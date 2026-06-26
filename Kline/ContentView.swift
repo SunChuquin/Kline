@@ -30,8 +30,13 @@ struct ContentView: View {
                 mainContentView
                     .frame(maxHeight: .infinity)
 
-                // 下半部分：底部导航栏 - 仅在竖屏时显示
-                if geometry.size.height > geometry.size.width {
+                // 下半部分：底部导航栏
+                VStack(spacing: 0) {
+                    // 顶部分隔线（使用负offset往上挪）
+                    Color(.separator)
+                        .frame(height: 1)
+                        .offset(y: -2)
+                    // 菜单按钮
                     HStack {
                         ForEach(0..<menuItems.count, id: \.self) { index in
                             Button(action: {
@@ -48,10 +53,9 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .background(Color(.systemBackground))
-                    .border(Color(.separator))
-                    .padding(.bottom, geometry.safeAreaInsets.bottom)
                 }
+                .background(Color(.systemBackground))
+                .padding(.bottom, geometry.safeAreaInsets.bottom)
             }
         }
         .overlay(
@@ -59,7 +63,7 @@ struct ContentView: View {
             Group {
                 if isProfilePresented {
                     ProfileDetailView(isPresented: $isProfilePresented)
-                        .transition(.slide)
+                        .transition(.opacity)
                 }
             }
             .ignoresSafeArea()

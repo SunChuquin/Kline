@@ -43,7 +43,8 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .background(Color(.systemBackground))
-                .padding(.top, 16)
+                .frame(height: 56) // 与底部菜单栏高度一致
+                .padding(.top, 0)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         searchFocused = true
@@ -64,7 +65,8 @@ struct HomeView: View {
                     Spacer()
                 }
                 .background(Color(.systemBackground))
-                .padding(.top, 16)
+                .frame(height: 56) // 与底部菜单栏高度一致
+                .padding(.top, 0)
             }
 
             // 分隔线
@@ -84,58 +86,6 @@ struct HomeView: View {
                 }
                 .frame(maxHeight: .infinity)
             }
-        }
-    }
-}
-
-// MARK: - 搜索页面
-struct SearchPageView: View {
-    @Binding var searchText: String
-
-    var body: some View {
-        VStack(spacing: 16) {
-            // 热门搜索
-            VStack(alignment: .leading, spacing: 8) {
-                Text("热门搜索")
-                    .font(.headline)
-                    .padding(.leading, 16)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(["贵州茅台", "比亚迪", "宁德时代", "东方财富", "药明康德"], id: \.self) { item in
-                            Text(item)
-                                .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .background(Color(.systemGray5))
-                                .cornerRadius(20)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-            }
-
-            // 搜索历史
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("搜索历史")
-                        .font(.headline)
-                    Spacer()
-                    Button("清空") {
-                        // 清空历史记录
-                    }
-                    .foregroundColor(.gray)
-                }
-                .padding(.horizontal, 16)
-
-                if !searchText.isEmpty {
-                    HStack {
-                        Image(systemName: "clock")
-                            .foregroundColor(.gray)
-                        Text(searchText)
-                    }
-                    .padding(.horizontal, 16)
-                }
-            }
-
-            Spacer()
         }
     }
 }
