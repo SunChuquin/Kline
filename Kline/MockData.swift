@@ -128,3 +128,49 @@ let dataCenterData = HorizontalCardData(
         HorizontalCardItem(icon: "arrow.up.circle", title: "投资机会", color: .orange, showBackground: false)
     ]
 )
+
+// MARK: - 左侧额外数据（用于测试滚动）
+let leftExtraData = HorizontalCardData(
+    title: "市场动态",
+    showMore: true,
+    updateTime: "刚刚更新",
+    items: [
+        HorizontalCardItem(icon: "trending.up", title: "涨幅榜", color: .red),
+        HorizontalCardItem(icon: "trending.down", title: "跌幅榜", color: .green),
+        HorizontalCardItem(icon: "star", title: "人气榜", color: .orange),
+        HorizontalCardItem(icon: "clock", title: "今日复盘", color: .blue),
+        HorizontalCardItem(icon: "newspaper", title: "财经资讯", color: .purple),
+        HorizontalCardItem(icon: "chart.pie", title: "板块轮动", color: .cyan)
+    ]
+)
+
+// MARK: - 右侧额外数据（用于测试滚动）
+let rightExtraData = HorizontalCardData(
+    title: "工具中心",
+    showMore: false,
+    updateTime: nil,
+    items: [
+        HorizontalCardItem(icon: "calculator", title: "计算器", color: .blue),
+        HorizontalCardItem(icon: "ruler", title: "度量工具", color: .green),
+        HorizontalCardItem(icon: "compass", title: "指南针", color: .orange),
+        HorizontalCardItem(icon: "timer", title: "倒计时", color: .red),
+        HorizontalCardItem(icon: "target", title: "目标设置", color: .purple)
+    ]
+)
+
+// MARK: - 更多热点数据（用于测试滚动）
+let moreHotNewsData = ListCardData(
+    title: "财经要闻",
+    showMore: true,
+    updateTime: "5分钟前更新",
+    items: [
+        ListCardItem(rank: 1, title: "央行宣布下调存款准备金率0.5个百分点", badge: "重要", badgeColor: .orange),
+        ListCardItem(rank: 2, title: "新能源汽车销量创新高，产业链迎机遇", badge: "热", badgeColor: .red),
+        ListCardItem(rank: 3, title: "半导体行业迎来政策利好，龙头企业受益", badge: nil, badgeColor: .gray),
+        ListCardItem(rank: 4, title: "医药板块持续调整，机构建议关注低估值标的", badge: nil, badgeColor: .gray),
+        ListCardItem(rank: 5, title: "消费复苏态势明显，零售板块有望反弹", badge: "新", badgeColor: .green),
+        ListCardItem(rank: 6, title: "人工智能应用加速落地，相关概念股走强", badge: "热", badgeColor: .red),
+        ListCardItem(rank: 7, title: "光伏产业景气度高企，组件价格企稳回升", badge: nil, badgeColor: .gray),
+        ListCardItem(rank: 8, title: "银行板块估值修复，中长期投资价值显现", badge: nil, badgeColor: .gray)
+    ]
+)
