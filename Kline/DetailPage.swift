@@ -1,20 +1,20 @@
 //
-//  ProfileDetailView.swift
+//  DetailPage.swift
 //  Kline
 //
-//  Created by 孙楚昆 on 2026/6/24.
+//  Created by 孙楚昆 on 2026/7/1.
 //
 
 import SwiftUI
 
-struct ProfileDetailView: View {
+struct DetailPage: View {
     @Binding var isPresented: Bool
+    let title: String
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部导航栏 - 参考搜索页面样式
+            // 顶部导航栏
             HStack {
-                // 返回按钮
                 Button(action: {
                     isPresented = false
                 }) {
@@ -23,8 +23,7 @@ struct ProfileDetailView: View {
                 }
                 .padding(.leading, 16)
 
-                // 标题
-                Text("个人中心")
+                Text(title)
                     .font(.title)
                     .fontWeight(.bold)
 
@@ -39,27 +38,22 @@ struct ProfileDetailView: View {
 
             // 主内容区域
             VStack(spacing: 24) {
-                // 用户头像
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 100))
+                Image(systemName: "info.circle")
+                    .font(.system(size: 64))
                     .foregroundColor(.blue)
 
-                // 用户名称
-                Text("用户名")
+                Text(title)
                     .font(.title)
                     .fontWeight(.bold)
 
-                // 用户ID
-                Text("ID: 123456")
-                    .font(.subheadline)
+                Text("这是「\(title)」的详情页面。你可以在这里展示更多相关内容。")
+                    .font(.body)
                     .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
             .frame(maxHeight: .infinity)
         }
         .background(Color(.systemBackground))
     }
-}
-
-#Preview {
-    ProfileDetailView(isPresented: .constant(true))
 }

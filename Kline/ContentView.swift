@@ -11,16 +11,17 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var isSearching = false
     @State private var isProfilePresented = false
+    @State private var isTestPresented = false
     @State private var lastHomeTapTime: Date?
+    @State private var lastSimulateTapTime: Date?
     private let doubleTapInterval: TimeInterval = 0.3
 
     // 菜单按钮配置 - 参考通达信手机版风格
     let menuItems = [
-        (icon: "house", title: "主页"),
-        (icon: "chart.bar", title: "行情"),
+        (icon: "house", title: "首页"),
         (icon: "folder", title: "自选"),
-        (icon: "gamecontroller", title: "模拟"),
-        (icon: "wrench", title: "测试")
+        (icon: "chart.bar", title: "行情"),
+        (icon: "gamecontroller", title: "模拟")
     ]
 
     var body: some View {
@@ -42,11 +43,11 @@ struct ContentView: View {
                             Button(action: {
                                 handleTabTap(index: index)
                             }) {
-                                VStack(spacing: 4) {
+                                HStack(spacing: 4) {
                                     Image(systemName: menuItems[index].icon)
-                                        .font(.system(size: 24))
+                                        .font(.system(size: 20))
                                     Text(menuItems[index].title)
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 16))
                                 }
                                 .foregroundColor(selectedTab == index ? .accentColor : Color(.secondaryLabel))
                                 .frame(maxWidth: .infinity)
@@ -59,14 +60,17 @@ struct ContentView: View {
             }
         }
         .overlay(
-            // 全屏覆盖层 - 用户信息页面
+            // 全屏覆盖层
             Group {
                 if isProfilePresented {
                     ProfileDetailView(isPresented: $isProfilePresented)
                         .transition(.opacity)
                 }
+                if isTestPresented {
+                    ProfileView(isPresented: $isTestPresented)
+                        .transition(.opacity)
+                }
             }
-            .ignoresSafeArea()
         )
     }
 
@@ -90,10 +94,29 @@ struct ContentView: View {
                     }
                 }
             }
+        } else if index == 3 && selectedTab == 3 {
+            // 点击的是模拟按钮，且当前已经在模拟页面
+            let now = Date()
+            let currentLastTime = lastSimulateTapTime
+            if let lastTime = currentLastTime, now.timeIntervalSince(lastTime) < doubleTapInterval {
+                // 双击：打开测试页面
+                isTestPresented = true
+                lastSimulateTapTime = nil
+            } else {
+                // 第一次点击
+                lastSimulateTapTime = now
+                // 延迟清除记录
+                DispatchQueue.main.asyncAfter(deadline: .now() + doubleTapInterval) {
+                    if self.lastSimulateTapTime == now {
+                        self.lastSimulateTapTime = nil
+                    }
+                }
+            }
         } else {
-            // 点击其他按钮或从其他页面切换到主页
+            // 点击其他按钮
             selectedTab = index
             lastHomeTapTime = nil
+            lastSimulateTapTime = nil
         }
     }
 
@@ -104,13 +127,11 @@ struct ContentView: View {
         case 0:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
         case 1:
-            MarketView()
-        case 2:
             FavoritesView()
+        case 2:
+            MarketView()
         case 3:
             SimulationView()
-        case 4:
-            ProfileView()
         default:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
         }

@@ -44,29 +44,48 @@ struct HomeView: View {
                 }
                 .background(Color(.systemBackground))
                 .frame(height: 56) // 与底部菜单栏高度一致
-                .padding(.top, 0)
+                .padding(.top, -4)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         searchFocused = true
                     }
                 }
             } else {
-                // 正常模式：仅显示人物图标按钮
+                // 正常模式：左侧软件图标和名称 + 右侧用户入口按钮
                 HStack {
-                    Button(action: {
-                        isProfilePresented = true
-                    }) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.blue)
+                    // 软件图标和名称
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 24))
+                            .foregroundColor(.red)
+                        Text("Kline")
+                            .font(.system(size: 18))
+                            .fontWeight(.bold)
                     }
                     .padding(.leading, 16)
 
                     Spacer()
+
+                    // 用户入口按钮
+                    Button(action: {
+                        isProfilePresented = true
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundColor(.blue)
+                            Text("登录")
+                                .font(.system(size: 16))
+                        }
+                        .padding(EdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2))
+                        .background(Color(.systemGray5))
+                        .cornerRadius(20)
+                    }
+                    .padding(.trailing, 16)
                 }
                 .background(Color(.systemBackground))
                 .frame(height: 56) // 与底部菜单栏高度一致
-                .padding(.top, 0)
+                .padding(.top, -5)
             }
 
             // 分隔线
@@ -78,11 +97,11 @@ struct HomeView: View {
                 SearchPageView(searchText: $searchText)
                     .frame(maxHeight: .infinity)
             } else {
-                // 主页内容
+                // 首页内容
                 VStack {
-                    Text("主页")
+                    Text("首页")
                         .font(.title)
-                    Text("欢迎来到主页")
+                    Text("欢迎来到首页")
                 }
                 .frame(maxHeight: .infinity)
             }
