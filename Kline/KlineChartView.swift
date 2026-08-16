@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// 副图（指标幅图）可选类型
+/// 副图（指标幅图）可选系统指标
 enum SubIndicator: String, CaseIterable, Identifiable {
     case macd = "MACD"
     case kdj = "KDJ"
@@ -17,30 +17,77 @@ enum SubIndicator: String, CaseIterable, Identifiable {
 
 /// 主图显示类型
 enum ChartStyle: String, CaseIterable, Identifiable {
-    case kline = "K线"
+    case bare  = "空心K线"   // 红K空心，绿K实心
+    case solid = "实心K线"   // 红绿均实心
     case close = "收盘线"
-    case ohlc = "美国线"
+    case ohlc  = "美国线"
     var id: String { rawValue }
 }
 
 /// 成交量幅图可选类型
 enum VolumeIndicator: String, CaseIterable, Identifiable {
-    case volume = "量"
-    case amount = "额"
-    var id: String { rawValue }
-}
-
-/// 主图叠加指标类型
-enum MainIndicator: String, CaseIterable, Identifiable {
-    case ma = "MA"
-    case ema = "EMA"
-    case boll = "BOLL"
+    case volume = "VOL"
+    case amount = "AMO"
     var id: String { rawValue }
 }
 
 /// 无光标时的拖动模式：水平=平移，垂直=缩放
 enum DragMode {
     case none, pan, zoom
+}
+
+/// 公式编辑器针对的目标图表（主图/副图）
+enum EditorTarget {
+    case main, sub
+}
+
+// MARK: - 指标参数配置（可编辑）
+
+/// MA 参数：最多 8 个周期，0 = 不显示对应均线
+struct MAConfig: Equatable {
+    var periods: [Int] = [5, 10, 20, 60, 0, 0, 0, 0]
+    mutating func sanitize() {
+        if periods.count != 8 { periods = Array(repeating: 0, count: 8) }
+        periods = periods.map { min(max($0, 0), 1000) }
+    }
+}
+
+struct EMAConfig: Equatable {
+    var periods: [Int] = [5, 10, 20, 60, 0, 0, 0, 0]
+    mutating func sanitize() {
+        if periods.count != 8 { periods = Array(repeating: 0, count: 8) }
+        periods = periods.map { min(max($0, 0), 1000) }
+    }
+}
+
+struct BOLLConfig: Equatable {
+    var period: Int = 20
+    var mult: Double = 2
+}
+
+/// MACD / KDJ / RSI 参数
+struct MACDConfig: Equatable { var fast = 12; var slow = 26; var signal = 9 }
+struct KDJConfig: Equatable { var n = 9; var kN = 3; var dN = 3 }
+struct RSIConfig: Equatable { var p1 = 6; var p2 = 12; var p3 = 24 }
+
+// MARK: - 通用指标线
+
+/// 一条可绘制的指标线/柱（主图、副图、公式输出线通用）
+struct IndicatorLine: Equatable {
+    let name: String
+    let values: [Double]
+    let color: Color
+    let style: TDXLineStyle
+    let lineWidth: Double
+    let hideValue: Bool
+}
+
+/// Canvas 内的曲线描述（Equatable，用于 Equatable Canvas 结构体）
+struct CanvasCurve: Equatable {
+    var color: Color
+    var values: [Double]
+    var style: TDXLineStyle
+    var lineWidth: Double
 }
 
 /// 缓存 K 线指标计算的结果，避免每次渲染重复计算。
@@ -51,8 +98,6 @@ struct ChartSeries {
     let bollMid, bollUpper, bollLower: [Double]
     let volMa5, volMa10: [Double]
     let amoMa5, amoMa10: [Double]
-    let dif, dea, macdHist: [Double]
-    let kdjK, kdjD, kdjJ: [Double]
     let rsi6, rsi12, rsi24: [Double]
 
     init(data: [KlineItem]) {
@@ -81,97 +126,116 @@ struct ChartSeries {
         self.amoMa5 = ma(5, \.turnover)
         self.amoMa10 = ma(10, \.turnover)
 
-        func ema(_ values: [Double], _ period: Int) -> [Double] {
-            var result: [Double] = []
-            let k = 2.0 / Double(period + 1)
-            var prev: Double?
-            for v in values {
-                if let p = prev { result.append(v * k + p * (1 - k)) } else { result.append(v) }
-                prev = result.last
-            }
-            return result
-        }
-        let closes = sorted.map(\.close)
-        self.ema5 = ema(closes, 5)
-        self.ema10 = ema(closes, 10)
-        self.ema20 = ema(closes, 20)
-        self.ema60 = ema(closes, 60)
+        self.ema5 = Self.ema(values: sorted.map(\.close), period: 5)
+        self.ema10 = Self.ema(values: sorted.map(\.close), period: 10)
+        self.ema20 = Self.ema(values: sorted.map(\.close), period: 20)
+        self.ema60 = Self.ema(values: sorted.map(\.close), period: 60)
 
-        // BOLL(20,2)：中轨=MA20，上下轨=中轨 ± 2*标准差
-        func std(_ period: Int) -> [Double] {
-            var result = Array(repeating: Double.nan, count: sorted.count)
-            for i in (period - 1)..<sorted.count {
-                let window = (i - period + 1)...i
-                let vals = Array(window).map { sorted[$0].close }
-                let mean = vals.reduce(0, +) / Double(period)
-                let variance = vals.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(period)
-                result[i] = sqrt(variance)
-            }
-            return result
-        }
-        self.bollMid = ma(20, \.close)
-        let sd = std(20)
+        self.bollMid = Self.ma(values: sorted.map(\.close), period: 20)
+        let sd = Self.rollingStd(sorted.map(\.close), period: 20)
         self.bollUpper = zip(self.bollMid, sd).map { $0 + 2 * $1 }
         self.bollLower = zip(self.bollMid, sd).map { $0 - 2 * $1 }
 
-        let dif = zip(ema(closes, 12), ema(closes, 26)).map { $0 - $1 }
-        self.dif = dif
-        self.dea = ema(dif, 9)
-        self.macdHist = zip(self.dif, self.dea).map { 2 * ($0 - $1) }
+        self.rsi6 = Self.rsi(values: sorted.map(\.close), period: 6)
+        self.rsi12 = Self.rsi(values: sorted.map(\.close), period: 12)
+        self.rsi24 = Self.rsi(values: sorted.map(\.close), period: 24)
+    }
 
-        // KDJ (9,3,3)
+    // MARK: 供参数化计算复用的静态方法（输入为 最新一根在末尾 的数组）
+
+    static func ma(values: [Double], period: Int) -> [Double] {
+        var result = Array(repeating: Double.nan, count: values.count)
+        guard period > 0, values.count >= period else { return result }
+        var sum = 0.0
+        for i in 0..<values.count {
+            sum += values[i]
+            if i >= period { sum -= values[i - period] }
+            if i >= period - 1 { result[i] = sum / Double(period) }
+        }
+        return result
+    }
+
+    static func ema(values: [Double], period: Int) -> [Double] {
+        var result = Array(repeating: Double.nan, count: values.count)
+        guard period > 0 else { return result }
+        let k = 2.0 / Double(period + 1)
+        var prev: Double?
+        for (i, v) in values.enumerated() {
+            if let p = prev { result[i] = v * k + p * (1 - k); prev = result[i] }
+            else { result[i] = v; prev = v }
+        }
+        return result
+    }
+
+    static func rollingStd(_ values: [Double], period: Int) -> [Double] {
+        var result = Array(repeating: Double.nan, count: values.count)
+        guard period > 0, values.count >= period else { return result }
+        for i in (period - 1)..<values.count {
+            let window = Array(values[(i - period + 1)...i])
+            let mean = window.reduce(0, +) / Double(period)
+            let variance = window.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(period)
+            result[i] = sqrt(variance)
+        }
+        return result
+    }
+
+    static func boll(values: [Double], period: Int, mult: Double) -> (mid: [Double], up: [Double], lo: [Double]) {
+        let mid = ma(values: values, period: period)
+        let sd = rollingStd(values, period: period)
+        return (mid, zip(mid, sd).map { $0 + mult * $1 }, zip(mid, sd).map { $0 - mult * $1 })
+    }
+
+    static func macd(values: [Double], fast: Int, slow: Int, signal: Int) -> (dif: [Double], dea: [Double], hist: [Double]) {
+        let fastE = ema(values: values, period: fast)
+        let slowE = ema(values: values, period: slow)
+        let dif = zip(fastE, slowE).map { $0 - $1 }
+        let dea = ema(values: dif, period: signal)
+        let hist = zip(dif, dea).map { 2 * ($0 - $1) }
+        return (dif, dea, hist)
+    }
+
+    static func kdj(highs: [Double], lows: [Double], closes: [Double], n: Int, kN: Int, dN: Int) -> (k: [Double], d: [Double], j: [Double]) {
         var kArr: [Double] = []
         var dArr: [Double] = []
         var jArr: [Double] = []
         var prevK = 50.0
         var prevD = 50.0
-        for i in 0..<sorted.count {
-            let loIndex = max(0, i - 9 + 1)
-            let lo = sorted[loIndex...i].map(\.low).min() ?? 0
-            let hi = sorted[loIndex...i].map(\.high).max() ?? 0
-            let rsv = (hi - lo) == 0 ? 50 : (sorted[i].close - lo) / (hi - lo) * 100
-            let k = (2.0 * prevK + rsv) / 3.0
-            let d = (2.0 * prevD + k) / 3.0
+        for i in 0..<closes.count {
+            let loIndex = max(0, i - n + 1)
+            let lo = lows[loIndex...i].min() ?? 0
+            let hi = highs[loIndex...i].max() ?? 0
+            let rsv = (hi - lo) == 0 ? 50 : (closes[i] - lo) / (hi - lo) * 100
+            let k = (Double(kN - 1) * prevK + rsv) / Double(kN)
+            let d = (Double(dN - 1) * prevD + k) / Double(dN)
             kArr.append(k); dArr.append(d); jArr.append(3 * k - 2 * d)
             prevK = k; prevD = d
         }
-        self.kdjK = kArr
-        self.kdjD = dArr
-        self.kdjJ = jArr
+        return (kArr, dArr, jArr)
+    }
 
-        // RSI
-        func rsi(_ period: Int) -> [Double] {
-            var result = Array(repeating: Double.nan, count: sorted.count)
-            guard sorted.count > period else { return result }
-            var avgGain = 0.0
-            var avgLoss = 0.0
-            for i in 1...period {
-                let c = sorted[i].close - sorted[i - 1].close
-                avgGain += max(c, 0) / Double(period)
-                avgLoss += max(-c, 0) / Double(period)
-            }
-            func rv(_ g: Double, _ l: Double) -> Double {
-                if l == 0 { return 100 }
-                return 100 - 100 / (1 + g / l)
-            }
-            result[period] = rv(avgGain, avgLoss)
-            for i in (period + 1)..<sorted.count {
-                let c = sorted[i].close - sorted[i - 1].close
-                avgGain = (avgGain * Double(period - 1) + max(c, 0)) / Double(period)
-                avgLoss = (avgLoss * Double(period - 1) + max(-c, 0)) / Double(period)
-                result[i] = rv(avgGain, avgLoss)
-            }
-            return result
+    static func rsi(values: [Double], period: Int) -> [Double] {
+        var result = Array(repeating: Double.nan, count: values.count)
+        guard values.count > period, period > 0 else { return result }
+        var avgGain = 0.0
+        var avgLoss = 0.0
+        for i in 1...period {
+            let c = values[i] - values[i - 1]
+            avgGain += max(c, 0) / Double(period)
+            avgLoss += max(-c, 0) / Double(period)
         }
-        self.rsi6 = rsi(6)
-        self.rsi12 = rsi(12)
-        self.rsi24 = rsi(24)
+        func rv(_ g: Double, _ l: Double) -> Double { l == 0 ? 100 : 100 - 100 / (1 + g / l) }
+        result[period] = rv(avgGain, avgLoss)
+        for i in (period + 1)..<values.count {
+            let c = values[i] - values[i - 1]
+            avgGain = (avgGain * Double(period - 1) + max(c, 0)) / Double(period)
+            avgLoss = (avgLoss * Double(period - 1) + max(-c, 0)) / Double(period)
+            result[i] = rv(avgGain, avgLoss)
+        }
+        return result
     }
 }
 
-/// 行情 K 线图，参考同花顺/通达信的日间（浅色）风格布局：
-/// 主图（K线 + MA + 右侧价格轴与网格）+ 成交量幅图 + 指标幅图 + 时间轴。
-/// 支持可见窗口平移、双指缩放、十字光标联动。
+/// 行情 K 线图，参考同花顺/通达信的日间（浅色）风格布局。
 struct KlineChartView: View {
     let data: [KlineItem]
     @Binding var chartStyle: ChartStyle
@@ -181,10 +245,9 @@ struct KlineChartView: View {
     @State private var selectedIndex: Int? = nil
     @State private var indicator: SubIndicator = .macd
     @State private var volumeIndicator: VolumeIndicator = .volume
-    @State private var mainIndicator: MainIndicator = .ma
-    @State private var showMainMenu = false
+    @State private var showMainSheet = false
     @State private var showVolumeMenu = false
-    @State private var showIndicatorMenu = false
+    @State private var showIndicatorSheet = false
     @State private var visibleCount: CGFloat = 100
     @State private var endOffset: Int = 0          // 0 = 最新一根贴右边缘
     @State private var zoomBase: CGFloat = 100
@@ -194,11 +257,34 @@ struct KlineChartView: View {
     @State private var cursorDragging: Bool = false
     @State private var hasInteracted: Bool = false
     @State private var crosshairY: CGFloat? = nil
+    @ObservedObject private var customStore = CustomIndicatorStore.shared
+
+    // 主图叠加指标（可同时叠加多个）
+    @State private var showMA = true
+    @State private var showEMA = false
+    @State private var showBOLL = false
+    @State private var showBareK = false
+    @State private var maConfig = MAConfig()
+    @State private var emaConfig = EMAConfig()
+    @State private var bollConfig = BOLLConfig()
+    @State private var activeCustomIndicator: CustomIndicator? = nil
+    @State private var customOutputs: [TDXOutputLine] = []
+    @State private var mainCurves: [IndicatorLine] = []
+
+    // 副图指标参数与自定义
+    @State private var macdConfig = MACDConfig()
+    @State private var kdjConfig = KDJConfig()
+    @State private var rsiConfig = RSIConfig()
+    @State private var activeSubCustom: CustomIndicator? = nil
+    @State private var subCustomOutputs: [TDXOutputLine] = []
+    @State private var subCurves: [IndicatorLine] = []
+
+    @State private var showCustomEditor = false
+    @State private var editorTarget: EditorTarget = .main
 
     init(data: [KlineItem], chartStyle: Binding<ChartStyle>) {
         self.data = data
         self._chartStyle = chartStyle
-        // 指标计算只在初始化时执行一次，避免每次渲染都重复计算
         self.series = ChartSeries(data: data)
     }
 
@@ -206,39 +292,27 @@ struct KlineChartView: View {
 
     private var upColor: Color { Color(red: 0.85, green: 0.16, blue: 0.16) }
     private var downColor: Color { Color(red: 0.0, green: 0.55, blue: 0.35) }
-    private var ma5Color: Color { Color.black.opacity(0.75) }
-    private var ma10Color: Color { Color.orange }
-    private var ma20Color: Color { Color.pink }
-    private var ma60Color: Color { Color.blue }
     private var gridColor: Color { Color.gray.opacity(0.22) }
     private var axisTextColor: Color { Color.black.opacity(0.55) }
     private var bollColor: Color { Color(red: 0.4, green: 0.4, blue: 0.9) }
+    private var ma5Color: Color { Color.black.opacity(0.75) }
+    private var ma10Color: Color { Color.orange }
+    private var ma20Color: Color { Color.pink }
+
+    /// MA/EMA 各周期线条颜色
+    private func maColor(_ i: Int) -> Color {
+        let colors = [Color.black.opacity(0.75), Color.orange, Color.pink, Color.blue,
+                      Color(red: 0.9, green: 0.6, blue: 0), Color.teal, Color.purple, Color.brown]
+        return colors[i % colors.count]
+    }
 
     // MARK: - 数据（从缓存读取）
 
     private var sortedData: [KlineItem] { series.sorted }
-    private var ma5: [Double] { series.ma5 }
-    private var ma10: [Double] { series.ma10 }
-    private var ma20: [Double] { series.ma20 }
-    private var ma60: [Double] { series.ma60 }
-    private var ema5: [Double] { series.ema5 }
-    private var ema10: [Double] { series.ema10 }
-    private var ema20: [Double] { series.ema20 }
-    private var ema60: [Double] { series.ema60 }
-    private var bollMid: [Double] { series.bollMid }
-    private var bollUpper: [Double] { series.bollUpper }
-    private var bollLower: [Double] { series.bollLower }
     private var volMa5: [Double] { series.volMa5 }
     private var volMa10: [Double] { series.volMa10 }
     private var amoMa5: [Double] { series.amoMa5 }
     private var amoMa10: [Double] { series.amoMa10 }
-    private var dif: [Double] { series.dif }
-    private var dea: [Double] { series.dea }
-    private var macdHistogram: [Double] { series.macdHist }
-    private var kdj: (k: [Double], d: [Double], j: [Double]) { (series.kdjK, series.kdjD, series.kdjJ) }
-    private var rsi6: [Double] { series.rsi6 }
-    private var rsi12: [Double] { series.rsi12 }
-    private var rsi24: [Double] { series.rsi24 }
 
     // MARK: - 可见窗口
 
@@ -270,26 +344,116 @@ struct KlineChartView: View {
         return arr.last(where: { !$0.isNaN })
     }
 
-    // MARK: - 主图价格区间（基于可见窗口）
+    private func legendValueFor(_ line: IndicatorLine) -> Double? {
+        legendValue(line.values)
+    }
+
+    // MARK: - 指标序列计算（系统指标 + 自定义）
+
+    private var closes: [Double] { sortedData.map(\.close) }
+
+    /// 自定义指标默认配色（优先公式 COLORX，其次指标默认色，再轮换调色板）
+    private func customLineColor(_ index: Int, line: TDXOutputLine, indicatorColor: Color?) -> Color {
+        if let hex = line.colorHex, let c = Color(hex: hex) { return c }
+        if let indicatorColor { return indicatorColor }
+        let palette = [Color.blue, Color(red: 0.9, green: 0.35, blue: 0.1), Color(red: 0.2, green: 0.55, blue: 0.85),
+                       Color(red: 0.6, green: 0.25, blue: 0.7), Color.teal, Color.pink]
+        return palette[index % palette.count]
+    }
+
+    /// 重新计算主图叠加线与自定义输出
+    private func recomputeMainCurves() {
+        var curves: [IndicatorLine] = []
+        if !showBareK {
+            if showMA {
+                for (i, p) in maConfig.periods.enumerated() where p > 0 {
+                    curves.append(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: closes, period: p),
+                                                color: maColor(i), style: .solid, lineWidth: 1, hideValue: false))
+                }
+            }
+            if showEMA {
+                for (i, p) in emaConfig.periods.enumerated() where p > 0 {
+                    curves.append(IndicatorLine(name: "EMA\(p)", values: ChartSeries.ema(values: closes, period: p),
+                                                color: maColor(i), style: .solid, lineWidth: 1, hideValue: false))
+                }
+            }
+            if showBOLL {
+                let b = ChartSeries.boll(values: closes, period: bollConfig.period, mult: bollConfig.mult)
+                curves.append(IndicatorLine(name: "MID", values: b.mid, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "UP", values: b.up, color: bollColor, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "LOW", values: b.lo, color: bollColor, style: .solid, lineWidth: 1, hideValue: false))
+            }
+        }
+        if !showBareK {
+            for (i, line) in customOutputs.enumerated() {
+                curves.append(IndicatorLine(name: displayName(line.name), values: line.values, color: customLineColor(i, line: line, indicatorColor: activeCustomIndicator?.color),
+                                            style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue))
+            }
+        }
+        mainCurves = curves
+    }
+
+    /// 重新计算副图曲线（系统指标或自定义）
+    private func recomputeSubCurves() {
+        if let active = activeSubCustom,
+           let lines = try? TDXFormulaEngine.evaluate(formula: active.formula, data: sortedData) {
+            subCustomOutputs = lines
+        } else if activeSubCustom == nil {
+            subCustomOutputs = []
+        }
+
+        var curves: [IndicatorLine] = []
+        if activeSubCustom != nil, !subCustomOutputs.isEmpty {
+            for (i, line) in subCustomOutputs.enumerated() {
+                curves.append(IndicatorLine(name: displayName(line.name), values: line.values, color: customLineColor(i, line: line, indicatorColor: activeSubCustom?.color),
+                                            style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue))
+            }
+        } else {
+            switch indicator {
+            case .macd:
+                let m = ChartSeries.macd(values: closes, fast: macdConfig.fast, slow: macdConfig.slow, signal: macdConfig.signal)
+                curves.append(IndicatorLine(name: "DIF", values: m.dif, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "DEA", values: m.dea, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "MACD", values: m.hist, color: ma20Color, style: .stick, lineWidth: 1, hideValue: false))
+            case .kdj:
+                let k = ChartSeries.kdj(highs: sortedData.map(\.high), lows: sortedData.map(\.low), closes: closes,
+                                        n: kdjConfig.n, kN: kdjConfig.kN, dN: kdjConfig.dN)
+                curves.append(IndicatorLine(name: "K", values: k.k, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "D", values: k.d, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "J", values: k.j, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
+            case .rsi:
+                let r1 = ChartSeries.rsi(values: closes, period: rsiConfig.p1)
+                let r2 = ChartSeries.rsi(values: closes, period: rsiConfig.p2)
+                let r3 = ChartSeries.rsi(values: closes, period: rsiConfig.p3)
+                curves.append(IndicatorLine(name: "RSI\(rsiConfig.p1)", values: r1, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "RSI\(rsiConfig.p2)", values: r2, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
+                curves.append(IndicatorLine(name: "RSI\(rsiConfig.p3)", values: r3, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
+            }
+        }
+        subCurves = curves
+    }
+
+    private func displayName(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "NOTEXT_", with: "")
+    }
+
+    // MARK: - 主图价格区间（基于可见窗口，含所有叠加线）
 
     private var priceRange: ClosedRange<Double> {
         guard !slice.isEmpty else { return 0...100 }
         var minLow = slice.map(\.low).min() ?? 0
         var maxHigh = slice.map(\.high).max() ?? 100
 
-        let offsets = Array(startIndex...endIndex)
-        let allValues = offsets.enumerated().flatMap { localIndex, absIndex -> [Double] in
-            let vals: [Double]
-            switch mainIndicator {
-            case .ma: vals = [ma5[absIndex], ma10[absIndex], ma20[absIndex], ma60[absIndex]]
-            case .ema: vals = [ema5[absIndex], ema10[absIndex], ema20[absIndex], ema60[absIndex]]
-            case .boll: vals = [bollMid[absIndex], bollUpper[absIndex], bollLower[absIndex]]
+        let offsets = Array(startIndex...endIndex).filter { $0 < closes.count }
+        var all: [Double] = []
+        for line in mainCurves {
+            for idx in offsets {
+                let v = line.values[idx]
+                if !v.isNaN { all.append(v) }
             }
-            return vals.filter { !$0.isNaN }
         }
-
-        if let minV = allValues.min() { minLow = min(minLow, minV) }
-        if let maxV = allValues.max() { maxHigh = max(maxHigh, maxV) }
+        if let minV = all.min() { minLow = min(minLow, minV) }
+        if let maxV = all.max() { maxHigh = max(maxHigh, maxV) }
 
         let padding = (maxHigh - minLow) * 0.05
         return (minLow - padding)...(maxHigh + padding)
@@ -300,9 +464,7 @@ struct KlineChartView: View {
     private var volumeMax: Double {
         let maA = volumeIndicator == .amount ? amoMa5 : volMa5
         let maB = volumeIndicator == .amount ? amoMa10 : volMa10
-        let values: [Double] = offsetsMap { index in
-            [maA[index], maB[index]].filter { !$0.isNaN }
-        }
+        let values: [Double] = offsetsMap { index in [maA[index], maB[index]].filter { !$0.isNaN } }
         let sliceMax = slice.map(volumeIndicator == .amount ? \.turnover : \.volume).max() ?? 1
         return max(sliceMax, values.max() ?? 1)
     }
@@ -319,15 +481,14 @@ struct KlineChartView: View {
         GeometryReader { geometry in
             let width = max(1, geometry.size.width)
             let candleSpacing = width / CGFloat(max(1, count))
-            let legendHeight: CGFloat = 16
-            // 每个图表上方各占一行指标栏，其余高度按 52/13/22/13 分配，减少空白
+            let legendHeight: CGFloat = 13
+            // 减少顶底空白：缩小指标栏与时间轴占比
             let chartHeight = max(1, geometry.size.height - 3 * legendHeight)
-            let mainHeight = chartHeight * 0.52
-            let volumeHeight = chartHeight * 0.13
-            let indicatorHeight = chartHeight * 0.22
+            let mainHeight = chartHeight * 0.56
+            let volumeHeight = chartHeight * 0.12
+            let indicatorHeight = chartHeight * 0.19
             let timeHeight = chartHeight * 0.13
 
-            // 各面板的纵向边界（用于手势限制与光标面板判断）
             let mainTop = legendHeight
             let mainBottom = legendHeight + mainHeight
             let volTop = mainBottom + legendHeight
@@ -337,14 +498,14 @@ struct KlineChartView: View {
 
             VStack(spacing: 0) {
                 mainLegendRow(height: legendHeight)
-                    .zIndex(20)
+                    .zIndex(30)
                 mainChart(width: width, candleSpacing: candleSpacing, height: mainHeight, panelTop: mainTop)
                 volumeLegendRow(height: legendHeight)
-                    .zIndex(20)
+                    .zIndex(30)
                 volumeChart(width: width, candleSpacing: candleSpacing, height: volumeHeight,
                             crosshairY: crosshairY, panelTop: volTop)
                 indicatorLegendRow(height: legendHeight)
-                    .zIndex(20)
+                    .zIndex(30)
                 indicatorChart(width: width, candleSpacing: candleSpacing, height: indicatorHeight,
                                crosshairY: crosshairY, panelTop: indTop)
                 timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
@@ -357,39 +518,109 @@ struct KlineChartView: View {
             .simultaneousGesture(magnificationGesture)
             .overlay(alignment: .top) {
                 if !hasInteracted {
-                    Text("主图左右拖动平移 / 上下滑动缩放 · 双指缩放 · 轻点切换光标")
+                    Text("主图拖动平移/上下缩放 · 双指缩放 · 轻点切换光标")
                         .font(.system(size: 10))
                         .foregroundColor(.gray)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.white.opacity(0.85))
-                        .cornerRadius(4)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.white.opacity(0.85)).cornerRadius(4)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3), lineWidth: 0.5))
-                        .padding(.top, 6)
+                        .padding(.top, 5)
                         .transition(.opacity)
                 }
             }
             .overlay {
-                // 横线跟随触摸 Y，仅当落在图表面板内时显示
                 if let crosshairY, isInChartPanel(crosshairY, mainTop, mainBottom)
                     || isInChartPanel(crosshairY, volTop, volBottom)
                     || isInChartPanel(crosshairY, indTop, indBottom) {
-                    let totalHeight = geometry.size.height
-                    let y = min(max(crosshairY, 0), totalHeight)
+                    let y = min(max(crosshairY, 0), geometry.size.height)
                     Rectangle().fill(Color.black.opacity(0.35)).frame(width: width, height: 0.5)
                         .position(x: width / 2, y: y)
                 }
             }
+            .overlay {
+                if showCustomEditor {
+                    FormulaEditorView(data: sortedData) {
+                        showCustomEditor = false
+                    } onSaved: { ind in
+                        switch editorTarget {
+                        case .main: activateCustom(ind)
+                        case .sub: activateSubCustom(ind)
+                        }
+                    }
+                    .zIndex(50)
+                }
+            }
+            .overlay {
+                if showMainSheet {
+                    bottomSheet(geometry: geometry, heightFraction: 0.78) {
+                        mainSheetContent
+                    } onClose: {
+                        showMainSheet = false
+                    }
+                } else if showIndicatorSheet {
+                    bottomSheet(geometry: geometry, heightFraction: 0.78) {
+                        subSheetContent
+                    } onClose: {
+                        showIndicatorSheet = false
+                    }
+                }
+            }
         }
         .background(Color.white)
+        .onAppear {
+            recomputeMainCurves()
+            recomputeSubCurves()
+        }
+        .onChange(of: customStore.indicators) { _ in
+            syncActiveCustomAfterStoreChange()
+            recomputeMainCurves()
+            recomputeSubCurves()
+        }
+    }
+
+    /// 自定义指标仓库变化后，同步主/副图激活的指标引用
+    private func syncActiveCustomAfterStoreChange() {
+        if let active = activeCustomIndicator,
+           let updated = customStore.indicators.first(where: { $0.id == active.id }) {
+            activateCustom(updated)
+        } else if activeCustomIndicator != nil {
+            activeCustomIndicator = nil
+            customOutputs = []
+            recomputeMainCurves()
+        }
+        if let active = activeSubCustom,
+           let updated = customStore.indicators.first(where: { $0.id == active.id }) {
+            activateSubCustom(updated)
+        } else if activeSubCustom != nil {
+            activeSubCustom = nil
+            subCustomOutputs = []
+            recomputeSubCurves()
+        }
     }
 
     private func isInChartPanel(_ y: CGFloat, _ top: CGFloat, _ bottom: CGFloat) -> Bool {
         y >= top && y <= bottom
     }
 
-    /// 任一指标下拉菜单是否打开（打开时禁用图表拖拽手势，避免误触光标）
-    private var menuIsOpen: Bool { showMainMenu || showVolumeMenu || showIndicatorMenu }
+    /// 任一面板是否打开（打开时禁用图表拖拽手势）
+    private var menuIsOpen: Bool { showMainSheet || showIndicatorSheet || showVolumeMenu || showCustomEditor }
+
+    // MARK: - 自定义指标激活
+
+    private func activateCustom(_ ind: CustomIndicator?) {
+        activeCustomIndicator = ind
+        if let ind, let lines = try? TDXFormulaEngine.evaluate(formula: ind.formula, data: sortedData) {
+            customOutputs = lines
+        } else {
+            customOutputs = []
+        }
+        recomputeMainCurves()
+    }
+
+    private func activateSubCustom(_ ind: CustomIndicator?) {
+        activeSubCustom = ind
+        recomputeSubCurves()
+    }
 
     // MARK: - 手势
 
@@ -399,31 +630,25 @@ struct KlineChartView: View {
                                   indTop: CGFloat, indBottom: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
-                // 下拉菜单打开时，不响应任何图表手势
                 guard !menuIsOpen else { return }
                 hasInteracted = true
                 let y = value.location.y
                 let inMain = isInChartPanel(y, mainTop, mainBottom)
                 let inVol = isInChartPanel(y, volTop, volBottom)
                 let inInd = isInChartPanel(y, indTop, indBottom)
-
-                // 指标栏、时间轴区域不响应光标/平移/缩放
                 guard inMain || inVol || inInd else { return }
 
                 if selectedIndex != nil {
-                    // 光标已显示：拖动只移动光标，不平移窗口（任一图表面板均可）
                     let col = Int((value.location.x / candleSpacing).rounded(.down))
                     let idx = startIndex + col
                     if idx >= startIndex && idx <= endIndex {
                         selectedIndex = idx
                         crosshairY = value.location.y
                     }
-                    // 只有真正移动超过阈值才算拖动；轻点（无位移）不置位，便于 onEnded 关闭光标
                     if abs(value.translation.width) > 6 || abs(value.translation.height) > 6 {
                         cursorDragging = true
                     }
                 } else if inMain && dragMode == .none {
-                    // 仅主图内触发平移/缩放：首次判定方向（垂直=缩放，水平=平移）
                     if abs(value.translation.height) > abs(value.translation.width)
                         && abs(value.translation.height) > 4 {
                         dragMode = .zoom
@@ -435,7 +660,6 @@ struct KlineChartView: View {
                 }
 
                 if dragMode == .zoom {
-                    // 上下滑动：模拟双指捏合/放开，向上=放大（可见根数减少），向下=缩小
                     let deltaY = value.translation.height - lastPanHeight
                     lastPanHeight = value.translation.height
                     visibleCount = clamp(visibleCount + deltaY * 0.5, 20, CGFloat(sortedData.count))
@@ -452,14 +676,11 @@ struct KlineChartView: View {
                 lastPanWidth = 0
                 lastPanHeight = 0
                 dragMode = .none
-                // 下拉菜单打开时，不响应任何图表手势
                 guard !menuIsOpen else { cursorDragging = false; return }
                 if cursorDragging {
-                    // 刚才是拖动着移动光标，保持光标显示
                     cursorDragging = false
                     return
                 }
-                // 轻点：切换光标（仅限图表面板内）
                 let y = value.location.y
                 let inPanel = isInChartPanel(y, mainTop, mainBottom)
                     || isInChartPanel(y, volTop, volBottom)
@@ -499,14 +720,9 @@ struct KlineChartView: View {
     private func mainChart(width: CGFloat, candleSpacing: CGFloat, height: CGFloat, panelTop: CGFloat) -> some View {
         return ZStack(alignment: .topLeading) {
             Color.white
-
             mainCanvas(width: width, candleSpacing: candleSpacing, height: height)
-
-            // 价格坐标（叠加在左侧，半透明不遮挡线条）
             overlayPriceLabels(width: width, height: height, min: priceRange.lowerBound, max: priceRange.upperBound,
                                ratios: [0, 0.25, 0.5, 0.75, 1], format: "%.2f")
-
-            // 最新价标签
             if let latest = slice.last {
                 Text(String(format: "%.2f", latest.close))
                     .font(.system(size: 9))
@@ -515,16 +731,11 @@ struct KlineChartView: View {
                     .background(Color.white.opacity(0.6))
                     .position(x: 20, y: yPosition(for: latest.close, in: height))
             }
-
             if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
                 let item = sortedData[selectedIndex]
                 let xPosition = (CGFloat(selectedIndex - startIndex) + 0.5) * candleSpacing
-
-                // 竖线
                 Rectangle().fill(Color.black.opacity(0.35)).frame(width: 0.5, height: height)
                     .position(x: xPosition, y: height / 2)
-
-                // 光标价格标签仅在光标落在主图内时显示
                 if let crosshairY, crosshairY >= panelTop, crosshairY <= panelTop + height {
                     let clampedY = min(max(crosshairY - panelTop, 0), height)
                     let priceAtY = priceRange.upperBound - (priceRange.upperBound - priceRange.lowerBound) * Double(clampedY / height)
@@ -535,7 +746,6 @@ struct KlineChartView: View {
                         .background(Color.white.opacity(0.6))
                         .position(x: 20, y: clampedY)
                 }
-
                 infoPanel(index: selectedIndex, item: item)
                     .padding(.leading, 6)
                     .padding(.top, 2)
@@ -545,19 +755,12 @@ struct KlineChartView: View {
         .clipped()
     }
 
-    // MARK: - Canvas 绘制
-
     private func mainCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
         MainChartCanvas(
-            slice: slice, chartStyle: chartStyle, mainIndicator: mainIndicator,
-            candleSpacing: candleSpacing, height: height,
+            slice: slice, chartStyle: chartStyle, candleSpacing: candleSpacing, height: height,
             priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
-            ma5: sliceArr(ma5), ma10: sliceArr(ma10), ma20: sliceArr(ma20), ma60: sliceArr(ma60),
-            ema5: sliceArr(ema5), ema10: sliceArr(ema10), ema20: sliceArr(ema20), ema60: sliceArr(ema60),
-            bollMid: sliceArr(bollMid), bollUpper: sliceArr(bollUpper), bollLower: sliceArr(bollLower),
-            upColor: upColor, downColor: downColor, gridColor: gridColor,
-            ma5Color: ma5Color, ma10Color: ma10Color, ma20Color: ma20Color,
-            ma60Color: ma60Color, bollColor: Color(red: 0.4, green: 0.4, blue: 0.9)
+            curves: mainCurves.map { CanvasCurve(color: $0.color, values: sliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth) },
+            upColor: upColor, downColor: downColor, gridColor: gridColor
         )
         .equatable()
     }
@@ -583,18 +786,12 @@ struct KlineChartView: View {
                              crosshairY: CGFloat?, panelTop: CGFloat) -> some View {
         return ZStack(alignment: .topLeading) {
             Color.white
-
             volumeCanvas(width: width, candleSpacing: candleSpacing, height: height)
-
-            // 左侧坐标值（最大量/0）
             volumeAxisLabels(width: width, height: height)
-
             if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
                 let xPosition = (CGFloat(selectedIndex - startIndex) + 0.5) * candleSpacing
                 Rectangle().fill(Color.black.opacity(0.35)).frame(width: 0.5, height: height)
                     .position(x: xPosition, y: height / 2)
-
-                // 光标值标签仅在光标落在量图内时显示
                 if let crosshairY, crosshairY >= panelTop, crosshairY <= panelTop + height {
                     let localY = min(max(crosshairY - panelTop, 0), height)
                     let volAtY = volumeMax * Double(1 - localY / height)
@@ -611,22 +808,17 @@ struct KlineChartView: View {
         .clipped()
     }
 
-    /// 量图左侧坐标：顶部为最大量，底部为 0
     private func volumeAxisLabels(width: CGFloat, height: CGFloat) -> some View {
         VStack(spacing: 0) {
             Text(formatVolume(volumeMax))
-                .font(.system(size: 9))
-                .foregroundColor(axisTextColor)
-                .padding(.horizontal, 2)
-                .padding(.vertical, 1)
+                .font(.system(size: 9)).foregroundColor(axisTextColor)
+                .padding(.horizontal, 2).padding(.vertical, 1)
                 .background(Color.white.opacity(0.6))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Spacer()
             Text("0")
-                .font(.system(size: 9))
-                .foregroundColor(axisTextColor)
-                .padding(.horizontal, 2)
-                .padding(.vertical, 1)
+                .font(.system(size: 9)).foregroundColor(axisTextColor)
+                .padding(.horizontal, 2).padding(.vertical, 1)
                 .background(Color.white.opacity(0.6))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -634,33 +826,25 @@ struct KlineChartView: View {
         .frame(width: width, height: height)
     }
 
-    // MARK: - 指标幅图
+    // MARK: - 指标副图
 
     private func indicatorChart(width: CGFloat, candleSpacing: CGFloat, height: CGFloat,
                                 crosshairY: CGFloat?, panelTop: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             Color.white
-
             indicatorCanvas(width: width, candleSpacing: candleSpacing, height: height)
             indicatorAxisLabels(width: width, height: height)
-
-            // 指标图例已移到独立的指标栏（indicatorLegendRow）
-
-            // 十字光标竖线
             if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
                 let xPosition = (CGFloat(selectedIndex - startIndex) + 0.5) * candleSpacing
                 Rectangle().fill(Color.black.opacity(0.35)).frame(width: 0.5, height: height)
                     .position(x: xPosition, y: height / 2)
-
-                // 光标值标签仅在光标落在指标图内时显示
                 if let crosshairY, crosshairY >= panelTop, crosshairY <= panelTop + height {
                     let localY = min(max(crosshairY - panelTop, 0), height)
                     let range = indicatorRange
                     let value = range.max - (range.max - range.min) * Double(localY / height)
-                    let fmt = indicator == .macd ? "%.3f" : "%.0f"
+                    let fmt = (isMacdMode || isCustomSubMode) ? "%.3f" : "%.1f"
                     Text(String(format: fmt, value))
-                        .font(.system(size: 9))
-                        .foregroundColor(.black)
+                        .font(.system(size: 9)).foregroundColor(.black)
                         .padding(.horizontal, 3)
                         .background(Color.white.opacity(0.6))
                         .position(x: 20, y: localY)
@@ -671,68 +855,76 @@ struct KlineChartView: View {
         .clipped()
     }
 
+    private var isCustomSubMode: Bool { activeSubCustom != nil && !subCustomOutputs.isEmpty }
+    private var isMacdMode: Bool { !isCustomSubMode && indicator == .macd }
+
     @ViewBuilder
     private func indicatorAxisLabels(width: CGFloat, height: CGFloat) -> some View {
         let range = indicatorRange
-        switch indicator {
-        case .macd:
+        if isMacdMode {
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
                                ratios: [0, 0.5, 1], format: "%.3f")
-        case .kdj, .rsi:
+        } else if indicator == .rsi && !isCustomSubMode {
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
                                ratios: [0, 0.25, 0.5, 0.75, 1], format: "%.0f")
+        } else if isCustomSubMode {
+            overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
+                               ratios: [0, 0.5, 1], format: "%.3f")
+        } else {
+            overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
+                               ratios: [0, 0.5, 1], format: "%.1f")
         }
     }
 
-    /// 副图基于可见窗口的动态坐标范围，保证线条不越界
+    /// 副图基于可见窗口的动态坐标范围
     private var indicatorRange: (min: Double, max: Double) {
-        switch indicator {
-        case .macd:
-            let m = macdMax
-            return (-m, m)
-        case .kdj:
-            let vals = offsetsMap { [kdj.k[$0], kdj.d[$0], kdj.j[$0]] }
-            let lo = vals.min() ?? 0
-            let hi = vals.max() ?? 100
-            return (min(lo, 0), max(hi, 100))
-        case .rsi:
-            return (0, 100)
+        let offsets = Array(startIndex...endIndex)
+        var values: [Double] = []
+        for line in subCurves {
+            for idx in offsets where idx < line.values.count {
+                let v = line.values[idx]
+                if !v.isNaN { values.append(v) }
+            }
         }
+        if isMacdMode {
+            let m = values.map { abs($0) }.max() ?? 1
+            let mm = max(m * 1.15, 0.0001)
+            return (-mm, mm)
+        }
+        if indicator == .rsi && !isCustomSubMode { return (0, 100) }
+        let lo = values.min() ?? 0
+        let hi = values.max() ?? 100
+        guard hi > lo else { return (lo - 1, hi + 1) }
+        let pad = (hi - lo) * 0.1
+        return (lo - pad, hi + pad)
     }
 
-    /// 副图基于可见窗口的动态最大绝对值（MACD）
-    private var macdMax: Double {
-        let vals: [Double] = offsetsMap { index in
-            [dif[index], dea[index], macdHistogram[index]].map { abs($0) }
-        }
-        let m = vals.max() ?? 1
-        return max(m * 1.15, 0.0001)
+    private func indicatorCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
+        let range = indicatorRange
+        return IndicatorChartCanvas(
+            candleSpacing: candleSpacing, height: height,
+            curves: subCurves.map { CanvasCurve(color: $0.color, values: sliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth) },
+            macdSignColor: isMacdMode,
+            rangeMin: range.min, rangeMax: range.max,
+            upColor: upColor, downColor: downColor, gridColor: gridColor
+        )
+        .equatable()
     }
 
-    // MARK: - 指标栏（独立一行，名称可点击弹下拉菜单）
+    // MARK: - 指标栏（名称按钮打开底部面板）
 
     private func mainLegendRow(height: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
-            HStack(spacing: 10) {
-                nameButtonView(title: mainIndicator.rawValue, isOpen: $showMainMenu) {
+            HStack(spacing: 8) {
+                nameButtonView(title: mainLegendTitle, isOpen: $showMainSheet) {
                     showVolumeMenu = false
-                    showIndicatorMenu = false
+                    showIndicatorSheet = false
                 }
-                switch mainIndicator {
-                case .ma:
-                    legendItem("MA5", legendValue(ma5), color: ma5Color)
-                    legendItem("MA10", legendValue(ma10), color: ma10Color)
-                    legendItem("MA20", legendValue(ma20), color: ma20Color)
-                    legendItem("MA60", legendValue(ma60), color: ma60Color)
-                case .ema:
-                    legendItem("EMA5", legendValue(ema5), color: ma5Color)
-                    legendItem("EMA10", legendValue(ema10), color: ma10Color)
-                    legendItem("EMA20", legendValue(ema20), color: ma20Color)
-                    legendItem("EMA60", legendValue(ema60), color: ma60Color)
-                case .boll:
-                    legendItem("MID", legendValue(bollMid), color: ma10Color)
-                    legendItem("UP", legendValue(bollUpper), color: bollColor)
-                    legendItem("LOW", legendValue(bollLower), color: bollColor)
+                if showBareK {
+                    legendText("裸K", hideValue: false)
+                }
+                ForEach(Array(mainCurves.enumerated()), id: \.offset) { idx, line in
+                    legendItem(line)
                 }
                 Spacer()
             }
@@ -740,19 +932,18 @@ struct KlineChartView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: height)
             .background(Color.white)
-
-            if showMainMenu {
-                indicatorMenuView(options: MainIndicator.allCases.map { ($0.rawValue, mainIndicator == $0) },
-                                  onSelect: { opt in
-                    mainIndicator = MainIndicator(rawValue: opt) ?? .ma
-                    showMainMenu = false
-                })
-                .offset(y: height + 2)
-                .padding(.leading, 6)
-                .transition(.opacity)
-            }
         }
         .frame(height: height)
+    }
+
+    private var mainLegendTitle: String {
+        if showBareK { return "裸K" }
+        var parts: [String] = []
+        if showMA { parts.append("MA") }
+        if showEMA { parts.append("EMA") }
+        if showBOLL { parts.append("BOLL") }
+        if let a = activeCustomIndicator { parts.append(a.name) }
+        return parts.isEmpty ? "主图" : parts.joined(separator: "/")
     }
 
     private func volumeLegendRow(height: CGFloat) -> some View {
@@ -760,11 +951,13 @@ struct KlineChartView: View {
         return ZStack(alignment: .topLeading) {
             HStack(spacing: 8) {
                 nameButtonView(title: isAmount ? "AMO" : "VOL", isOpen: $showVolumeMenu) {
-                    showMainMenu = false
-                    showIndicatorMenu = false
+                    showMainSheet = false
+                    showIndicatorSheet = false
                 }
-                legendItem("MA5", legendValue(isAmount ? amoMa5 : volMa5), color: ma5Color)
-                legendItem("MA10", legendValue(isAmount ? amoMa10 : volMa10), color: ma10Color)
+                legendItem(IndicatorLine(name: "MA5", values: isAmount ? amoMa5 : volMa5, color: ma5Color,
+                                         style: .solid, lineWidth: 1, hideValue: false))
+                legendItem(IndicatorLine(name: "MA10", values: isAmount ? amoMa10 : volMa10, color: ma10Color,
+                                         style: .solid, lineWidth: 1, hideValue: false))
                 Spacer()
             }
             .padding(.horizontal, 6)
@@ -773,100 +966,31 @@ struct KlineChartView: View {
             .background(Color.white)
 
             if showVolumeMenu {
-                indicatorMenuView(options: VolumeIndicator.allCases.map { ($0.rawValue, volumeIndicator == $0) },
-                                  onSelect: { opt in
-                    volumeIndicator = VolumeIndicator(rawValue: opt) ?? .volume
-                    showVolumeMenu = false
-                })
-                .offset(y: height + 2)
-                .padding(.leading, 6)
-                .transition(.opacity)
+                volumeMenuView(height: height)
+                    .offset(y: height + 2)
+                    .padding(.leading, 6)
+                    .transition(.opacity)
             }
         }
         .frame(height: height)
     }
 
-    private func indicatorLegendRow(height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            HStack(spacing: 8) {
-                nameButtonView(title: indicator.rawValue, isOpen: $showIndicatorMenu) {
-                    showMainMenu = false
-                    showVolumeMenu = false
-                }
-                switch indicator {
-                case .macd:
-                    legendItem("DIF", legendValue(dif), color: ma5Color, format: "%.3f")
-                    legendItem("DEA", legendValue(dea), color: ma10Color, format: "%.3f")
-                    legendItem("MACD", legendValue(macdHistogram), color: ma20Color, format: "%.3f")
-                case .kdj:
-                    legendItem("K", legendValue(kdj.k), color: ma5Color)
-                    legendItem("D", legendValue(kdj.d), color: ma10Color)
-                    legendItem("J", legendValue(kdj.j), color: ma20Color)
-                case .rsi:
-                    legendItem("RSI6", legendValue(rsi6), color: ma5Color)
-                    legendItem("RSI12", legendValue(rsi12), color: ma10Color)
-                    legendItem("RSI24", legendValue(rsi24), color: ma20Color)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: height)
-            .background(Color.white)
-
-            if showIndicatorMenu {
-                indicatorMenuView(options: SubIndicator.allCases.map { ($0.rawValue, indicator == $0) },
-                                  onSelect: { opt in
-                    indicator = SubIndicator(rawValue: opt) ?? .macd
-                    showIndicatorMenu = false
-                })
-                .offset(y: height + 2)
-                .padding(.leading, 6)
-                .transition(.opacity)
-            }
-        }
-        .frame(height: height)
-    }
-
-    /// 指标名称按钮（点击展开下拉菜单）
-    private func nameButtonView(title: String, isOpen: Binding<Bool>, onTap: @escaping () -> Void) -> some View {
-        Button {
-            withAnimation { isOpen.wrappedValue.toggle(); onTap() }
-        } label: {
-            HStack(spacing: 3) {
-                Text(title)
-                    .font(.system(size: 9, weight: .medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8))
-            }
-            .foregroundColor(.black)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(Color.gray.opacity(0.12))
-            .cornerRadius(4)
-        }
-    }
-
-    /// 下拉菜单
-    private func indicatorMenuView(options: [(String, Bool)], onSelect: @escaping (String) -> Void) -> some View {
+    /// 量图下拉菜单（VOL/AMO）
+    private func volumeMenuView(height: CGFloat) -> some View {
         VStack(spacing: 0) {
-            ForEach(options, id: \.0) { opt in
+            ForEach(VolumeIndicator.allCases) { opt in
                 Button {
-                    onSelect(opt.0)
+                    volumeIndicator = opt
+                    showVolumeMenu = false
                 } label: {
                     HStack {
-                        Text(opt.0)
-                            .font(.system(size: 11))
+                        Text(opt.rawValue).font(.system(size: 11)).foregroundColor(.black)
                         Spacer()
-                        if opt.1 {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10))
-                                .foregroundColor(.blue)
+                        if volumeIndicator == opt {
+                            Image(systemName: "checkmark").font(.system(size: 10)).foregroundColor(.blue)
                         }
                     }
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
                 }
             }
         }
@@ -876,19 +1000,374 @@ struct KlineChartView: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3), lineWidth: 0.5))
     }
 
-    private func indicatorCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
-        let range = indicatorRange
-        return IndicatorChartCanvas(
-            indicator: indicator,
-            candleSpacing: candleSpacing, height: height,
-            dif: sliceArr(dif), dea: sliceArr(dea), macdHist: sliceArr(macdHistogram),
-            kdjK: sliceArr(kdj.k), kdjD: sliceArr(kdj.d), kdjJ: sliceArr(kdj.j),
-            rsi6: sliceArr(rsi6), rsi12: sliceArr(rsi12), rsi24: sliceArr(rsi24),
-            rangeMin: range.min, rangeMax: range.max,
-            upColor: upColor, downColor: downColor, gridColor: gridColor,
-            ma5Color: ma5Color, ma10Color: ma10Color, ma20Color: ma20Color
+    private func indicatorLegendRow(height: CGFloat) -> some View {
+        let title = isCustomSubMode ? activeSubCustom?.name ?? "自定义" : subLegendTitle
+        return ZStack(alignment: .topLeading) {
+            HStack(spacing: 8) {
+                nameButtonView(title: title, isOpen: $showIndicatorSheet) {
+                    showMainSheet = false
+                    showVolumeMenu = false
+                }
+                ForEach(Array(subCurves.enumerated()), id: \.offset) { idx, line in
+                    legendItem(line)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: height)
+            .background(Color.white)
+        }
+        .frame(height: height)
+    }
+
+    private var subLegendTitle: String { indicator.rawValue }
+
+    private func nameButtonView(title: String, isOpen: Binding<Bool>, onTap: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation { isOpen.wrappedValue.toggle(); onTap() }
+        } label: {
+            HStack(spacing: 3) {
+                Text(title).font(.system(size: 9, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8))
+            }
+            .foregroundColor(.black)
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(Color.gray.opacity(0.12)).cornerRadius(4)
+        }
+    }
+
+    private func legendItem(_ line: IndicatorLine, format: String = "%.2f") -> some View {
+        HStack(spacing: 2) {
+            Circle().fill(line.style == .nodraw ? Color.clear : line.color).frame(width: line.style == .stick ? 3 : 5, height: 5)
+            Text(line.name).font(.system(size: 9)).foregroundColor(.gray)
+            if !line.hideValue, let value = legendValueFor(line), !value.isNaN {
+                Text(String(format: format, value)).font(.system(size: 9)).foregroundColor(line.color)
+            }
+        }
+    }
+
+    private func legendText(_ text: String, hideValue: Bool) -> some View {
+        HStack(spacing: 2) {
+            Circle().fill(Color.gray).frame(width: 5, height: 5)
+            Text(text).font(.system(size: 9)).foregroundColor(.gray)
+        }
+    }
+
+    // MARK: - 底部选择面板（指标选择 + 参数编辑）
+
+    private func bottomSheet<Content: View>(geometry: GeometryProxy, heightFraction: CGFloat,
+                                            @ViewBuilder content: () -> Content,
+                                            onClose: @escaping () -> Void) -> some View {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation { onClose() } }
+
+            VStack(spacing: 0) {
+                content()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .frame(width: geometry.size.width, height: min(geometry.size.height * heightFraction, 640))
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: 主图面板
+
+    private var mainSheetContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("主图指标")
+                    .font(.system(size: 16, weight: .bold)).foregroundColor(.black)
+                Spacer()
+                Button("关闭") { showMainSheet = false }
+                    .font(.system(size: 14)).foregroundColor(.gray)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    toggleRow("裸K（隐藏全部叠加线）", on: $showBareK) { recomputeMainCurves() }
+                    Divider()
+                    toggleRow("MA 均线", on: $showMA) { recomputeMainCurves() }
+                    if showMA {
+                        paramRow(title: "MA 周期（0=隐藏，最多8个）") {
+                            periodsEditor(periods: $maConfig.periods)
+                        }
+                    }
+                    Divider()
+                    toggleRow("EMA 均线", on: $showEMA) { recomputeMainCurves() }
+                    if showEMA {
+                        paramRow(title: "EMA 周期（0=隐藏，最多8个）") {
+                            periodsEditor(periods: $emaConfig.periods)
+                        }
+                    }
+                    Divider()
+                    toggleRow("BOLL 布林带", on: $showBOLL) { recomputeMainCurves() }
+                    if showBOLL {
+                        paramRow(title: "BOLL 参数") {
+                            HStack(spacing: 12) {
+                                numberField("周期", $bollConfig.period, range: 1...1000)
+                                numberField("倍数", $bollConfig.mult, range: 0.1...10)
+                            }
+                        }
+                    }
+                    Divider()
+                    // 自定义指标叠加
+                    HStack(spacing: 8) {
+                        Image(systemName: "function")
+                            .font(.system(size: 13)).foregroundColor(.blue)
+                        Text("自定义叠加指标").font(.system(size: 14, weight: .medium)).foregroundColor(.black)
+                        Spacer()
+                        Button("管理/新增") { showMainSheet = false; editorTarget = .main; showCustomEditor = true }
+                            .font(.system(size: 12)).foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+
+                    if customStore.indicators.isEmpty {
+                        Text("暂无自定义指标，点右上“管理/新增”创建")
+                            .font(.system(size: 12)).foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16).padding(.bottom, 12)
+                    } else {
+                        ForEach(customStore.indicators) { ind in
+                            HStack {
+                                Button {
+                                    if activeCustomIndicator?.id == ind.id {
+                                        activateCustom(nil)
+                                    } else {
+                                        activateCustom(ind)
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: activeCustomIndicator?.id == ind.id ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(activeCustomIndicator?.id == ind.id ? .blue : .gray)
+                                        RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 16, height: 5)
+                                        Text(ind.name).font(.system(size: 14)).foregroundColor(.black)
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                    }
+                    Spacer(minLength: 20)
+                }
+            }
+        }
+    }
+
+    // MARK: 副图面板
+
+    private var subSheetContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("副图指标")
+                    .font(.system(size: 16, weight: .bold)).foregroundColor(.black)
+                Spacer()
+                Button("关闭") { showIndicatorSheet = false }
+                    .font(.system(size: 14)).foregroundColor(.gray)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    // 系统指标
+                    ForEach(SubIndicator.allCases) { sub in
+                        Button {
+                            if activeSubCustom != nil { activeSubCustom = nil }
+                            indicator = sub
+                            recomputeSubCurves()
+                        } label: {
+                            HStack {
+                                Text(sub.rawValue).font(.system(size: 14)).foregroundColor(.black)
+                                Spacer()
+                                if !isCustomSubMode && indicator == sub {
+                                    Image(systemName: "checkmark").font(.system(size: 13)).foregroundColor(.blue)
+                                }
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        if !isCustomSubMode && indicator == sub {
+                            subParamEditor
+                        }
+                        Divider()
+                    }
+
+                    // 自定义指标
+                    HStack(spacing: 8) {
+                        Image(systemName: "function").font(.system(size: 13)).foregroundColor(.blue)
+                        Text("自定义副图指标").font(.system(size: 14, weight: .medium)).foregroundColor(.black)
+                        Spacer()
+                        Button("管理/新增") { showIndicatorSheet = false; editorTarget = .sub; showCustomEditor = true }
+                            .font(.system(size: 12)).foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+
+                    if customStore.indicators.isEmpty {
+                        Text("暂无自定义指标，点“管理/新增”创建")
+                            .font(.system(size: 12)).foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16).padding(.bottom, 12)
+                    } else {
+                        ForEach(customStore.indicators) { ind in
+                            HStack {
+                                Button {
+                                    if activeSubCustom?.id == ind.id {
+                                        activateSubCustom(nil)
+                                    } else {
+                                        activateSubCustom(ind)
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: activeSubCustom?.id == ind.id ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(activeSubCustom?.id == ind.id ? .blue : .gray)
+                                        RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 16, height: 5)
+                                        Text(ind.name).font(.system(size: 14)).foregroundColor(.black)
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                    }
+                    Spacer(minLength: 20)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var subParamEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch indicator {
+            case .macd:
+                HStack(spacing: 12) {
+                    numberField("快线", $macdConfig.fast, range: 1...300)
+                    numberField("慢线", $macdConfig.slow, range: 1...300)
+                    numberField("信号", $macdConfig.signal, range: 1...300)
+                }
+            case .kdj:
+                HStack(spacing: 12) {
+                    numberField("周期", $kdjConfig.n, range: 1...300)
+                    numberField("K", $kdjConfig.kN, range: 1...100)
+                    numberField("D", $kdjConfig.dN, range: 1...100)
+                }
+            case .rsi:
+                HStack(spacing: 12) {
+                    numberField("P1", $rsiConfig.p1, range: 1...300)
+                    numberField("P2", $rsiConfig.p2, range: 1...300)
+                    numberField("P3", $rsiConfig.p3, range: 1...300)
+                }
+            }
+            // 参数输入可能被 onEnded 触发的 onEditingChanged 回调里重新计算
+        }
+        .padding(.horizontal, 16).padding(.bottom, 10)
+        .onChange(of: macdConfig) { _ in recomputeSubCurves() }
+        .onChange(of: kdjConfig) { _ in recomputeSubCurves() }
+        .onChange(of: rsiConfig) { _ in recomputeSubCurves() }
+    }
+
+    // MARK: 通用 UI 组件
+
+    private func toggleRow(_ title: String, on: Binding<Bool>, onChange: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title).font(.system(size: 14)).foregroundColor(.black)
+            Spacer()
+            Toggle("", isOn: on).labelsHidden()
+                .onChange(of: on.wrappedValue) { _ in onChange() }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    private func paramRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 11)).foregroundColor(.gray)
+            content()
+        }
+        .padding(.horizontal, 16).padding(.bottom, 10)
+    }
+
+    /// 最多 8 个周期输入框
+    private func periodsEditor(periods: Binding<[Int]>) -> some View {
+        let list = Array(0..<8)
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(stride(from: 0, to: 8, by: 4)), id: \.self) { rowStart in
+                HStack(spacing: 12) {
+                    ForEach(list[rowStart..<min(rowStart + 4, 8)], id: \.self) { idx in
+                        smallNumberField(label: "\(idx + 1)", value: periodBinding(periods, idx))
+                    }
+                }
+            }
+        }
+    }
+
+    private func periodBinding(_ periods: Binding<[Int]>, _ idx: Int) -> Binding<String> {
+        Binding(
+            get: { String(periods.wrappedValue.indices.contains(idx) ? periods.wrappedValue[idx] : 0) },
+            set: { newValue in
+                var arr = periods.wrappedValue
+                if arr.count != 8 { arr = Array(repeating: 0, count: 8) }
+                let n = Int(newValue) ?? 0
+                arr[idx] = min(max(n, 0), 1000)
+                periods.wrappedValue = arr
+            }
         )
-        .equatable()
+    }
+
+    private func smallNumberField(label: String, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 9)).foregroundColor(.gray)
+            TextField("", text: value)
+                .font(.system(size: 12))
+                .keyboardType(.numberPad)
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .background(Color(uiColor: .systemGray6)).cornerRadius(4)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func numberField(_ label: String, _ value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 9)).foregroundColor(.gray)
+            TextField("", text: Binding(
+                get: { String(value.wrappedValue) },
+                set: { nv in value.wrappedValue = min(max(Int(nv) ?? value.wrappedValue, range.lowerBound), range.upperBound) }
+            ))
+            .font(.system(size: 13))
+            .keyboardType(.numberPad)
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .background(Color(uiColor: .systemGray6)).cornerRadius(4)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func numberField(_ label: String, _ value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 9)).foregroundColor(.gray)
+            TextField("", text: Binding(
+                get: { String(format: "%.1f", value.wrappedValue) },
+                set: { nv in
+                    let n = Double(nv) ?? value.wrappedValue
+                    value.wrappedValue = min(max(n, range.lowerBound), range.upperBound)
+                }
+            ))
+            .font(.system(size: 13))
+            .keyboardType(.decimalPad)
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .background(Color(uiColor: .systemGray6)).cornerRadius(4)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 时间轴
@@ -898,18 +1377,11 @@ struct KlineChartView: View {
         let right = sortedData[endIndex].formattedDate
         return ZStack {
             HStack(spacing: 0) {
-                Text(left)
-                    .font(.system(size: 9))
-                    .foregroundColor(.gray)
-                // 最左日期右侧追加三个空格的间距，再显示当前可见 K 线周期数
-                Text("   周期数\(count)个")
-                    .font(.system(size: 9))
-                    .foregroundColor(.gray)
+                Text(left).font(.system(size: 9)).foregroundColor(.gray)
+                Text("   周期数\(count)个").font(.system(size: 9)).foregroundColor(.gray)
                 Spacer()
             }
-            Text(right)
-                .font(.system(size: 9))
-                .foregroundColor(.gray)
+            Text(right).font(.system(size: 9)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(width: width, height: height)
@@ -918,7 +1390,6 @@ struct KlineChartView: View {
 
     // MARK: - 通用绘制辅助
 
-    /// 叠加在图表右侧的价格标签（不单独占列）
     private func overlayPriceLabels(width: CGFloat, height: CGFloat, min: Double, max: Double, ratios: [CGFloat], format: String) -> some View {
         ZStack {
             ForEach(ratios, id: \.self) { ratio in
@@ -926,46 +1397,27 @@ struct KlineChartView: View {
                 Text(String(format: format, value))
                     .font(.system(size: 9))
                     .foregroundColor(axisTextColor)
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 1)
-                    // 半透明背景，避免遮挡指标线条
+                    .padding(.horizontal, 2).padding(.vertical, 1)
                     .background(Color.white.opacity(0.55))
-                    // 顶/底标签向内偏移半个标签高，避免被面板边界裁掉一半
                     .position(x: 22, y: clampedAxisY(height * CGFloat(ratio), in: height))
             }
         }
         .frame(width: width, height: height)
     }
 
-    /// 让标签 Y 始终落在面板内，保证顶/底标签完整显示
     private func clampedAxisY(_ y: CGFloat, in height: CGFloat) -> CGFloat {
         let half: CGFloat = 8
         return min(max(y, half), max(half, height - half))
     }
 
-    private func legendItem(_ name: String, _ value: Double?, color: Color, format: String = "%.2f") -> some View {
-        HStack(spacing: 2) {
-            Circle().fill(color).frame(width: 5, height: 5)
-            Text(name).font(.system(size: 9)).foregroundColor(.gray)
-            if let value, !value.isNaN {
-                Text(String(format: format, value))
-                    .font(.system(size: 9)).foregroundColor(color)
-            }
-        }
-    }
-
     // MARK: - 十字光标信息面板
 
     private func infoPanel(index: Int, item: KlineItem) -> some View {
-        // 涨跌额 = 收盘 - 前收盘
         let changeAmount = prevClose(of: index) > 0 ? item.close - prevClose(of: index) : 0
         let changeColor: Color = changeAmount >= 0 ? upColor : downColor
-
         return VStack(alignment: .leading, spacing: 2) {
             Text(item.formattedDateWithWeekday)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.black)
-
+                .font(.system(size: 10, weight: .medium)).foregroundColor(.black)
             HStack(spacing: 8) {
                 kv("开", item.open, .black)
                 kv("收", item.close, item.isUp ? upColor : downColor)
@@ -978,8 +1430,7 @@ struct KlineChartView: View {
             }
         }
         .padding(6)
-        .background(Color.white.opacity(0.92))
-        .cornerRadius(4)
+        .background(Color.white.opacity(0.92)).cornerRadius(4)
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.4), lineWidth: 0.5))
     }
 
@@ -991,15 +1442,9 @@ struct KlineChartView: View {
     }
 
     private func kv(_ title: String, _ value: Double, _ color: Color) -> some View {
-        valuePill(title, value, color)
-    }
-
-    private func valuePill(_ title: String, _ value: Double?, _ color: Color, format: String = "%.2f") -> some View {
         HStack(spacing: 2) {
             Text(title).font(.system(size: 9)).foregroundColor(.gray)
-            if let value, !value.isNaN {
-                Text(String(format: format, value)).font(.system(size: 9)).foregroundColor(color)
-            }
+            Text(String(format: "%.2f", value)).font(.system(size: 9)).foregroundColor(color)
         }
     }
 
@@ -1030,20 +1475,17 @@ struct KlineChartView: View {
     }
 }
 
-// MARK: - 主图 Canvas（Equatable，光标拖动时不重绘）
+// MARK: - 主图 Canvas
 
 struct MainChartCanvas: View, Equatable {
     let slice: [KlineItem]
     let chartStyle: ChartStyle
-    let mainIndicator: MainIndicator
     let candleSpacing: CGFloat
     let height: CGFloat
     let priceMin: Double
     let priceMax: Double
-    let ma5, ma10, ma20, ma60: [Double]
-    let ema5, ema10, ema20, ema60: [Double]
-    let bollMid, bollUpper, bollLower: [Double]
-    let upColor, downColor, gridColor, ma5Color, ma10Color, ma20Color, ma60Color, bollColor: Color
+    let curves: [CanvasCurve]
+    let upColor, downColor, gridColor: Color
 
     var body: some View {
         Canvas { ctx, size in
@@ -1052,21 +1494,19 @@ struct MainChartCanvas: View, Equatable {
 
             for ratio: CGFloat in [0, 0.25, 0.5, 0.75, 1] {
                 let y = h * ratio
-                var p = Path()
-                p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+                var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
                 ctx.stroke(p, with: .color(gridColor), lineWidth: 0.5)
             }
             for i in 0..<8 {
                 let x = w * CGFloat(i) / 8
-                var p = Path()
-                p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: h))
+                var p = Path(); p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: h))
                 ctx.stroke(p, with: .color(gridColor), lineWidth: 0.5)
             }
 
             let candleWidth = max(1.5, candleSpacing * 0.7)
-
             switch chartStyle {
-            case .kline:
+            case .bare, .solid:
+                let hollow = chartStyle == .bare  // 空心K：红K空、绿K实
                 for (li, item) in slice.enumerated() {
                     let x = (CGFloat(li) + 0.5) * candleSpacing
                     let color = item.isUp ? upColor : downColor
@@ -1078,10 +1518,15 @@ struct MainChartCanvas: View, Equatable {
                     let bodyTop = yPos(max(item.open, item.close), h: h)
                     let bodyBottom = yPos(min(item.open, item.close), h: h)
                     let rect = CGRect(x: x - candleWidth / 2, y: bodyTop, width: candleWidth, height: max(1, bodyBottom - bodyTop))
-                    ctx.fill(Path(rect), with: .color(color))
+                    if hollow && item.isUp {
+                        // 红K空心：仅描边
+                        ctx.stroke(Path(rect), with: .color(color), lineWidth: 1)
+                    } else {
+                        ctx.fill(Path(rect), with: .color(color))
+                    }
                 }
             case .close:
-                strokeLine(ctx, values: slice.map(\.close), color: Color(red: 0.2, green: 0.4, blue: 0.9), h: h)
+                strokeLine(ctx, values: slice.map(\.close), color: Color(red: 0.2, green: 0.4, blue: 0.9), h: h, style: .solid, lineWidth: 1)
             case .ohlc:
                 for (li, item) in slice.enumerated() {
                     let x = (CGFloat(li) + 0.5) * candleSpacing
@@ -1092,31 +1537,17 @@ struct MainChartCanvas: View, Equatable {
                     bar.move(to: CGPoint(x: x, y: yH)); bar.addLine(to: CGPoint(x: x, y: yL))
                     ctx.stroke(bar, with: .color(color), lineWidth: max(1, candleWidth * 0.12))
                     let oy = yPos(item.open, h: h)
-                    var op = Path()
-                    op.move(to: CGPoint(x: x - candleSpacing * 0.18, y: oy)); op.addLine(to: CGPoint(x: x, y: oy))
+                    var op = Path(); op.move(to: CGPoint(x: x - candleSpacing * 0.18, y: oy)); op.addLine(to: CGPoint(x: x, y: oy))
                     ctx.stroke(op, with: .color(color), lineWidth: 1)
                     let cy = yPos(item.close, h: h)
-                    var cl = Path()
-                    cl.move(to: CGPoint(x: x, y: cy)); cl.addLine(to: CGPoint(x: x + candleSpacing * 0.18, y: cy))
+                    var cl = Path(); cl.move(to: CGPoint(x: x, y: cy)); cl.addLine(to: CGPoint(x: x + candleSpacing * 0.18, y: cy))
                     ctx.stroke(cl, with: .color(color), lineWidth: 1)
                 }
             }
 
-            switch mainIndicator {
-            case .ma:
-                strokeLine(ctx, values: ma5, color: ma5Color, h: h)
-                strokeLine(ctx, values: ma10, color: ma10Color, h: h)
-                strokeLine(ctx, values: ma20, color: ma20Color, h: h)
-                strokeLine(ctx, values: ma60, color: ma60Color, h: h)
-            case .ema:
-                strokeLine(ctx, values: ema5, color: ma5Color, h: h)
-                strokeLine(ctx, values: ema10, color: ma10Color, h: h)
-                strokeLine(ctx, values: ema20, color: ma20Color, h: h)
-                strokeLine(ctx, values: ema60, color: ma60Color, h: h)
-            case .boll:
-                strokeLine(ctx, values: bollMid, color: ma10Color, h: h)
-                strokeLine(ctx, values: bollUpper, color: bollColor, h: h)
-                strokeLine(ctx, values: bollLower, color: bollColor, h: h)
+            // 叠加指标/自定义线
+            for curve in curves {
+                drawCurve(ctx, curve: curve, h: h)
             }
 
             if let latest = slice.last {
@@ -1129,13 +1560,37 @@ struct MainChartCanvas: View, Equatable {
         }
     }
 
-    private func yPos(_ v: Double, h: CGFloat) -> CGFloat {
-        let range = priceMax - priceMin
-        guard range > 0 else { return h }
-        return h * CGFloat(1 - (v - priceMin) / range)
+    private func drawCurve(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat) {
+        switch curve.style {
+        case .dotline:
+            strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .dotline, lineWidth: curve.lineWidth)
+        case .pointdot:
+            var points = Path()
+            for (i, v) in curve.values.enumerated() {
+                guard !v.isNaN else { continue }
+                let x = (CGFloat(i) + 0.5) * candleSpacing
+                let y = yPos(v, h: h)
+                points.addEllipse(in: CGRect(x: x - 1, y: y - 1, width: 2, height: 2))
+            }
+            ctx.fill(points, with: .color(curve.color))
+        case .stick:
+            let barWidth = max(0.6, candleSpacing * 0.55)
+            for (i, v) in curve.values.enumerated() {
+                guard !v.isNaN else { continue }
+                let x = (CGFloat(i) + 0.5) * candleSpacing
+                let y = yPos(0, h: h)  // 从 0 值起点
+                let yv = yPos(v, h: h)
+                let rect = CGRect(x: x - barWidth / 2, y: min(y, yv), width: barWidth, height: max(0.5, abs(y - yv)))
+                ctx.fill(Path(rect), with: .color(curve.color))
+            }
+        case .solid:
+            strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .solid, lineWidth: curve.lineWidth)
+        case .nodraw:
+            break
+        }
     }
 
-    private func strokeLine(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat) {
+    private func strokeLine(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat, style: TDXLineStyle, lineWidth: Double) {
         var path = Path()
         var started = false
         for (i, v) in values.enumerated() {
@@ -1144,7 +1599,18 @@ struct MainChartCanvas: View, Equatable {
             let y = yPos(v, h: h)
             if started { path.addLine(to: CGPoint(x: x, y: y)) } else { path.move(to: CGPoint(x: x, y: y)); started = true }
         }
-        ctx.stroke(path, with: .color(color), lineWidth: 1)
+        let strokeStyle: StrokeStyle
+        switch style {
+        case .dotline: strokeStyle = StrokeStyle(lineWidth: lineWidth, dash: [3, 3])
+        default: strokeStyle = StrokeStyle(lineWidth: lineWidth)
+        }
+        ctx.stroke(path, with: .color(color), style: strokeStyle)
+    }
+
+    private func yPos(_ v: Double, h: CGFloat) -> CGFloat {
+        let range = priceMax - priceMin
+        guard range > 0 else { return h }
+        return h * CGFloat(1 - (v - priceMin) / range)
     }
 }
 
@@ -1165,8 +1631,7 @@ struct VolumeChartCanvas: View, Equatable {
             let h = size.height
             for ratio: CGFloat in [0, 0.5, 1] {
                 let y = h * ratio
-                var p = Path()
-                p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+                var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
                 ctx.stroke(p, with: .color(gridColor), lineWidth: 0.5)
             }
             let barWidth = max(1.5, candleSpacing * 0.7)
@@ -1201,90 +1666,83 @@ struct VolumeChartCanvas: View, Equatable {
     }
 }
 
-// MARK: - 指标 Canvas
+// MARK: - 指标副图 Canvas
 
 struct IndicatorChartCanvas: View, Equatable {
-    let indicator: SubIndicator
     let candleSpacing: CGFloat
     let height: CGFloat
-    let dif, dea, macdHist: [Double]
-    let kdjK, kdjD, kdjJ: [Double]
-    let rsi6, rsi12, rsi24: [Double]
+    let curves: [CanvasCurve]
+    let macdSignColor: Bool
     let rangeMin: Double
     let rangeMax: Double
-    let upColor, downColor, gridColor, ma5Color, ma10Color, ma20Color: Color
+    let upColor, downColor, gridColor: Color
 
     var body: some View {
         Canvas { ctx, size in
             let w = size.width
             let h = size.height
+            // 网格
+            for ratio: CGFloat in [0, 0.5, 1] {
+                let y = h * ratio
+                var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+                ctx.stroke(p, with: .color(gridColor), lineWidth: 0.5)
+            }
+            // 0 轴
+            var zero = Path()
+            zero.move(to: CGPoint(x: 0, y: h / 2)); zero.addLine(to: CGPoint(x: w, y: h / 2))
+            ctx.stroke(zero, with: .color(Color.black.opacity(0.4)), lineWidth: 0.5)
 
-            switch indicator {
-            case .macd:
-                for ratio: CGFloat in [0, 0.5, 1] {
-                    let y = h * ratio
-                    var p = Path()
-                    p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
-                    ctx.stroke(p, with: .color(gridColor), lineWidth: 0.5)
+            for curve in curves {
+                switch curve.style {
+                case .stick:
+                    let barWidth = max(1.0, candleSpacing * 0.55)
+                    let midY = h / 2
+                    let half = max(abs(rangeMin), abs(rangeMax))
+                    for (i, v) in curve.values.enumerated() {
+                        guard !v.isNaN else { continue }
+                        let x = (CGFloat(i) + 0.5) * candleSpacing
+                        let barHeight = half > 0 ? abs(v) / half * (h / 2) : 0
+                        let color = macdSignColor ? (v >= 0 ? upColor.opacity(0.8) : downColor.opacity(0.8)) : curve.color
+                        let topY = v >= 0 ? (midY - barHeight) : midY
+                        let rect = CGRect(x: x - barWidth / 2, y: topY, width: barWidth, height: max(0.5, barHeight))
+                        ctx.fill(Path(rect), with: .color(color))
+                    }
+                case .dotline, .pointdot, .solid:
+                    drawLine(ctx, curve: curve, h: h)
+                case .nodraw:
+                    break
                 }
-                var zero = Path()
-                zero.move(to: CGPoint(x: 0, y: h / 2)); zero.addLine(to: CGPoint(x: w, y: h / 2))
-                ctx.stroke(zero, with: .color(Color.black.opacity(0.4)), lineWidth: 0.5)
-                // 以动态范围的最大绝对值作为柱的满刻度
-                let half = max(abs(rangeMin), abs(rangeMax))
-                let barWidth = max(1.5, candleSpacing * 0.7)
-                for (li, value) in macdHist.enumerated() {
-                    let x = (CGFloat(li) + 0.5) * candleSpacing
-                    let barHeight = half > 0 ? abs(value) / half * (h / 2) : 0
-                    let color = value >= 0 ? upColor.opacity(0.8) : downColor.opacity(0.8)
-                    // 柱子从 0 轴（中心线）开始，正值向上、负值向下生长，而不是以 0 轴为中心居中
-                    let topY = value >= 0 ? (h / 2 - barHeight) : h / 2
-                    let rect = CGRect(x: x - barWidth / 2, y: topY, width: barWidth, height: max(0.5, barHeight))
-                    ctx.fill(Path(rect), with: .color(color))
-                }
-                strokeLine(ctx, values: dif, color: ma5Color, h: h, lo: rangeMin, hi: rangeMax)
-                strokeLine(ctx, values: dea, color: ma10Color, h: h, lo: rangeMin, hi: rangeMax)
-            case .kdj:
-                drawOscillator(ctx, w: w, h: h, lines: [kdjK, kdjD, kdjJ], colors: [ma5Color, ma10Color, ma20Color])
-            case .rsi:
-                drawOscillator(ctx, w: w, h: h, lines: [rsi6, rsi12, rsi24], colors: [ma5Color, ma10Color, ma20Color])
             }
         }
     }
 
-    private func yPos(_ v: Double, h: CGFloat, lo: Double, hi: Double) -> CGFloat {
-        let range = hi - lo
-        guard range > 0 else { return h }
-        return h * CGFloat(1 - (v - lo) / range)
-    }
-
-    private func strokeLine(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat, lo: Double, hi: Double) {
+    private func drawLine(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat) {
+        if curve.style == .pointdot {
+            var points = Path()
+            for (i, v) in curve.values.enumerated() {
+                guard !v.isNaN else { continue }
+                let x = (CGFloat(i) + 0.5) * candleSpacing
+                let y = yPos(v, h: h)
+                points.addEllipse(in: CGRect(x: x - 1, y: y - 1, width: 2, height: 2))
+            }
+            ctx.fill(points, with: .color(curve.color))
+            return
+        }
         var path = Path()
         var started = false
-        for (i, v) in values.enumerated() {
+        for (i, v) in curve.values.enumerated() {
             guard !v.isNaN else { continue }
             let x = (CGFloat(i) + 0.5) * candleSpacing
-            let y = yPos(v, h: h, lo: lo, hi: hi)
+            let y = yPos(v, h: h)
             if started { path.addLine(to: CGPoint(x: x, y: y)) } else { path.move(to: CGPoint(x: x, y: y)); started = true }
         }
-        ctx.stroke(path, with: .color(color), lineWidth: 1)
+        let strokeStyle: StrokeStyle = curve.style == .dotline ? StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3]) : StrokeStyle(lineWidth: curve.lineWidth)
+        ctx.stroke(path, with: .color(curve.color), style: strokeStyle)
     }
 
-    private func drawOscillator(_ ctx: GraphicsContext, w: CGFloat, h: CGFloat, lines: [[Double]], colors: [Color]) {
-        for ratio: CGFloat in [0, 0.25, 0.5, 0.75, 1] {
-            let y = h * ratio
-            var p = Path()
-            p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
-            ctx.stroke(p, with: .color(gridColor), lineWidth: 0.5)
-        }
-        for ref: Double in [20, 80] {
-            let y = yPos(ref, h: h, lo: rangeMin, hi: rangeMax)
-            var p = Path()
-            p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
-            ctx.stroke(p, with: .color(Color.gray.opacity(0.4)), lineWidth: 0.5)
-        }
-        for (idx, values) in lines.enumerated() {
-            strokeLine(ctx, values: values, color: colors[idx], h: h, lo: rangeMin, hi: rangeMax)
-        }
+    private func yPos(_ v: Double, h: CGFloat) -> CGFloat {
+        let range = rangeMax - rangeMin
+        guard range > 0 else { return h }
+        return h * CGFloat(1 - (v - rangeMin) / range)
     }
 }

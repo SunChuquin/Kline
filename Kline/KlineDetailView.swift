@@ -21,7 +21,7 @@ struct KlineDetailView: View {
     let item: MetaItem
     var onClose: () -> Void
     @State private var selectedPeriod: KlinePeriod = .daily
-    @State private var chartStyle: ChartStyle = .kline
+    @State private var chartStyle: ChartStyle = .bare
     @State private var showSettings = false
     @State private var dailyData: [KlineItem] = []
     @State private var weeklyData: [KlineItem] = []
