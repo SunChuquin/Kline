@@ -6,7 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		D25AA45030236FBC002D45C4 /* tdx.db in Resources */ = {isa = PBXBuildFile; fileRef = D25AA44F30236FBC002D45C4 /* tdx.db */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		D25AA44F30236FBC002D45C4 /* tdx.db */ = {isa = PBXFileReference; lastKnownFileType = file; path = tdx.db; sourceTree = "<group>"; };
 		D2C5C4AC2FE4F6CD00D5918E /* Kline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -32,6 +37,7 @@
 		D2C5C4A32FE4F6CD00D5918E = {
 			isa = PBXGroup;
 			children = (
+				D25AA44F30236FBC002D45C4 /* tdx.db */,
 				D2C5C4AE2FE4F6CD00D5918E /* Kline */,
 				D2C5C4AD2FE4F6CD00D5918E /* Products */,
 			);
@@ -109,6 +115,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D25AA45030236FBC002D45C4 /* tdx.db in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

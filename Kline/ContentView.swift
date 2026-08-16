@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var isTestPresented = false
     @State private var lastHomeTapTime: Date?
     @State private var lastSimulateTapTime: Date?
+    @ObservedObject private var detailRouter = DetailRouter.shared
     private let doubleTapInterval: TimeInterval = 0.3
 
     // 菜单按钮配置 - 参考通达信手机版风格
@@ -24,39 +25,51 @@ struct ContentView: View {
         (icon: "gamecontroller", title: "模拟")
     ]
 
+    private var detailItem: MetaItem? { detailRouter.item }
+
     var body: some View {
         GeometryReader { geometry in
-            VStack(spacing: 0) {
-                // 上半部分：主内容区域，根据选中的菜单切换视图
-                mainContentView
-                    .frame(maxHeight: .infinity)
-
-                // 下半部分：底部导航栏
+            ZStack {
                 VStack(spacing: 0) {
-                    // 顶部分隔线（使用负offset往上挪）
-                    Color(.separator)
-                        .frame(height: 1)
-                        .offset(y: -2)
-                    // 菜单按钮
-                    HStack {
-                        ForEach(0..<menuItems.count, id: \.self) { index in
-                            Button(action: {
-                                handleTabTap(index: index)
-                            }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: menuItems[index].icon)
-                                        .font(.system(size: 20))
-                                    Text(menuItems[index].title)
-                                        .font(.system(size: 16))
+                    // 上半部分：主内容区域，根据选中的菜单切换视图
+                    mainContentView
+                        .frame(maxHeight: .infinity)
+
+                    // 下半部分：底部导航栏
+                    VStack(spacing: 0) {
+                        // 顶部分隔线（使用负offset往上挪）
+                        Color(.separator)
+                            .frame(height: 1)
+                            .offset(y: -2)
+                        // 菜单按钮
+                        HStack {
+                            ForEach(0..<menuItems.count, id: \.self) { index in
+                                Button(action: {
+                                    handleTabTap(index: index)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: menuItems[index].icon)
+                                            .font(.system(size: 20))
+                                        Text(menuItems[index].title)
+                                            .font(.system(size: 16))
+                                    }
+                                    .foregroundColor(selectedTab == index ? .accentColor : Color(.secondaryLabel))
+                                    .frame(maxWidth: .infinity)
                                 }
-                                .foregroundColor(selectedTab == index ? .accentColor : Color(.secondaryLabel))
-                                .frame(maxWidth: .infinity)
                             }
                         }
                     }
+                    .background(Color(.systemBackground))
+                    .padding(.bottom, geometry.safeAreaInsets.bottom)
                 }
-                .background(Color(.systemBackground))
-                .padding(.bottom, geometry.safeAreaInsets.bottom)
+
+                // 全屏 K 线详情（覆盖整个屏幕，含底部栏）
+                if let item = detailItem {
+                    KlineDetailView(item: item) {
+                        DetailRouter.shared.item = nil
+                    }
+                    .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                }
             }
         }
         .overlay(

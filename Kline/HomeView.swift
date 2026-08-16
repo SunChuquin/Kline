@@ -43,8 +43,7 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .background(Color(.systemBackground))
-                .frame(height: 56) // 与底部菜单栏高度一致
-                .padding(.top, -4)
+                .frame(minHeight: 56)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         searchFocused = true
@@ -84,11 +83,9 @@ struct HomeView: View {
                     .padding(.trailing, 16)
                 }
                 .background(Color(.systemBackground))
-                .frame(height: 56) // 与底部菜单栏高度一致
-                .padding(.top, -5)
+                .frame(minHeight: 56)
             }
 
-            // 分隔线
             Divider()
 
             // 主内容区域
