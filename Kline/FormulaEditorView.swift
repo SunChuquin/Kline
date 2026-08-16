@@ -151,6 +151,7 @@ private struct IndicatorEditSheet: View {
     @State private var name: String
     @State private var formula: String
     @State private var color: Color
+    @State private var scope: IndicatorScope = .sub
     @State private var style: TDXLineStyle = .solid
     @State private var thickness: Int = 1
     @State private var testMessage: String?
@@ -168,6 +169,7 @@ private struct IndicatorEditSheet: View {
         _name = State(initialValue: indicator?.name ?? "")
         _formula = State(initialValue: indicator?.formula ?? "")
         _color = State(initialValue: indicator?.color ?? Color(hex: "1E88E5")!)
+        _scope = State(initialValue: indicator?.scope ?? .sub)
     }
 
     var body: some View {
@@ -198,6 +200,22 @@ private struct IndicatorEditSheet: View {
                                 .font(.system(size: 14))
                                 .padding(.horizontal, 10).padding(.vertical, 8)
                                 .background(Color(uiColor: .systemGray6)).cornerRadius(6)
+                        }
+                        field("作用域") {
+                            HStack(spacing: 8) {
+                                ForEach(IndicatorScope.allCases) { s in
+                                    Button {
+                                        scope = s
+                                    } label: {
+                                        Text(s.rawValue)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(scope == s ? .white : .black)
+                                            .padding(.horizontal, 12).padding(.vertical, 6)
+                                            .background(scope == s ? Color.blue : Color(uiColor: .systemGray6))
+                                            .cornerRadius(6)
+                                    }
+                                }
+                            }
                         }
                         field("公式") {
                             TextEditor(text: $formula)
@@ -327,6 +345,7 @@ private struct IndicatorEditSheet: View {
         var ind = indicator ?? CustomIndicator(name: trimmedName, formula: formula)
         ind.name = trimmedName
         ind.formula = formula
+        ind.scope = scope
         ind.colorHex = color.hexString
         onSave(ind)
     }

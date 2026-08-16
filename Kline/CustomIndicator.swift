@@ -10,11 +10,20 @@
 import SwiftUI
 import Combine
 
+/// 公式指标作用域：主图叠加 / 副图
+enum IndicatorScope: String, Codable, CaseIterable, Identifiable {
+    case main = "主图指标"
+    case sub = "副图指标"
+    var id: String { rawValue }
+}
+
 /// 用户自定义的主图叠加指标
 struct CustomIndicator: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var name: String
     var formula: String
+    /// 作用域（主图或副图）
+    var scope: IndicatorScope = .sub
     /// 线条颜色（十六进制字符串，如 "1E88E5"）
     var colorHex: String = "1E88E5"
 
