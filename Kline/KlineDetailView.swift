@@ -23,11 +23,11 @@ struct KlineDetailView: View {
     @State private var selectedPeriod: KlinePeriod = .daily
     @State private var chartStyle: ChartStyle = .bare
     @State private var showSettings = false
-    @State private var dailyData: [KlineItem] = []
-    @State private var weeklyData: [KlineItem] = []
+    @State private var dailySeries: ChartSeries? = nil
+    @State private var weeklySeries: ChartSeries? = nil
     @State private var isLoading = true
 
-    private var currentData: [KlineItem] { selectedPeriod == .daily ? dailyData : weeklyData }
+    private var currentSeries: ChartSeries? { selectedPeriod == .daily ? dailySeries : weeklySeries }
 
     var body: some View {
         GeometryReader { geometry in
@@ -74,10 +74,10 @@ struct KlineDetailView: View {
             Group {
                 if isLoading {
                     loadingView
-                } else if currentData.isEmpty {
+                } else if currentSeries == nil {
                     emptyDataView
-                } else {
-                    chartView(data: currentData)
+                } else if let s = currentSeries {
+                    chartView(series: s)
                 }
             }
         }
@@ -231,8 +231,9 @@ struct KlineDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func chartView(data: [KlineItem]) -> some View {
-        KlineChartView(data: data, chartStyle: $chartStyle)
+    private func chartView(series: ChartSeries) -> some View {
+        KlineChartView(series: series, chartStyle: $chartStyle)
+            .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -262,14 +263,14 @@ struct KlineDetailView: View {
         }
         isLoading = true
 
-        // 在后台串行加载（避免多个线程同时访问同一个 SQLite 连接）
+        // 后台串行加载并预计算指标（全量历史），避免阻塞主线程
         DispatchQueue.global(qos: .userInitiated).async {
-            let daily = databaseManager.fetchDailyData(metaId: item.id, limit: 300)
-            let weekly = databaseManager.fetchWeeklyData(metaId: item.id, limit: 150)
+            let daily = databaseManager.fetchDailyData(metaId: item.id)
+            let weekly = databaseManager.fetchWeeklyData(metaId: item.id)
 
             DispatchQueue.main.async {
-                self.dailyData = daily
-                self.weeklyData = weekly
+                self.dailySeries = daily.isEmpty ? nil : ChartSeries(data: daily)
+                self.weeklySeries = weekly.isEmpty ? nil : ChartSeries(data: weekly)
                 self.isLoading = false
             }
         }

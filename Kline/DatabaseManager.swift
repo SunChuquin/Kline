@@ -96,86 +96,44 @@ class DatabaseManager: ObservableObject {
         }
     }
 
-    func fetchDailyData(metaId: Int, limit: Int = 500) -> [KlineItem] {
+    /// 读取指定标的全量日线数据
+    func fetchDailyData(metaId: Int) -> [KlineItem] {
         dbQueue.sync {
             guard let db = db else { return [] }
-            let query = "SELECT date, open, high, low, close, vol, amo FROM daily WHERE meta_id = ? ORDER BY date DESC LIMIT ?;"
-
-            var statement: OpaquePointer?
-            var results: [KlineItem] = []
-
-            guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-                return results
-            }
-
-            sqlite3_bind_int64(statement, 1, Int64(metaId))
-            sqlite3_bind_int(statement, 2, Int32(limit))
-
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let date = Int(sqlite3_column_int64(statement, 0))
-                let open = sqlite3_column_double(statement, 1)
-                let high = sqlite3_column_double(statement, 2)
-                let low = sqlite3_column_double(statement, 3)
-                let close = sqlite3_column_double(statement, 4)
-                let vol = sqlite3_column_type(statement, 5) == SQLITE_FLOAT ? sqlite3_column_double(statement, 5) : 0
-                let amo = sqlite3_column_type(statement, 6) == SQLITE_FLOAT ? sqlite3_column_double(statement, 6) : 0
-
-                let item = KlineItem(
-                    date: date,
-                    open: open,
-                    high: high,
-                    low: low,
-                    close: close,
-                    volume: vol,
-                    turnover: amo
-                )
-                results.append(item)
-            }
-
-            sqlite3_finalize(statement)
-            return results
+            let query = "SELECT date, open, high, low, close, vol, amo FROM daily WHERE meta_id = ? ORDER BY date DESC;"
+            return runBarsQuery(db: db, query: query, metaId: metaId)
         }
     }
 
-    func fetchWeeklyData(metaId: Int, limit: Int = 200) -> [KlineItem] {
+    /// 读取指定标的全量周线数据
+    func fetchWeeklyData(metaId: Int) -> [KlineItem] {
         dbQueue.sync {
             guard let db = db else { return [] }
-            let query = "SELECT date, open, high, low, close, vol, amo FROM weekly WHERE meta_id = ? ORDER BY date DESC LIMIT ?;"
+            let query = "SELECT date, open, high, low, close, vol, amo FROM weekly WHERE meta_id = ? ORDER BY date DESC;"
+            return runBarsQuery(db: db, query: query, metaId: metaId)
+        }
+    }
 
-            var statement: OpaquePointer?
-            var results: [KlineItem] = []
-
-            guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-                return results
-            }
-
-            sqlite3_bind_int64(statement, 1, Int64(metaId))
-            sqlite3_bind_int(statement, 2, Int32(limit))
-
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let date = Int(sqlite3_column_int64(statement, 0))
-                let open = sqlite3_column_double(statement, 1)
-                let high = sqlite3_column_double(statement, 2)
-                let low = sqlite3_column_double(statement, 3)
-                let close = sqlite3_column_double(statement, 4)
-                let vol = sqlite3_column_type(statement, 5) == SQLITE_FLOAT ? sqlite3_column_double(statement, 5) : 0
-                let amo = sqlite3_column_type(statement, 6) == SQLITE_FLOAT ? sqlite3_column_double(statement, 6) : 0
-
-                let item = KlineItem(
-                    date: date,
-                    open: open,
-                    high: high,
-                    low: low,
-                    close: close,
-                    volume: vol,
-                    turnover: amo
-                )
-                results.append(item)
-            }
-
-            sqlite3_finalize(statement)
+    /// 统一执行 K 线查询并组装结果（需已在 dbQueue 上）
+    private func runBarsQuery(db: OpaquePointer, query: String, metaId: Int) -> [KlineItem] {
+        var statement: OpaquePointer?
+        var results: [KlineItem] = []
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
             return results
         }
+        sqlite3_bind_int64(statement, 1, Int64(metaId))
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let date = Int(sqlite3_column_int64(statement, 0))
+            let open = sqlite3_column_double(statement, 1)
+            let high = sqlite3_column_double(statement, 2)
+            let low = sqlite3_column_double(statement, 3)
+            let close = sqlite3_column_double(statement, 4)
+            let vol = sqlite3_column_type(statement, 5) == SQLITE_FLOAT ? sqlite3_column_double(statement, 5) : 0
+            let amo = sqlite3_column_type(statement, 6) == SQLITE_FLOAT ? sqlite3_column_double(statement, 6) : 0
+            results.append(KlineItem(date: date, open: open, high: high, low: low, close: close, volume: vol, turnover: amo))
+        }
+        sqlite3_finalize(statement)
+        return results
     }
 
     func searchMeta(keyword: String) -> [MetaItem] {
