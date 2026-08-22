@@ -168,6 +168,8 @@ struct TDXParser {
         while !isAtEnd {
             let stmt = try parseStatement()
             stmts.append(stmt)
+            // 容错：忽略语句后多余的孤立逗号（如 VALUE:=SMA(X,M,1),;）
+            while match(.comma) { }
             // 语句之间允许 0 或 1 个分号
             if match(.semicolon) {
                 // 继续
@@ -181,9 +183,10 @@ struct TDXParser {
         if match(.assignOutput) {
             let expr = try parseExpr()
             // 输出线可带样式/颜色等选项：名字:表达式,DOTLINE,COLORRED,LINETHICK2;
+            // 容错：表达式后出现孤立逗号（如 SMA(X,N,1),;）时忽略，避免解析失败
             var options: [String] = []
             while match(.comma) {
-                options.append(try consumeIdentifier("期望样式或颜色选项"))
+                if case .identifier(let s)? = peek() { pos += 1; options.append(s) } else { break }
             }
             return TDXStatement(name: name, output: true, expr: expr, options: options)
         } else if match(.assignAssign) {
@@ -268,11 +271,23 @@ struct TDXParser {
             } else if match(.slash) {
                 let rhs = try parseUnary()
                 lhs = .binary(op: "/", lhs: lhs, rhs: rhs)
+            } else if isImplicitMulStart(peek()) {
+                // 通达信隐式乘法：2HV 等价 2*HV、MA5( 等价 MA5*(、2(C-L) 等价 2*(C-L)
+                let rhs = try parseUnary()
+                lhs = .binary(op: "*", lhs: lhs, rhs: rhs)
             } else {
                 break
             }
         }
         return lhs
+    }
+
+    /// 隐式乘法起始符：标识符、数字、左括号之后紧跟它们视为相乘
+    private func isImplicitMulStart(_ t: TDXToken?) -> Bool {
+        switch t {
+        case .identifier, .number, .lparen: return true
+        default: return false
+        }
     }
 
     private mutating func parseUnary() throws -> TDXExpr {

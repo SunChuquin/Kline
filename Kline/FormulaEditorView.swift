@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// 通达信公式编辑器（全屏 overlay 页面）
 struct FormulaEditorView: View {
@@ -59,7 +60,7 @@ struct FormulaEditorView: View {
                         editing = nil
                     }
                 )
-                .transition(.move(edge: .bottom))
+                .transition(.opacity)
                 .zIndex(10)
             }
         }
@@ -156,10 +157,27 @@ private struct IndicatorEditSheet: View {
     @State private var thickness: Int = 1
     @State private var testMessage: String?
     @State private var testError: Bool = false
+    @State private var showCancelConfirm = false
+    /// 公式输入框控制器：支持向光标处插入 / 全选
+    private let inputController = FormulaInputController()
 
-    private let palette: [String] = [
-        "1E88E5", "E53935", "43A047", "FB8C00", "8E24AA", "00ACC1", "5D4037", "757575"
-    ]
+    /// 名称与公式都非空才允许保存
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && !formula.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// 相对原始指标是否有未保存的修改
+    private var hasChanges: Bool {
+        if let ind = indicator {
+            return name != ind.name
+                || formula != ind.formula
+                || scope != ind.scope
+                || color.hexString != ind.colorHex
+        } else {
+            return !name.trimmingCharacters(in: .whitespaces).isEmpty
+                || !formula.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+    }
 
     init(indicator: CustomIndicator?, data: [KlineItem], onCancel: @escaping () -> Void, onSave: @escaping (CustomIndicator) -> Void) {
         self.indicator = indicator
@@ -174,20 +192,31 @@ private struct IndicatorEditSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部占位，点击关闭
-            Color.black.opacity(0.35)
-                .ignoresSafeArea()
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture { onCancel() }
-
-            VStack(spacing: 0) {
-                HStack {
+                HStack(spacing: 10) {
                     Text(indicator == nil ? "新建指标" : "编辑指标")
                         .font(.system(size: 16, weight: .bold)).foregroundColor(.black)
-                    Spacer()
-                    Button("取消") { onCancel() }
-                        .font(.system(size: 14)).foregroundColor(.gray)
+                    Spacer(minLength: 4)
+                    Button("全选") { inputController.selectAll() }
+                        .font(.system(size: 12)).foregroundColor(.blue)
+                    Button("清空") { formula = "" }
+                        .font(.system(size: 12)).foregroundColor(.blue)
+                    Button("测试公式") { runTest() }
+                        .font(.system(size: 12, weight: .medium)).foregroundColor(.blue)
+                    Button("保存") { save() }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(canSave ? Color.blue : Color.gray)
+                        .cornerRadius(6)
+                        .disabled(!canSave)
+                    Button("取消") {
+                        if hasChanges {
+                            showCancelConfirm = true
+                        } else {
+                            onCancel()
+                        }
+                    }
+                    .font(.system(size: 12)).foregroundColor(.gray)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
 
@@ -195,76 +224,98 @@ private struct IndicatorEditSheet: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        field("名称") {
-                            TextField("例如：双均线", text: $name)
-                                .font(.system(size: 14))
-                                .padding(.horizontal, 10).padding(.vertical, 8)
-                                .background(Color(uiColor: .systemGray6)).cornerRadius(6)
-                        }
-                        field("作用域") {
-                            HStack(spacing: 8) {
-                                ForEach(IndicatorScope.allCases) { s in
-                                    Button {
-                                        scope = s
-                                    } label: {
-                                        Text(s.rawValue)
-                                            .font(.system(size: 12))
-                                            .foregroundColor(scope == s ? .white : .black)
-                                            .padding(.horizontal, 12).padding(.vertical, 6)
-                                            .background(scope == s ? Color.blue : Color(uiColor: .systemGray6))
-                                            .cornerRadius(6)
+                        // 名称 + 作用域 合在一行
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("名称").font(.system(size: 13, weight: .medium)).foregroundColor(.black)
+                                TextField("例如：双均线", text: $name)
+                                    .font(.system(size: 14))
+                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .background(Color(uiColor: .systemGray6)).cornerRadius(6)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("作用域").font(.system(size: 13, weight: .medium)).foregroundColor(.black)
+                                HStack(spacing: 8) {
+                                    ForEach(IndicatorScope.allCases) { s in
+                                        Button {
+                                            scope = s
+                                        } label: {
+                                            Text(s.rawValue)
+                                                .font(.system(size: 12))
+                                                .foregroundColor(scope == s ? .white : .black)
+                                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                                .background(scope == s ? Color.blue : Color(uiColor: .systemGray6))
+                                                .cornerRadius(6)
+                                        }
                                     }
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         field("公式") {
-                            TextEditor(text: $formula)
-                                .font(.system(size: 13, design: .monospaced))
-                                .frame(minHeight: 120)
-                                .padding(8)
-                                .background(Color(uiColor: .systemGray6)).cornerRadius(6)
+                            FormulaTextView(text: Binding(
+                                get: { formula },
+                                set: { formula = $0 }
+                            ), controller: inputController)
+                            .frame(minHeight: 180)
+                            .padding(8)
+                            .background(Color(uiColor: .systemGray6)).cornerRadius(6)
                             Text("支持：MA/EMA/SMA/REF/HHV/LLV/ABS/MAX/MIN/SUM/STD/COUNT/IF/CROSS/BARSLAST/AND/OR/NOT，数据 C/H/L/O/V/AMOUNT，运算符 + - * / < > <= >= == != ")
                                 .font(.system(size: 10)).foregroundColor(.gray)
                         }
+                        field("常用符号") {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 6)], alignment: .leading, spacing: 6) {
+                                symbolChip(":=")
+                                symbolChip(";")
+                                symbolChip(",")
+                                symbolChip("：")
+                                symbolChip("（")
+                                symbolChip("）")
+                                symbolChip("{")
+                                symbolChip("}")
+                                symbolChip("=")
+                                symbolChip("+")
+                                symbolChip("-")
+                                symbolChip("!")
+                                symbolChip("*")
+                                symbolChip("/")
+                                symbolChip("<")
+                                symbolChip(">")
+                                symbolChip("AND")
+                                symbolChip("OR")
+                            }
+                        }
                         field("输出线条样式（通达信选项）") {
-                            // 线条类型
+                            // 线条类型：全宽单行，避免"不绘制"换行
                             HStack(spacing: 8) {
+                                Text("样式").font(.system(size: 11)).foregroundColor(.gray)
                                 styleChip("实线", opt: "", selected: style == .solid) { style = .solid }
                                 styleChip("虚线", opt: ",DOTLINE", selected: style == .dotline) { appendOption(",DOTLINE"); style = .dotline }
                                 styleChip("圆点", opt: ",POINTDOT", selected: style == .pointdot) { appendOption(",POINTDOT"); style = .pointdot }
                                 styleChip("柱状", opt: ",STICK", selected: style == .stick) { appendOption(",STICK"); style = .stick }
                                 styleChip("不绘制", opt: ",NODRAW", selected: style == .nodraw) { appendOption(",NODRAW"); style = .nodraw }
+                                Spacer(minLength: 0)
                             }
-                            // 线条粗细
+                            // 线条粗细：全宽单行
                             HStack(spacing: 8) {
+                                Text("粗细").font(.system(size: 11)).foregroundColor(.gray)
                                 ForEach([1, 2, 3, 4], id: \.self) { t in
                                     styleChip("×\(t)", opt: t == 1 ? "" : ",LINETHICK\(t)", selected: thickness == t) {
                                         if t != 1 { appendOption(",LINETHICK\(t)") }
                                         thickness = t
                                     }
                                 }
+                                Spacer(minLength: 0)
                             }
-                            // 颜色
-                            HStack(spacing: 8) {
+                            // 颜色（只显示色块，9 列排成两行）
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 9), alignment: .leading, spacing: 6) {
                                 ForEach(TDXFormulaColor.palette, id: \.1) { item in
                                     colorChip(name: item.0, hex: item.1, option: ",COLOR\(itemOption(for: item.0))")
                                 }
                             }
-                            Text("点击样式/粗细/颜色会将该选项追加到公式末尾，例如：MA5:MA(C,5),COLORRED,LINETHICK2;")
+                            Text("点击样式/粗细/颜色会在光标处插入对应关键字，例如插入 DOTLINE / LINETHICK2 / COLORRED")
                                 .font(.system(size: 10)).foregroundColor(.gray)
-                        }
-                        field("指标默认颜色") {
-                            HStack(spacing: 10) {
-                                ForEach(palette, id: \.self) { hex in
-                                    Circle()
-                                        .fill(Color(hex: hex)!)
-                                        .frame(width: 26, height: 26)
-                                        .overlay(
-                                            Circle().stroke(Color.black.opacity(color == Color(hex: hex) ? 0.6 : 0.1), lineWidth: 2)
-                                        )
-                                        .onTapGesture { color = Color(hex: hex)! }
-                                }
-                            }
                         }
                         if let message = testMessage {
                             Text(message)
@@ -274,41 +325,19 @@ private struct IndicatorEditSheet: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background((testError ? Color.red : Color.green).opacity(0.1)).cornerRadius(6)
                         }
-                        Button {
-                            runTest()
-                        } label: {
-                            Text("测试公式")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.blue)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(Color.blue.opacity(0.08)).cornerRadius(8)
-                        }
-                        Button {
-                            save()
-                        } label: {
-                            Text("保存")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(name.trimmingCharacters(in: .whitespaces).isEmpty || formula.trimmingCharacters(in: .whitespaces).isEmpty ? Color.gray : Color.blue)
-                                .cornerRadius(8)
-                        }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || formula.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                     .padding(16)
                 }
 
                 // 底部安全区
                 Color.clear.frame(height: 8)
-            }
-            .frame(maxWidth: .infinity, alignment: .top)
-            .frame(height: UIScreen.main.bounds.height * 0.85)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.white)
+        .alert("存在修改未保存，是否取消修改？", isPresented: $showCancelConfirm) {
+            Button("继续编辑", role: .cancel) { }
+            Button("取消修改", role: .destructive) { onCancel() }
+        }
     }
 
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {
@@ -351,10 +380,10 @@ private struct IndicatorEditSheet: View {
     }
 
     private func appendOption(_ opt: String) {
-        if !formula.trimmingCharacters(in: .whitespaces).hasSuffix(";") {
-            formula += ";"
-        }
-        formula += opt
+        // 只插入关键字（去掉前导逗号），插入到公式编辑器中光标所在位置
+        let keyword = opt.trimmingCharacters(in: CharacterSet(charactersIn: ","))
+        guard !keyword.isEmpty else { return }
+        inputController.insert(keyword)
     }
 
     /// 中文颜色名 → 通达信 COLORXXX 选项名（与 IndicatorStyle 的 palette 对应）
@@ -374,8 +403,10 @@ private struct IndicatorEditSheet: View {
         } label: {
             Text(text)
                 .font(.system(size: 11))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundColor(selected ? .white : .black)
-                .padding(.horizontal, 10).padding(.vertical, 6)
+                .padding(.horizontal, 8).padding(.vertical, 6)
                 .background(selected ? Color.blue : Color(uiColor: .systemGray6))
                 .cornerRadius(6)
         }
@@ -385,12 +416,106 @@ private struct IndicatorEditSheet: View {
         Button {
             appendOption(option)
         } label: {
-            HStack(spacing: 3) {
-                Circle().fill(Color(hex: hex)!).frame(width: 8, height: 8)
-                Text(name).font(.system(size: 11)).foregroundColor(.black)
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(hex: hex)!)
+                .frame(height: 24)
+                .frame(maxWidth: .infinity)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                )
+        }
+    }
+
+    /// 常用符号快捷输入：点击即插入到公式光标处
+    private func symbolChip(_ s: String) -> some View {
+        Button {
+            inputController.insert(s)
+        } label: {
+            Text(s)
+                .font(.system(size: 12, design: .monospaced))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundColor(.black)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(Color(uiColor: .systemGray6)).cornerRadius(6)
+        }
+    }
+}
+
+// MARK: - 公式输入框（UITextView 封装）
+
+/// 公式输入框控制器：向光标处插入内容 / 全选公式
+final class FormulaInputController {
+    weak var textView: UITextView?
+
+    /// 在公式光标处插入文本（会自动触发绑定同步）
+    func insert(_ s: String) {
+        guard let tv = textView else { return }
+        let range = tv.selectedRange
+        FormulaTextView.replace(range: range, with: s, in: tv)
+    }
+
+    /// 全选公式内容
+    func selectAll() {
+        guard let tv = textView else { return }
+        tv.becomeFirstResponder()
+        tv.selectAll(nil)
+    }
+}
+
+/// 公式输入框：UITextView 封装，输入自动转大写，且支持在光标处插入、全选
+struct FormulaTextView: UIViewRepresentable {
+    @Binding var text: String
+    let controller: FormulaInputController
+
+    /// 把 NSRange 替换转换为 UITextView 的 UITextRange 替换
+    static func replace(range: NSRange, with replacement: String, in tv: UITextView) {
+        guard let start = tv.position(from: tv.beginningOfDocument, offset: range.location),
+              let end = tv.position(from: start, offset: range.length),
+              let r = tv.textRange(from: start, to: end) else { return }
+        tv.replace(r, withText: replacement)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        tv.backgroundColor = .clear
+        tv.autocapitalizationType = .allCharacters
+        tv.autocorrectionType = .no
+        tv.spellCheckingType = .no
+        tv.delegate = context.coordinator
+        controller.textView = tv
+        tv.text = text
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        // 仅当外部状态与输入框不一致时才写回，避免打断光标
+        if uiView.text != text {
+            uiView.text = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: FormulaTextView
+
+        init(_ p: FormulaTextView) { parent = p }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text.uppercased()
+        }
+
+        /// 输入时把小写字母就地转大写，保持光标不跳动
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            let up = text.uppercased()
+            if up != text {
+                FormulaTextView.replace(range: range, with: up, in: textView)
+                return false
             }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(Color(uiColor: .systemGray6)).cornerRadius(6)
+            return true
         }
     }
 }

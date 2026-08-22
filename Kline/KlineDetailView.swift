@@ -21,8 +21,10 @@ struct KlineDetailView: View {
     let item: MetaItem
     var onClose: () -> Void
     @State private var selectedPeriod: KlinePeriod = .daily
-    @State private var chartStyle: ChartStyle = .bare
     @State private var showSettings = false
+    /// 自定义指标公式编辑器是否打开（由 K 线图内部触发，此处负责隐藏顶部栏实现真全屏）
+    @State private var showCustomEditor = false
+    @ObservedObject private var config = ChartConfigStore.shared
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
     @State private var isLoading = true
@@ -32,12 +34,14 @@ struct KlineDetailView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                // 顶部安全区留白，保证返回按钮始终在可视区域
-                Color.clear
-                    .frame(height: geometry.safeAreaInsets.top)
+                // 自定义指标公式编辑器（真全屏）打开时隐藏顶部栏
+                if !showCustomEditor {
+                    // 顶部留白压缩为小固定值，减少状态栏区域的空白
+                    Color.clear
+                        .frame(height: 2)
 
-                headerView
-                periodSelector
+                    topBar
+                }
 
                 // 图表区域：始终占满剩余空间，内部显示加载/空/图表
                 chartArea
@@ -65,6 +69,92 @@ struct KlineDetailView: View {
                 loadData()
             }
         }
+    }
+
+    /// 顶部单行：返回 + 名称/代码/类型 + 周期切换 + K线设置
+    private var topBar: some View {
+        HStack(spacing: 6) {
+            // 返回
+            Button(action: {
+                onClose()
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                    .frame(width: 30, height: 30)
+                    .background(Color.gray.opacity(0.12))
+                    .cornerRadius(6)
+            }
+
+            // 名称 / 代码 / 类型
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Text(item.name)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                    Text(item.displayCode)
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                }
+                Text(item.type)
+                    .font(.system(size: 8))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+            // 行情周期切换
+            HStack(spacing: 2) {
+                ForEach(KlinePeriod.allCases) { period in
+                    Button(action: {
+                        withAnimation { selectedPeriod = period }
+                    }) {
+                        Text(period.rawValue)
+                            .font(.system(size: 12))
+                            .foregroundColor(selectedPeriod == period ? .white : .gray)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(selectedPeriod == period ? Color.gray.opacity(0.75) : Color.gray.opacity(0.12))
+                            .cornerRadius(6)
+                    }
+                }
+            }
+
+            // 裸K 开关（默认关闭，开启后只显示K线、隐藏主图指标）
+            Button(action: {
+                config.showBareK.toggle()
+            }) {
+                Text("裸K")
+                    .font(.system(size: 12))
+                    .foregroundColor(config.showBareK ? .white : .gray)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(config.showBareK ? Color.gray.opacity(0.75) : Color.gray.opacity(0.12))
+                    .cornerRadius(6)
+            }
+
+            // K线设置
+            Button(action: {
+                withAnimation { showSettings = true }
+            }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 15))
+                    .foregroundColor(.gray)
+                    .frame(width: 32, height: 30)
+                    .contentShape(Rectangle())
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 8)
+        .padding(.vertical, 4)
+        .background(Color.white)
+        .overlay(
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(height: 0.5),
+            alignment: .bottom
+        )
     }
 
     private var chartArea: some View {
@@ -96,82 +186,6 @@ struct KlineDetailView: View {
         .background(Color.white)
     }
 
-    private var headerView: some View {
-        HStack {
-            Button(action: {
-                onClose()
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text("返回")
-                        .font(.system(size: 15, weight: .medium))
-                }
-                .foregroundColor(.black)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12))
-                .cornerRadius(8)
-            }
-            .padding(.leading, 16)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(item.name)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.black)
-                    Text(item.displayCode)
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                }
-                Text(item.type)
-                    .font(.system(size: 10))
-                    .foregroundColor(.gray)
-            }
-
-            Spacer()
-        }
-        .padding(.vertical, 8)
-        .background(Color.white)
-    }
-
-    private var periodSelector: some View {
-        HStack(spacing: 0) {
-            ForEach(KlinePeriod.allCases) { period in
-                Button(action: {
-                    withAnimation {
-                        selectedPeriod = period
-                    }
-                }) {
-                    Text(period.rawValue)
-                        .font(.system(size: 13))
-                        .foregroundColor(selectedPeriod == period ? .black : .gray)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(selectedPeriod == period ? Color.gray.opacity(0.15) : Color.clear)
-                }
-            }
-
-            // 设置按钮：打开 K 线类型配置面板
-            Button {
-                withAnimation { showSettings = true }
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15))
-                    .foregroundColor(.gray)
-                    .frame(width: 44, height: 36)
-                    .contentShape(Rectangle())
-            }
-        }
-        .background(Color.white)
-        .overlay(
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(height: 0.5),
-            alignment: .bottom
-        )
-    }
-
     /// 设置面板：底部 3/4 高度，点击顶部 1/4 区域关闭
     private func settingsOverlay(geometry: GeometryProxy) -> some View {
         ZStack(alignment: .bottom) {
@@ -187,7 +201,7 @@ struct KlineDetailView: View {
             // 底部设置面板
             VStack(spacing: 0) {
                 HStack {
-                    Text("K线类型")
+                    Text("K线设置")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.black)
                     Spacer()
@@ -197,31 +211,74 @@ struct KlineDetailView: View {
 
                 Divider()
 
-                VStack(spacing: 0) {
-                    ForEach(ChartStyle.allCases) { style in
-                        Button {
-                            withAnimation { chartStyle = style }
-                        } label: {
-                            HStack {
-                                Text(style.rawValue)
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.black)
-                                Spacer()
-                                if chartStyle == style {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.blue)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // 1. K线类型（下拉选项，压缩占位）
+                        settingsSectionTitle("K线类型")
+                        Menu {
+                            ForEach(ChartStyle.allCases) { style in
+                                Button {
+                                    withAnimation { config.chartStyle = style }
+                                } label: {
+                                    if config.chartStyle == style {
+                                        Label(style.rawValue, systemImage: "checkmark")
+                                    } else {
+                                        Text(style.rawValue)
+                                    }
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .contentShape(Rectangle())
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(config.chartStyle.rawValue)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.black)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.gray.opacity(0.12))
+                            .cornerRadius(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        Divider()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+
+                        // 2. 区间统计
+                        settingsSectionTitle("区间统计")
+                        toggleRow(title: "显示区间统计", isOn: $config.displaySettings.showRangeStats) {
+                            Text("在图表右上角显示可见区间的涨跌幅、高低、量额统计")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                        }
+
+                        // 3. 图层显示
+                        settingsSectionTitle("图层显示")
+                        toggleRow(title: "跳空缺口", isOn: $config.displaySettings.showGap) {
+                            Text("在 K 线之间标出跳空缺口区域")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                        }
+                        toggleRow(title: "缺口回补后消失", isOn: $config.displaySettings.gapDisappearAfterFill) {
+                            Text("开启时缺口被回补后整体隐藏；关闭时仅截止到回补位置、保留形成到截止区域")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                        }
+                        toggleRow(title: "最新价线", isOn: $config.displaySettings.showLatestPriceLine) {
+                            Text("在最新收盘价位置绘制虚线")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                        }
+                        toggleRow(title: "指标不挤压K线", isOn: $config.displaySettings.indicatorNotSqueezeKline) {
+                            Text("开启时主图价格范围仅按K线计算，指标线超出部分被裁剪；关闭后指标线会撑大价格范围")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
             }
             .frame(maxWidth: .infinity, alignment: .top)
             .frame(height: geometry.size.height * 0.75)
@@ -231,8 +288,37 @@ struct KlineDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func settingsSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.gray)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+    }
+
+    private func toggleRow(title: String, isOn: Binding<Bool>, @ViewBuilder subtitle: () -> some View) -> some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: isOn.animation()) {
+                    Text(title)
+                        .font(.system(size: 15))
+                        .foregroundColor(.black)
+                }
+                .tint(.blue)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                subtitle()
+                    .padding(.horizontal, 16)
+            }
+            .padding(.vertical, 2)
+            Divider().padding(.leading, 16)
+        }
+    }
+
     private func chartView(series: ChartSeries) -> some View {
-        KlineChartView(series: series, chartStyle: $chartStyle)
+        KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
+                       showCustomEditor: $showCustomEditor)
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -111,3 +111,17 @@ enum KlinePeriod: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 }
+
+/// 图表图层显示设置（由设置面板控制，绑定传入 K 线图）
+struct ChartDisplaySettings: Equatable {
+    /// 区间统计：在图表中显示可见区间统计面板
+    var showRangeStats = false
+    /// 图层显示：跳空缺口
+    var showGap = false
+    /// 图层显示：最新价线
+    var showLatestPriceLine = true
+    /// 图层显示：指标线不挤压K线（主图价格范围仅按K线计算，指标线不参与范围）
+    var indicatorNotSqueezeKline = true
+    /// 图层显示：缺口回补后消失（开启时缺口回补截止后整个隐藏；关闭时仅截止、保留形成到截止区域）
+    var gapDisappearAfterFill = false
+}
