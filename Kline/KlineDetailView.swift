@@ -13,12 +13,34 @@ import UIKit
 final class DetailRouter: ObservableObject {
     static let shared = DetailRouter()
     @Published var item: MetaItem? = nil
+    /// 打开详情时的候选标的列表与当前位置（用于第二副图左右滑动切换标的）
+    @Published var navItems: [MetaItem] = []
+    @Published var navIndex: Int = 0
+
+    /// 从列表打开：记录候选列表与当前位置，便于第二副图左右滑动切换标的
+    func open(_ item: MetaItem, in list: [MetaItem]) {
+        navItems = list
+        navIndex = list.firstIndex(where: { $0.id == item.id }) ?? 0
+        self.item = item
+    }
+
+    /// 切换标的：dir = -1 上一个 / +1 下一个；越界返回 nil（不切换）
+    func neighbor(_ dir: Int) -> MetaItem? {
+        let i = navIndex + dir
+        guard i >= 0, i < navItems.count else { return nil }
+        navIndex = i
+        let next = navItems[i]
+        item = next
+        return next
+    }
 }
 
 struct KlineDetailView: View {
     @ObservedObject private var databaseManager = DatabaseManager.shared
+    @ObservedObject private var detailRouter = DetailRouter.shared
 
-    let item: MetaItem
+    /// 当前展示的标的（第二副图左右滑动时可在候选列表中切换）
+    @State private var item: MetaItem
     var onClose: () -> Void
     @State private var selectedPeriod: KlinePeriod = .daily
     @State private var showSettings = false
@@ -28,6 +50,11 @@ struct KlineDetailView: View {
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
     @State private var isLoading = true
+
+    init(item: MetaItem, onClose: @escaping () -> Void) {
+        self._item = State(initialValue: item)
+        self.onClose = onClose
+    }
 
     private var currentSeries: ChartSeries? { selectedPeriod == .daily ? dailySeries : weeklySeries }
 
@@ -103,36 +130,6 @@ struct KlineDetailView: View {
                     .lineLimit(1)
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
-            // 行情周期切换
-            HStack(spacing: 2) {
-                ForEach(KlinePeriod.allCases) { period in
-                    Button(action: {
-                        withAnimation { selectedPeriod = period }
-                    }) {
-                        Text(period.rawValue)
-                            .font(.system(size: 12))
-                            .foregroundColor(selectedPeriod == period ? .white : .gray)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(selectedPeriod == period ? Color.gray.opacity(0.75) : Color.gray.opacity(0.12))
-                            .cornerRadius(6)
-                    }
-                }
-            }
-
-            // 裸K 开关（默认关闭，开启后只显示K线、隐藏主图指标）
-            Button(action: {
-                config.showBareK.toggle()
-            }) {
-                Text("裸K")
-                    .font(.system(size: 12))
-                    .foregroundColor(config.showBareK ? .white : .gray)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(config.showBareK ? Color.gray.opacity(0.75) : Color.gray.opacity(0.12))
-                    .cornerRadius(6)
-            }
 
             // K线设置
             Button(action: {
@@ -213,6 +210,38 @@ struct KlineDetailView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        // 0. 行情周期（日线/周线）
+                        settingsSectionTitle("行情周期")
+                        Menu {
+                            ForEach(KlinePeriod.allCases) { period in
+                                Button {
+                                    withAnimation { selectedPeriod = period }
+                                } label: {
+                                    if selectedPeriod == period {
+                                        Label(period.rawValue, systemImage: "checkmark")
+                                    } else {
+                                        Text(period.rawValue)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(selectedPeriod.rawValue)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.black)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.gray.opacity(0.12))
+                            .cornerRadius(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+
                         // 1. K线类型（下拉选项，压缩占位）
                         settingsSectionTitle("K线类型")
                         Menu {
@@ -275,6 +304,11 @@ struct KlineDetailView: View {
                                 .font(.system(size: 11))
                                 .foregroundColor(.gray)
                         }
+                        toggleRow(title: "裸K", isOn: $config.showBareK) {
+                            Text("开启后只显示K线、隐藏主图指标")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
 
@@ -318,7 +352,17 @@ struct KlineDetailView: View {
 
     private func chartView(series: ChartSeries) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
-                       showCustomEditor: $showCustomEditor)
+                       showCustomEditor: $showCustomEditor, period: selectedPeriod,
+                       onPeriodSwitch: { newPeriod in
+                           withAnimation { selectedPeriod = newPeriod }
+                       },
+                       onSwitchItem: { dir in
+                           // 第二副图左右滑动切换标的：dir = -1 上一个 / +1 下一个
+                           if let next = detailRouter.neighbor(dir) {
+                               item = next
+                               loadData()
+                           }
+                       })
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

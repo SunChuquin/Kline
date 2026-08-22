@@ -87,7 +87,7 @@ struct MarketView: View {
                         .onTapGesture {
                             // 进入详情前先收起键盘，避免键盘残留到新页面
                             isSearchFocused = false
-                            DetailRouter.shared.item = item
+                            DetailRouter.shared.open(item, in: filteredItems)
                         }
 
                     Divider()

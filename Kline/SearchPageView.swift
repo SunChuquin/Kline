@@ -95,7 +95,7 @@ struct SearchPageView: View {
                 } else {
                     ForEach(searchResults) { item in
                         Button(action: {
-                            DetailRouter.shared.item = item
+                            DetailRouter.shared.open(item, in: searchResults)
                         }) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {

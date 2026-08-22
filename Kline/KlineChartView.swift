@@ -121,8 +121,6 @@ final class ChartConfigStore: ObservableObject {
     @Published var showBareK = false
     @Published var showCMK = false
     @Published var showSAR = false
-    @Published var showXS = false
-    @Published var showXS2 = false
     // K线类型与图层显示（设置面板）
     @Published var chartStyle: ChartStyle = .bare
     @Published var displaySettings = ChartDisplaySettings()
@@ -130,9 +128,6 @@ final class ChartConfigStore: ObservableObject {
     @Published var cmkN = 10
     @Published var sarStep: Double = 0.02
     @Published var sarMax: Double = 0.2
-    @Published var xsN = 5
-    @Published var xs2N = 3
-    @Published var xs2M = 5
     @Published var maConfig = MAConfig()
     @Published var emaConfig = EMAConfig()
     @Published var bollConfig = BOLLConfig()
@@ -312,6 +307,12 @@ struct GapInfo: Equatable {
 /// 行情 K 线图。
 struct KlineChartView: View {
     private let series: ChartSeries
+    /// 当前行情周期（用于主图指标名称按钮显示 "日线: MA" 之类前缀）
+    let period: KlinePeriod
+    /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
+    let onPeriodSwitch: ((KlinePeriod) -> Void)?
+    /// 第二副图左右滑动切换标的（dir = -1 上一个 / +1 下一个）
+    let onSwitchItem: ((Int) -> Void)?
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
 
@@ -323,6 +324,10 @@ struct KlineChartView: View {
     @State private var visibleCount: CGFloat = 100
     @State private var endOffset: Int = 0
     @State private var zoomBase: CGFloat = 100
+    // 缩放锚点：以双指位置对应的K线为基线缩放（而非屏幕最右端）
+    @State private var zoomAnchorIndex: Int? = nil
+    @State private var zoomAnchorOffset: CGFloat = 0
+    @State private var lastTouchX: CGFloat = 0
     @State private var lastPanWidth: CGFloat = 0
     @State private var lastPanHeight: CGFloat = 0
     @State private var dragMode: DragMode = .none
@@ -358,8 +363,14 @@ struct KlineChartView: View {
 
     init(series: ChartSeries, chartStyle: Binding<ChartStyle>,
          displaySettings: Binding<ChartDisplaySettings> = .constant(ChartDisplaySettings()),
-         showCustomEditor: Binding<Bool> = .constant(false)) {
+         showCustomEditor: Binding<Bool> = .constant(false),
+         period: KlinePeriod = .daily,
+         onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
+         onSwitchItem: ((Int) -> Void)? = nil) {
         self.series = series
+        self.period = period
+        self.onPeriodSwitch = onPeriodSwitch
+        self.onSwitchItem = onSwitchItem
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -508,20 +519,6 @@ struct KlineChartView: View {
                 let r = ChartSeries.sar(highs: highs, lows: lows, step: config.sarStep, maxStep: config.sarMax)
                 curves.append(IndicatorLine(name: "SAR", values: r.values, color: upColor, style: .pointdot, lineWidth: 1,
                                             hideValue: false, markerColors: r.isUp.map { $0 ? upColor : downColor }))
-            }
-            if config.showXS {
-                let r = ChartSeries.xs(closes: closes, volumes: volumes, n: config.xsN)
-                curves.append(IndicatorLine(name: "SUP", values: r.sup, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "SDN", values: r.sdn, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "LUP", values: r.lup, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "LDN", values: r.ldn, color: Color(red: 0.9, green: 0.6, blue: 0), style: .solid, lineWidth: 1, hideValue: false))
-            }
-            if config.showXS2 {
-                let r = ChartSeries.xs2(closes: closes, highs: highs, lows: lows, n: config.xs2N, m: config.xs2M)
-                curves.append(IndicatorLine(name: "通道1", values: r.c1, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "通道2", values: r.c2, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "通道3", values: r.c3, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "通道4", values: r.c4, color: Color(red: 0.9, green: 0.6, blue: 0), style: .solid, lineWidth: 1, hideValue: false))
             }
             if let custom = activeCustomIndicator,
                let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: sortedData) {
@@ -764,6 +761,8 @@ struct KlineChartView: View {
             .onChanged { value in
                 guard !menuIsOpen else { return }
                 isDragging = true
+                // 记录最近触摸位置，作为双指缩放时的锚点（双指质心）
+                lastTouchX = value.location.x
                 let y = value.location.y
                 let inMain = isInPanel(y, mainTop, mainBottom)
                 // 区间统计边界拖动：命中边界线附近（或已处于边界拖动中）且在主图区域时，优先调整统计区间
@@ -823,6 +822,21 @@ struct KlineChartView: View {
                     refreshCurves()
                 }
                 guard !menuIsOpen else { cursorDragging = false; return }
+                // 副图横向滑动：第一副图切换周期，第二副图切换标的（明显横向滑动时优先，忽略纵向）
+                let startY = value.startLocation.y
+                let inS1Start = isInPanel(startY, s1Top, s1Bottom)
+                let inS2Start = isInPanel(startY, s2Top, s2Bottom)
+                let w = value.translation.width
+                let isHSwipe = abs(w) > 30 && abs(w) > abs(value.translation.height) * 1.5
+                if isHSwipe && (inS1Start || inS2Start) {
+                    selectedIndex = nil; crosshairY = nil
+                    if inS1Start {
+                        switchPeriod(direction: w > 0 ? -1 : 1)
+                    } else {
+                        onSwitchItem?(w > 0 ? -1 : 1)
+                    }
+                    return
+                }
                 if cursorDragging { cursorDragging = false; return }
                 let y = value.location.y
                 let inPanel = isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom)
@@ -839,13 +853,47 @@ struct KlineChartView: View {
             }
     }
 
-    private var magnificationGesture: some Gesture {
+    /// 第一副图横向滑动切换周期：direction = 1 更大级别（右滑）/ -1 更小级别（左滑）；无对应周期时忽略
+    private func switchPeriod(direction: Int) {
+        guard let onPeriodSwitch else { return }
+        let cases = KlinePeriod.allCases
+        guard let cur = cases.firstIndex(of: period) else { return }
+        let target = cur + direction
+        guard target >= 0, target < cases.count else { return }
+        onPeriodSwitch(cases[target])
+    }
+
+    /// 双指缩放：以双指位置（lastTouchX 质心）对应的K线为基线，保持该K线的屏幕位置不变
+    private func magnificationGesture(width: CGFloat) -> some Gesture {
         MagnificationGesture()
             .onChanged { value in
                 selectedIndex = nil; crosshairY = nil
-                visibleCount = clamp(zoomBase / value, 20, CGFloat(maxVisibleCount))
+                let newCountF = clamp(zoomBase / value, 20, CGFloat(maxVisibleCount))
+                let newCount = max(1, Int(newCountF.rounded()))
+                // 缩放开始：以最近触摸位置（双指质心）确定锚点K线
+                if zoomAnchorIndex == nil {
+                    let spacing = width / CGFloat(max(1, count))
+                    let anchor = startIndex + Int((lastTouchX / spacing).rounded(.down))
+                    zoomAnchorIndex = clamp(anchor, 0, max(0, sortedData.count - 1))
+                    zoomAnchorOffset = (CGFloat(zoomAnchorIndex! - startIndex) + 0.5) * spacing
+                }
+                visibleCount = newCountF
+                // 保持锚点K线屏幕位置不变：反推新的可见窗口起点
+                if let anchor = zoomAnchorIndex {
+                    let spacing1 = width / CGFloat(newCount)
+                    let newStartF = CGFloat(anchor) - zoomAnchorOffset / spacing1 + 0.5
+                    let newStart = Int(newStartF.rounded())
+                    let newEnd = newStart + newCount - 1
+                    let maxEnd = sortedData.count - 1
+                    let minEnd = max(0, newCount - 1)
+                    let clampedEnd = min(maxEnd, max(minEnd, newEnd))
+                    endOffset = maxEnd - clampedEnd
+                }
             }
-            .onEnded { _ in zoomBase = visibleCount }
+            .onEnded { _ in
+                zoomBase = visibleCount
+                zoomAnchorIndex = nil
+            }
     }
 
     // MARK: - Body
@@ -883,7 +931,7 @@ struct KlineChartView: View {
             .contentShape(Rectangle())
             .gesture(chartDragGesture(candleSpacing: candleSpacing, mainTop: mainTop, mainBottom: mainBottom,
                                       s1Top: s1Top, s1Bottom: s1Bottom, s2Top: s2Top, s2Bottom: s2Bottom))
-            .simultaneousGesture(magnificationGesture)
+            .simultaneousGesture(magnificationGesture(width: width))
             .overlay {
                 if let crosshairY, isInPanel(crosshairY, mainTop, mainBottom) || isInPanel(crosshairY, s1Top, s1Bottom) || isInPanel(crosshairY, s2Top, s2Bottom) {
                     let y = min(max(crosshairY, 0), geometry.size.height)
@@ -891,7 +939,28 @@ struct KlineChartView: View {
                                                        mainHeight: mainHeight, s1Top: s1Top, s1Bottom: s1Bottom,
                                                        s1Height: sub1Height, s2Top: s2Top, s2Bottom: s2Bottom,
                                                        s2Height: sub2Height)
-                    crosshairLineOverlay(width: width, height: geometry.size.height, y: y, valueText: valueText)
+                    ZStack(alignment: .topLeading) {
+                        crosshairLineOverlay(width: width, height: geometry.size.height, y: y, valueText: valueText)
+                        // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅
+                        if let idx = selectedIndex, isInPanel(crosshairY, mainTop, mainBottom),
+                           idx >= startIndex, idx <= endIndex, endIndex >= 0, endIndex < sortedData.count {
+                            let cursorItem = sortedData[idx]
+                            let screenLast = sortedData[endIndex]
+                            if cursorItem.close > 0, screenLast.close > 0 {
+                                let pct = (screenLast.close - cursorItem.close) / cursorItem.close * 100
+                                // 周期数：光标K线 → 当前屏幕最后一根K线
+                                let periodCount = max(0, endIndex - idx)
+                                // 使用整宽右对齐容器，让标签右边缘精确贴合屏幕最右侧
+                                Text(String(format: "%+.2f%%  %d", pct, periodCount))
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 4)
+                                    .background(pct >= 0 ? upColor : downColor)
+                                    .frame(width: width, alignment: .trailing)
+                                    .position(x: width / 2, y: y)
+                            }
+                        }
+                    }
                 }
             }
             .overlay {
@@ -1028,8 +1097,34 @@ struct KlineChartView: View {
             if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
                 let item = sortedData[selectedIndex]
                 let xPosition = (CGFloat(selectedIndex - startIndex) + 0.5) * candleSpacing
-                Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1.0, height: height).position(x: xPosition, y: height / 2)
-                infoPanel(index: selectedIndex, item: item).padding(.leading, 6).padding(.top, 2)
+                // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）
+                let topCut = clampedAxisY(0, in: height) + 8
+                let lineHeight = max(0, height - topCut)
+                Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1.0, height: lineHeight)
+                    .position(x: xPosition, y: topCut + lineHeight / 2)
+                // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
+                // 靠近左右边界时向内收敛，避免超出屏幕
+                let dateHalfW: CGFloat = 48
+                let dateX = min(max(xPosition, dateHalfW), max(dateHalfW, width - dateHalfW))
+                Text(item.formattedDateWithWeekday)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .background(Color(red: 0.35, green: 0.75, blue: 1.0))
+                    .position(x: dateX, y: clampedAxisY(0, in: height))
+                // 主图竖线下方（底部）：距今涨幅（光标K线收盘 → 整个数据集最后一根K线收盘）+ 距今周期数，白字、背景红涨绿跌
+                if let last = sortedData.last, last.close > 0 {
+                    let pct = (last.close - item.close) / item.close * 100
+                    let periodCount = max(0, (sortedData.count - 1) - selectedIndex)
+                    let pctHalfW: CGFloat = 70
+                    let pctX = min(max(xPosition, pctHalfW), max(pctHalfW, width - pctHalfW))
+                    Text(String(format: "%+.2f%%  %d", pct, periodCount))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .background(pct >= 0 ? upColor : downColor)
+                        .position(x: pctX, y: height - 9)
+                }
             }
             // 区间统计：绘制可拖动的统计区间边界线（起点/终点）
             if displaySettings.showRangeStats {
@@ -1133,7 +1228,8 @@ struct KlineChartView: View {
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
-                        gaps: gaps, sliceStart: startIndex)
+                        gaps: gaps, sliceStart: startIndex,
+                        latest: sortedAll.last)
             .equatable()
     }
 
@@ -1209,17 +1305,16 @@ struct KlineChartView: View {
     }
 
     private var mainLegendTitle: String {
-        if config.showBareK { return "裸K" }
+        if config.showBareK { return "\(period.rawValue): 裸K" }
         var parts: [String] = []
         if config.showMA { parts.append("MA") }
         if config.showEMA { parts.append("EMA") }
         if config.showBOLL { parts.append("BOLL") }
         if config.showCMK { parts.append("CMK") }
         if config.showSAR { parts.append("SAR") }
-        if config.showXS { parts.append("XS") }
-        if config.showXS2 { parts.append("XS2") }
         if let a = activeCustomIndicator { parts.append(a.name) }
-        return parts.isEmpty ? "主图" : parts.joined(separator: "/")
+        if parts.isEmpty { return "\(period.rawValue): 裸K" }
+        return "\(period.rawValue): \(parts.joined(separator: "/"))"
     }
 
     /// 副图坐标数值格式化
@@ -1239,11 +1334,11 @@ struct KlineChartView: View {
         let color = line.color
         if let value = legendValueFor(line), !value.isNaN {
             return AnyView(Text("\(name):\(String(format: format, value))")
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundColor(color))
         } else {
             return AnyView(Text(name)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundColor(color))
         }
     }
@@ -1263,7 +1358,7 @@ struct KlineChartView: View {
     private func legendText(_ text: String) -> some View {
         HStack(spacing: 3) {
             Circle().fill(Color.gray).frame(width: 6, height: 6)
-            Text(text).font(.system(size: 10)).foregroundColor(.gray)
+            Text(text).font(.system(size: 11)).foregroundColor(.gray)
         }
     }
 
@@ -1291,19 +1386,45 @@ struct KlineChartView: View {
     }
 
     private func timeAxis(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
-        let left = sortedData[startIndex].formattedDate
-        let right = sortedData[endIndex].formattedDate
+        let left = sortedData[startIndex].formattedDateWithWeekday
+        let right = sortedData[endIndex].formattedDateWithWeekday
         return ZStack {
             HStack(spacing: 0) {
-                Text(left).font(.system(size: 9)).foregroundColor(.gray)
-                Text("   周期数\(count)个").font(.system(size: 9)).foregroundColor(.gray)
+                Text(left).font(.system(size: 10)).foregroundColor(.gray)
+                Text("   周期数\(count)个").font(.system(size: 10)).foregroundColor(.gray)
                 Spacer()
             }
-            Text(right).font(.system(size: 9)).foregroundColor(.gray)
+            Text(right).font(.system(size: 10)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            // 光标出现时：在时间轴上覆盖显示 开/收/高/低/涨/额（涨为百分比），替代浮动行情窗口
+            if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
+                let item = sortedData[selectedIndex]
+                let prev = prevClose(of: selectedIndex)
+                let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
+                HStack(spacing: 6) {
+                    axisKV("开", String(format: "%.2f", item.open), .black)
+                    axisKV("收", String(format: "%.2f", item.close), item.isUp ? upColor : downColor)
+                    axisKV("高", String(format: "%.2f", item.high), upColor)
+                    axisKV("低", String(format: "%.2f", item.low), downColor)
+                    axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
+                    axisKV("额", item.formattedTurnover, .black)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.95))
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .frame(width: width, height: height)
         .background(Color.white)
+    }
+
+    /// 时间轴上紧凑的"标题:值"单元（标题灰色小字、值带色）
+    private func axisKV(_ title: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 2) {
+            Text(title).font(.system(size: 9)).foregroundColor(.gray)
+            Text(value).font(.system(size: 10)).foregroundColor(color)
+        }
     }
 
     // MARK: - 全屏参数编辑页（双击指标名称打开）
@@ -1373,23 +1494,8 @@ struct KlineChartView: View {
                                 }
                             }
                         }
-                        if config.showXS {
-                            paramRow(title: "XS 参数") {
-                                HStack(spacing: 12) {
-                                    numberField("N", $config.xsN, range: 1...300) { recomputeMainCurves(force: true) }
-                                }
-                            }
-                        }
-                        if config.showXS2 {
-                            paramRow(title: "XS2 参数") {
-                                HStack(spacing: 12) {
-                                    numberField("N", $config.xs2N, range: 1...300) { recomputeMainCurves(force: true) }
-                                    numberField("M", $config.xs2M, range: 1...300) { recomputeMainCurves(force: true) }
-                                }
-                            }
-                        }
                         if !config.showMA && !config.showEMA && !config.showBOLL && !config.showCMK
-                            && !config.showSAR && !config.showXS && !config.showXS2 {
+                            && !config.showSAR {
                             Text("当前没有可编辑的系统指标").font(.system(size: 13)).foregroundColor(.gray).padding(24)
                         }
                     case .sub(let slot):
@@ -1433,9 +1539,6 @@ struct KlineChartView: View {
             config.cmkN = 10
             config.sarStep = 0.02
             config.sarMax = 0.2
-            config.xsN = 5
-            config.xs2N = 3
-            config.xs2M = 5
             recomputeMainCurves(force: true)
         case .sub(let slot):
             let m = model(for: slot)
@@ -1514,14 +1617,12 @@ struct KlineChartView: View {
                         mainTile("BOLL", on: config.showBOLL) { toggleMain(.boll) }
                         mainTile("CMK", on: config.showCMK) { toggleMain(.cmk) }
                         mainTile("SAR", on: config.showSAR) { toggleMain(.sar) }
-                        mainTile("XS", on: config.showXS) { toggleMain(.xs) }
-                        mainTile("XS2", on: config.showXS2) { toggleMain(.xs2) }
                     }
                     .padding(.horizontal, 16).padding(.bottom, 6)
 
                     // 系统指标参数入口
                     if config.showMA || config.showEMA || config.showBOLL || config.showCMK
-                        || config.showSAR || config.showXS || config.showXS2 {
+                        || config.showSAR {
                         paramEntryRow(title: "参数设置") {
                             showMainSheet = false
                             paramEditorTarget = .main
@@ -1548,7 +1649,7 @@ struct KlineChartView: View {
 
     private var gridColumns: [GridItem] { [GridItem(.adaptive(minimum: 80), spacing: 8)] }
 
-    private enum MainRowKey { case ma, ema, boll, cmk, sar, xs, xs2 }
+    private enum MainRowKey { case ma, ema, boll, cmk, sar }
     private var mainCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .main } }
 
     private func toggleMain(_ group: MainRowKey) {
@@ -1558,8 +1659,6 @@ struct KlineChartView: View {
         case .boll: config.showBOLL.toggle()
         case .cmk: config.showCMK.toggle()
         case .sar: config.showSAR.toggle()
-        case .xs: config.showXS.toggle()
-        case .xs2: config.showXS2.toggle()
         }
         recomputeMainCurves(force: true)
     }
@@ -1855,28 +1954,7 @@ struct KlineChartView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 十字光标信息面板
-
-    private func infoPanel(index: Int, item: KlineItem) -> some View {
-        let changeAmount = prevClose(of: index) > 0 ? item.close - prevClose(of: index) : 0
-        let changeColor: Color = changeAmount >= 0 ? upColor : downColor
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(item.formattedDateWithWeekday).font(.system(size: 10, weight: .medium)).foregroundColor(.black)
-            HStack(spacing: 8) {
-                kv("开", item.open, .black)
-                kv("收", item.close, item.isUp ? upColor : downColor)
-                kv("高", item.high, upColor)
-                kv("低", item.low, downColor)
-            }
-            HStack(spacing: 8) {
-                kv("涨", changeAmount, changeColor)
-                textPill("额", item.formattedTurnover)
-            }
-        }
-        .padding(6)
-        .background(Color.white.opacity(0.92)).cornerRadius(4)
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.4), lineWidth: 0.5))
-    }
+    // MARK: - 十字光标辅助
 
     private func prevClose(of index: Int) -> Double {
         guard index > 0, index < sortedData.count else { return index < sortedData.count ? sortedData[index].close : 0 }
@@ -1887,12 +1965,6 @@ struct KlineChartView: View {
         HStack(spacing: 2) {
             Text(title).font(.system(size: 9)).foregroundColor(.gray)
             Text(String(format: "%.2f", value)).font(.system(size: 9)).foregroundColor(color)
-        }
-    }
-    private func textPill(_ title: String, _ value: String) -> some View {
-        HStack(spacing: 2) {
-            Text(title).font(.system(size: 9)).foregroundColor(.gray)
-            Text(value).font(.system(size: 9)).foregroundColor(.black)
         }
     }
 
@@ -1925,6 +1997,8 @@ struct MainChartCanvas: View, Equatable {
     let gaps: [GapInfo]
     /// 可见区间的绝对起点索引（用于把缺口绝对索引换算为画布坐标）
     let sliceStart: Int
+    /// 整个数据集的最后一根K线（最新价线固定在最新收盘价位置，与屏幕滚动位置无关）
+    let latest: KlineItem?
 
     var body: some View {
         Canvas { ctx, size in
@@ -1956,11 +2030,11 @@ struct MainChartCanvas: View, Equatable {
 
             for curve in curves { drawCurve(ctx, curve: curve, h: h, step: lineStep) }
 
-            if showLatestPriceLine, let latest = slice.last {
+            if showLatestPriceLine, let latest {
                 let y = yPos(latest.close, h: h)
                 var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
                 ctx.stroke(p, with: .color(latest.isUp ? upColor.opacity(0.6) : downColor.opacity(0.6)),
-                           style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                           style: StrokeStyle(lineWidth: 0.5, dash: [12, 6]))
             }
         }
     }
@@ -2147,8 +2221,8 @@ private struct IndicatorNameButton: View {
             onTap()
         } label: {
             HStack(spacing: 3) {
-                Text(title).font(.system(size: 9, weight: .medium))
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8))
+                Text(title).font(.system(size: 10, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
             }
             .foregroundColor(.black)
             .padding(.horizontal, 6).padding(.vertical, 3)
