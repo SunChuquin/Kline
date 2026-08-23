@@ -50,6 +50,17 @@ enum DragMode {
     case none, pan, zoom
 }
 
+/// 拖动手势过程变量容器：改用 class 引用存储，避免手势 onChanged 频繁写入 @State 触发整页重绘导致缓慢拖动卡顿
+final class DragState {
+    var lastTouchX: CGFloat = 0
+    var lastPanWidth: CGFloat = 0
+    var lastPanHeight: CGFloat = 0
+    var dragMode: DragMode = .none
+    var cursorDragging: Bool = false
+    var isDragging = false
+    var needsRefreshAfterDrag = false
+}
+
 /// 区间统计可拖动的边界（起点/终点）
 enum StatsEdge: Equatable {
     case start, end
@@ -327,11 +338,9 @@ struct KlineChartView: View {
     // 缩放锚点：以双指位置对应的K线为基线缩放（而非屏幕最右端）
     @State private var zoomAnchorIndex: Int? = nil
     @State private var zoomAnchorOffset: CGFloat = 0
-    @State private var lastTouchX: CGFloat = 0
-    @State private var lastPanWidth: CGFloat = 0
-    @State private var lastPanHeight: CGFloat = 0
-    @State private var dragMode: DragMode = .none
-    @State private var cursorDragging: Bool = false
+    @State private var drag = DragState()
+    /// 亚像素平移偏移（px）：缓慢拖动时画面平滑跟手，累计满一根K线间距才进位移动可见窗口
+    @State private var panOffset: CGFloat = 0
     @State private var crosshairY: CGFloat? = nil
     // 区间统计自定义边界（nil = 跟随屏幕可见区间）
     @State private var statsStartIndex: Int? = nil
@@ -354,8 +363,6 @@ struct KlineChartView: View {
     @State private var editorTarget: EditorTarget = .main
     /// 系统指标参数编辑页目标（与选择指标页同尺寸的底部面板，非全屏）
     @State private var paramEditorTarget: ParamEditorTarget? = nil
-    @State private var isDragging = false
-    @State private var needsRefreshAfterDrag = false
 
     // 基础序列一次性缓存（供指标按需计算复用，避免拖拽/重算时反复整表 map）
     private let sortedAll: [KlineItem]
@@ -485,7 +492,7 @@ struct KlineChartView: View {
     private func recomputeMainCurves(force: Bool = false) {
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
-        if !force, isDragging { needsRefreshAfterDrag = true; return }
+        if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
             if config.showMA {
@@ -535,7 +542,7 @@ struct KlineChartView: View {
     private func recomputeSub(_ m: SubChartModel, force: Bool = false) {
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
-        if !force, isDragging { needsRefreshAfterDrag = true; return }
+        if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
         var curves: [IndicatorLine] = []
         if m.activeCustomID != nil, let custom,
@@ -760,9 +767,9 @@ struct KlineChartView: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
                 guard !menuIsOpen else { return }
-                isDragging = true
+                drag.isDragging = true
                 // 记录最近触摸位置，作为双指缩放时的锚点（双指质心）
-                lastTouchX = value.location.x
+                drag.lastTouchX = value.location.x
                 let y = value.location.y
                 let inMain = isInPanel(y, mainTop, mainBottom)
                 // 区间统计边界拖动：命中边界线附近（或已处于边界拖动中）且在主图区域时，优先调整统计区间
@@ -790,38 +797,46 @@ struct KlineChartView: View {
                         selectedIndex = idx
                         crosshairY = value.location.y
                     }
-                    if abs(value.translation.width) > 6 || abs(value.translation.height) > 6 { cursorDragging = true }
-                } else if inMain && dragMode == .none {
+                    if abs(value.translation.width) > 6 || abs(value.translation.height) > 6 { drag.cursorDragging = true }
+                } else if inMain && drag.dragMode == .none {
                     if abs(value.translation.height) > abs(value.translation.width) && abs(value.translation.height) > 4 {
-                        dragMode = .zoom
+                        drag.dragMode = .zoom
                     } else if abs(value.translation.width) > 4 {
-                        dragMode = .pan
+                        drag.dragMode = .pan
                     }
-                    lastPanWidth = 0; lastPanHeight = 0
+                    drag.lastPanWidth = 0; drag.lastPanHeight = 0
                 }
 
-                if dragMode == .zoom {
-                    let deltaY = value.translation.height - lastPanHeight
-                    lastPanHeight = value.translation.height
+                if drag.dragMode == .zoom {
+                    let deltaY = value.translation.height - drag.lastPanHeight
+                    drag.lastPanHeight = value.translation.height
                     visibleCount = clamp(visibleCount + deltaY * 0.5, 20, CGFloat(maxVisibleCount))
-                } else if dragMode == .pan {
-                    let delta = value.translation.width - lastPanWidth
-                    lastPanWidth = value.translation.width
-                    let cols = Int((delta / candleSpacing).rounded())
-                    if cols != 0 { endOffset = clamp(endOffset + cols, 0, max(0, sortedData.count - count)) }
+                } else if drag.dragMode == .pan {
+                    let delta = value.translation.width - drag.lastPanWidth
+                    drag.lastPanWidth = value.translation.width
+                    // 亚像素平滑平移：先累计像素偏移，累计满一根K线间距才进位移动窗口，保证缓慢拖动也平滑跟手
+                    panOffset += delta
+                    let shift = Int((panOffset / candleSpacing).rounded())
+                    if shift != 0 {
+                        let newOffset = clamp(endOffset + shift, 0, max(0, sortedData.count - count))
+                        let applied = newOffset - endOffset
+                        endOffset = newOffset
+                        panOffset -= CGFloat(applied) * candleSpacing
+                    }
                 }
             }
             .onEnded { value in
-                lastPanWidth = 0; lastPanHeight = 0; dragMode = .none
+                drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
+                panOffset = 0
                 statsDragEdge = nil
                 // 关键：无论手势如何结束（含提前 return 的分支），都必须重置拖拽状态，
                 // 否则 isDragging 一直为 true，后续切换/修改指标的重算都会被跳过
-                isDragging = false
-                if needsRefreshAfterDrag {
-                    needsRefreshAfterDrag = false
+                drag.isDragging = false
+                if drag.needsRefreshAfterDrag {
+                    drag.needsRefreshAfterDrag = false
                     refreshCurves()
                 }
-                guard !menuIsOpen else { cursorDragging = false; return }
+                guard !menuIsOpen else { drag.cursorDragging = false; return }
                 // 副图横向滑动：第一副图切换周期，第二副图切换标的（明显横向滑动时优先，忽略纵向）
                 let startY = value.startLocation.y
                 let inS1Start = isInPanel(startY, s1Top, s1Bottom)
@@ -837,7 +852,7 @@ struct KlineChartView: View {
                     }
                     return
                 }
-                if cursorDragging { cursorDragging = false; return }
+                if drag.cursorDragging { drag.cursorDragging = false; return }
                 let y = value.location.y
                 let inPanel = isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom)
                 let isTap = abs(value.translation.width) < 6 && abs(value.translation.height) < 6
@@ -873,7 +888,7 @@ struct KlineChartView: View {
                 // 缩放开始：以最近触摸位置（双指质心）确定锚点K线
                 if zoomAnchorIndex == nil {
                     let spacing = width / CGFloat(max(1, count))
-                    let anchor = startIndex + Int((lastTouchX / spacing).rounded(.down))
+                    let anchor = startIndex + Int((drag.lastTouchX / spacing).rounded(.down))
                     zoomAnchorIndex = clamp(anchor, 0, max(0, sortedData.count - 1))
                     zoomAnchorOffset = (CGFloat(zoomAnchorIndex! - startIndex) + 0.5) * spacing
                 }
@@ -1090,6 +1105,7 @@ struct KlineChartView: View {
         ZStack(alignment: .topLeading) {
             Color.white
             mainCanvas(width: width, candleSpacing: candleSpacing, height: height)
+                .offset(x: panOffset)
             // 主图价格坐标：网格线仍为5条，数值只显示顶底两个（中间三个不显示）
             overlayPriceLabels(width: width, height: height, min: priceRange.lowerBound, max: priceRange.upperBound,
                                ratios: [0, 1], formatter: { String(format: "%.2f", $0) })
@@ -1246,6 +1262,7 @@ struct KlineChartView: View {
                            rangeMin: range.min, rangeMax: range.max,
                            upColor: upColor, downColor: downColor, gridColor: gridColor)
                 .equatable()
+                .offset(x: panOffset)
             // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；其他指标保留顶底两个值
             let labelRatios: [CGFloat] = (m.kind == .vol || m.kind == .amo) ? [0] : [0, 1]
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
