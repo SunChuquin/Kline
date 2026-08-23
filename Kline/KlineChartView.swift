@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import UIKit
 
 /// 副图可选指标类型（两个副图均可任选）
 enum SubChartKind: String, CaseIterable, Identifiable {
@@ -59,6 +60,14 @@ final class DragState {
     var cursorDragging: Bool = false
     var isDragging = false
     var needsRefreshAfterDrag = false
+}
+
+/// 副图左右滑动切换的拖动反馈动画状态
+struct SwipeFeedback: Equatable {
+    let slot: SubSlot
+    var offset: CGFloat      // 当前横向位移（右正左负）
+    let canLeft: Bool        // 左滑方向是否可切换
+    let canRight: Bool       // 右滑方向是否可切换
 }
 
 /// 区间统计可拖动的边界（起点/终点）
@@ -132,6 +141,8 @@ final class ChartConfigStore: ObservableObject {
     @Published var showBareK = false
     @Published var showCMK = false
     @Published var showSAR = false
+    // 当前行情周期（跨页面/跨标的持久，返回行情再进入时保持上次选择）
+    @Published var selectedPeriod: KlinePeriod = .daily
     // K线类型与图层显示（设置面板）
     @Published var chartStyle: ChartStyle = .bare
     @Published var displaySettings = ChartDisplaySettings()
@@ -324,6 +335,8 @@ struct KlineChartView: View {
     let onPeriodSwitch: ((KlinePeriod) -> Void)?
     /// 第二副图左右滑动切换标的（dir = -1 上一个 / +1 下一个）
     let onSwitchItem: ((Int) -> Void)?
+    /// 第二副图某方向是否可切换标的（dir = -1 上一个 / +1 下一个），用于滑动提示
+    let canSwitchItem: ((Int) -> Bool)?
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
 
@@ -341,6 +354,8 @@ struct KlineChartView: View {
     @State private var drag = DragState()
     /// 亚像素平移偏移（px）：缓慢拖动时画面平滑跟手，累计满一根K线间距才进位移动可见窗口
     @State private var panOffset: CGFloat = 0
+    /// 副图左右滑动切换的拖动反馈动画状态（nil = 未在拖动副图）
+    @State private var swipeFeedback: SwipeFeedback? = nil
     @State private var crosshairY: CGFloat? = nil
     // 区间统计自定义边界（nil = 跟随屏幕可见区间）
     @State private var statsStartIndex: Int? = nil
@@ -373,11 +388,13 @@ struct KlineChartView: View {
          showCustomEditor: Binding<Bool> = .constant(false),
          period: KlinePeriod = .daily,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
-         onSwitchItem: ((Int) -> Void)? = nil) {
+         onSwitchItem: ((Int) -> Void)? = nil,
+         canSwitchItem: ((Int) -> Bool)? = nil) {
         self.series = series
         self.period = period
         self.onPeriodSwitch = onPeriodSwitch
         self.onSwitchItem = onSwitchItem
+        self.canSwitchItem = canSwitchItem
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -760,20 +777,39 @@ struct KlineChartView: View {
 
     private func clamp<V: Comparable>(_ v: V, _ lo: V, _ hi: V) -> V { min(max(v, lo), hi) }
 
-    private func chartDragGesture(candleSpacing: CGFloat,
+    /// 标签文本实际渲染宽度（含左右各 4pt 内边距）：用于贴边判定，避免用估算半宽导致提前贴边
+    private func labelTextWidth(_ text: String, fontSize: CGFloat, bold: Bool = true) -> CGFloat {
+        let font = UIFont.systemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
+        let w = (text as NSString).size(withAttributes: [.font: font]).width
+        return w + 8
+    }
+
+    /// 十字光标竖线标签的横向定位：标签中心跟随竖线，只有标签真正会超出屏幕时才对齐贴边
+    private func crosshairLabelAlignment(x: CGFloat, labelWidth: CGFloat, width: CGFloat) -> (Alignment, CGFloat) {
+        if x - labelWidth / 2 < 0 { return (.leading, 0) }        // 左边缘贴屏幕最左侧
+        if x + labelWidth / 2 > width { return (.trailing, 0) }    // 右边缘贴屏幕最右侧
+        return (.center, x - width / 2)                            // 跟随竖线
+    }
+
+    private func chartDragGesture(width: CGFloat, candleSpacing: CGFloat,
                                   mainTop: CGFloat, mainBottom: CGFloat,
                                   s1Top: CGFloat, s1Bottom: CGFloat,
                                   s2Top: CGFloat, s2Bottom: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
                 guard !menuIsOpen else { return }
+                // 手势作用域固定为起点所在区域：主图/副图1/副图2；滑出起点区域后仍以起点区域处理
+                let sy = value.startLocation.y
+                let startInMain = isInPanel(sy, mainTop, mainBottom)
+                let startInS1 = isInPanel(sy, s1Top, s1Bottom)
+                let startInS2 = isInPanel(sy, s2Top, s2Bottom)
+                guard startInMain || startInS1 || startInS2 else { return }
                 drag.isDragging = true
                 // 记录最近触摸位置，作为双指缩放时的锚点（双指质心）
                 drag.lastTouchX = value.location.x
                 let y = value.location.y
-                let inMain = isInPanel(y, mainTop, mainBottom)
-                // 区间统计边界拖动：命中边界线附近（或已处于边界拖动中）且在主图区域时，优先调整统计区间
-                if inMain && displaySettings.showRangeStats {
+                // 区间统计边界拖动：命中边界线附近（或已处于边界拖动中）且起点在主图区域时，优先调整统计区间
+                if startInMain && displaySettings.showRangeStats {
                     let edge = statsDragEdge ?? statsEdge(atX: value.location.x, candleSpacing: candleSpacing)
                     if let edge {
                         statsDragEdge = edge
@@ -786,9 +822,15 @@ struct KlineChartView: View {
                         return
                     }
                 }
-                let inS1 = isInPanel(y, s1Top, s1Bottom)
-                let inS2 = isInPanel(y, s2Top, s2Bottom)
-                guard inMain || inS1 || inS2 else { return }
+
+                // 副图左右滑动切换：起点在副图且无光标时实时更新拖动反馈动画（显示方向提示/滑轨/阈值）
+                if (startInS1 || startInS2) && selectedIndex == nil {
+                    let slot: SubSlot = startInS1 ? .top : .bottom
+                    swipeFeedback = SwipeFeedback(slot: slot, offset: value.translation.width,
+                                                  canLeft: slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(-1) ?? false),
+                                                  canRight: slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(1) ?? false))
+                    return
+                }
 
                 if selectedIndex != nil {
                     let col = Int((value.location.x / candleSpacing).rounded(.down))
@@ -798,7 +840,7 @@ struct KlineChartView: View {
                         crosshairY = value.location.y
                     }
                     if abs(value.translation.width) > 6 || abs(value.translation.height) > 6 { drag.cursorDragging = true }
-                } else if inMain && drag.dragMode == .none {
+                } else if startInMain && drag.dragMode == .none {
                     if abs(value.translation.height) > abs(value.translation.width) && abs(value.translation.height) > 4 {
                         drag.dragMode = .zoom
                     } else if abs(value.translation.width) > 4 {
@@ -816,6 +858,9 @@ struct KlineChartView: View {
                     drag.lastPanWidth = value.translation.width
                     // 亚像素平滑平移：先累计像素偏移，累计满一根K线间距才进位移动窗口，保证缓慢拖动也平滑跟手
                     panOffset += delta
+                    // 到达数据边界时最多滑出屏幕宽度 1/10 的空白，避免把 K 线拖出大片空白
+                    let maxOver = width / 10
+                    panOffset = clamp(panOffset, -maxOver, maxOver)
                     let shift = Int((panOffset / candleSpacing).rounded())
                     if shift != 0 {
                         let newOffset = clamp(endOffset + shift, 0, max(0, sortedData.count - count))
@@ -837,19 +882,19 @@ struct KlineChartView: View {
                     refreshCurves()
                 }
                 guard !menuIsOpen else { drag.cursorDragging = false; return }
-                // 副图横向滑动：第一副图切换周期，第二副图切换标的（明显横向滑动时优先，忽略纵向）
-                let startY = value.startLocation.y
-                let inS1Start = isInPanel(startY, s1Top, s1Bottom)
-                let inS2Start = isInPanel(startY, s2Top, s2Bottom)
-                let w = value.translation.width
-                let isHSwipe = abs(w) > 30 && abs(w) > abs(value.translation.height) * 1.5
-                if isHSwipe && (inS1Start || inS2Start) {
-                    selectedIndex = nil; crosshairY = nil
-                    if inS1Start {
-                        switchPeriod(direction: w > 0 ? -1 : 1)
-                    } else {
-                        onSwitchItem?(w > 0 ? -1 : 1)
+                // 副图滑动切换结算：超过阈值触发切换，否则回弹取消（动画由 overlay 呈现）
+                if let fb = swipeFeedback {
+                    let threshold: CGFloat = 70
+                    let dir = fb.offset > 0 ? -1 : 1   // 右滑=更小周期/上一个标的，左滑=更大周期/下一个标的
+                    if abs(fb.offset) > threshold {
+                        selectedIndex = nil; crosshairY = nil
+                        if fb.slot == .top {
+                            switchPeriod(direction: dir)
+                        } else {
+                            onSwitchItem?(dir)
+                        }
                     }
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { swipeFeedback = nil }
                     return
                 }
                 if drag.cursorDragging { drag.cursorDragging = false; return }
@@ -876,6 +921,14 @@ struct KlineChartView: View {
         let target = cur + direction
         guard target >= 0, target < cases.count else { return }
         onPeriodSwitch(cases[target])
+    }
+
+    /// 某方向是否存在可切换的周期（-1 更小 / +1 更大），用于副图滑动方向提示
+    private func canSwitchPeriod(_ dir: Int) -> Bool {
+        let cases = KlinePeriod.allCases
+        guard let cur = cases.firstIndex(of: period) else { return false }
+        let target = cur + dir
+        return target >= 0 && target < cases.count
     }
 
     /// 双指缩放：以双指位置（lastTouchX 质心）对应的K线为基线，保持该K线的屏幕位置不变
@@ -920,7 +973,8 @@ struct KlineChartView: View {
             let legendHeight: CGFloat = 18
             // 时间轴固定紧凑高度，把剩余空间全部还给主图，消除底部大块空白
             let timeHeight: CGFloat = 18
-            let chartHeight = max(1, geometry.size.height - 3 * legendHeight - timeHeight)
+            // 底部区域：新增的行情数据行 + 时间轴各占一行（同高）
+            let chartHeight = max(1, geometry.size.height - 3 * legendHeight - 2 * timeHeight)
             let sub1Height = chartHeight * 0.15
             let sub2Height = chartHeight * 0.19
             let mainHeight = max(1, chartHeight - sub1Height - sub2Height)
@@ -941,10 +995,12 @@ struct KlineChartView: View {
                 subLegendRow(model: subBottom, height: legendHeight).zIndex(30)
                 subChart(model: subBottom, width: width, candleSpacing: candleSpacing, height: sub2Height,
                          slot: .bottom)
+                // 时间轴上方新增一行：十字光标出现时显示 开/收/高/低/涨/额 行情数据
+                axisQuoteRow(width: width, height: timeHeight)
                 timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
             }
             .contentShape(Rectangle())
-            .gesture(chartDragGesture(candleSpacing: candleSpacing, mainTop: mainTop, mainBottom: mainBottom,
+            .gesture(chartDragGesture(width: width, candleSpacing: candleSpacing, mainTop: mainTop, mainBottom: mainBottom,
                                       s1Top: s1Top, s1Bottom: s1Bottom, s2Top: s2Top, s2Bottom: s2Bottom))
             .simultaneousGesture(magnificationGesture(width: width))
             .overlay {
@@ -956,9 +1012,10 @@ struct KlineChartView: View {
                                                        s2Height: sub2Height)
                     ZStack(alignment: .topLeading) {
                         crosshairLineOverlay(width: width, height: geometry.size.height, y: y, valueText: valueText)
-                        // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅
+                        // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
+                        // 光标停在屏幕最右边一根K线（idx == endIndex）时不显示（涨幅恒为0无意义）
                         if let idx = selectedIndex, isInPanel(crosshairY, mainTop, mainBottom),
-                           idx >= startIndex, idx <= endIndex, endIndex >= 0, endIndex < sortedData.count {
+                           idx >= startIndex, idx < endIndex, endIndex >= 0, endIndex < sortedData.count {
                             let cursorItem = sortedData[idx]
                             let screenLast = sortedData[endIndex]
                             if cursorItem.close > 0, screenLast.close > 0 {
@@ -1119,27 +1176,34 @@ struct KlineChartView: View {
                 Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1.0, height: lineHeight)
                     .position(x: xPosition, y: topCut + lineHeight / 2)
                 // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
-                // 靠近左右边界时向内收敛，避免超出屏幕
-                let dateHalfW: CGFloat = 48
-                let dateX = min(max(xPosition, dateHalfW), max(dateHalfW, width - dateHalfW))
-                Text(item.formattedDateWithWeekday)
+                // 按标签实际宽度贴边判定：只有真正会超出屏幕时才贴边（右边缘贴合最右侧/左边缘贴合最左侧），避免提前靠边
+                let dateText = item.formattedDateWithWeekday
+                let dateW = labelTextWidth(dateText, fontSize: 10)
+                let (dateAlign, dateOffset) = crosshairLabelAlignment(x: xPosition, labelWidth: dateW, width: width)
+                Text(dateText)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 4)
                     .background(Color(red: 0.35, green: 0.75, blue: 1.0))
-                    .position(x: dateX, y: clampedAxisY(0, in: height))
-                // 主图竖线下方（底部）：距今涨幅（光标K线收盘 → 整个数据集最后一根K线收盘）+ 距今周期数，白字、背景红涨绿跌
+                    .frame(width: width, alignment: dateAlign)
+                    .offset(x: dateOffset)
+                    .position(x: width / 2, y: clampedAxisY(0, in: height))
+                // 主图竖线下方（底部）：距今涨幅（光标K线收盘 → 整个数据集最后一根K线收盘）+ 距今周期数，白字、背景红涨绿跌；
+                // 按标签实际宽度贴边判定，只有真正会超出屏幕时才贴边
                 if let last = sortedData.last, last.close > 0 {
                     let pct = (last.close - item.close) / item.close * 100
                     let periodCount = max(0, (sortedData.count - 1) - selectedIndex)
-                    let pctHalfW: CGFloat = 70
-                    let pctX = min(max(xPosition, pctHalfW), max(pctHalfW, width - pctHalfW))
-                    Text(String(format: "%+.2f%%  %d", pct, periodCount))
+                    let pctText = String(format: "%+.2f%%  %d", pct, periodCount)
+                    let pctW = labelTextWidth(pctText, fontSize: 10)
+                    let (pctAlign, pctOffset) = crosshairLabelAlignment(x: xPosition, labelWidth: pctW, width: width)
+                    Text(pctText)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 4)
                         .background(pct >= 0 ? upColor : downColor)
-                        .position(x: pctX, y: height - 9)
+                        .frame(width: width, alignment: pctAlign)
+                        .offset(x: pctOffset)
+                        .position(x: width / 2, y: height - 9)
                 }
             }
             // 区间统计：绘制可拖动的统计区间边界线（起点/终点）
@@ -1275,6 +1339,81 @@ struct KlineChartView: View {
         }
         .frame(width: width, height: height)
         .clipped()
+        .overlay {
+            swipeOverlay(slot: slot, width: width, height: height)
+        }
+    }
+
+    /// 副图左右滑动切换反馈：常驻方向箭头 + 拖动时的滑轨/滑块/阈值动画
+    private func swipeOverlay(slot: SubSlot, width: CGFloat, height: CGFloat) -> some View {
+        let fb = swipeFeedback
+        let isDragging = fb?.slot == slot && (fb?.offset ?? 0).magnitude > 1
+        let off = isDragging ? (fb?.offset ?? 0) : 0
+        let canL = slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(1) ?? false)
+        let canR = slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(-1) ?? false)
+        let threshold: CGFloat = 70
+        return ZStack {
+            // 常驻方向箭头提示：可切换方向高亮，边界方向灰显
+            HStack {
+                swipeDirectionArrow(system: "chevron.left", can: canL,
+                                    active: isDragging && off < 0)
+                Spacer()
+                swipeDirectionArrow(system: "chevron.right", can: canR,
+                                    active: isDragging && off > 0)
+            }
+            .padding(.horizontal, 8)
+
+            // 拖动中的滑轨动画
+            if isDragging {
+                let dir: CGFloat = off > 0 ? 1 : -1
+                let reachable = off > 0 ? canR : canL
+                let dist = min(abs(off), threshold)
+                let cx = width / 2
+                let ready = abs(off) > threshold
+                let color: Color = reachable ? (ready ? Color.green : Color.white.opacity(0.9)) : Color.red
+                // 轨道（从中心向拖动方向延伸）
+                Capsule()
+                    .fill(Color.black.opacity(0.35))
+                    .frame(width: dist, height: 6)
+                    .position(x: cx + dir * dist / 2, y: height / 2)
+                // 阈值刻度线
+                if reachable {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.7))
+                        .frame(width: 1.5, height: 12)
+                        .position(x: cx + dir * threshold, y: height / 2)
+                }
+                // 滑块
+                Circle()
+                    .fill(color)
+                    .frame(width: 16, height: 16)
+                    .overlay(Circle().stroke(Color.white, lineWidth: 1))
+                    .shadow(radius: 1)
+                    .position(x: cx + dir * dist, y: height / 2)
+                // 状态文字：超过阈值提示松手切换，未到阈值提示继续拖动，不可切换方向提示边界
+                let text = reachable ? (ready ? "松开切换" : "继续拖动") : "无法切换"
+                let textColor: Color = (reachable && !ready) ? Color.black : Color.white
+                Text(text)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(textColor)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(color)
+                    .cornerRadius(3)
+                    .position(x: cx + dir * dist, y: height / 2 - 16)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// 副图滑动方向提示箭头
+    private func swipeDirectionArrow(system: String, can: Bool, active: Bool) -> some View {
+        Image(systemName: can ? system : (system + ".circle"))
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(can ? (active ? Color.white : Color.black.opacity(0.35)) : Color.gray.opacity(0.25))
+            .frame(width: 22, height: 22)
+            .background(can ? Color.black.opacity(active ? 0.5 : 0.08) : Color.clear)
+            .clipShape(Circle())
     }
 
     private func subLegendRow(model m: SubChartModel, height: CGFloat) -> some View {
@@ -1321,6 +1460,7 @@ struct KlineChartView: View {
         .frame(height: height)
     }
 
+    /// 主图指标名称按钮：固定显示当前时间周期，如"日线: MA"、"周线: 裸K"
     private var mainLegendTitle: String {
         if config.showBareK { return "\(period.rawValue): 裸K" }
         var parts: [String] = []
@@ -1413,10 +1553,20 @@ struct KlineChartView: View {
             }
             Text(right).font(.system(size: 10)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-            // 光标出现时：在时间轴上覆盖显示 开/收/高/低/涨/额（涨为百分比），替代浮动行情窗口
-            if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
-                let item = sortedData[selectedIndex]
-                let prev = prevClose(of: selectedIndex)
+        }
+        .frame(width: width, height: height)
+        .background(Color.white)
+    }
+
+    /// 时间轴上方新增的行情数据行：十字光标出现时显示光标所在K线 开/收/高/低/涨/额（涨为百分比），
+    /// 无光标时显示当前屏幕最右边那根K线的行情数据
+    private func axisQuoteRow(width: CGFloat, height: CGFloat) -> some View {
+        ZStack {
+            // 光标出现时取光标所在K线，否则取屏幕最右边那根K线
+            let quoteIndex = selectedIndex ?? endIndex
+            if quoteIndex >= startIndex, quoteIndex <= endIndex, quoteIndex >= 0, quoteIndex < sortedData.count {
+                let item = sortedData[quoteIndex]
+                let prev = prevClose(of: quoteIndex)
                 let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
                 HStack(spacing: 6) {
                     axisKV("开", String(format: "%.2f", item.open), .black)
@@ -1428,7 +1578,6 @@ struct KlineChartView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .background(Color.white.opacity(0.95))
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }

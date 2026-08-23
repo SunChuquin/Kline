@@ -33,6 +33,12 @@ final class DetailRouter: ObservableObject {
         item = next
         return next
     }
+
+    /// 查询某方向是否可切换（-1 上一个 / +1 下一个），用于副图滑动提示
+    func canSwitch(_ dir: Int) -> Bool {
+        let i = navIndex + dir
+        return i >= 0 && i < navItems.count
+    }
 }
 
 struct KlineDetailView: View {
@@ -42,7 +48,6 @@ struct KlineDetailView: View {
     /// 当前展示的标的（第二副图左右滑动时可在候选列表中切换）
     @State private var item: MetaItem
     var onClose: () -> Void
-    @State private var selectedPeriod: KlinePeriod = .daily
     @State private var showSettings = false
     /// 自定义指标公式编辑器是否打开（由 K 线图内部触发，此处负责隐藏顶部栏实现真全屏）
     @State private var showCustomEditor = false
@@ -56,7 +61,7 @@ struct KlineDetailView: View {
         self.onClose = onClose
     }
 
-    private var currentSeries: ChartSeries? { selectedPeriod == .daily ? dailySeries : weeklySeries }
+    private var currentSeries: ChartSeries? { config.selectedPeriod == .daily ? dailySeries : weeklySeries }
 
     var body: some View {
         GeometryReader { geometry in
@@ -215,9 +220,9 @@ struct KlineDetailView: View {
                         Menu {
                             ForEach(KlinePeriod.allCases) { period in
                                 Button {
-                                    withAnimation { selectedPeriod = period }
+                                    withAnimation { config.selectedPeriod = period }
                                 } label: {
-                                    if selectedPeriod == period {
+                                    if config.selectedPeriod == period {
                                         Label(period.rawValue, systemImage: "checkmark")
                                     } else {
                                         Text(period.rawValue)
@@ -226,7 +231,7 @@ struct KlineDetailView: View {
                             }
                         } label: {
                             HStack(spacing: 6) {
-                                Text(selectedPeriod.rawValue)
+                                Text(config.selectedPeriod.rawValue)
                                     .font(.system(size: 15))
                                     .foregroundColor(.black)
                                 Image(systemName: "chevron.up.chevron.down")
@@ -352,9 +357,9 @@ struct KlineDetailView: View {
 
     private func chartView(series: ChartSeries) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
-                       showCustomEditor: $showCustomEditor, period: selectedPeriod,
+                       showCustomEditor: $showCustomEditor, period: config.selectedPeriod,
                        onPeriodSwitch: { newPeriod in
-                           withAnimation { selectedPeriod = newPeriod }
+                           withAnimation { config.selectedPeriod = newPeriod }
                        },
                        onSwitchItem: { dir in
                            // 第二副图左右滑动切换标的：dir = -1 上一个 / +1 下一个
@@ -362,6 +367,9 @@ struct KlineDetailView: View {
                                item = next
                                loadData()
                            }
+                       },
+                       canSwitchItem: { dir in
+                           detailRouter.canSwitch(dir)
                        })
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
