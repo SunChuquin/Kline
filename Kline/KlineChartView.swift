@@ -337,11 +337,18 @@ struct KlineChartView: View {
     let onSwitchItem: ((Int) -> Void)?
     /// 第二副图某方向是否可切换标的（dir = -1 上一个 / +1 下一个），用于滑动提示
     let canSwitchItem: ((Int) -> Bool)?
+    /// 📌 固定光标模式开关（由详情页顶部按钮持有；开启时固定第一个光标，点击切换第二个光标）
+    @Binding var pinEnabled: Bool
+    /// 是否有任意光标在屏幕上（供详情页控制 📌 按钮可点/高亮）
+    let onHasCursorChange: ((Bool) -> Void)?
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
 
     // 交互状态
     @State private var selectedIndex: Int? = nil
+    /// 📌 开启时固定下来的第一个光标（不可被点击清除；只随 pinEnabled 关闭而清除）
+    @State private var pinnedIndex: Int? = nil
+    @State private var pinnedY: CGFloat? = nil
     @State private var showMainSheet = false
     @State private var showSubSheet = false
     @State private var editingSlot: SubSlot = .top
@@ -389,12 +396,16 @@ struct KlineChartView: View {
          period: KlinePeriod = .daily,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
          onSwitchItem: ((Int) -> Void)? = nil,
-         canSwitchItem: ((Int) -> Bool)? = nil) {
+         canSwitchItem: ((Int) -> Bool)? = nil,
+         pinEnabled: Binding<Bool> = .constant(false),
+         onHasCursorChange: ((Bool) -> Void)? = nil) {
         self.series = series
         self.period = period
         self.onPeriodSwitch = onPeriodSwitch
         self.onSwitchItem = onSwitchItem
         self.canSwitchItem = canSwitchItem
+        self._pinEnabled = pinEnabled
+        self.onHasCursorChange = onHasCursorChange
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -1004,35 +1015,16 @@ struct KlineChartView: View {
                                       s1Top: s1Top, s1Bottom: s1Bottom, s2Top: s2Top, s2Bottom: s2Bottom))
             .simultaneousGesture(magnificationGesture(width: width))
             .overlay {
-                if let crosshairY, isInPanel(crosshairY, mainTop, mainBottom) || isInPanel(crosshairY, s1Top, s1Bottom) || isInPanel(crosshairY, s2Top, s2Bottom) {
-                    let y = min(max(crosshairY, 0), geometry.size.height)
-                    let valueText = crosshairValueText(at: crosshairY, mainTop: mainTop, mainBottom: mainBottom,
-                                                       mainHeight: mainHeight, s1Top: s1Top, s1Bottom: s1Bottom,
-                                                       s1Height: sub1Height, s2Top: s2Top, s2Bottom: s2Bottom,
-                                                       s2Height: sub2Height)
-                    ZStack(alignment: .topLeading) {
-                        crosshairLineOverlay(width: width, height: geometry.size.height, y: y, valueText: valueText)
-                        // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
-                        // 光标停在屏幕最右边一根K线（idx == endIndex）时不显示（涨幅恒为0无意义）
-                        if let idx = selectedIndex, isInPanel(crosshairY, mainTop, mainBottom),
-                           idx >= startIndex, idx < endIndex, endIndex >= 0, endIndex < sortedData.count {
-                            let cursorItem = sortedData[idx]
-                            let screenLast = sortedData[endIndex]
-                            if cursorItem.close > 0, screenLast.close > 0 {
-                                let pct = (screenLast.close - cursorItem.close) / cursorItem.close * 100
-                                // 周期数：光标K线 → 当前屏幕最后一根K线
-                                let periodCount = max(0, endIndex - idx)
-                                // 使用整宽右对齐容器，让标签右边缘精确贴合屏幕最右侧
-                                Text(String(format: "%+.2f%%  %d", pct, periodCount))
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 4)
-                                    .background(pct >= 0 ? upColor : downColor)
-                                    .frame(width: width, alignment: .trailing)
-                                    .position(x: width / 2, y: y)
-                            }
-                        }
-                    }
+                // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
+                ZStack(alignment: .topLeading) {
+                    cursorOverlay(index: selectedIndex, y: crosshairY, compare: pinnedIndex, width: width, height: geometry.size.height,
+                                  mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
+                                  s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
+                                  s2Top: s2Top, s2Bottom: s2Bottom, s2Height: sub2Height)
+                    cursorOverlay(index: pinnedIndex, y: pinnedY, compare: nil, width: width, height: geometry.size.height,
+                                  mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
+                                  s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
+                                  s2Top: s2Top, s2Bottom: s2Bottom, s2Height: sub2Height)
                 }
             }
             .overlay {
@@ -1074,7 +1066,27 @@ struct KlineChartView: View {
         .onAppear {
             // 副图配置已持久化在共享仓库，无需重置
             refreshCurves()
+            notifyHasCursor()
         }
+        .onChange(of: pinEnabled) { enabled in
+            if enabled {
+                // 开启：把当前屏幕上那一个光标固定下来，准备点击产生第二个光标
+                guard let idx = selectedIndex else { return }
+                pinnedIndex = idx
+                pinnedY = crosshairY
+                selectedIndex = nil
+                crosshairY = nil
+            } else {
+                // 关闭：清除所有光标
+                selectedIndex = nil
+                crosshairY = nil
+                pinnedIndex = nil
+                pinnedY = nil
+            }
+            notifyHasCursor()
+        }
+        .onChange(of: selectedIndex) { _ in notifyHasCursor() }
+        .onChange(of: pinnedIndex) { _ in notifyHasCursor() }
         .onChange(of: config.showBareK) { _ in
             // 顶部栏裸K按钮切换后立即重算（隐藏/恢复主图指标）
             recomputeMainCurves(force: true)
@@ -1083,6 +1095,11 @@ struct KlineChartView: View {
             syncCustomAfterStoreChange()
             refreshCurves()
         }
+    }
+
+    /// 屏幕上是否有任意光标（固定光标或可交互光标），通知详情页用于控制 📌 按钮
+    private func notifyHasCursor() {
+        onHasCursorChange?(selectedIndex != nil || pinnedIndex != nil)
     }
 
     private func refreshCurves() {
@@ -1142,19 +1159,68 @@ struct KlineChartView: View {
         return ""
     }
 
-    /// 十字光标横线 + 天蓝色背景数值标签（横线从数值背景的最左边开始画起，贯穿全宽）
-    private func crosshairLineOverlay(width: CGFloat, height: CGFloat, y: CGFloat, valueText: String) -> some View {
+    /// 十字光标横线 + 背景数值标签（横线从数值背景的最左边开始画起，贯穿全宽）
+    private func crosshairLineOverlay(width: CGFloat, height: CGFloat, y: CGFloat, valueText: String,
+                                      bgColor: Color = Color(red: 0.35, green: 0.75, blue: 1.0),
+                                      lineColor: Color = Color.black.opacity(0.45)) -> some View {
         ZStack(alignment: .topLeading) {
             // 横轴虚线：从数值背景的最左边（x=0）开始画起
-            Rectangle().fill(Color.black.opacity(0.45)).frame(width: width, height: 1.0)
+            Rectangle().fill(lineColor).frame(width: width, height: 1.0)
                 .position(x: width / 2, y: y)
-            // 光标数值：天蓝色矩形背景（高=字体高度、宽=内容宽度），白字加粗，比主图坐标数值大一号
+            // 光标数值：背景矩形（高=字体高度、宽=内容宽度），白字加粗，比主图坐标数值大一号
             Text(valueText)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.white)
                 .padding(.horizontal, 4)
-                .background(Color(red: 0.35, green: 0.75, blue: 1.0))
+                .background(bgColor)
                 .offset(y: y - 6)
+        }
+    }
+
+    /// 单个十字光标在整图上的绘制：横线 + 左侧数值标签 + 主图横轴右侧涨幅标签
+    /// （可交互光标与固定光标共用；只有光标 y 落在任一图表面板内才绘制）
+    @ViewBuilder
+    private func cursorOverlay(index: Int?, y: CGFloat?, compare: Int?, width: CGFloat, height: CGFloat,
+                               mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat,
+                               s1Top: CGFloat, s1Bottom: CGFloat, s1Height: CGFloat,
+                               s2Top: CGFloat, s2Bottom: CGFloat, s2Height: CGFloat) -> some View {
+        if let index, let y,
+           isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom) {
+            let cy = min(max(y, 0), height)
+            // 第二个光标且位于主图区域时：左侧标签追加 第一个光标横轴价格→第二个光标横轴价格 的涨幅
+            let priceChange = secondCursorPriceChange(y: y, pinnedY: pinnedY, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight)
+            let compareSuffix = (compare != nil && isInPanel(y, mainTop, mainBottom))
+                ? (priceChange.map { String(format: "  %+.2f%%", $0) } ?? "")
+                : ""
+            let valueText = crosshairValueText(at: y, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
+                                               s1Top: s1Top, s1Bottom: s1Bottom, s1Height: s1Height,
+                                               s2Top: s2Top, s2Bottom: s2Bottom, s2Height: s2Height) + compareSuffix
+            // 第二个光标时：左侧标签整体背景红涨绿跌（按横轴价格涨幅）、横线蓝色（同📌高亮色）；固定光标保持天蓝/黑色
+            let bgColor = priceChange.map { $0 >= 0 ? upColor : downColor } ?? Color(red: 0.35, green: 0.75, blue: 1.0)
+            crosshairLineOverlay(width: width, height: height, y: cy, valueText: valueText, bgColor: bgColor,
+                                 lineColor: compare != nil ? Color.blue : Color.black.opacity(0.45))
+            // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
+            // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）
+            if isInPanel(y, mainTop, mainBottom),
+               index >= startIndex, index < endIndex, endIndex >= 0, endIndex < sortedData.count {
+                let cursorItem = sortedData[index]
+                let screenLast = sortedData[endIndex]
+                if cursorItem.close > 0, screenLast.close > 0 {
+                    let pct = (screenLast.close - cursorItem.close) / cursorItem.close * 100
+                    let periodCount = max(0, endIndex - index)
+                    // 第二个光标时：右侧标签追加 两光标间K线周期个数
+                    let rightText = String(format: "%+.2f%%  %d", pct, periodCount)
+                        + (compare.flatMap { pinnedRangeStats(index, $0) }.map { String(format: "  %d", $0.periodCount) } ?? "")
+                    // 使用整宽右对齐容器，让标签右边缘精确贴合屏幕最右侧
+                    Text(rightText)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .background(pct >= 0 ? upColor : downColor)
+                        .frame(width: width, alignment: .trailing)
+                        .position(x: width / 2, y: cy)
+                }
+            }
         }
     }
 
@@ -1167,45 +1233,9 @@ struct KlineChartView: View {
             overlayPriceLabels(width: width, height: height, min: priceRange.lowerBound, max: priceRange.upperBound,
                                ratios: [0, 1], formatter: { String(format: "%.2f", $0) })
             // 最新价：只保留虚线（在 Canvas 中绘制），不显示数值，避免与虚线重叠
-            if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
-                let item = sortedData[selectedIndex]
-                let xPosition = (CGFloat(selectedIndex - startIndex) + 0.5) * candleSpacing
-                // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）
-                let topCut = clampedAxisY(0, in: height) + 8
-                let lineHeight = max(0, height - topCut)
-                Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1.0, height: lineHeight)
-                    .position(x: xPosition, y: topCut + lineHeight / 2)
-                // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
-                // 按标签实际宽度贴边判定：只有真正会超出屏幕时才贴边（右边缘贴合最右侧/左边缘贴合最左侧），避免提前靠边
-                let dateText = item.formattedDateWithWeekday
-                let dateW = labelTextWidth(dateText, fontSize: 10)
-                let (dateAlign, dateOffset) = crosshairLabelAlignment(x: xPosition, labelWidth: dateW, width: width)
-                Text(dateText)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 4)
-                    .background(Color(red: 0.35, green: 0.75, blue: 1.0))
-                    .frame(width: width, alignment: dateAlign)
-                    .offset(x: dateOffset)
-                    .position(x: width / 2, y: clampedAxisY(0, in: height))
-                // 主图竖线下方（底部）：距今涨幅（光标K线收盘 → 整个数据集最后一根K线收盘）+ 距今周期数，白字、背景红涨绿跌；
-                // 按标签实际宽度贴边判定，只有真正会超出屏幕时才贴边
-                if let last = sortedData.last, last.close > 0 {
-                    let pct = (last.close - item.close) / item.close * 100
-                    let periodCount = max(0, (sortedData.count - 1) - selectedIndex)
-                    let pctText = String(format: "%+.2f%%  %d", pct, periodCount)
-                    let pctW = labelTextWidth(pctText, fontSize: 10)
-                    let (pctAlign, pctOffset) = crosshairLabelAlignment(x: xPosition, labelWidth: pctW, width: width)
-                    Text(pctText)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 4)
-                        .background(pct >= 0 ? upColor : downColor)
-                        .frame(width: width, alignment: pctAlign)
-                        .offset(x: pctOffset)
-                        .position(x: width / 2, y: height - 9)
-                }
-            }
+            // 可交互光标（pin 开启时即第二个光标）与固定光标的竖线/标签都绘制
+            mainCursorVLine(index: selectedIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
+            mainCursorVLine(index: pinnedIndex, compare: nil, width: width, candleSpacing: candleSpacing, height: height)
             // 区间统计：绘制可拖动的统计区间边界线（起点/终点）
             if displaySettings.showRangeStats {
                 let s = statsRangeIndices.start
@@ -1226,6 +1256,71 @@ struct KlineChartView: View {
         }
         .frame(width: width, height: height)
         .clipped()
+    }
+
+    /// 主图单个光标的竖线 + 顶部日期标签 + 底部涨幅标签（可交互光标与固定光标共用；
+    /// compare 非 nil 表示这是第二个光标，顶部/底部标签追加与第一个固定光标的对比统计）
+    @ViewBuilder
+    private func mainCursorVLine(index: Int?, compare: Int?, width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
+        if let index, index >= startIndex, index <= endIndex {
+            let item = sortedData[index]
+            let xPosition = (CGFloat(index - startIndex) + 0.5) * candleSpacing
+            // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）；第二个光标蓝色、固定光标黑色
+            let topCut = clampedAxisY(0, in: height) + 8
+            let lineHeight = max(0, height - topCut)
+            Rectangle().fill(compare != nil ? Color.blue : Color.black.opacity(0.45)).frame(width: 1.0, height: lineHeight)
+                .position(x: xPosition, y: topCut + lineHeight / 2)
+            // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
+            // 第二个光标时追加 两光标间振幅 / 最大回撤 / 最大上涨 / 涨幅；按标签实际宽度贴边判定，避免提前靠边
+            let compareStats = compare.flatMap { pinnedRangeStats(index, $0) }
+            let dateText = item.formattedDateWithWeekday
+            let dateLabelText = dateText + (compareStats.map { String(format: "  %.2f%%  %+.2f%%  %+.2f%%  %+.2f%%", $0.amplitude, $0.drawdown, $0.rally, $0.change) } ?? "")
+            let dateW = labelTextWidth(dateLabelText, fontSize: 10)
+            let (dateAlign, dateOffset) = crosshairLabelAlignment(x: xPosition, labelWidth: dateW, width: width)
+            HStack(spacing: 3) {
+                Text(dateText)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                if let c = compareStats {
+                    Text(String(format: "%.2f%%", c.amplitude))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(String(format: "%+.2f%%", c.drawdown))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(downColor)
+                    Text(String(format: "%+.2f%%", c.rally))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(upColor)
+                    Text(String(format: "%+.2f%%", c.change))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(c.change >= 0 ? upColor : downColor)
+                }
+            }
+            .padding(.horizontal, 4)
+            .background(Color(red: 0.35, green: 0.75, blue: 1.0))
+            .frame(width: width, alignment: dateAlign)
+            .offset(x: dateOffset)
+            .position(x: width / 2, y: clampedAxisY(0, in: height))
+            // 主图竖线下方（底部）：距今涨幅（光标K线收盘 → 整个数据集最后一根K线收盘）+ 距今周期数，白字、背景红涨绿跌；
+            // 第二个光标时追加 两光标间成交量之和 与 成交额之和；按标签实际宽度贴边判定
+            if let last = sortedData.last, last.close > 0 {
+                let pct = (last.close - item.close) / item.close * 100
+                let periodCount = max(0, (sortedData.count - 1) - index)
+                // 第二个光标时：追加 两光标间成交量之和 与 成交额之和
+                let pctText = String(format: "%+.2f%%  %d", pct, periodCount)
+                    + (compareStats.map { String(format: "  %@  %@", formatVolume($0.volSum), formatAmount($0.amoSum)) } ?? "")
+                let pctW = labelTextWidth(pctText, fontSize: 10)
+                let (pctAlign, pctOffset) = crosshairLabelAlignment(x: xPosition, labelWidth: pctW, width: width)
+                Text(pctText)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .background(pct >= 0 ? upColor : downColor)
+                    .frame(width: width, alignment: pctAlign)
+                    .offset(x: pctOffset)
+                    .position(x: width / 2, y: height - 9)
+            }
+        }
     }
 
     /// 实际统计区间：自定义边界未设置时跟随屏幕可见区间，设置了则用手动拖动的边界
@@ -1264,6 +1359,51 @@ struct KlineChartView: View {
         let vol = statSlice.reduce(0.0) { $0 + $1.volume }
         let amo = statSlice.reduce(0.0) { $0 + $1.turnover }
         return (first.formattedDate, last.formattedDate, change, high, low, vol, amo)
+    }
+
+    /// 第二个光标相对第一个固定光标的区间统计（区间为两光标之间；基准为固定光标的收盘价）
+    /// change=两光标间涨幅、amplitude=振幅(区间最高-最低相对基准)、drawdown=最大回撤(相对基准,通常负)、
+    /// rally=最大上涨(相对基准,通常正)、volSum=成交量之和、amoSum=成交额之和、periodCount=两光标间K线周期个数
+    private func pinnedRangeStats(_ second: Int, _ pinned: Int) -> (change: Double, amplitude: Double, drawdown: Double, rally: Double, volSum: Double, amoSum: Double, periodCount: Int)? {
+        let s = min(second, pinned)
+        let e = max(second, pinned)
+        guard s >= 0, e < sortedData.count, s <= e else { return nil }
+        let baseClose = sortedData[pinned].close
+        guard baseClose > 0 else { return nil }
+        let slice = sortedData[s...e]
+        let high = slice.map(\.high).max() ?? 0
+        let low = slice.map(\.low).min() ?? 0
+        let change = (sortedData[second].close - baseClose) / baseClose * 100
+        let amplitude = (high - low) / baseClose * 100
+        let drawdown = (low - baseClose) / baseClose * 100
+        let rally = (high - baseClose) / baseClose * 100
+        let volSum = slice.reduce(0.0) { $0 + $1.volume }
+        let amoSum = slice.reduce(0.0) { $0 + $1.turnover }
+        return (change, amplitude, drawdown, rally, volSum, amoSum, e - s)
+    }
+
+    /// 成交额格式化（万亿/亿/万）
+    private func formatAmount(_ v: Double) -> String {
+        if v >= 1000000000000 { return String(format: "%.2f万亿", v / 1000000000000) }
+        else if v >= 100000000 { return String(format: "%.2f亿", v / 100000000) }
+        else if v >= 10000 { return String(format: "%.2f万", v / 10000) }
+        else { return String(format: "%.0f", v) }
+    }
+
+    /// 根据光标横线 y 反算主图横轴价格（仅主图区域有效）
+    private func priceAtY(_ y: CGFloat, mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat) -> Double? {
+        guard y >= mainTop, y <= mainBottom else { return nil }
+        let ratio = Double((y - mainTop) / mainHeight)
+        return priceRange.upperBound - (priceRange.upperBound - priceRange.lowerBound) * ratio
+    }
+
+    /// 第二个光标相对第一个固定光标的横轴价格涨幅（基于两个光标横线所在位置的价格；仅两者都在主图区域时有效）
+    private func secondCursorPriceChange(y: CGFloat, pinnedY: CGFloat?, mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat) -> Double? {
+        guard let pinnedY else { return nil }
+        guard let p1 = priceAtY(pinnedY, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight),
+              let p2 = priceAtY(y, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight),
+              p1 > 0 else { return nil }
+        return (p2 - p1) / p1 * 100
     }
 
     private func rangeStatsView(_ s: (start: String, end: String, change: Double, high: Double, low: Double, vol: Double, amo: Double),
@@ -1332,15 +1472,25 @@ struct KlineChartView: View {
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
                                ratios: labelRatios, formatter: subFmt)
 
-            if let selectedIndex, selectedIndex >= startIndex, selectedIndex <= endIndex {
-                let xPosition = (CGFloat(selectedIndex - startIndex) + 0.5) * candleSpacing
-                Rectangle().fill(Color.black.opacity(0.45)).frame(width: 1.0, height: height).position(x: xPosition, y: height / 2)
-            }
+            // 可交互光标（pin 开启时即第二个光标）与固定光标的副图竖线都绘制
+            subCursorVLine(index: selectedIndex, compare: pinnedIndex, candleSpacing: candleSpacing, height: height)
+            subCursorVLine(index: pinnedIndex, compare: nil, candleSpacing: candleSpacing, height: height)
         }
         .frame(width: width, height: height)
         .clipped()
         .overlay {
             swipeOverlay(slot: slot, width: width, height: height)
+        }
+    }
+
+    /// 副图单个光标的竖线（可交互光标与固定光标共用；第二个光标蓝色、固定光标黑色）
+    @ViewBuilder
+    private func subCursorVLine(index: Int?, compare: Int?, candleSpacing: CGFloat, height: CGFloat) -> some View {
+        if let index, index >= startIndex, index <= endIndex {
+            let xPosition = (CGFloat(index - startIndex) + 0.5) * candleSpacing
+            Rectangle().fill(compare != nil ? Color.blue : Color.black.opacity(0.45))
+                .frame(width: 1.0, height: height)
+                .position(x: xPosition, y: height / 2)
         }
     }
 
@@ -1424,8 +1574,9 @@ struct KlineChartView: View {
                     showMainSheet = false
                     withAnimation { showSubSheet.toggle() }
                 })
+                // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式
                 ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
-                    legendItem(line)
+                    legendItem(line, formatter: (m.kind == .vol || m.kind == .amo) ? { formatVolume($0) } : nil)
                 }
                 Spacer()
             }
@@ -1484,13 +1635,14 @@ struct KlineChartView: View {
         }
     }
 
-    private func legendItem(_ line: IndicatorLine, format: String = "%.2f") -> some View {
+    private func legendItem(_ line: IndicatorLine, format: String = "%.2f", formatter: ((Double) -> String)? = nil) -> some View {
         // NOTEXT_ 前缀的输出线：不显示名称也不显示数值（仅保留线条）
         if line.hideValue { return AnyView(EmptyView()) }
         let name = legendName(line)
         let color = line.color
         if let value = legendValueFor(line), !value.isNaN {
-            return AnyView(Text("\(name):\(String(format: format, value))")
+            let valueText = formatter?(value) ?? String(format: format, value)
+            return AnyView(Text("\(name):\(valueText)")
                 .font(.system(size: 12))
                 .foregroundColor(color))
         } else {
@@ -1532,7 +1684,8 @@ struct KlineChartView: View {
         .frame(width: width, height: height)
     }
     private func formatVolume(_ v: Double) -> String {
-        if v >= 100000000 { return String(format: "%.2f亿", v / 100000000) }
+        if v >= 1000000000000 { return String(format: "%.2f万亿", v / 1000000000000) }
+        else if v >= 100000000 { return String(format: "%.2f亿", v / 100000000) }
         else if v >= 10000 { return String(format: "%.2f万", v / 10000) }
         else { return String(format: "%.0f", v) }
     }
@@ -1553,13 +1706,31 @@ struct KlineChartView: View {
             }
             Text(right).font(.system(size: 10)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            // 📌 开启且第一个固定光标存在时：固定光标的行情数据覆盖显示在时间轴上（第二个光标出现后依然持续显示）
+            if let pinnedIndex, pinnedIndex >= startIndex, pinnedIndex <= endIndex {
+                let item = sortedData[pinnedIndex]
+                let prev = prevClose(of: pinnedIndex)
+                let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
+                HStack(spacing: 6) {
+                    axisKV("开", String(format: "%.2f", item.open), .black)
+                    axisKV("收", String(format: "%.2f", item.close), item.isUp ? upColor : downColor)
+                    axisKV("高", String(format: "%.2f", item.high), upColor)
+                    axisKV("低", String(format: "%.2f", item.low), downColor)
+                    axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
+                    axisKV("额", item.formattedTurnover, .black)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.95))
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .frame(width: width, height: height)
         .background(Color.white)
     }
 
     /// 时间轴上方新增的行情数据行：十字光标出现时显示光标所在K线 开/收/高/低/涨/额（涨为百分比），
-    /// 无光标时显示当前屏幕最右边那根K线的行情数据
+    /// 无光标时显示当前屏幕最右边那根K线的行情数据（固定光标的行情数据改由时间轴覆盖显示）
     private func axisQuoteRow(width: CGFloat, height: CGFloat) -> some View {
         ZStack {
             // 光标出现时取光标所在K线，否则取屏幕最右边那根K线

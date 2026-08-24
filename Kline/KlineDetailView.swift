@@ -55,6 +55,10 @@ struct KlineDetailView: View {
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
     @State private var isLoading = true
+    /// 📌 固定光标模式开关（高亮表示已开启）
+    @State private var pinEnabled = false
+    /// 图表当前是否已有任意十字光标（控制 📌 按钮是否可开启）
+    @State private var chartHasCursor = false
 
     init(item: MetaItem, onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
@@ -135,6 +139,22 @@ struct KlineDetailView: View {
                     .lineLimit(1)
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+            // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
+            Button(action: {
+                if pinEnabled {
+                    pinEnabled = false
+                } else if chartHasCursor {
+                    pinEnabled = true
+                }
+            }) {
+                Image(systemName: pinEnabled ? "pin.fill" : "pin")
+                    .font(.system(size: 15))
+                    .foregroundColor(pinEnabled ? .blue : .gray)
+                    .frame(width: 32, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .disabled(!pinEnabled && !chartHasCursor)
 
             // K线设置
             Button(action: {
@@ -359,17 +379,24 @@ struct KlineDetailView: View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, period: config.selectedPeriod,
                        onPeriodSwitch: { newPeriod in
+                           // 切换周期后图表重建，固定光标随之失效，重置 pin
+                           pinEnabled = false
                            withAnimation { config.selectedPeriod = newPeriod }
                        },
                        onSwitchItem: { dir in
                            // 第二副图左右滑动切换标的：dir = -1 上一个 / +1 下一个
                            if let next = detailRouter.neighbor(dir) {
+                               pinEnabled = false
                                item = next
                                loadData()
                            }
                        },
                        canSwitchItem: { dir in
                            detailRouter.canSwitch(dir)
+                       },
+                       pinEnabled: $pinEnabled,
+                       onHasCursorChange: { has in
+                           chartHasCursor = has
                        })
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
