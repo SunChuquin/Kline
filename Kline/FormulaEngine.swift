@@ -499,7 +499,7 @@ struct TDXEvaluator {
             case "+": result[i] = x + y
             case "-": result[i] = x - y
             case "*": result[i] = x * y
-            case "/": result[i] = (y == 0) ? .nan : x / y
+            case "/": result[i] = (y == 0) ? 0 : x / y   // 通达信语义：除零结果为 0（否则缺失数据区会变成 NaN）
             case "<": result[i] = x < y ? 1 : 0
             case ">": result[i] = x > y ? 1 : 0
             case "<=": result[i] = x <= y ? 1 : 0
@@ -638,11 +638,13 @@ struct TDXEvaluator {
             var prev: Double?
             for i in 0..<barCount {
                 let v = seq[offset + i]
+                // 跳过无效数据，避免污染后续计算
+                if v.isNaN { continue }
                 if let p = prev {
                     let cur = v * k + p * (1 - k)
                     result[i] = cur
                     prev = cur
-                } else if !v.isNaN {
+                } else {
                     result[i] = v
                     prev = v
                 }
@@ -670,11 +672,13 @@ struct TDXEvaluator {
         var prev: Double?
         for i in 0..<barCount {
             let v = seq[offset + i]
+            // 跳过无效数据：热身后遇到 NaN 保持前值，避免污染后续所有计算（导致整条线空白）
+            if v.isNaN { continue }
             if let p = prev {
                 let cur = (m * v + (Double(period) - m) * p) / Double(period)
                 result[i] = cur
                 prev = cur
-            } else if !v.isNaN {
+            } else {
                 result[i] = v
                 prev = v
             }

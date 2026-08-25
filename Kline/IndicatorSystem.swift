@@ -26,7 +26,7 @@ extension SubChartKind {
     var group: String {
         switch self {
         case .vol, .amo, .vmacd, .vr, .vrsi, .obv, .col: return "量能"
-        case .macd, .dmi, .trix: return "趋向"
+        case .macd, .wmacd, .dmi, .trix: return "趋向"
         case .kdj, .rsi, .cci, .kd, .lwr, .marsi, .brar, .cr, .mass, .cdj: return "超买超卖"
         }
     }
@@ -40,7 +40,7 @@ extension SubChartKind {
     var paramSpecs: [SubParamSpec] {
         switch self {
         case .vol, .amo: return []
-        case .macd:
+        case .macd, .wmacd:
             return [.init(key: "fast", label: "快", range: 1...300, defaultValue: 12),
                     .init(key: "slow", label: "慢", range: 1...300, defaultValue: 26),
                     .init(key: "signal", label: "信号", range: 1...300, defaultValue: 9)]
