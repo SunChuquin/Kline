@@ -36,6 +36,39 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
+      - name: Validate Provisioning Profile
+        run: |
+          set -e
+          security cms -D -i profile.mobileprovision -o profile.plist
+          python3 - <<'PY'
+          import plistlib
+          with open('profile.plist', 'rb') as f:
+              p = plistlib.load(f)
+          appid  = p.get('ApplicationIdentifier', '')
+          team   = p.get('TeamIdentifier', [])
+          exp    = p.get('ExpirationDate', '')
+          devs   = p.get('ProvisionedDevices', [])
+          print('=== Provisioning Profile Info ===')
+          print('Name                    :', p.get('Name'))
+          print('AppIDName               :', p.get('AppIDName'))
+          print('ApplicationIdentifier   :', appid)
+          print('TeamIdentifier          :', team)
+          print('ExpirationDate          :', exp)
+          print('ProvisionedDevices count:', len(devs))
+          print('================================')
+          ok = True
+          if 'com.sunck.Kline' not in ''.join(appid):
+              print('!! MISMATCH: ApplicationIdentifier does not contain com.sunck.Kline')
+              ok = False
+          if '4G3V8W86TN' not in team:
+              print('!! MISMATCH: TeamIdentifier does not contain 4G3V8W86TN')
+              ok = False
+          if not ok:
+              print('Profile does NOT match target. Fix profile and update PROVISION_PROFILE_BASE64 secret.')
+              exit(1)
+          print('Profile matches com.sunck.Kline / 4G3V8W86TN.')
+          PY
+
       - name: Build Archive
         run: |
           set -e
