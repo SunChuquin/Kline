@@ -44,21 +44,22 @@ jobs:
           import plistlib
           with open('profile.plist', 'rb') as f:
               p = plistlib.load(f)
-          appid  = p.get('ApplicationIdentifier', '')
+          entitlements = p.get('Entitlements', {}) or {}
+          appid  = entitlements.get('application-identifier', '')
           team   = p.get('TeamIdentifier', [])
           exp    = p.get('ExpirationDate', '')
           devs   = p.get('ProvisionedDevices', [])
           print('=== Provisioning Profile Info ===')
           print('Name                    :', p.get('Name'))
           print('AppIDName               :', p.get('AppIDName'))
-          print('ApplicationIdentifier   :', appid)
+          print('application-identifier  :', appid)
           print('TeamIdentifier          :', team)
           print('ExpirationDate          :', exp)
           print('ProvisionedDevices count:', len(devs))
           print('================================')
           ok = True
           if 'com.sunck.Kline' not in ''.join(appid):
-              print('!! MISMATCH: ApplicationIdentifier does not contain com.sunck.Kline')
+              print('!! MISMATCH: application-identifier does not contain com.sunck.Kline')
               ok = False
           if '4G3V8W86TN' not in team:
               print('!! MISMATCH: TeamIdentifier does not contain 4G3V8W86TN')
