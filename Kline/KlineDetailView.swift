@@ -334,6 +334,15 @@ struct KlineDetailView: View {
                                 .font(.system(size: 11))
                                 .foregroundColor(.gray)
                         }
+
+                        // 4. 数据管理（数据库与 App 分离，可单独更新）
+                        settingsSectionTitle("数据管理")
+                        dataRow(title: "数据库位置", detail: "Documents/tdx.db",
+                                subtitle: "可通过 Finder / 文件 App 单独替换该文件，无需重装 App")
+                        actionRow(title: "重新加载数据库", action: { databaseManager.reload() },
+                                  subtitle: "替换 tdx.db 后点击此处立即生效")
+                        actionRow(title: "恢复内置数据库", action: { databaseManager.restoreSeedDatabase() },
+                                  subtitle: "用 App 内置的 tdx.db 覆盖当前数据")
                     }
                 }
 
@@ -371,6 +380,45 @@ struct KlineDetailView: View {
                     .padding(.horizontal, 16)
             }
             .padding(.vertical, 2)
+            Divider().padding(.leading, 16)
+        }
+    }
+
+    /// 静态信息行（标题 + 右侧详情 + 说明）
+    private func dataRow(title: String, detail: String, subtitle: String? = nil) -> some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(title).font(.system(size: 15)).foregroundColor(.black)
+                    Spacer()
+                    Text(detail).font(.system(size: 13)).foregroundColor(.gray)
+                }
+                if let subtitle = subtitle {
+                    Text(subtitle).font(.system(size: 11)).foregroundColor(.gray)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            Divider().padding(.leading, 16)
+        }
+    }
+
+    /// 点击操作行（标题 + 说明）
+    private func actionRow(title: String, action: @escaping () -> Void, subtitle: String? = nil) -> some View {
+        VStack(spacing: 0) {
+            Button(action: action) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 15)).foregroundColor(.blue)
+                    if let subtitle = subtitle {
+                        Text(subtitle).font(.system(size: 11)).foregroundColor(.gray)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
             Divider().padding(.leading, 16)
         }
     }

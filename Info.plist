@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 允许通过 Finder / 文件 App 直接访问本 App 的 Documents 目录，用于单独更新 tdx.db -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+</dict>
+</plist>

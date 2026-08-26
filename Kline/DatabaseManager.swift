@@ -29,24 +29,79 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// 沙盒内可写数据库文件名（放在 Documents，可通过 Finder / 文件 App 单独替换更新，无需重装 App）
+    static let dbFileName = "tdx.db"
+
+    /// 内置种子数据库路径（随 App 打包）
+    private var seedPath: String? {
+        Bundle.main.path(forResource: "tdx", ofType: "db")
+    }
+
+    /// Documents 下可写数据库路径
+    static var writableDBPath: String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent(dbFileName).path
+    }
+
+    /// 首次启动把内置数据库复制到 Documents，之后统一从 Documents 打开，便于单独更新数据库
     private func loadDatabase() {
-        guard let dbPath = Bundle.main.path(forResource: "tdx", ofType: "db") else {
+        guard ensureWritableDBExists() else { return }
+        openDatabase()
+    }
+
+    /// 确保 Documents 下存在可写数据库（缺失时从内置副本复制）
+    @discardableResult
+    private func ensureWritableDBExists() -> Bool {
+        let target = Self.writableDBPath
+        if FileManager.default.fileExists(atPath: target) { return true }
+        guard let seed = seedPath else {
             DispatchQueue.main.async { [weak self] in
-                self?.errorMessage = "数据库文件未找到"
+                self?.errorMessage = "内置数据库文件未找到"
             }
-            return
+            return false
         }
+        do {
+            try FileManager.default.copyItem(atPath: seed, toPath: target)
+            return true
+        } catch {
+            DispatchQueue.main.async { [weak self] in
+                self?.errorMessage = "初始化数据库失败：\(error.localizedDescription)"
+            }
+            return false
+        }
+    }
 
-        let fileURL = URL(fileURLWithPath: dbPath)
-
-        if sqlite3_open(fileURL.path, &db) != SQLITE_OK {
+    private func openDatabase() {
+        guard ensureWritableDBExists() else { return }
+        let path = Self.writableDBPath
+        if sqlite3_open(path, &db) != SQLITE_OK {
             DispatchQueue.main.async { [weak self] in
                 self?.errorMessage = "无法打开数据库"
             }
             return
         }
-
         loadMetaList()
+    }
+
+    /// 外部替换了 Documents/tdx.db 后调用：关闭旧连接、重开并刷新标的列表
+    func reload() {
+        dbQueue.async { [weak self] in
+            guard let self = self else { return }
+            if let db = self.db { sqlite3_close(db); self.db = nil }
+            self.openDatabase()
+        }
+    }
+
+    /// 用内置种子数据库覆盖 Documents 中的数据库（恢复默认数据）后重载
+    func restoreSeedDatabase() {
+        dbQueue.async { [weak self] in
+            guard let self = self, let seed = self.seedPath else { return }
+            let target = Self.writableDBPath
+            if let db = self.db { sqlite3_close(db); self.db = nil }
+            try? FileManager.default.removeItem(atPath: target)
+            try? FileManager.default.copyItem(atPath: seed, toPath: target)
+            self.openDatabase()
+        }
     }
 
     func loadMetaList() {
