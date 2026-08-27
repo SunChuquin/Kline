@@ -17,81 +17,39 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Import Certificate and Profile
-        env:
-          CERT_B64: ${{ secrets.CERTIFICATE_BASE64 }}
-          CERT_PASS: ${{ secrets.CERTIFICATE_PASSWORD }}
-          PROFILE_B64: ${{ secrets.PROVISION_PROFILE_BASE64 }}
+      - name: Import Certificate
         run: |
-          set -e
-          echo "$CERT_B64" | base64 -d > cert.p12
-          echo "$PROFILE_B64" | base64 -d > profile.mobileprovision
+          echo "${{ secrets.CERTIFICATE_BASE64 }}" | base64 -d > cert.p12
 
-          security create-keychain -p temp build.keychain
+          security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
-          security unlock-keychain -p temp build.keychain
-          security import cert.p12 -k build.keychain -P "$CERT_PASS" -A -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k temp build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import cert.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
 
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
-
-      - name: Validate Provisioning Profile
+      - name: Install Profile
         run: |
-          set -e
-          security cms -D -i profile.mobileprovision -o profile.plist
-          python3 - <<'PY'
-          import plistlib
-          with open('profile.plist', 'rb') as f:
-              p = plistlib.load(f)
-          entitlements = p.get('Entitlements', {}) or {}
-          appid  = entitlements.get('application-identifier', '')
-          team   = p.get('TeamIdentifier', [])
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
+          echo "${{ secrets.PROVISION_PROFILE_BASE64 }}" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/Kline.mobileprovision
 
-          print('=== Provisioning Profile Info ===')
-          print('Name                    :', p.get('Name'))
-          print('AppIDName               :', p.get('AppIDName'))
-          print('application-identifier  :', appid)
-          print('TeamIdentifier          :', team)
-          print('ExpirationDate          :', p.get('ExpirationDate'))
-          print('================================')
-
-          if 'com.sunck.Kline' in ''.join(appid):
-              print('✅ Profile matches com.sunck.Kline')
-          else:
-              print('⚠️  WARNING: Profile App ID does not contain com.sunck.Kline')
-              print('   Current App ID:', appid)
-          PY
-
-      - name: Debug Signing Info
-        run: |
-          echo "=== Available Identities ==="
-          security find-identity -v -p codesigning
-
-          echo "=== Provisioning Profiles ==="
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
-
-          echo "=== Profile Details ==="
-          security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision | plutil -p - | head -100
-
-          echo "=== Xcode Build Settings ==="
-          xcodebuild -showBuildSettings -project Kline.xcodeproj -scheme Kline CODE_SIGN_STYLE=Manual
+          # 自动提取UUID
+          security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/Kline.mobileprovision -o profile.plist
+          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" profile.plist)
+          echo "✅ Profile UUID: $UUID"
+          echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
 
       - name: Build Archive
         run: |
-          set -e
-          # 获取签名身份
-          IDENTITY=$(security find-identity -v -p codesigning | grep -E "iPhone Developer|Apple Development" | head -1 | awk -F '"' '{print $2}')
+          IDENTITY=$(security find-identity -v -p codesigning | grep "iPhone Developer" | head -1 | awk -F '"' '{print $2}')
 
           if [ -z "$IDENTITY" ]; then
             echo "❌ No signing identity found!"
-            security find-identity -v -p codesigning
             exit 1
           fi
 
-          echo "✅ Using signing identity: $IDENTITY"
+          echo "✅ Using: $IDENTITY"
 
-          xcodebuild \
+          xcodebuild archive \
             -project Kline.xcodeproj \
             -scheme Kline \
             -configuration Release \
@@ -99,61 +57,31 @@ jobs:
             -archivePath build/Kline.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$IDENTITY" \
-            PROVISIONING_PROFILE_SPECIFIER="com.sunck.Kline" \
-            archive
+            PROVISIONING_PROFILE="${{ env.PROFILE_UUID }}" \
+            DEVELOPMENT_TEAM="4G3V8W86TN"
 
-      - name: Create ExportOptions.plist
+      - name: Export IPA
         run: |
-          # 从profile提取Team ID
-          security cms -D -i profile.mobileprovision -o profile_info.plist
-          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print TeamIdentifier:0" profile_info.plist 2>/dev/null || echo "")
-
-          if [ -z "$TEAM_ID" ]; then
-            echo "⚠️  Could not extract Team ID, please check manually"
-            # 如果你的Team ID提取失败，可以硬编码这里
-            # TEAM_ID="你的TeamID"
-          fi
-
-          echo "✅ Using Team ID: $TEAM_ID"
-
-          # 判断Profile类型（从profile中提取）
-          PROFILE_TYPE=$(/usr/libexec/PlistBuddy -c "Print Entitlements:aps-environment" profile_info.plist 2>/dev/null || echo "")
-          if [ "$PROFILE_TYPE" == "development" ]; then
-            EXPORT_METHOD="development"
-          else
-            EXPORT_METHOD="ad-hoc"  # 或 app-store，根据你的实际情况
-          fi
-
           cat > ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>method</key>
-              <string>${EXPORT_METHOD}</string>
+              <string>development</string>
               <key>teamID</key>
-              <string>${TEAM_ID}</string>
+              <string>4G3V8W86TN</string>
               <key>signingStyle</key>
               <string>manual</string>
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.sunck.Kline</key>
-                  <string>com.sunck.Kline</string>
+                  <string>${{ env.PROFILE_UUID }}</string>
               </dict>
-              <key>compileBitcode</key>
-              <false/>
-              <key>stripSwiftSymbols</key>
-              <true/>
           </dict>
           </plist>
           EOF
 
-          echo "ExportOptions.plist created:"
-          cat ExportOptions.plist
-
-      - name: Export IPA
-        run: |
-          set -e
           xcodebuild -exportArchive \
             -archivePath build/Kline.xcarchive \
             -exportOptionsPlist ExportOptions.plist \
