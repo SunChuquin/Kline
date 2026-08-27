@@ -127,7 +127,7 @@ struct ContentView: View {
             }
         } else {
             // 点击其他按钮
-            selectedTab = nonExistentTab
+            selectedTab = index
             lastHomeTapTime = nil
             lastSimulateTapTime = nil
         }
