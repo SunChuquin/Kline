@@ -79,6 +79,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -archivePath build/Kline.xcarchive \
+            -allowProvisioningUpdates \
             archive
 
       - name: Export IPA
