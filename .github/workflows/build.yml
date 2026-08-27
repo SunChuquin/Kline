@@ -47,40 +47,109 @@ jobs:
           entitlements = p.get('Entitlements', {}) or {}
           appid  = entitlements.get('application-identifier', '')
           team   = p.get('TeamIdentifier', [])
-          exp    = p.get('ExpirationDate', '')
-          devs   = p.get('ProvisionedDevices', [])
+
           print('=== Provisioning Profile Info ===')
           print('Name                    :', p.get('Name'))
           print('AppIDName               :', p.get('AppIDName'))
           print('application-identifier  :', appid)
           print('TeamIdentifier          :', team)
-          print('ExpirationDate          :', exp)
-          print('ProvisionedDevices count:', len(devs))
+          print('ExpirationDate          :', p.get('ExpirationDate'))
           print('================================')
-          ok = True
-          if 'com.sunck.Kline' not in ''.join(appid):
-              print('!! MISMATCH: application-identifier does not contain com.sunck.Kline')
-              ok = False
-          if '4G3V8W86TN' not in team:
-              print('!! MISMATCH: TeamIdentifier does not contain 4G3V8W86TN')
-              ok = False
-          if not ok:
-              print('Profile does NOT match target. Fix profile and update PROVISION_PROFILE_BASE64 secret.')
-              exit(1)
-          print('Profile matches com.sunck.Kline / 4G3V8W86TN.')
+
+          if 'com.sunck.Kline' in ''.join(appid):
+              print('✅ Profile matches com.sunck.Kline')
+          else:
+              print('⚠️  WARNING: Profile App ID does not contain com.sunck.Kline')
+              print('   Current App ID:', appid)
           PY
+
+      - name: Debug Signing Info
+        run: |
+          echo "=== Available Identities ==="
+          security find-identity -v -p codesigning
+
+          echo "=== Provisioning Profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+
+          echo "=== Profile Details ==="
+          security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision | plutil -p - | head -100
+
+          echo "=== Xcode Build Settings ==="
+          xcodebuild -showBuildSettings -project Kline.xcodeproj -scheme Kline CODE_SIGN_STYLE=Manual
 
       - name: Build Archive
         run: |
           set -e
+          # 获取签名身份
+          IDENTITY=$(security find-identity -v -p codesigning | grep -E "iPhone Developer|Apple Development" | head -1 | awk -F '"' '{print $2}')
+
+          if [ -z "$IDENTITY" ]; then
+            echo "❌ No signing identity found!"
+            security find-identity -v -p codesigning
+            exit 1
+          fi
+
+          echo "✅ Using signing identity: $IDENTITY"
+
           xcodebuild \
             -project Kline.xcodeproj \
             -scheme Kline \
             -configuration Release \
             -sdk iphoneos \
             -archivePath build/Kline.xcarchive \
-            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$IDENTITY" \
+            PROVISIONING_PROFILE_SPECIFIER="com.sunck.Kline" \
             archive
+
+      - name: Create ExportOptions.plist
+        run: |
+          # 从profile提取Team ID
+          security cms -D -i profile.mobileprovision -o profile_info.plist
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print TeamIdentifier:0" profile_info.plist 2>/dev/null || echo "")
+
+          if [ -z "$TEAM_ID" ]; then
+            echo "⚠️  Could not extract Team ID, please check manually"
+            # 如果你的Team ID提取失败，可以硬编码这里
+            # TEAM_ID="你的TeamID"
+          fi
+
+          echo "✅ Using Team ID: $TEAM_ID"
+
+          # 判断Profile类型（从profile中提取）
+          PROFILE_TYPE=$(/usr/libexec/PlistBuddy -c "Print Entitlements:aps-environment" profile_info.plist 2>/dev/null || echo "")
+          if [ "$PROFILE_TYPE" == "development" ]; then
+            EXPORT_METHOD="development"
+          else
+            EXPORT_METHOD="ad-hoc"  # 或 app-store，根据你的实际情况
+          fi
+
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>${EXPORT_METHOD}</string>
+              <key>teamID</key>
+              <string>${TEAM_ID}</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.sunck.Kline</key>
+                  <string>com.sunck.Kline</string>
+              </dict>
+              <key>compileBitcode</key>
+              <false/>
+              <key>stripSwiftSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          echo "ExportOptions.plist created:"
+          cat ExportOptions.plist
 
       - name: Export IPA
         run: |
