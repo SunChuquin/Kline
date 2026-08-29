@@ -61,6 +61,75 @@ final class DragState {
     var cursorDragging: Bool = false
     var isDragging = false
     var needsRefreshAfterDrag = false
+    /// 双指手势进行中：平移/缩放由双指手势统一处理，单指手势应跳过，避免重复平移/误触发
+    var twoFingerActive = false
+}
+
+// MARK: - 双指手势（UIKit）
+
+/// 双指手势层：一个只覆盖「单个图表面板区域」的 UIKit 视图，挂 UIPinchGestureRecognizer。
+/// SwiftUI 的 MagnificationGesture 只在「捏合（距离变化）」时激活、DragGesture 多指时不可靠，
+/// 无法在双指固定距离平移时拿到整体横向位移；UIPinchGestureRecognizer 原生跟踪双指质心
+/// （location(in:)）与缩放（scale），固定距离平移时质心移动也会持续触发。
+/// 该视图按面板分片放置（主图/各副图各一块），不覆盖 legend 行的按钮；
+/// 面板上的单指触摸沿 UIKit 响应链同时派发给祖先上的 SwiftUI 手势（chartDragGesture），
+/// 因此单指平移/缩放/光标/副图切换不受影响。
+struct TwoFingerGestureHook: UIViewRepresentable {
+    let onBegin: (CGFloat) -> Void       // 手势起始：双指质心 x
+    let onChange: (CGFloat, CGFloat) -> Void // 手势中：缩放 scale、质心横向位移增量 dx
+    let onEnd: () -> Void
+
+    func makeUIView(context: Context) -> TwoFingerHookView {
+        let v = TwoFingerHookView()
+        v.onBegin = onBegin
+        v.onChange = onChange
+        v.onEnd = onEnd
+        return v
+    }
+    func updateUIView(_ uiView: TwoFingerHookView, context: Context) {
+        uiView.onBegin = onBegin
+        uiView.onChange = onChange
+        uiView.onEnd = onEnd
+    }
+}
+
+final class TwoFingerHookView: UIView, UIGestureRecognizerDelegate {
+    var onBegin: ((CGFloat) -> Void)?
+    var onChange: ((CGFloat, CGFloat) -> Void)?
+    var onEnd: (() -> Void)?
+    private var lastCentroidX: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = true
+        let p = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        p.delegate = self
+        addGestureRecognizer(p)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
+        let c = g.location(in: self)
+        switch g.state {
+        case .began:
+            lastCentroidX = c.x
+            onBegin?(c.x)
+        case .changed:
+            let dx = c.x - lastCentroidX
+            lastCentroidX = c.x
+            onChange?(g.scale, dx)
+        case .ended, .cancelled, .failed:
+            lastCentroidX = 0
+            onEnd?()
+        default:
+            break
+        }
+    }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
 }
 
 /// 副图左右滑动切换的拖动反馈动画状态
@@ -156,7 +225,7 @@ final class ChartConfigStore: ObservableObject {
     @Published var bollConfig = BOLLConfig()
     // 主图自定义指标
     @Published var activeCustomIndicatorID: UUID? = nil
-    // 主图镜像（空）：开启后主图图形取负镜像
+    // 全局多/空镜像（顶部导航栏按钮控制）：开启后主图与所有副图图形取负镜像（空头）
     @Published var mainMirrored = false
 
     // 三个副图（跨页面保留同一实例，避免重建）
@@ -343,8 +412,6 @@ final class SubChartModel: ObservableObject {
     @Published var params: [String: Int] = [:]
     /// VOL/AMO 的量均线周期（0=隐藏）
     @Published var volPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
-    /// 副图镜像（空）：开启后本副图图形取负镜像；VOL/AMO 不支持
-    @Published var mirrored = false
 
     var isCustom: Bool { activeCustomID != nil }
 
@@ -702,10 +769,10 @@ struct KlineChartView: View {
         return s.map { -$0 }
     }
 
-    /// 副图可见窗口曲线的取负版本（副图开启镜像时）
-    private func subMirroredSliceArr(_ m: SubChartModel, _ values: [Double]) -> [Double] {
+    /// 副图可见窗口曲线的取负版本（全局空头镜像开启时）
+    private func subMirroredSliceArr(_ values: [Double]) -> [Double] {
         let s = sliceArr(values)
-        guard m.mirrored else { return s }
+        guard config.mainMirrored else { return s }
         return s.map { -$0 }
     }
 
@@ -1208,7 +1275,7 @@ struct KlineChartView: View {
             r = (mn - pad, mx + pad)
         }
         // 空头镜像（取负）：范围镜像为 (-max)...(-min)，曲线随之镜像
-        if m.mirrored { return (-r.max, -r.min) }
+        if config.mainMirrored { return (-r.max, -r.min) }
         return r
     }
 
@@ -1242,6 +1309,8 @@ struct KlineChartView: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
                 guard !menuIsOpen else { return }
+                // 双指手势进行中：平移/缩放由双指手势统一处理，单指手势跳过，避免重复平移/误触发
+                if drag.twoFingerActive { return }
                 // 手势作用域固定为起点所在区域：主图/副图1/副图2/副图3；滑出起点区域后仍以起点区域处理
                 let sy = value.startLocation.y
                 let startInMain = isInPanel(sy, mainTop, mainBottom)
@@ -1324,6 +1393,8 @@ struct KlineChartView: View {
                 drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
                 panOffset = 0
                 statsDragEdge = nil
+                // 兜底：无论手势如何结束（含双指手势被中断），都清除双指状态，避免残留拦截后续单指拖动
+                drag.twoFingerActive = false
                 // 关键：无论手势如何结束（含提前 return 的分支），都必须重置拖拽状态，
                 // 否则 isDragging 一直为 true，后续切换/修改指标的重算都会被跳过
                 drag.isDragging = false
@@ -1383,40 +1454,60 @@ struct KlineChartView: View {
         return target >= 0 && target < cases.count
     }
 
-    /// 双指缩放：以双指位置（lastTouchX 质心）对应的K线为基线，保持该K线的屏幕位置不变
-    private func magnificationGesture(width: CGFloat) -> some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                selectedIndex = nil; crosshairY = nil
-                let newCountF = clamp(zoomBase / value, 20, CGFloat(capVisibleCount))
-                let newCount = max(1, Int(newCountF.rounded()))
-                // 缩放开始：以最近触摸位置（双指质心）确定锚点K线
-                if zoomAnchorIndex == nil {
-                    let spacing = width / CGFloat(max(1, count))
-                    let anchor = startIndex + Int((drag.lastTouchX / spacing).rounded(.down))
-                    zoomAnchorIndex = clamp(anchor, 0, max(0, sortedData.count - 1))
-                    zoomAnchorOffset = (CGFloat(zoomAnchorIndex! - startIndex) + 0.5) * spacing
-                }
-                visibleCount = newCountF
-                // 保持锚点K线屏幕位置不变：反推新的可见窗口起点
-                if let anchor = zoomAnchorIndex {
-                    let spacing1 = width / CGFloat(newCount)
-                    let newStartF = CGFloat(anchor) - zoomAnchorOffset / spacing1 + 0.5
-                    let newStart = Int(newStartF.rounded())
-                    let newEnd = newStart + newCount - 1
-                    let maxEnd = sortedData.count - 1
-                    let minEnd = max(0, newCount - 1)
-                    let clampedEnd = min(maxEnd, max(minEnd, newEnd))
-                    endOffset = maxEnd - clampedEnd
-                }
-                // 手势（含双指缩放）不暂停后台预计算：进度条持续推进到消失
-            }
-            .onEnded { _ in
-                zoomBase = visibleCount
-                zoomAnchorIndex = nil
-                // 双指缩放结束，恢复后台历史预计算（避免 DragGesture 被抢占时漏重启）
-                startPrefetch()
-            }
+    // MARK: - 双指手势（由 TwoFingerGestureHook 回调驱动）
+
+    /// 双指手势开始：以双指质心起始位置对应K线为缩放锚点，初始化缩放基准
+    private func handleTwoFingerBegin(centroidX: CGFloat, width: CGFloat) {
+        drag.twoFingerActive = true
+        selectedIndex = nil; crosshairY = nil
+        zoomBase = visibleCount
+        zoomAnchorIndex = nil
+        let spacing = width / CGFloat(max(1, count))
+        let anchor = startIndex + Int((max(0, centroidX) / spacing).rounded(.down))
+        zoomAnchorIndex = clamp(anchor, 0, max(0, sortedData.count - 1))
+        zoomAnchorOffset = (CGFloat(zoomAnchorIndex! - startIndex) + 0.5) * spacing
+        // 手势不暂停后台预计算：进度条持续推进到消失
+    }
+
+    /// 双指手势中：质心横向位移 dx → 平移（锚点K线随双指移动）；缩放 scale → 围绕锚点缩放
+    private func handleTwoFingerChange(scale: CGFloat, centroidDeltaX: CGFloat, width: CGFloat) {
+        guard drag.twoFingerActive else { return }
+        // 平移：锚点屏幕位置随双指质心整体横向位移移动
+        zoomAnchorOffset += centroidDeltaX
+        // 缩放：围绕锚点缩放（锚点K线保持在同一屏幕位置）
+        let newCountF = clamp(zoomBase / scale, 20, CGFloat(capVisibleCount))
+        let newCount = max(1, Int(newCountF.rounded()))
+        visibleCount = newCountF
+        if let anchor = zoomAnchorIndex {
+            let spacing1 = width / CGFloat(newCount)
+            let newStartF = CGFloat(anchor) - zoomAnchorOffset / spacing1 + 0.5
+            let newStart = Int(newStartF.rounded())
+            let newEnd = newStart + newCount - 1
+            let maxEnd = sortedData.count - 1
+            let minEnd = max(0, newCount - 1)
+            let clampedEnd = min(maxEnd, max(minEnd, newEnd))
+            endOffset = maxEnd - clampedEnd
+        }
+    }
+
+    /// 双指手势结束：复位缩放状态，恢复后台历史预计算
+    private func handleTwoFingerEnd() {
+        zoomBase = visibleCount
+        zoomAnchorIndex = nil
+        zoomAnchorOffset = 0
+        drag.twoFingerActive = false
+        startPrefetch()
+    }
+
+    /// 生成覆盖单个图表面板区域的双指手势层（按面板分片，不覆盖 legend 行的按钮）
+    private func twoFingerLayer(width: CGFloat, rect: CGRect) -> some View {
+        TwoFingerGestureHook(
+            onBegin: { cx in handleTwoFingerBegin(centroidX: cx, width: width) },
+            onChange: { scale, dx in handleTwoFingerChange(scale: scale, centroidDeltaX: dx, width: width) },
+            onEnd: { handleTwoFingerEnd() }
+        )
+        .frame(width: rect.width, height: rect.height)
+        .position(x: rect.midX, y: rect.midY)
     }
 
     // MARK: - Body
@@ -1445,29 +1536,38 @@ struct KlineChartView: View {
             let s3Top = s2Bottom + legendHeight
             let s3Bottom = s3Top + sub3Height
 
-            VStack(spacing: 0) {
-                mainLegendRow(height: legendHeight).zIndex(30)
-                mainChart(width: width, candleSpacing: candleSpacing, height: mainHeight)
-                if !mainFullscreen {
-                    subLegendRow(model: subTop, height: legendHeight).zIndex(30)
-                    subChart(model: subTop, width: width, candleSpacing: candleSpacing, height: sub1Height,
-                             slot: .top)
-                    subLegendRow(model: subBottom, height: legendHeight).zIndex(30)
-                    subChart(model: subBottom, width: width, candleSpacing: candleSpacing, height: sub2Height,
-                             slot: .bottom)
-                    subLegendRow(model: subThird, height: legendHeight).zIndex(30)
-                    subChart(model: subThird, width: width, candleSpacing: candleSpacing, height: sub3Height,
-                             slot: .third)
+            ZStack {
+                VStack(spacing: 0) {
+                    mainLegendRow(height: legendHeight).zIndex(30)
+                    mainChart(width: width, candleSpacing: candleSpacing, height: mainHeight)
+                    if !mainFullscreen {
+                        subLegendRow(model: subTop, height: legendHeight).zIndex(30)
+                        subChart(model: subTop, width: width, candleSpacing: candleSpacing, height: sub1Height,
+                                 slot: .top)
+                        subLegendRow(model: subBottom, height: legendHeight).zIndex(30)
+                        subChart(model: subBottom, width: width, candleSpacing: candleSpacing, height: sub2Height,
+                                 slot: .bottom)
+                        subLegendRow(model: subThird, height: legendHeight).zIndex(30)
+                        subChart(model: subThird, width: width, candleSpacing: candleSpacing, height: sub3Height,
+                                 slot: .third)
+                    }
+                    // 时间轴上方新增一行：十字光标出现时显示 开/收/高/低/涨/额 行情数据
+                    axisQuoteRow(width: width, height: timeHeight)
+                    timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
                 }
-                // 时间轴上方新增一行：十字光标出现时显示 开/收/高/低/涨/额 行情数据
-                axisQuoteRow(width: width, height: timeHeight)
-                timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
+                // 双指手势层：按面板分片覆盖（主图/各副图各一块），不覆盖 legend 行的按钮，
+                // 面板上的单指触摸沿响应链派发给祖先 ZStack 上的 chartDragGesture
+                twoFingerLayer(width: width, rect: CGRect(x: 0, y: mainTop, width: width, height: mainHeight))
+                if !mainFullscreen {
+                    twoFingerLayer(width: width, rect: CGRect(x: 0, y: s1Top, width: width, height: sub1Height))
+                    twoFingerLayer(width: width, rect: CGRect(x: 0, y: s2Top, width: width, height: sub2Height))
+                    twoFingerLayer(width: width, rect: CGRect(x: 0, y: s3Top, width: width, height: sub3Height))
+                }
             }
             .contentShape(Rectangle())
             .gesture(chartDragGesture(width: width, candleSpacing: candleSpacing, mainTop: mainTop, mainBottom: mainBottom,
                                       s1Top: s1Top, s1Bottom: s1Bottom, s2Top: s2Top, s2Bottom: s2Bottom,
                                       s3Top: s3Top, s3Bottom: s3Bottom))
-            .simultaneousGesture(magnificationGesture(width: width))
             .overlay {
                 // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
                 ZStack(alignment: .topLeading) {
@@ -1565,6 +1665,12 @@ struct KlineChartView: View {
         .onChange(of: config.showBareK) { _ in
             // 顶部栏裸K按钮切换后立即重算（隐藏/恢复主图指标）
             recomputeMainCurves(force: true)
+        }
+        .onChange(of: config.mainMirrored) { _ in
+            // 全局多/空镜像（顶部导航栏控制）切换：价格范围取负会改变固定光标的价格映射，
+            // 切换时清除固定光标避免错位
+            pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
+            notifyHasCursor()
         }
         .onChange(of: customStore.indicators) { _ in
             syncCustomAfterStoreChange()
@@ -2489,7 +2595,7 @@ struct KlineChartView: View {
             Color.white
             SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
                            curves: m.curves.map { CanvasCurve(color: $0.color,
-                                                              values: subMirroredSliceArr(m, $0.values),
+                                                              values: subMirroredSliceArr($0.values),
                                                               style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
                            rangeMin: range.min, rangeMax: range.max,
                            upColor: upColor, downColor: downColor, gridColor: gridColor)
@@ -2608,14 +2714,10 @@ struct KlineChartView: View {
                 })
                 // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式
                 ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
-                    legendItem(line, mirrored: m.mirrored,
+                    legendItem(line, mirrored: config.mainMirrored,
                                formatter: (m.kind == .vol || m.kind == .amo) ? { formatVolume($0) } : nil)
                 }
                 Spacer()
-                // 多/空 镜像开关：VOL/AMO 数量无方向，不支持镜像（置灰）
-                mirrorButton(isOn: m.mirrored, enabled: m.kind != .vol && m.kind != .amo) {
-                    m.mirrored.toggle()
-                }
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2639,13 +2741,6 @@ struct KlineChartView: View {
                     legendItem(line, mirrored: config.mainMirrored)
                 }
                 Spacer()
-                // 多/空 镜像开关：开启后本图取负镜像（不重算指标，仅渲染取负）
-                mirrorButton(isOn: config.mainMirrored, enabled: true) {
-                    config.mainMirrored.toggle()
-                    // 价格范围取负会改变固定光标的价格映射，切换时清除固定光标避免错位
-                    pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
-                    notifyHasCursor()
-                }
                 // 主图放大开关：进入后主图全屏裸K、显示全部 K 线；放大期间若双指缩放导致 K 线数变少，
                 // 再次点击只重新全显（保持放大）；仅当全部 K 线都在屏幕内时才退出放大并恢复最新 100 根
                 Button {
@@ -2764,22 +2859,6 @@ struct KlineChartView: View {
             Circle().fill(Color.gray).frame(width: 6, height: 6)
             Text(text).font(.system(size: 11)).foregroundColor(.gray)
         }
-    }
-
-    /// 多/空 镜像切换按钮：默认"多"，开启后显示"空"（本图取负镜像）；disabled 时置灰
-    private func mirrorButton(isOn: Bool, enabled: Bool, onTap: @escaping () -> Void) -> some View {
-        Button(action: onTap) {
-            Text(isOn ? "空" : "多")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(!enabled ? Color.gray.opacity(0.35) : (isOn ? Color.blue : Color.gray))
-                .frame(width: 20, height: 20)
-                .background(enabled ? (isOn ? Color.blue.opacity(0.12) : Color.gray.opacity(0.1)) : Color.clear)
-                .cornerRadius(4)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(isOn ? "关闭空头镜像" : "开启空头镜像")
     }
 
     private func overlayPriceLabels(width: CGFloat, height: CGFloat, min: Double, max: Double, ratios: [CGFloat], formatter: @escaping (Double) -> String) -> some View {

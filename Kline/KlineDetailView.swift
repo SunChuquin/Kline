@@ -156,6 +156,18 @@ struct KlineDetailView: View {
             }
             .disabled(!pinEnabled && !chartHasCursor)
 
+            // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
+            Button(action: {
+                config.mainMirrored.toggle()
+            }) {
+                Text(config.mainMirrored ? "空" : "多")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(config.mainMirrored ? .blue : .gray)
+                    .frame(width: 28, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
+
             // K线设置
             Button(action: {
                 withAnimation { showSettings = true }
