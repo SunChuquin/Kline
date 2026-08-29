@@ -880,8 +880,8 @@ struct TDXOutputLineUnit {
 }
 
 enum TDXFormulaEngine {
-    /// 解析并求值公式，返回所有输出行（按出现顺序）。
-    static func evaluate(formula: String, data: [KlineItem]) throws -> [TDXOutputLine] {
+    /// 解析并求值公式，返回所有输出行（按出现顺序）。纯计算，可在任意线程调用
+    nonisolated static func evaluate(formula: String, data: [KlineItem]) throws -> [TDXOutputLine] {
         var lexer = TDXLexer(formula)
         let tokens = try lexer.tokenize()
         guard !tokens.isEmpty else {
@@ -892,8 +892,8 @@ enum TDXFormulaEngine {
         return try evaluate(statements: stmts, data: data)
     }
 
-    /// 用已解析的语句序列求值（避免重复解析）
-    static func evaluate(statements: [TDXStatement], data: [KlineItem]) throws -> [TDXOutputLine] {
+    /// 用已解析的语句序列求值（避免重复解析）。纯计算，可在任意线程调用
+    nonisolated static func evaluate(statements: [TDXStatement], data: [KlineItem]) throws -> [TDXOutputLine] {
         var evaluator = TDXEvaluator(data: data)
         return try evaluator.evaluate(stmts: statements)
     }

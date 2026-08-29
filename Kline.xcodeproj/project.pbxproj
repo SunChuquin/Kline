@@ -16,7 +16,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D2C5C4C12FE4F6CD00D5918E /* Exceptions for "Indicators" folder in "Kline" group */ = {
+		D2C5C4C12FE4F6CD00D5918E /* Exceptions for "Kline" folder in "Kline" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				"Indicators/*.tdx",
@@ -29,7 +29,7 @@
 		D2C5C4AE2FE4F6CD00D5918E /* Kline */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				D2C5C4C12FE4F6CD00D5918E /* Exceptions for "Indicators" folder in "Kline" group */,
+				D2C5C4C12FE4F6CD00D5918E /* Exceptions for "Kline" folder in "Kline" target */,
 			);
 			path = Kline;
 			sourceTree = "<group>";

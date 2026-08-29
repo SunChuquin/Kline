@@ -377,11 +377,15 @@ struct KlineDetailView: View {
 
     private func chartView(series: ChartSeries) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
-                       showCustomEditor: $showCustomEditor, period: config.selectedPeriod,
+                       showCustomEditor: $showCustomEditor, metaId: item.id, period: config.selectedPeriod,
                        onPeriodSwitch: { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
                            pinEnabled = false
                            withAnimation { config.selectedPeriod = newPeriod }
+                       },
+                       onPeriodPrefetched: { finished in
+                           // 当前周期已全部算完：后台继续预计算其它未计算周期（不切换可见周期）
+                           prefetchOtherPeriods(excluding: finished)
                        },
                        onSwitchItem: { dir in
                            // 第二副图左右滑动切换标的：dir = -1 上一个 / +1 下一个
@@ -438,6 +442,22 @@ struct KlineDetailView: View {
                 self.weeklySeries = weekly.isEmpty ? nil : ChartSeries(data: weekly)
                 self.isLoading = false
             }
+        }
+    }
+
+    /// 当前周期已全部算完后，在后台继续预计算其它未计算周期：
+    /// 结果写入 ChartCacheStore，用户切到该周期时由 K 线图直接从缓存恢复，无需等待。
+    /// 只处理已加载出数据、且尚未标记预计算完成的周期；不切换可见周期。
+    /// 注意：当前正在显示的周期由可见 K 线图自己分块预计算，后台只补「不可见」的周期，
+    /// 避免后台提前把可见周期标记为完成、与可见视图的进行中计算产生竞态
+    private func prefetchOtherPeriods(excluding finished: KlinePeriod) {
+        let metaId = item.id
+        let visible = config.selectedPeriod
+        for period in KlinePeriod.allCases where period != finished && period != visible {
+            let data = period == .daily ? dailySeries?.sorted : weeklySeries?.sorted
+            guard let data, !data.isEmpty else { continue }
+            // 是否已预计算、配置是否已过期，由 KlineChartView.prefetchOtherPeriod 内部判断
+            KlineChartView.prefetchOtherPeriod(metaId: metaId, period: period, data: data)
         }
     }
 }

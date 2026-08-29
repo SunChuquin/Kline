@@ -156,6 +156,8 @@ final class ChartConfigStore: ObservableObject {
     @Published var bollConfig = BOLLConfig()
     // 主图自定义指标
     @Published var activeCustomIndicatorID: UUID? = nil
+    // 主图镜像（空）：开启后主图图形取负镜像
+    @Published var mainMirrored = false
 
     // 三个副图（跨页面保留同一实例，避免重建）
     let subTop = SubChartModel()
@@ -181,7 +183,7 @@ struct BOLLConfig: Equatable {
 
 struct IndicatorLine: Equatable {
     let name: String
-    let values: [Double]
+    var values: [Double]
     let color: Color
     let style: TDXLineStyle
     let lineWidth: Double
@@ -198,6 +200,110 @@ struct CanvasCurve: Equatable {
     var lineWidth: Double
     var barColor: BarColorMode = .fixed
     var markerColors: [Color]? = nil
+}
+
+// MARK: - 后台预计算（分块向历史扩展指标覆盖区间）
+
+/// 预计算每块的指标计算请求（主线程构造，Sendable，可跨线程传给后台求值）
+struct PrefetchCalcRequest {
+    let calcStart: Int
+    let calcEnd: Int
+    let data: [KlineItem]        // 裁剪区间数据
+    let volumes: [Double]        // 裁剪区间成交量
+    let turnovers: [Double]      // 裁剪区间成交额
+    /// 主图公式文本（仅启用的指标，按固定顺序；空串表示未启用/无自定义指标）
+    let mainFormulas: [String]
+    /// 副图请求（3 个，与 subTop/subBottom/subThird 对应）
+    let subs: [SubPrefetchRequest]
+}
+
+struct SubPrefetchRequest {
+    let kind: SubChartKind
+    /// 自定义指标公式（启用自定义时非空，优先于系统公式）
+    let customFormula: String?
+    /// 系统指标公式（已替换参数）
+    let formula: String?
+    /// VOL/AMO 的均线周期
+    let volPeriods: [Int]
+}
+
+/// 后台求值结果（原始输出行，主线程再组装为 IndicatorLine）
+struct PrefetchCalcResult {
+    /// 与 mainFormulas 一一对应
+    let main: [[TDXOutputLine]]
+    /// 与 subs 一一对应（VOL/AMO 为空，主线程用成交量/成交额组装）
+    let subs: [[TDXOutputLine]]
+}
+
+// MARK: - 后台预计算辅助（文件级私有）
+// 后台预计算（prefetchOtherPeriod/makeFullRequest/commitToCache）为 static 上下文，
+// 而本工程构建配置下实例方法无法用「裸名」引用 static 成员，故用文件级函数复用，
+// 与 KlineChartView 实例内配色/命名/参数逻辑保持一致。
+
+private let prefetchUpColor = Color(red: 0.85, green: 0.16, blue: 0.16)
+private let prefetchDownColor = Color(red: 0.0, green: 0.55, blue: 0.35)
+private let prefetchMa10Color = Color.orange
+private let prefetchBollColor = Color(red: 0.4, green: 0.4, blue: 0.9)
+
+private func prefetchMaColor(_ i: Int) -> Color {
+    let colors = [Color.black.opacity(0.75), Color.orange, Color.pink, Color.blue,
+                  Color(red: 0.9, green: 0.6, blue: 0), Color.teal, Color.purple, Color.brown]
+    return colors[i % colors.count]
+}
+
+private func prefetchDisplayName(_ raw: String) -> String { raw.replacingOccurrences(of: "NOTEXT_", with: "") }
+
+private func prefetchCustomLineColor(_ index: Int, line: TDXOutputLine, indicatorColor: Color?) -> Color {
+    if let hex = line.colorHex, let c = Color(hex: hex) { return c }
+    if let indicatorColor { return indicatorColor }
+    let palette = [Color.blue, Color(red: 0.9, green: 0.35, blue: 0.1), Color(red: 0.2, green: 0.55, blue: 0.85),
+                   Color(red: 0.6, green: 0.25, blue: 0.7), Color.teal, Color.pink]
+    return palette[index % palette.count]
+}
+
+private func prefetchAllNaN(_ values: [Double]) -> Bool { values.allSatisfy { $0.isNaN } }
+
+private func prefetchLineColor(from line: TDXOutputLine, fallback: Color) -> Color {
+    if let hex = line.colorHex, let c = Color(hex: hex) { return c }
+    return fallback
+}
+
+private func prefetchFmt(_ v: Double) -> String { String(format: "%g", v) }
+
+private func prefetchStringParams(_ params: [String: Int]) -> [String: String] {
+    var d: [String: String] = [:]
+    for (k, v) in params { d[k] = "\(v)" }
+    return d
+}
+
+private func prefetchSourceValue(_ s: MAValueSource) -> Int {
+    switch s {
+    case .close: return 1
+    case .open: return 2
+    case .high: return 3
+    case .low: return 4
+    case .avg: return 5
+    }
+}
+
+private func prefetchMainMAValues(periods: [Int], sources: [MAValueSource]) -> [String: String] {
+    var d: [String: String] = [:]
+    for i in 0..<8 {
+        let p = periods.indices.contains(i) ? periods[i] : 0
+        let src = sources.indices.contains(i) ? sources[i] : .close
+        d["p\(i + 1)"] = "\(p)"
+        d["src\(i + 1)"] = "\(prefetchSourceValue(src))"
+    }
+    return d
+}
+
+private func prefetchMainMAValues(_ cfg: MAConfig) -> [String: String] {
+    prefetchMainMAValues(periods: cfg.periods, sources: cfg.sources)
+}
+
+private func prefetchMainBOLLValues() -> [String: String] {
+    let config = ChartConfigStore.shared
+    return ["period": "\(config.bollConfig.period)", "mult": prefetchFmt(config.bollConfig.mult)]
 }
 
 /// 主图各指标按「输出行」缓存计算结果：每个输出行（如一条 MA）独立缓存，
@@ -237,6 +343,8 @@ final class SubChartModel: ObservableObject {
     @Published var params: [String: Int] = [:]
     /// VOL/AMO 的量均线周期（0=隐藏）
     @Published var volPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
+    /// 副图镜像（空）：开启后本副图图形取负镜像；VOL/AMO 不支持
+    @Published var mirrored = false
 
     var isCustom: Bool { activeCustomID != nil }
 
@@ -365,10 +473,14 @@ struct GapInfo: Equatable {
 /// 行情 K 线图。
 struct KlineChartView: View {
     private let series: ChartSeries
+    /// 当前标的 ID（用于按 (标的, 周期) 读写指标计算缓存；nil 时不使用缓存）
+    let metaId: Int?
     /// 当前行情周期（用于主图指标名称按钮显示 "日线: MA" 之类前缀）
     let period: KlinePeriod
     /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
     let onPeriodSwitch: ((KlinePeriod) -> Void)?
+    /// 当前周期后台预计算全部完成后的回调（用于外层继续预计算其它未计算周期）
+    let onPeriodPrefetched: ((KlinePeriod) -> Void)?
     /// 第二副图左右滑动切换标的（dir = -1 上一个 / +1 下一个）
     let onSwitchItem: ((Int) -> Void)?
     /// 第二副图某方向是否可切换标的（dir = -1 上一个 / +1 下一个），用于滑动提示
@@ -417,6 +529,21 @@ struct KlineChartView: View {
     @State private var mainCache = MainIndicatorCache()
     /// 主图放大模式：隐藏三个副图 K 线区域（副图名称/指标栏保留并挤到最下方），主图占满剩余空间
     @State private var mainFullscreen = false
+    /// 指标已计算的覆盖区间（绝对索引，随滑动/缩放单调扩展）：
+    /// 左右滑动时，只要可见窗口仍落在已覆盖范围内就复用曲线不重算，保证"已经计算过的部分不丢失"。
+    /// 覆盖区间跨度超上限时（超大幅滑动）重置为当前需要区间，避免退化为全量计算
+    @State private var indicatorCoverageStart = 0
+    @State private var indicatorCoverageEnd = -1
+    /// 指标覆盖区间最大跨度：防止一次滑到很老的历史后覆盖区间扩展到全量
+    private let maxCoverageSpan = 2000
+    /// 历史指标预计算任务 token（nil = 无任务）：打开标的后分块向更久远历史预计算指标，
+    /// 切换周期/标的/指标或用户交互时更新使其失效
+    @State private var prefetchToken: UUID? = nil
+    /// 后台正确计算的覆盖末端（绝对索引）：从数据开头（最左）向右逐块推进，
+    /// 保证 EMA/SMA 等递归指标从第一根开始累积、数值最正确；覆盖到可见窗口末端后才替换前台近似结果
+    @State private var bgCoverageEnd = 0
+    /// 预计算每块向右推进的根数（单块毫秒级，块间让出主线程，不阻塞 UI）
+    private let prefetchBlockSize = 500
 
     // 三个副图（同一实例跨页面复用，配置不重置）
     @ObservedObject private var subTop: SubChartModel
@@ -440,15 +567,19 @@ struct KlineChartView: View {
     init(series: ChartSeries, chartStyle: Binding<ChartStyle>,
          displaySettings: Binding<ChartDisplaySettings> = .constant(ChartDisplaySettings()),
          showCustomEditor: Binding<Bool> = .constant(false),
+         metaId: Int? = nil,
          period: KlinePeriod = .daily,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
+         onPeriodPrefetched: ((KlinePeriod) -> Void)? = nil,
          onSwitchItem: ((Int) -> Void)? = nil,
          canSwitchItem: ((Int) -> Bool)? = nil,
          pinEnabled: Binding<Bool> = .constant(false),
          onHasCursorChange: ((Bool) -> Void)? = nil) {
         self.series = series
+        self.metaId = metaId
         self.period = period
         self.onPeriodSwitch = onPeriodSwitch
+        self.onPeriodPrefetched = onPeriodPrefetched
         self.onSwitchItem = onSwitchItem
         self.canSwitchItem = canSwitchItem
         self._pinEnabled = pinEnabled
@@ -471,6 +602,32 @@ struct KlineChartView: View {
         self._subTop = ObservedObject(wrappedValue: store.subTop)
         self._subBottom = ObservedObject(wrappedValue: store.subBottom)
         self._subThird = ObservedObject(wrappedValue: store.subThird)
+        // 同一标的内切换周期：从 (标的, 周期) 缓存恢复上次的计算结果与覆盖状态，
+        // 保证切回该周期时已算过的部分不重算、不丢失（LRU 保留最近 3 个标的的所有周期）。
+        // 仅当缓存所用指标配置指纹与当前一致时才恢复，否则视为无效、按新配置重新计算
+        if let metaId {
+            let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
+            let fingerprint = Self.currentConfigFingerprint()
+            if entry.configFingerprint == fingerprint {
+                _mainCurves = State(initialValue: entry.mainCurves)
+                _mainCache = State(initialValue: entry.mainCache)
+                _indicatorCoverageStart = State(initialValue: entry.coverageStart)
+                _indicatorCoverageEnd = State(initialValue: entry.coverageEnd)
+                _bgCoverageEnd = State(initialValue: entry.bgCoverageEnd)
+            }
+            if entry.configFingerprint == fingerprint {
+                let subs = [store.subTop, store.subBottom, store.subThird]
+                for (i, m) in subs.enumerated() {
+                    if let curves = entry.subCurves[i], !curves.isEmpty {
+                        m.curves = curves
+                    } else {
+                        // 缓存无该槽位曲线（如配置变更后缓存被清空）：清掉共享模型里
+                        // 其它周期（如周线）残留的旧曲线，避免 recomputeSub 误判为已算好而跳过重算
+                        m.curves = []
+                    }
+                }
+            }
+        }
     }
 
     /// 当前主图自定义指标（从共享仓库中的 ID 派生）
@@ -505,8 +662,12 @@ struct KlineChartView: View {
 
     // MARK: - 可见窗口
 
-    private var count: Int { min(max(20, Int(visibleCount.rounded())), maxVisibleCount) }
+    private var count: Int { min(max(20, Int(visibleCount.rounded())), capVisibleCount) }
     private var maxVisibleCount: Int { sortedData.count }
+    /// 非放大模式下屏幕最多显示的 K 线数（放大模式下才允许显示全部）
+    private let normalMaxVisible = 250
+    /// 当前可用的最大可见 K 线数：放大模式显示全部，非放大模式最多 250 根
+    private var capVisibleCount: Int { mainFullscreen ? maxVisibleCount : min(maxVisibleCount, normalMaxVisible) }
     private var endIndex: Int {
         let maxEnd = sortedData.count - 1
         let minEnd = max(0, count - 1)
@@ -524,6 +685,56 @@ struct KlineChartView: View {
     private func sliceColors(_ arr: [Color]?) -> [Color]? {
         guard let arr, !arr.isEmpty, startIndex <= endIndex, endIndex < arr.count else { return arr }
         return Array(arr[startIndex...endIndex])
+    }
+
+    // MARK: - 镜像（多/空）
+
+    /// 主图是否开启空头镜像（纯取负）
+    private var mainMirrored: Bool { config.mainMirrored }
+
+    /// 取负：主图开启镜像时把数值取负
+    private func mir(_ v: Double) -> Double { mainMirrored ? -v : v }
+
+    /// 可见窗口曲线的取负版本（用于画布），未镜像时原样返回
+    private func mirroredSliceArr(_ values: [Double]) -> [Double] {
+        let s = sliceArr(values)
+        guard mainMirrored else { return s }
+        return s.map { -$0 }
+    }
+
+    /// 副图可见窗口曲线的取负版本（副图开启镜像时）
+    private func subMirroredSliceArr(_ m: SubChartModel, _ values: [Double]) -> [Double] {
+        let s = sliceArr(values)
+        guard m.mirrored else { return s }
+        return s.map { -$0 }
+    }
+
+    /// 镜像后的可见 K 线（OHLC 取负；日期/量额不变，仅供画布绘制）
+    private var mirroredSlice: [KlineItem] {
+        guard mainMirrored else { return slice }
+        return slice.map { it in
+            KlineItem(date: it.date, open: -it.open, high: -it.high, low: -it.low,
+                      close: -it.close, volume: it.volume, turnover: it.turnover)
+        }
+    }
+
+    /// 镜像后的跳空缺口（top/bottom 取负）
+    private var mirroredGaps: [GapInfo] {
+        guard mainMirrored else { return gaps }
+        return gaps.map { g in GapInfo(startIdx: g.startIdx, top: -g.top, bottom: -g.bottom, isUp: g.isUp, filledIdx: g.filledIdx) }
+    }
+
+    /// 镜像后的最新一根 K 线（最新价线用）
+    private var mirroredLatest: KlineItem? {
+        guard mainMirrored, let last = sortedAll.last else { return sortedAll.last }
+        return KlineItem(date: last.date, open: -last.open, high: -last.high, low: -last.low,
+                         close: -last.close, volume: last.volume, turnover: last.turnover)
+    }
+
+    /// 主图价格范围：开启镜像时取负（数值与坐标标签都会镜像为负）
+    private func mirroredRange(_ r: ClosedRange<Double>) -> ClosedRange<Double> {
+        guard mainMirrored else { return r }
+        return (-r.upperBound)...(-r.lowerBound)
     }
 
     /// MA/EMA 数据源序列：CLOSE/OPEN/HIGH/LOW/平均值(开收高低均值)
@@ -568,6 +779,64 @@ struct KlineChartView: View {
     /// 主图是否裸K：用户手动设置 或 主图放大模式（全屏裸K，不计算任何指标）
     private var isBareK: Bool { config.showBareK || mainFullscreen }
 
+    // MARK: - 指标计算区间（裁剪）
+
+    /// 指标预热长度：往前多算这一段历史，保证 MA（需前 N 根）与 EMA/SMA 等递归指标
+    /// 在可见窗口内已收敛、数值准确；也避免每次拖动/缩放后全量重算
+    private let indicatorWarmup = 500
+    /// 指标计算区间的起点索引（绝对，需要区间）：可见窗口起点往前推预热长度，最小为 0
+    private var indicatorCalcStart: Int { max(0, startIndex - indicatorWarmup) }
+    /// 指标计算区间的终点索引（绝对，需要区间）：覆盖到可见窗口末端即可
+    private var indicatorCalcEnd: Int { max(indicatorCalcStart, endIndex) }
+
+    /// 本次指标计算区间：与已覆盖区间合并（只扩不缩），并更新覆盖状态。
+    /// 可见窗口落在已覆盖范围内时直接复用已覆盖区间 → 缓存键不变 → 不重算、不倒退；
+    /// 需要区间超出已覆盖且扩展后跨度超上限时保持已覆盖区间，避免丢弃已算的全量历史
+    private func mergedCalcRange(needStart: Int, needEnd: Int) -> (start: Int, end: Int) {
+        if indicatorCoverageEnd >= 0 {
+            // 需要区间完全落在已覆盖范围内：直接复用已覆盖区间（不重算、不倒退）
+            if needStart >= indicatorCoverageStart && needEnd <= indicatorCoverageEnd {
+                return (indicatorCoverageStart, indicatorCoverageEnd)
+            }
+            // 需要区间超出已覆盖：尝试扩展（只扩不缩）；扩展后跨度超上限时保持已覆盖区间
+            let mergedStart = min(indicatorCoverageStart, needStart)
+            let mergedEnd = max(indicatorCoverageEnd, needEnd)
+            if mergedEnd - mergedStart + 1 <= maxCoverageSpan {
+                indicatorCoverageStart = mergedStart
+                indicatorCoverageEnd = mergedEnd
+                return (mergedStart, mergedEnd)
+            }
+            return (indicatorCoverageStart, indicatorCoverageEnd)
+        }
+        indicatorCoverageStart = needStart
+        indicatorCoverageEnd = needEnd
+        return (needStart, needEnd)
+    }
+
+    /// 取 [start...end] 一段作为指标计算数据（越界/空数据安全）
+    private func calcData(from start: Int, to end: Int) -> [KlineItem] {
+        guard !sortedData.isEmpty, start <= end, end < sortedData.count else { return [] }
+        return Array(sortedData[start...end])
+    }
+
+    /// 把「裁剪区间」的计算结果填充回全量长度：前段/后段用 NaN 占位（markerColors 用透明色占位），
+    /// 绘制与取值处本就跳过 NaN，因此既有索引逻辑保持不变，只是计算量大幅下降
+    private func padToFull(_ line: IndicatorLine, calcStart: Int, calcEnd: Int) -> IndicatorLine {
+        guard calcStart > 0 || calcEnd < sortedData.count - 1 else { return line }
+        var values = Array(repeating: Double.nan, count: calcStart) + line.values
+        let missing = sortedData.count - values.count
+        if missing > 0 { values += Array(repeating: Double.nan, count: missing) }
+        var result = line
+        result.values = values
+        if let mc = line.markerColors {
+            var colors = Array(repeating: Color.clear, count: calcStart) + mc
+            let colorMissing = sortedData.count - colors.count
+            if colorMissing > 0 { colors += Array(repeating: Color.clear, count: colorMissing) }
+            result.markerColors = colors
+        }
+        return result
+    }
+
     private func recomputeMainCurves(force: Bool = false) {
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记主图待重算，关闭返回后再算
         if menuIsOpen { pendingMainRefresh = true; return }
@@ -576,15 +845,24 @@ struct KlineChartView: View {
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         // 主图放大（全屏裸K）：不计算任何主图指标
         if mainFullscreen { mainCurves = []; return }
+        // 后台正确计算已覆盖整个可见窗口（从数据开头起算，数值最正确）：
+        // 未强制重算时直接复用后台结果；指标配置变化（force）时用正确覆盖区间重算，避免退化为近似
+        let bgCovered = bgCoverageEnd >= endIndex
+        if bgCovered, !force, !mainCurves.isEmpty { return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
             let store = SystemIndicatorStore.shared
             let custom = activeCustomIndicator
+            // 计算区间：后台已覆盖窗口时用后台正确覆盖 [0...bgCoverageEnd]，否则前台近似（窗口+预热，合并已算区间）
+            let (calcStart, calcEnd) = bgCovered
+                ? (0, bgCoverageEnd)
+                : mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
 
             // 每个指标按「输出行」缓存：仅该行公式文本（含参数）变化才重算那一行，其余行复用缓存
 
             curves += mainRows(&mainCache.ma, enabled: config.showMA,
                                formula: store.formula(for: "MA", values: mainMAValues(config.maConfig)),
+                               calcStart: calcStart, calcEnd: calcEnd,
                                build: { i, out in
                                    IndicatorLine(name: displayName(out.name), values: out.values,
                                                  color: lineColor(from: out, fallback: maColor(i)),
@@ -592,6 +870,7 @@ struct KlineChartView: View {
                                })
             curves += mainRows(&mainCache.ema, enabled: config.showEMA,
                                formula: store.formula(for: "EMA", values: mainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)),
+                               calcStart: calcStart, calcEnd: calcEnd,
                                build: { i, out in
                                    IndicatorLine(name: displayName(out.name), values: out.values,
                                                  color: lineColor(from: out, fallback: maColor(i)),
@@ -599,6 +878,7 @@ struct KlineChartView: View {
                                })
             curves += mainRows(&mainCache.boll, enabled: config.showBOLL,
                                formula: store.formula(for: "BOLL", values: mainBOLLValues()),
+                               calcStart: calcStart, calcEnd: calcEnd,
                                build: { i, out in
                                    IndicatorLine(name: displayName(out.name), values: out.values,
                                                  color: lineColor(from: out, fallback: i == 0 ? ma10Color : bollColor),
@@ -606,6 +886,7 @@ struct KlineChartView: View {
                                })
             curves += mainRows(&mainCache.cmk, enabled: config.showCMK,
                                formula: store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]),
+                               calcStart: calcStart, calcEnd: calcEnd,
                                build: { i, out in
                                    IndicatorLine(name: displayName(out.name), values: out.values,
                                                  color: lineColor(from: out, fallback: maColor(i)),
@@ -616,6 +897,7 @@ struct KlineChartView: View {
                                formula: store.formula(for: "SAR", values: [
                                    "step": fmt(config.sarStep), "maxstep": fmt(config.sarMax)
                                ]),
+                               calcStart: calcStart, calcEnd: calcEnd,
                                build: { _, out in
                                    IndicatorLine(name: "SAR", values: out.values, color: upColor,
                                                  style: .pointdot, lineWidth: 1, hideValue: false,
@@ -625,6 +907,7 @@ struct KlineChartView: View {
             if let custom {
                 curves += mainRows(&mainCache.custom, enabled: true,
                                    formula: custom.formula,
+                                   calcStart: calcStart, calcEnd: calcEnd,
                                    build: { i, out in
                                        IndicatorLine(name: displayName(out.name), values: out.values,
                                                      color: customLineColor(i, line: out, indicatorColor: custom.color),
@@ -638,29 +921,51 @@ struct KlineChartView: View {
             mainCache.custom = MainIndicatorCache.UnitSet()
         }
         mainCurves = curves
+        // 写回 (标的, 周期) 缓存：切走再回来时恢复主图曲线与覆盖状态，不重复计算
+        if let metaId = metaId {
+            let store = ChartCacheStore.shared
+            let fp = Self.currentConfigFingerprint()
+            // 配置已变：先失效旧缓存（清完成标记/覆盖/曲线），避免旧配置的“已完成”被误用
+            if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
+                // 本视图预计算进度也归零，避免写回 max 把缓存覆盖末端顶回旧值（否则恢复后 bgCovered 误判、副图空白）
+                bgCoverageEnd = 0
+            }
+            let e = store.entry(for: metaId, period: period)
+            e.mainCurves = mainCurves
+            e.mainCache = mainCache
+            e.coverageStart = indicatorCoverageStart
+            e.coverageEnd = indicatorCoverageEnd
+            // 覆盖末端只增不减，避免后台/旧任务已算得更远时被本次写回往回推
+            e.bgCoverageEnd = max(e.bgCoverageEnd, bgCoverageEnd)
+            e.configFingerprint = fp
+        }
     }
 
-    /// 主图单指标按「输出行」缓存求值：仅某行单元文本（含参数）变化才重算该行，其余行复用缓存
+    /// 主图单指标按「输出行」缓存求值：仅某行单元文本（含参数）变化才重算该行，其余行复用缓存。
+    /// 计算使用「裁剪区间」数据（可见窗口+预热），计算量≈可见窗口+预热，与总 K 数无关
     private func mainRows(_ cache: inout MainIndicatorCache.UnitSet,
                           enabled: Bool,
                           formula: String?,
+                          calcStart: Int, calcEnd: Int,
                           build: (Int, TDXOutputLine) -> IndicatorLine?) -> [IndicatorLine] {
         guard enabled, let formula else { return [] }
-        // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元
-        if cache.formulaKey != formula {
-            cache.formulaKey = formula
+        // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元；计算区间变化也须重建
+        let formulaKey = "\(formula)|\(calcStart)|\(calcEnd)"
+        if cache.formulaKey != formulaKey {
+            cache.formulaKey = formulaKey
             cache.units = (try? TDXFormulaEngine.splitOutputUnits(formula: formula)) ?? []
             cache.rows = Array(repeating: MainIndicatorCache.Row(), count: cache.units.count)
         }
+        let calcData = calcData(from: calcStart, to: calcEnd)
         var lines: [IndicatorLine] = []
         for (i, unit) in cache.units.enumerated() {
             // 该行单元文本与缓存一致 → 直接复用；否则只重算这一行
             if cache.rows[i].key != unit.text {
                 cache.rows[i].key = unit.text
                 // 单元内可能含前置输出行（如 BOLL 的 UP 依赖输出行 MID），目标行是最后一个输出行
-                if let outs = try? TDXFormulaEngine.evaluate(statements: unit.statements, data: sortedData),
+                if let outs = try? TDXFormulaEngine.evaluate(statements: unit.statements, data: calcData),
                    let out = outs.last, let built = build(i, out), !allNaN(built.values) {
-                    cache.rows[i].line = built
+                    cache.rows[i].line = padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
                 } else {
                     cache.rows[i].line = nil
                 }
@@ -735,39 +1040,57 @@ struct KlineChartView: View {
             m.titleName = m.kind.rawValue
             return
         }
+        // 后台正确计算已覆盖整个可见窗口：未强制重算时直接复用；指标变化（force）时用正确覆盖区间重算。
+        // 注意：m.curves 是跨周期共享的副图模型曲线，切换周期/配置变更后可能残留其它周期的旧曲线
+        // （长度与当前数据不一致）。此时绝不能因 bgCovered 提前返回，必须按当前周期数据重算，
+        // 否则副图曲线空白、十字光标不更新副图指标值
+        let bgCovered = bgCoverageEnd >= endIndex
+        let curvesMatchCurrentData = m.curves.allSatisfy { $0.values.count == sortedData.count }
+        if bgCovered, !force, !m.curves.isEmpty, curvesMatchCurrentData { return }
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
+        // 计算区间：后台已覆盖窗口时用后台正确覆盖 [0...bgCoverageEnd]，否则前台近似（合并已算区间）
+        let (calcStart, calcEnd) = bgCovered
+            ? (0, bgCoverageEnd)
+            : mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
+        let calcData = calcData(from: calcStart, to: calcEnd)
         var curves: [IndicatorLine] = []
         if m.activeCustomID != nil, let custom,
-           let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: sortedData) {
+           let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: calcData) {
             for (i, line) in lines.enumerated() {
-                curves.append(IndicatorLine(name: displayName(line.name), values: line.values,
-                                            color: customLineColor(i, line: line, indicatorColor: custom.color),
-                                            style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue))
+                let built = IndicatorLine(name: displayName(line.name), values: line.values,
+                                          color: customLineColor(i, line: line, indicatorColor: custom.color),
+                                          style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue)
+                curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
             }
         } else {
             switch m.kind {
             case .vol, .amo:
                 let isAmo = m.kind == .amo
-                let base = isAmo ? turnovers : volumes
-                curves.append(IndicatorLine(name: m.kind.rawValue, values: base,
-                                            color: isAmo ? upColor : downColor,
-                                            style: .stick, lineWidth: 1, hideValue: false, barColor: .candle))
+                let baseAll = isAmo ? turnovers : volumes
+                // 始终裁剪到 [calcStart...calcEnd]，padToFull 会补齐前后 NaN 到全量长度
+                let baseSlice = baseAll.isEmpty ? [] : Array(baseAll[calcStart...min(calcEnd, baseAll.count - 1)])
+                curves.append(padToFull(IndicatorLine(name: m.kind.rawValue, values: baseSlice,
+                                                      color: isAmo ? upColor : downColor,
+                                                      style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
+                                        calcStart: calcStart, calcEnd: calcEnd))
                 for (i, p) in m.volPeriods.enumerated() where p > 0 {
-                    curves.append(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: base, period: p),
-                                                color: maColor(i), style: .solid, lineWidth: 1, hideValue: false))
+                    curves.append(padToFull(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: baseSlice, period: p),
+                                                          color: maColor(i), style: .solid, lineWidth: 1, hideValue: false),
+                                            calcStart: calcStart, calcEnd: calcEnd))
                 }
             default:
                 // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
                 if let formula = SystemIndicatorStore.shared.formula(for: m.kind.rawValue, values: stringParams(m.params)),
-                   let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: sortedData) {
+                   let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
                     for (i, line) in lines.enumerated() {
                         guard !allNaN(line.values) else { continue }
-                        curves.append(IndicatorLine(name: displayName(line.name), values: line.values,
-                                                    color: lineColor(from: line, fallback: maColor(i)),
-                                                    style: line.style, lineWidth: line.lineWidth,
-                                                    hideValue: line.hideValue,
-                                                    barColor: line.colorStick ? .sign : .fixed,
-                                                    markerColors: line.markerDirections?.map { $0 ? upColor : downColor }))
+                        let built = IndicatorLine(name: displayName(line.name), values: line.values,
+                                                  color: lineColor(from: line, fallback: maColor(i)),
+                                                  style: line.style, lineWidth: line.lineWidth,
+                                                  hideValue: line.hideValue,
+                                                  barColor: line.colorStick ? .sign : .fixed,
+                                                  markerColors: line.markerDirections?.map { $0 ? upColor : downColor })
+                        curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
                     }
                 }
             }
@@ -775,6 +1098,16 @@ struct KlineChartView: View {
         m.curves = curves
         m.titleName = (m.isCustom ? custom?.name : nil) ?? m.kind.rawValue
         m.color = custom?.color ?? Color(hex: "0050FF")!
+        // 写回 (标的, 周期) 缓存：副图曲线按槽位存储，切回该周期时直接恢复
+        if let metaId = metaId {
+            let store = ChartCacheStore.shared
+            let fp = Self.currentConfigFingerprint()
+            store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp)
+            let e = store.entry(for: metaId, period: period)
+            let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
+            e.subCurves[slot] = m.curves
+            e.configFingerprint = fp
+        }
     }
 
     // MARK: - 主图价格区间
@@ -838,7 +1171,9 @@ struct KlineChartView: View {
             if let maxV = all.max() { maxHigh = max(maxHigh, maxV) }
         }
         let padding = (maxHigh - minLow) * 0.05
-        return (minLow - padding)...(maxHigh + padding)
+        let range = (minLow - padding)...(maxHigh + padding)
+        // 空头镜像：价格范围取负，K线与指标随之镜像
+        return mirroredRange(range)
     }
 
     // MARK: - 副图坐标范围
@@ -852,25 +1187,29 @@ struct KlineChartView: View {
                 if !v.isNaN { values.append(v) }
             }
         }
+        let r: (min: Double, max: Double)
         switch m.kind {
         case .vol, .amo:
             let mx = values.max() ?? 1
-            return (0, mx * 1.08)
+            r = (0, mx * 1.08)
         case .macd, .vmacd, .wmacd:
             let mx = values.map { abs($0) }.max() ?? 1
             let mm = max(mx * 1.15, 0.0001)
-            return (-mm, mm)
+            r = (-mm, mm)
         case .rsi, .vrsi:
-            return (0, 100)
+            r = (0, 100)
         case .kdj, .kd, .lwr, .marsi, .cdj, .col:
             let lo = min(values.min() ?? 0, 0)
             let hi = max(values.max() ?? 100, 100)
-            return (lo, hi)
+            r = (lo, hi)
         default:
-            guard let mn = values.min(), let mx = values.max(), mn != mx else { return (0, 100) }
+            guard let mn = values.min(), let mx = values.max(), mn != mx else { r = (0, 100); break }
             let pad = (mx - mn) * 0.05
-            return (mn - pad, mx + pad)
+            r = (mn - pad, mx + pad)
         }
+        // 空头镜像（取负）：范围镜像为 (-max)...(-min)，曲线随之镜像
+        if m.mirrored { return (-r.max, -r.min) }
+        return r
     }
 
     // MARK: - 手势
@@ -961,7 +1300,7 @@ struct KlineChartView: View {
                 if drag.dragMode == .zoom {
                     let deltaY = value.translation.height - drag.lastPanHeight
                     drag.lastPanHeight = value.translation.height
-                    visibleCount = clamp(visibleCount + deltaY * 0.5, 20, CGFloat(maxVisibleCount))
+                    visibleCount = clamp(visibleCount + deltaY * 0.5, 20, CGFloat(capVisibleCount))
                 } else if drag.dragMode == .pan {
                     let delta = value.translation.width - drag.lastPanWidth
                     drag.lastPanWidth = value.translation.width
@@ -978,6 +1317,8 @@ struct KlineChartView: View {
                         panOffset -= CGFloat(applied) * candleSpacing
                     }
                 }
+                // 手势不暂停后台预计算：进度条持续推进到消失；
+                // 松开后 startPrefetch 会因 token 仍在（任务在跑）而直接跳过，不会重复启动
             }
             .onEnded { value in
                 drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
@@ -986,10 +1327,12 @@ struct KlineChartView: View {
                 // 关键：无论手势如何结束（含提前 return 的分支），都必须重置拖拽状态，
                 // 否则 isDragging 一直为 true，后续切换/修改指标的重算都会被跳过
                 drag.isDragging = false
-                if drag.needsRefreshAfterDrag {
-                    drag.needsRefreshAfterDrag = false
-                    refreshCurves()
-                }
+                // 平移/缩放会改变可见窗口，指标裁剪区间需跟随；这里无条件重算一次。
+                // 无窗口变化（如轻点）时裁剪区间缓存键不变，直接复用缓存，开销几乎为零
+                drag.needsRefreshAfterDrag = false
+                refreshCurves()
+                // 拖动结束，恢复后台历史预计算（从当前已覆盖区间继续向历史扩展）
+                startPrefetch()
                 guard !menuIsOpen else { drag.cursorDragging = false; return }
                 // 副图滑动切换结算：超过阈值触发切换，否则回弹取消（动画由 overlay 呈现）
                 if let fb = swipeFeedback {
@@ -1045,7 +1388,7 @@ struct KlineChartView: View {
         MagnificationGesture()
             .onChanged { value in
                 selectedIndex = nil; crosshairY = nil
-                let newCountF = clamp(zoomBase / value, 20, CGFloat(maxVisibleCount))
+                let newCountF = clamp(zoomBase / value, 20, CGFloat(capVisibleCount))
                 let newCount = max(1, Int(newCountF.rounded()))
                 // 缩放开始：以最近触摸位置（双指质心）确定锚点K线
                 if zoomAnchorIndex == nil {
@@ -1066,10 +1409,13 @@ struct KlineChartView: View {
                     let clampedEnd = min(maxEnd, max(minEnd, newEnd))
                     endOffset = maxEnd - clampedEnd
                 }
+                // 手势（含双指缩放）不暂停后台预计算：进度条持续推进到消失
             }
             .onEnded { _ in
                 zoomBase = visibleCount
                 zoomAnchorIndex = nil
+                // 双指缩放结束，恢复后台历史预计算（避免 DragGesture 被抢占时漏重启）
+                startPrefetch()
             }
     }
 
@@ -1204,7 +1550,15 @@ struct KlineChartView: View {
         .onAppear {
             // 副图配置已持久化在共享仓库，无需重置
             refreshCurves()
+            // 先显示当前可见窗口（不卡），随后分块预计算更久远历史指标
+            startPrefetch()
             notifyHasCursor()
+        }
+        .onDisappear {
+            // 视图被移除（切换周期/退出详情页）时停止本视图的预计算任务：
+            // 否则任务会继续向「共享的副图模型」写曲线，与切换后的新视图抢写，
+            // 导致副图曲线错位/变空。其它周期由后台 prefetchOtherPeriod 独立补齐
+            prefetchToken = nil
         }
         .onChange(of: selectedIndex) { _ in notifyHasCursor() }
         .onChange(of: pinnedIndex) { _ in notifyHasCursor() }
@@ -1214,19 +1568,24 @@ struct KlineChartView: View {
         }
         .onChange(of: customStore.indicators) { _ in
             syncCustomAfterStoreChange()
-            refreshCurves()
+            // 自定义指标被新增/编辑/删除，必须强制重算；
+            // 否则后台已覆盖全量（bgCovered）时 refreshCurves 会被 `!force` 提前 return，
+            // 导致编辑后的指标不更新
+            refreshCurves(force: true)
         }
         .onChange(of: menuIsOpen) { isOpen in
-            // 面板关闭返回 K 线页：只重算期间被挂起的指标（主图/具体副图），未修改的不算
+            // 面板关闭返回 K 线页：重算期间被挂起的指标（主图/具体副图）。
+            // 被挂起说明用户在面板里改了指标/参数，必须 force 重算；
+            // 否则后台已覆盖全量（bgCovered）时 `!force` 会提前 return，导致切换指标无反应
             if !isOpen {
                 if pendingMainRefresh {
                     pendingMainRefresh = false
-                    recomputeMainCurves()
+                    recomputeMainCurves(force: true)
                 }
                 if !pendingSubCharts.isEmpty {
                     let subs = pendingSubCharts
                     pendingSubCharts.removeAll()
-                    for m in subs { recomputeSub(m) }
+                    for m in subs { recomputeSub(m, force: true) }
                 }
             }
         }
@@ -1242,6 +1601,412 @@ struct KlineChartView: View {
         recomputeSub(subTop, force: force)
         recomputeSub(subBottom, force: force)
         recomputeSub(subThird, force: force)
+    }
+
+    /// 打开标的后，在后台分块正确计算全部历史指标：
+    /// 前台已先显示当前可见窗口的近似值（从可见起点往前预热一段起算，偏差很小）；
+    /// 随后后台从数据开头（最左）向右逐块推进计算，EMA/SMA 等递归指标从第一根开始累积，
+    /// 数值最正确；覆盖到当前可见窗口末端后才替换前台近似曲线（最新部分被重算为正确值）。
+    /// 用户交互（拖动/缩放）或切换周期/标的/指标时 token 失效，任务自动停止
+    private func startPrefetch() {
+        guard !sortedData.isEmpty, !mainFullscreen, prefetchToken == nil else { return }
+        // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
+        // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
+        // 防止「完成标记」与「实际覆盖/配置」不一致时进度条卡住或指标不更新
+        if let metaId = metaId {
+            let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
+            if entry.prefetchDone, entry.bgCoverageEnd >= sortedData.count - 1,
+               entry.configFingerprint == Self.currentConfigFingerprint() { return }
+        }
+        // 标记缓存条目正在预计算，避免后台「其它周期预计算」对该周期重复启动
+        if let metaId = metaId {
+            ChartCacheStore.shared.entry(for: metaId, period: period).isPrefetching = true
+        }
+        let token = UUID()
+        prefetchToken = token
+        Task { @MainActor in
+            while self.prefetchToken == token {
+                // 指标/设置面板打开期间暂停预计算，避免空转与干扰面板操作
+                if self.menuIsOpen {
+                    await Task.yield()
+                    continue
+                }
+                // 从数据开头（最左）向右推进：下一块覆盖到 bgCoverageEnd + block
+                let currentEnd = max(0, self.bgCoverageEnd)
+                let bgEnd = min(self.sortedData.count - 1, currentEnd + self.prefetchBlockSize)
+                guard bgEnd > currentEnd else {
+                    // 已全部算完：标记周期预计算完成，并让外层继续预计算其它未计算周期
+                    self.finishPrefetch()
+                    break
+                }
+                // 主线程构造计算请求（从数据开头起算，保证递归指标数值最正确）
+                guard let request = self.makePrefetchRequest(calcStart: 0, calcEnd: bgEnd) else { break }
+                // 后台线程执行指标求值（纯计算，不触碰任何 UI/状态）
+                let result = await Task.detached(priority: .utility) {
+                    Self.evaluatePrefetch(request)
+                }.value
+                // 回主线程：token 仍有效才提交；仅当正确覆盖推进到可见窗口末端时才更新曲线，
+                // 否则保持前台近似的立即显示（避免后台未覆盖时指标变空白）。
+                // 拖动/缩放进行中跳过曲线组装（只推进 bgCoverageEnd/进度条），
+                // 避免全量曲线组装占用主线程影响手势流畅度；松手后下一块会补上
+                guard self.prefetchToken == token else { break }
+                let shouldCommit = bgEnd >= self.endIndex && !self.drag.isDragging
+                self.commitPrefetch(request, result, updateCurves: shouldCommit)
+                self.bgCoverageEnd = bgEnd
+                // 仅在曲线真正提交时推进缓存的覆盖末端，保证缓存 bgCoverageEnd 与实际存储曲线
+                // 的覆盖一致；否则会出现「声称已覆盖」但曲线未覆盖可见窗口，切回该周期后
+                // bgCovered 误判为真、recomputeSub 提前返回 → 副图空白
+                if shouldCommit, let metaId = self.metaId {
+                    let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
+                    entry.bgCoverageEnd = max(entry.bgCoverageEnd, bgEnd)
+                }
+                // 让出主线程，先刷新 UI 再算下一块
+                await Task.yield()
+            }
+            // 仅当仍是自己在运行时才清理 token / 占用标记：
+            // 拖动等交互会把 prefetchToken 置 nil 或让后续 startPrefetch 换成新 token，
+            // 此时绝不能清掉新任务的 token，否则会把新任务误杀，导致进度条卡死不再推进
+            if self.prefetchToken == token {
+                self.prefetchToken = nil
+                if let metaId = self.metaId {
+                    ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
+                }
+            }
+        }
+    }
+
+    /// 当前周期全量正确预计算完成：标记缓存并回调外层继续预计算其它未计算周期
+    private func finishPrefetch() {
+        guard let metaId = metaId else { return }
+        let cache = ChartCacheStore.shared
+        let entry = cache.entry(for: metaId, period: period)
+        entry.prefetchDone = true
+        entry.isPrefetching = false
+        // 让外层（详情页）拿到其它未计算周期的数据并后台预计算，不切换可见周期
+        onPeriodPrefetched?(period)
+    }
+
+    /// 主线程构造预计算每块的请求：快照裁剪数据、启用的指标公式与参数（全部 Sendable，可跨线程）
+    private func makePrefetchRequest(calcStart: Int, calcEnd: Int) -> PrefetchCalcRequest? {
+        guard !sortedData.isEmpty, calcStart >= 0, calcStart <= calcEnd, calcEnd < sortedData.count else { return nil }
+        let data = Array(sortedData[calcStart...calcEnd])
+        let volumes = Array(self.volumes[calcStart...calcEnd])
+        let turnovers = Array(self.turnovers[calcStart...calcEnd])
+        let store = SystemIndicatorStore.shared
+        // 主图：固定顺序（MA/EMA/BOLL/CMK/SAR/自定义），未启用用空串占位，
+        // 保证后台结果与提交组装的索引严格一一对应，避免中途配置变化导致错位
+        var main: [String] = ["", "", "", "", "", ""]
+        if !config.showBareK {
+            if config.showMA { main[0] = store.formula(for: "MA", values: mainMAValues(config.maConfig)) ?? "" }
+            if config.showEMA { main[1] = store.formula(for: "EMA", values: mainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)) ?? "" }
+            if config.showBOLL { main[2] = store.formula(for: "BOLL", values: mainBOLLValues()) ?? "" }
+            if config.showCMK { main[3] = store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]) ?? "" }
+            if config.showSAR { main[4] = store.formula(for: "SAR", values: ["step": fmt(config.sarStep), "maxstep": fmt(config.sarMax)]) ?? "" }
+            if let custom = activeCustomIndicator { main[5] = custom.formula }
+        }
+        // 副图（3 个，与 subTop/subBottom/subThird 对应）
+        var subs: [SubPrefetchRequest] = []
+        for m in [subTop, subBottom, subThird] {
+            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+            let isCustom = m.activeCustomID != nil && customInd != nil
+            let customFormula = isCustom ? customInd?.formula : nil
+            let formula = (m.kind == .vol || m.kind == .amo) ? nil : store.formula(for: m.kind.rawValue, values: stringParams(m.params))
+            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: m.volPeriods))
+        }
+        return PrefetchCalcRequest(calcStart: calcStart, calcEnd: calcEnd, data: data,
+                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs)
+    }
+
+    /// 后台线程：对请求中的每个公式求值（纯计算，无任何 UI/状态访问，线程安全）
+    nonisolated static func evaluatePrefetch(_ req: PrefetchCalcRequest) -> PrefetchCalcResult {
+        let main: [[TDXOutputLine]] = req.mainFormulas.map { formula in
+            guard !formula.isEmpty else { return [] }
+            return (try? TDXFormulaEngine.evaluate(formula: formula, data: req.data)) ?? []
+        }
+        let subs: [[TDXOutputLine]] = req.subs.map { s in
+            let f = s.customFormula ?? s.formula
+            guard let f, !f.isEmpty else { return [] }
+            return (try? TDXFormulaEngine.evaluate(formula: f, data: req.data)) ?? []
+        }
+        return PrefetchCalcResult(main: main, subs: subs)
+    }
+
+    /// 主线程：把后台求得的原始输出行组装为 IndicatorLine，更新主图/副图曲线（含标题与颜色）。
+    /// updateCurves=false 时只更新进度（bgCoverageEnd 由调用方设置），保持前台近似曲线不变，
+    /// 直到正确覆盖推进到可见窗口末端才替换为正确结果
+    private func commitPrefetch(_ req: PrefetchCalcRequest, _ result: PrefetchCalcResult, updateCurves: Bool) {
+        guard updateCurves else { return }
+        let cs = req.calcStart, ce = req.calcEnd
+        // ---- 主图（固定顺序，与 makePrefetchRequest 的 mainFormulas 一一对应）----
+        var curves: [IndicatorLine] = []
+        func appendMain(_ idx: Int, color: (Int, TDXOutputLine) -> Color,
+                        sar: Bool = false, name: String? = nil, lineWidth: Double? = nil) {
+            guard idx < result.main.count else { return }
+            for (i, out) in result.main[idx].enumerated() {
+                guard !allNaN(out.values) else { continue }
+                curves.append(padToFull(IndicatorLine(name: name ?? displayName(out.name), values: out.values,
+                                                      color: color(i, out),
+                                                      // SAR 固定小圆点（与 recomputeMainCurves 保持一致），
+                                                      // 否则公式输出行默认 solid 会被画成线条
+                                                      style: sar ? .pointdot : out.style,
+                                                      lineWidth: lineWidth ?? out.lineWidth,
+                                                      hideValue: out.hideValue,
+                                                      markerColors: sar ? out.markerDirections?.map { $0 ? upColor : downColor } : nil),
+                                        calcStart: cs, calcEnd: ce))
+            }
+        }
+        appendMain(0, color: { lineColor(from: $1, fallback: maColor($0)) })                                        // MA
+        appendMain(1, color: { lineColor(from: $1, fallback: maColor($0)) })                                        // EMA
+        appendMain(2, color: { lineColor(from: $1, fallback: $0 == 0 ? ma10Color : bollColor) })                   // BOLL
+        appendMain(3, color: { lineColor(from: $1, fallback: maColor($0)) })                                        // CMK
+        appendMain(4, color: { _, _ in upColor }, sar: true, name: "SAR", lineWidth: 1)                            // SAR
+        if let custom = activeCustomIndicator {
+            appendMain(5, color: { customLineColor($0, line: $1, indicatorColor: custom.color) })                  // 自定义
+        }
+        mainCurves = curves
+        // ---- 副图 ----
+        for (i, m) in [subTop, subBottom, subThird].enumerated() {
+            guard i < req.subs.count, i < result.subs.count else { continue }
+            let subReq = req.subs[i]
+            let raw = result.subs[i]
+            var subCurves: [IndicatorLine] = []
+            if subReq.customFormula != nil {
+                let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+                for (j, out) in raw.enumerated() {
+                    guard !allNaN(out.values) else { continue }
+                    subCurves.append(padToFull(IndicatorLine(name: displayName(out.name), values: out.values,
+                                                             color: customLineColor(j, line: out, indicatorColor: customInd?.color),
+                                                             style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue),
+                                               calcStart: cs, calcEnd: ce))
+                }
+            } else if subReq.kind == .vol || subReq.kind == .amo {
+                let isAmo = subReq.kind == .amo
+                let baseSlice = isAmo ? req.turnovers : req.volumes
+                subCurves.append(padToFull(IndicatorLine(name: subReq.kind.rawValue, values: baseSlice,
+                                                         color: isAmo ? upColor : downColor,
+                                                         style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
+                                           calcStart: cs, calcEnd: ce))
+                for (p, period) in subReq.volPeriods.enumerated() where period > 0 {
+                    subCurves.append(padToFull(IndicatorLine(name: "MA\(period)", values: ChartSeries.ma(values: baseSlice, period: period),
+                                                             color: maColor(p), style: .solid, lineWidth: 1, hideValue: false),
+                                               calcStart: cs, calcEnd: ce))
+                }
+            } else if subReq.formula != nil {
+                for (j, out) in raw.enumerated() {
+                    guard !allNaN(out.values) else { continue }
+                    subCurves.append(padToFull(IndicatorLine(name: displayName(out.name), values: out.values,
+                                                             color: lineColor(from: out, fallback: maColor(j)),
+                                                             style: out.style, lineWidth: out.lineWidth,
+                                                             hideValue: out.hideValue,
+                                                             barColor: out.colorStick ? .sign : .fixed,
+                                                             markerColors: out.markerDirections?.map { $0 ? upColor : downColor }),
+                                               calcStart: cs, calcEnd: ce))
+                }
+            }
+            m.curves = subCurves
+            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+            m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind.rawValue
+            m.color = customInd?.color ?? Color(hex: "0050FF")!
+        }
+        // 写回 (标的, 周期) 缓存：后台正确结果落盘，切走再回来直接恢复
+        if let metaId = metaId {
+            let store = ChartCacheStore.shared
+            let fp = Self.currentConfigFingerprint()
+            store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp)
+            let e = store.entry(for: metaId, period: period)
+            e.mainCurves = mainCurves
+            e.mainCache = mainCache
+            e.coverageStart = indicatorCoverageStart
+            e.coverageEnd = indicatorCoverageEnd
+            // 覆盖末端只增不减
+            e.bgCoverageEnd = max(e.bgCoverageEnd, bgCoverageEnd)
+            e.configFingerprint = fp
+            for (i, m) in [subTop, subBottom, subThird].enumerated() {
+                e.subCurves[i] = m.curves
+            }
+        }
+    }
+
+    // MARK: - 后台预计算其它周期（写入全局缓存，不触碰可见视图）
+
+    /// 当前指标配置指纹：主图开关/参数 + 三个副图指标与参数（含自定义指标公式）。
+    /// 用于判断某 (标的, 周期) 的缓存是否仍与当前配置一致：配置变了 → 缓存视为无效、重算。
+    static func currentConfigFingerprint() -> String {
+        let config = ChartConfigStore.shared
+        let customStore = CustomIndicatorStore.shared
+        let store = SystemIndicatorStore.shared
+        var parts: [String] = []
+        // 主图：固定顺序（MA/EMA/BOLL/CMK/SAR/自定义）
+        var main = ["", "", "", "", "", ""]
+        if !config.showBareK {
+            if config.showMA { main[0] = store.formula(for: "MA", values: prefetchMainMAValues(config.maConfig)) ?? "" }
+            if config.showEMA { main[1] = store.formula(for: "EMA", values: prefetchMainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)) ?? "" }
+            if config.showBOLL { main[2] = store.formula(for: "BOLL", values: prefetchMainBOLLValues()) ?? "" }
+            if config.showCMK { main[3] = store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]) ?? "" }
+            if config.showSAR { main[4] = store.formula(for: "SAR", values: ["step": prefetchFmt(config.sarStep), "maxstep": prefetchFmt(config.sarMax)]) ?? "" }
+            if let customID = config.activeCustomIndicatorID,
+               let custom = customStore.indicators.first(where: { $0.id == customID }) {
+                main[5] = custom.formula
+            }
+        }
+        parts.append(main.joined(separator: "§"))
+        // 副图：3 个槽位，含指标类型、参数（VOL/AMO 量均线周期）
+        for m in [config.subTop, config.subBottom, config.subThird] {
+            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+            let isCustom = m.activeCustomID != nil && customInd != nil
+            var s = m.kind.rawValue
+            if isCustom, let customInd {
+                s += "|CUSTOM|" + customInd.formula
+            } else if m.kind == .vol || m.kind == .amo {
+                s += "|" + m.volPeriods.map(String.init).joined(separator: ",")
+            } else {
+                s += "|" + (store.formula(for: m.kind.rawValue, values: prefetchStringParams(m.params)) ?? "")
+            }
+            parts.append(s)
+        }
+        return parts.joined(separator: "\u{1F}")
+    }
+
+    /// 后台预计算指定 (标的, 周期) 的完整指标并写入缓存。
+    /// 用于「当前周期算完后，继续计算其它未计算周期」：不依赖可见视图，
+    /// 结果写入 ChartCacheStore，用户切换到该周期时由 init 直接恢复、无需等待。
+    /// 幂等：该周期已标记完成或正在预计算时直接返回。
+    static func prefetchOtherPeriod(metaId: Int, period: KlinePeriod, data: [KlineItem]) {
+        guard !data.isEmpty else { return }
+        let cache = ChartCacheStore.shared
+        let currentFP = currentConfigFingerprint()
+        // 配置已变化：先使旧缓存失效，避免旧配置的「已完成」被误判为无需计算
+        cache.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: currentFP)
+        let entry = cache.entry(for: metaId, period: period)
+        // 已按当前配置完成全量预计算 → 无需再算
+        if entry.prefetchDone, entry.bgCoverageEnd >= data.count - 1 { return }
+        guard !entry.isPrefetching else { return }
+        entry.isPrefetching = true
+        // 记录本次计算所用的配置指纹，供恢复时校验是否已过期
+        let fingerprint = currentFP
+        guard let req = makeFullRequest(data: data) else { entry.isPrefetching = false; return }
+        let result = Task.detached(priority: .utility) {
+            Self.evaluatePrefetch(req)
+        }
+        Task { @MainActor in
+            let r = await result.value
+            // 计算期间指标配置可能已变化：与本次快照不一致时丢弃旧配置结果，避免污染缓存
+            guard currentConfigFingerprint() == fingerprint else {
+                entry.isPrefetching = false
+                return
+            }
+            Self.commitToCache(req, r, entry: entry, data: data, fingerprint: fingerprint)
+            entry.isPrefetching = false
+            entry.prefetchDone = true
+        }
+    }
+
+    /// 构造指定 (标的, 周期) 全量指标计算请求（公式与可见视图完全一致，读取共享配置）
+    private static func makeFullRequest(data: [KlineItem]) -> PrefetchCalcRequest? {
+        guard !data.isEmpty else { return nil }
+        let config = ChartConfigStore.shared
+        let customStore = CustomIndicatorStore.shared
+        let store = SystemIndicatorStore.shared
+        let volumes = data.map(\.volume)
+        let turnovers = data.map(\.turnover)
+        // 主图：固定顺序（MA/EMA/BOLL/CMK/SAR/自定义），未启用用空串占位
+        var main: [String] = ["", "", "", "", "", ""]
+        if !config.showBareK {
+            if config.showMA { main[0] = store.formula(for: "MA", values: prefetchMainMAValues(config.maConfig)) ?? "" }
+            if config.showEMA { main[1] = store.formula(for: "EMA", values: prefetchMainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)) ?? "" }
+            if config.showBOLL { main[2] = store.formula(for: "BOLL", values: prefetchMainBOLLValues()) ?? "" }
+            if config.showCMK { main[3] = store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]) ?? "" }
+            if config.showSAR { main[4] = store.formula(for: "SAR", values: ["step": prefetchFmt(config.sarStep), "maxstep": prefetchFmt(config.sarMax)]) ?? "" }
+            if let customID = config.activeCustomIndicatorID,
+               let custom = customStore.indicators.first(where: { $0.id == customID }) {
+                main[5] = custom.formula
+            }
+        }
+        // 副图（3 个，与 subTop/subBottom/subThird 对应）
+        var subs: [SubPrefetchRequest] = []
+        for m in [config.subTop, config.subBottom, config.subThird] {
+            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+            let isCustom = m.activeCustomID != nil && customInd != nil
+            let customFormula = isCustom ? customInd?.formula : nil
+            let formula = (m.kind == .vol || m.kind == .amo) ? nil : store.formula(for: m.kind.rawValue, values: prefetchStringParams(m.params))
+            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: m.volPeriods))
+        }
+        return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
+                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs)
+    }
+
+    /// 主线程：把后台求得的原始输出行组装为 IndicatorLine 并写入全局缓存。
+    /// 全量覆盖（calcStart=0、calcEnd=末尾），无需 NaN 填充
+    @MainActor
+    private static func commitToCache(_ req: PrefetchCalcRequest, _ result: PrefetchCalcResult,
+                                      entry: ChartCacheStore.Entry, data: [KlineItem], fingerprint: String) {
+        let config = ChartConfigStore.shared
+        var curves: [IndicatorLine] = []
+        func appendMain(_ idx: Int, color: (Int, TDXOutputLine) -> Color,
+                        sar: Bool = false, name: String? = nil, lineWidth: Double? = nil) {
+            guard idx < result.main.count else { return }
+            for (i, out) in result.main[idx].enumerated() {
+                guard !prefetchAllNaN(out.values) else { continue }
+                curves.append(IndicatorLine(name: name ?? prefetchDisplayName(out.name), values: out.values,
+                                            color: color(i, out),
+                                            // SAR 固定小圆点，避免默认 solid 被画成线条
+                                            style: sar ? .pointdot : out.style,
+                                            lineWidth: lineWidth ?? out.lineWidth, hideValue: out.hideValue,
+                                            markerColors: sar ? out.markerDirections?.map { $0 ? prefetchUpColor : prefetchDownColor } : nil))
+            }
+        }
+        appendMain(0, color: { prefetchLineColor(from: $1, fallback: prefetchMaColor($0)) })                            // MA
+        appendMain(1, color: { prefetchLineColor(from: $1, fallback: prefetchMaColor($0)) })                            // EMA
+        appendMain(2, color: { prefetchLineColor(from: $1, fallback: $0 == 0 ? prefetchMa10Color : prefetchBollColor) }) // BOLL
+        appendMain(3, color: { prefetchLineColor(from: $1, fallback: prefetchMaColor($0)) })                            // CMK
+        appendMain(4, color: { _, _ in prefetchUpColor }, sar: true, name: "SAR", lineWidth: 1)                        // SAR
+        if let customID = config.activeCustomIndicatorID,
+           let custom = CustomIndicatorStore.shared.indicators.first(where: { $0.id == customID }) {
+            appendMain(5, color: { prefetchCustomLineColor($0, line: $1, indicatorColor: custom.color) })               // 自定义
+        }
+        entry.mainCurves = curves
+        // 副图
+        var subCurves: [Int: [IndicatorLine]] = [:]
+        for (i, m) in [config.subTop, config.subBottom, config.subThird].enumerated() {
+            guard i < req.subs.count, i < result.subs.count else { continue }
+            let subReq = req.subs[i]
+            let raw = result.subs[i]
+            var sc: [IndicatorLine] = []
+            if subReq.customFormula != nil {
+                let customInd = CustomIndicatorStore.shared.indicators.first { $0.id == m.activeCustomID }
+                for (j, out) in raw.enumerated() {
+                    guard !prefetchAllNaN(out.values) else { continue }
+                    sc.append(IndicatorLine(name: prefetchDisplayName(out.name), values: out.values,
+                                            color: prefetchCustomLineColor(j, line: out, indicatorColor: customInd?.color),
+                                            style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue))
+                }
+            } else if subReq.kind == .vol || subReq.kind == .amo {
+                let isAmo = subReq.kind == .amo
+                let baseSlice = isAmo ? req.turnovers : req.volumes
+                sc.append(IndicatorLine(name: subReq.kind.rawValue, values: baseSlice,
+                                        color: isAmo ? prefetchUpColor : prefetchDownColor,
+                                        style: .stick, lineWidth: 1, hideValue: false, barColor: .candle))
+                for (p, period) in subReq.volPeriods.enumerated() where period > 0 {
+                    sc.append(IndicatorLine(name: "MA\(period)", values: ChartSeries.ma(values: baseSlice, period: period),
+                                            color: prefetchMaColor(p), style: .solid, lineWidth: 1, hideValue: false))
+                }
+            } else if subReq.formula != nil {
+                for (j, out) in raw.enumerated() {
+                    guard !prefetchAllNaN(out.values) else { continue }
+                    sc.append(IndicatorLine(name: prefetchDisplayName(out.name), values: out.values,
+                                            color: prefetchLineColor(from: out, fallback: prefetchMaColor(j)),
+                                            style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue,
+                                            barColor: out.colorStick ? .sign : .fixed,
+                                            markerColors: out.markerDirections?.map { $0 ? prefetchUpColor : prefetchDownColor }))
+                }
+            }
+            subCurves[i] = sc
+        }
+        entry.subCurves = subCurves
+        entry.coverageStart = 0
+        entry.coverageEnd = data.count - 1
+        entry.bgCoverageEnd = data.count - 1
+        entry.configFingerprint = fingerprint
     }
 
     private func model(for slot: SubSlot) -> SubChartModel {
@@ -1602,7 +2367,8 @@ struct KlineChartView: View {
         let low = statSlice.map(\.low).min() ?? 0
         let vol = statSlice.reduce(0.0) { $0 + $1.volume }
         let amo = statSlice.reduce(0.0) { $0 + $1.turnover }
-        return (first.formattedDate, last.formattedDate, change, high, low, vol, amo)
+        // 空头镜像：高/低取负
+        return (first.formattedDate, last.formattedDate, change, mir(high), mir(low), vol, amo)
     }
 
     /// 第二个光标相对第一个固定光标的区间统计（区间为两光标之间；基准为固定光标的收盘价）
@@ -1702,14 +2468,14 @@ struct KlineChartView: View {
     }
 
     private func mainCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
-        MainChartCanvas(slice: slice, chartStyle: chartStyle, candleSpacing: candleSpacing, height: height,
+        MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
-                        curves: mainCurves.map { CanvasCurve(color: $0.color, values: sliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
+                        curves: mainCurves.map { CanvasCurve(color: $0.color, values: mirroredSliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
-                        gaps: gaps, sliceStart: startIndex,
-                        latest: sortedAll.last)
+                        gaps: mainMirrored ? mirroredGaps : gaps, sliceStart: startIndex,
+                        latest: mirroredLatest)
             .equatable()
     }
 
@@ -1722,7 +2488,9 @@ struct KlineChartView: View {
         return ZStack(alignment: .topLeading) {
             Color.white
             SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
-                           curves: m.curves.map { CanvasCurve(color: $0.color, values: sliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
+                           curves: m.curves.map { CanvasCurve(color: $0.color,
+                                                              values: subMirroredSliceArr(m, $0.values),
+                                                              style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
                            rangeMin: range.min, rangeMax: range.max,
                            upColor: upColor, downColor: downColor, gridColor: gridColor)
                 .equatable()
@@ -1840,9 +2608,14 @@ struct KlineChartView: View {
                 })
                 // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式
                 ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
-                    legendItem(line, formatter: (m.kind == .vol || m.kind == .amo) ? { formatVolume($0) } : nil)
+                    legendItem(line, mirrored: m.mirrored,
+                               formatter: (m.kind == .vol || m.kind == .amo) ? { formatVolume($0) } : nil)
                 }
                 Spacer()
+                // 多/空 镜像开关：VOL/AMO 数量无方向，不支持镜像（置灰）
+                mirrorButton(isOn: m.mirrored, enabled: m.kind != .vol && m.kind != .amo) {
+                    m.mirrored.toggle()
+                }
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1863,9 +2636,16 @@ struct KlineChartView: View {
                 })
                 if isBareK { legendText("裸K") }
                 ForEach(Array(mainCurves.enumerated()), id: \.offset) { _, line in
-                    legendItem(line)
+                    legendItem(line, mirrored: config.mainMirrored)
                 }
                 Spacer()
+                // 多/空 镜像开关：开启后本图取负镜像（不重算指标，仅渲染取负）
+                mirrorButton(isOn: config.mainMirrored, enabled: true) {
+                    config.mainMirrored.toggle()
+                    // 价格范围取负会改变固定光标的价格映射，切换时清除固定光标避免错位
+                    pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
+                    notifyHasCursor()
+                }
                 // 主图放大开关：进入后主图全屏裸K、显示全部 K 线；放大期间若双指缩放导致 K 线数变少，
                 // 再次点击只重新全显（保持放大）；仅当全部 K 线都在屏幕内时才退出放大并恢复最新 100 根
                 Button {
@@ -1897,6 +2677,12 @@ struct KlineChartView: View {
                     // 保证退出放大后主图和副图指标立即恢复计算
                     drag.isDragging = false
                     drag.needsRefreshAfterDrag = false
+                    // 放大模式主图裸K、副图隐藏，无需预计算；退出放大后恢复预计算
+                    if mainFullscreen {
+                        prefetchToken = nil
+                    } else {
+                        startPrefetch()
+                    }
                     refreshCurves(force: true)
                 } label: {
                     // 图标语义：未放大或放大中需重新全显时显示"指向外"（点击进入放大/重新全显）；
@@ -1943,13 +2729,14 @@ struct KlineChartView: View {
         }
     }
 
-    private func legendItem(_ line: IndicatorLine, format: String = "%.2f", formatter: ((Double) -> String)? = nil) -> some View {
+    private func legendItem(_ line: IndicatorLine, format: String = "%.2f", mirrored: Bool = false, formatter: ((Double) -> String)? = nil) -> some View {
         // NOTEXT_ 前缀的输出线：不显示名称也不显示数值（仅保留线条）
         if line.hideValue { return AnyView(EmptyView()) }
         let name = legendName(line)
         let color = line.color
         if let value = legendValueFor(line), !value.isNaN {
-            let valueText = formatter?(value) ?? String(format: format, value)
+            let v = mirrored ? -value : value
+            let valueText = formatter?(v) ?? String(format: format, v)
             return AnyView(Text("\(name):\(valueText)")
                 .font(.system(size: 12))
                 .foregroundColor(color))
@@ -1977,6 +2764,22 @@ struct KlineChartView: View {
             Circle().fill(Color.gray).frame(width: 6, height: 6)
             Text(text).font(.system(size: 11)).foregroundColor(.gray)
         }
+    }
+
+    /// 多/空 镜像切换按钮：默认"多"，开启后显示"空"（本图取负镜像）；disabled 时置灰
+    private func mirrorButton(isOn: Bool, enabled: Bool, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            Text(isOn ? "空" : "多")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(!enabled ? Color.gray.opacity(0.35) : (isOn ? Color.blue : Color.gray))
+                .frame(width: 20, height: 20)
+                .background(enabled ? (isOn ? Color.blue.opacity(0.12) : Color.gray.opacity(0.1)) : Color.clear)
+                .cornerRadius(4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(isOn ? "关闭空头镜像" : "开启空头镜像")
     }
 
     private func overlayPriceLabels(width: CGFloat, height: CGFloat, min: Double, max: Double, ratios: [CGFloat], formatter: @escaping (Double) -> String) -> some View {
@@ -2083,6 +2886,10 @@ struct KlineChartView: View {
         let left = sortedData[startIndex].formattedDateWithWeekday
         let right = sortedData[endIndex].formattedDateWithWeekday
         return ZStack {
+            // 指标覆盖进度条：直观显示已计算的历史范围（背景层，文字在上层不受影响）
+            if showCoverageBar {
+                coverageProgressBar(width: width, height: height)
+            }
             HStack(spacing: 0) {
                 Text(left).font(.system(size: 10)).foregroundColor(.gray)
                 Text("   周期数\(count)个").font(.system(size: 10)).foregroundColor(.gray)
@@ -2113,6 +2920,30 @@ struct KlineChartView: View {
         .background(Color.white)
     }
 
+    /// 是否显示指标覆盖进度条：后台正确计算尚未覆盖全部历史（非放大模式），算完（bgCoverageEnd 到末尾）后消失
+    private var showCoverageBar: Bool {
+        !mainFullscreen && !sortedData.isEmpty && bgCoverageEnd < sortedData.count - 1
+    }
+
+    /// 时间轴栏中间的指标覆盖进度条：高亮段表示后台已正确计算的覆盖范围 [0...bgCoverageEnd]
+    /// 占全部数据的比例（横向代表 旧→新），从数据开头（最左）向右逐块推进，直观显示当前标的
+    /// 已"精确计算"了多少历史；与普通从左往右推动的进度条不同，它反映的是真实计算覆盖范围
+    private func coverageProgressBar(width: CGFloat, height: CGFloat) -> some View {
+        let total = CGFloat(max(1, sortedData.count))
+        let endRatio = CGFloat(min(bgCoverageEnd, sortedData.count - 1) + 1) / total
+        let barWidth = min(width * 0.72, 340)
+        let barHeight: CGFloat = 4
+        return ZStack(alignment: .leading) {
+            Capsule().fill(Color.gray.opacity(0.18))
+            Capsule()
+                .fill(Color.blue)
+                .frame(width: max(0, barWidth * endRatio), height: barHeight)
+        }
+        .frame(width: barWidth, height: barHeight)
+        .position(x: width / 2, y: height / 2)
+        .animation(.easeInOut(duration: 0.15), value: bgCoverageEnd)
+    }
+
     /// 时间轴上方新增的行情数据行：十字光标出现时显示光标所在K线 开/收/高/低/涨/额（涨为百分比），
     /// 无光标时显示当前屏幕最右边那根K线的行情数据（固定光标的行情数据改由时间轴覆盖显示）
     private func axisQuoteRow(width: CGFloat, height: CGFloat) -> some View {
@@ -2123,11 +2954,14 @@ struct KlineChartView: View {
                 let item = sortedData[quoteIndex]
                 let prev = prevClose(of: quoteIndex)
                 let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
+                // 空头镜像：开/收/高/低取负显示；涨跌幅取负后数值不变（分子分母同号）
+                let o = mir(item.open), c = mir(item.close), h = mir(item.high), l = mir(item.low)
+                let isUpMirror = mainMirrored ? !item.isUp : item.isUp
                 HStack(spacing: 6) {
-                    axisKV("开", String(format: "%.2f", item.open), .black)
-                    axisKV("收", String(format: "%.2f", item.close), item.isUp ? upColor : downColor)
-                    axisKV("高", String(format: "%.2f", item.high), upColor)
-                    axisKV("低", String(format: "%.2f", item.low), downColor)
+                    axisKV("开", String(format: "%.2f", o), .black)
+                    axisKV("收", String(format: "%.2f", c), isUpMirror ? upColor : downColor)
+                    axisKV("高", String(format: "%.2f", h), upColor)
+                    axisKV("低", String(format: "%.2f", l), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
                     axisKV("额", item.formattedTurnover, .black)
                 }
