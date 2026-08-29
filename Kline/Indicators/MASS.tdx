@@ -1,0 +1,8 @@
+NAME=MASS
+SCOPE=sub
+FORMULA:
+DIFF:=H-L;
+E1:=EMA(DIFF,{n});
+E2:=EMA(E1,{n});
+MASS:SUM(E1/E2,{n1});
+MAMASS:MA(MASS,{m});

@@ -1,0 +1,5 @@
+NAME=LWR
+SCOPE=sub
+FORMULA:
+LWR1:(HHV(H,{n})-C)/(HHV(H,{n})-LLV(L,{n}))*100;
+LWR2:SMA(LWR1,{m1},1);

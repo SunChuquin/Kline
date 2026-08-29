@@ -69,8 +69,9 @@ struct TDXLexer {
             if peek() == "=" { pos += 1; return .ge }
             return .gt
         case "=":
-            if peek() == "=" { pos += 1; return .eq }
-            throw TDXEngineError.syntax("意外的字符 '='，如需赋值请使用 ':' 或 ':='")
+            // 通达信语义：单个 "=" 也是相等比较（"==" 同样支持）
+            if peek() == "=" { pos += 1 }
+            return .eq
         case ":":
             if peek() == "=" { pos += 1; return .assignAssign }
             return .assignOutput
@@ -283,9 +284,13 @@ struct TDXParser {
     }
 
     /// 隐式乘法起始符：标识符、数字、左括号之后紧跟它们视为相乘
+    /// （排除 AND/OR/NOT 逻辑关键字，避免 "0 AND X" 被误判为 "0*AND"）
     private func isImplicitMulStart(_ t: TDXToken?) -> Bool {
         switch t {
-        case .identifier, .number, .lparen: return true
+        case .identifier(let s):
+            let up = s.uppercased()
+            return up != "AND" && up != "OR" && up != "NOT"
+        case .number, .lparen: return true
         default: return false
         }
     }
@@ -379,6 +384,10 @@ struct TDXOutputLine {
     var colorHex: String? = nil
     /// NOTEXT_ 前缀：隐藏该变量在指标栏中的数值，但保留线条
     var hideValue: Bool = false
+    /// SAR 红/绿方向（true=红/涨，false=绿/跌），nil 表示不使用
+    var markerDirections: [Bool]? = nil
+    /// COLORSTICK：红绿柱（按正负红绿着色）
+    var colorStick: Bool = false
 }
 
 /// 通达信公式求值器
@@ -387,6 +396,8 @@ struct TDXEvaluator {
     private let builtins: [String: [Double]]
     private var vars: [String: [Double]] = [:]
     private let outputValues: [Double]
+    /// 最近一次 SAR 调用的红/绿方向（用于输出线红绿点）
+    private var sarDirection: [Bool]?
 
     init(data: [KlineItem]) {
         // 数据需为“最新一根在末尾”的顺序，与图表索引对齐
@@ -411,6 +422,7 @@ struct TDXEvaluator {
     mutating func evaluate(stmts: [TDXStatement]) throws -> [TDXOutputLine] {
         var lines: [TDXOutputLine] = []
         for stmt in stmts {
+            sarDirection = nil
             let value = try eval(stmt.expr)
             vars[stmt.name] = value
             if stmt.output {
@@ -420,6 +432,12 @@ struct TDXEvaluator {
                 }
                 // NOTEXT_ 前缀：不显示该线数值，仅保留线条
                 line.hideValue = stmt.name.hasPrefix("NOTEXT_")
+                // SAR 输出线：附加红/绿方向用于逐点着色
+                if let dir = sarDirection,
+                   case .call(let fnName, _) = stmt.expr,
+                   fnName.uppercased() == "SAR" {
+                    line.markerDirections = dir
+                }
                 lines.append(line)
             }
         }
@@ -440,6 +458,7 @@ struct TDXEvaluator {
                 case "DOTLINE": line.style = .dotline
                 case "POINTDOT": line.style = .pointdot
                 case "STICK": line.style = .stick
+                case "COLORSTICK": line.style = .stick; line.colorStick = true
                 case "NODRAW": line.style = .nodraw
                 default:
                     if up.hasPrefix("COLOR"), let hex = TDXFormulaColor.hex(forOption: up) {
@@ -555,7 +574,20 @@ struct TDXEvaluator {
             return elementWise(vals[0], vals[1]) { min($0, $1) }
         case "SUM":
             try requireArgs(fn, vals, 2)
-            return rolling(vals[0], period: Int(scalar(vals[1])), kind: .sum)
+            let period = Int(scalar(vals[1]))
+            if period <= 0 { return total(vals[0]) }   // SUM(X,0)：从第一天起的全量累计
+            return rolling(vals[0], period: period, kind: .sum)
+        case "AVEDEV":
+            try requireArgs(fn, vals, 2)
+            return avedev(vals[0], period: Int(scalar(vals[1])))
+        case "SAR":
+            // SAR(步长, 极限)：基于 H/L 的抛物线转向，输出红/绿方向
+            try requireArgs(fn, vals, 2)
+            let step = scalar(vals[0])
+            let maxStep = scalar(vals[1])
+            let r = sar(highs: builtins["H"] ?? [], lows: builtins["L"] ?? [], step: step, maxStep: maxStep)
+            sarDirection = r.isUp
+            return r.values
         case "STD":
             try requireArgs(fn, vals, 2)
             return rolling(vals[0], period: Int(scalar(vals[1])), kind: .std)
@@ -686,6 +718,91 @@ struct TDXEvaluator {
         return result
     }
 
+    /// 从第一天起的全量累计（SUM(X,0)，用于 OBV 等）
+    private func total(_ seq: [Double]) -> [Double] {
+        var result = Array(repeating: 0.0, count: barCount)
+        let offset = seq.count - barCount
+        var sum = 0.0
+        for i in 0..<barCount {
+            let v = seq[offset + i]
+            if v.isNaN { result[i] = .nan; continue }
+            sum += v
+            result[i] = sum
+        }
+        return result
+    }
+
+    /// 平均绝对偏差 AVEDEV(X,N)
+    private func avedev(_ seq: [Double], period: Int) -> [Double] {
+        var result = Array(repeating: Double.nan, count: barCount)
+        let offset = seq.count - barCount
+        guard period > 0 else { return result }
+        for i in 0..<barCount {
+            let start = Swift.max(0, i - period + 1)
+            var sum = 0.0
+            var count = 0
+            for j in start...i {
+                let v = seq[offset + j]
+                if v.isNaN { continue }
+                sum += v; count += 1
+            }
+            guard count > 0 else { continue }
+            let mean = sum / Double(count)
+            var dev = 0.0
+            for j in start...i {
+                let v = seq[offset + j]
+                if v.isNaN { continue }
+                dev += abs(v - mean)
+            }
+            result[i] = dev / Double(count)
+        }
+        return result
+    }
+
+    /// 抛物线转向 SAR（红/绿方向逐点着色）
+    private func sar(highs: [Double], lows: [Double], step: Double, maxStep: Double) -> (values: [Double], isUp: [Bool]) {
+        let count = min(highs.count, lows.count)
+        var out = Array(repeating: Double.nan, count: count)
+        var upFlag = Array(repeating: true, count: count)
+        guard count > 1 else { return (out, upFlag) }
+        var isUp = true
+        var af = step
+        var extreme = highs[0]
+        var sarVal = lows[0]
+        out[0] = sarVal
+        upFlag[0] = isUp
+        for i in 1..<count {
+            let prev = out[i - 1]
+            if isUp {
+                sarVal = prev + af * (extreme - prev)
+                sarVal = min(sarVal, lows[i - 1])
+            } else {
+                sarVal = prev + af * (extreme - prev)
+                sarVal = max(sarVal, highs[i - 1])
+            }
+            out[i] = sarVal
+            if isUp && lows[i] < sarVal {
+                isUp = false
+                out[i] = extreme
+                extreme = lows[i]
+                af = step
+            } else if !isUp && highs[i] > sarVal {
+                isUp = true
+                out[i] = extreme
+                extreme = highs[i]
+                af = step
+            } else {
+                if isUp {
+                    if highs[i] > extreme { extreme = highs[i]; af = min(af + step, maxStep) }
+                } else {
+                    if lows[i] < extreme { extreme = lows[i]; af = min(af + step, maxStep) }
+                }
+            }
+            upFlag[i] = isUp
+        }
+        return (out, upFlag)
+    }
+
     private func reference(_ seq: [Double], n: Int) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
@@ -753,6 +870,15 @@ struct TDXEvaluator {
 
 // MARK: - 公式引擎入口
 
+/// 单个输出行的独立求值单元：包含该行及其全部传递依赖的赋值语句
+struct TDXOutputLineUnit {
+    let name: String
+    /// 该行可独立求值的语句序列（依赖闭包 + 输出语句）
+    let statements: [TDXStatement]
+    /// 该行的公式文本（含参数替换后的值），用于逐行缓存比较——参数变仅影响对应行
+    let text: String
+}
+
 enum TDXFormulaEngine {
     /// 解析并求值公式，返回所有输出行（按出现顺序）。
     static func evaluate(formula: String, data: [KlineItem]) throws -> [TDXOutputLine] {
@@ -763,7 +889,99 @@ enum TDXFormulaEngine {
         }
         var parser = TDXParser(tokens: tokens)
         let stmts = try parser.parse()
+        return try evaluate(statements: stmts, data: data)
+    }
+
+    /// 用已解析的语句序列求值（避免重复解析）
+    static func evaluate(statements: [TDXStatement], data: [KlineItem]) throws -> [TDXOutputLine] {
         var evaluator = TDXEvaluator(data: data)
-        return try evaluator.evaluate(stmts: stmts)
+        return try evaluator.evaluate(stmts: statements)
+    }
+
+    /// 把公式拆分成「每个输出行一个独立求值单元」。
+    /// 每个单元 = 输出行 + 它全部传递依赖的赋值语句，可独立求值与独立缓存；
+    /// 这样改某个参数只会使受影响行的单元文本变化，其余输出行可直接复用缓存结果。
+    static func splitOutputUnits(formula: String) throws -> [TDXOutputLineUnit] {
+        var lexer = TDXLexer(formula)
+        let tokens = try lexer.tokenize()
+        guard !tokens.isEmpty else { throw TDXEngineError.syntax("公式为空") }
+        var parser = TDXParser(tokens: tokens)
+        let stmts = try parser.parse()
+
+        // 语句映射：变量名（大写）→ 语句。包含赋值与输出行——
+        // 输出行也可能被其他输出行依赖（如 BOLL 的 UP 依赖输出行 MID），须一并纳入依赖闭包
+        var stmtMap: [String: TDXStatement] = [:]
+        for st in stmts { stmtMap[st.name.uppercased()] = st }
+
+        var units: [TDXOutputLineUnit] = []
+        for st in stmts where st.output {
+            // BFS 收集输出行的全部传递依赖语句（赋值 + 输出行）
+            var needed = Set<String>()
+            collectVars(st.expr, into: &needed)
+            var queue = needed
+            var processed = Set<String>()
+            while let name = queue.popFirst() {
+                guard !processed.contains(name) else { continue }
+                processed.insert(name)
+                guard let s = stmtMap[name] else { continue }
+                var deps = Set<String>()
+                collectVars(s.expr, into: &deps)
+                for d in deps where stmtMap[d] != nil && !needed.contains(d) {
+                    needed.insert(d)
+                    queue.insert(d)
+                }
+            }
+            // 按原顺序取依赖语句（赋值 + 输出行）+ 目标输出行
+            var sub: [TDXStatement] = []
+            for s in stmts where needed.contains(s.name.uppercased()) { sub.append(s) }
+            sub.append(st)
+            let text = sub.map(stmtText).joined()
+            units.append(TDXOutputLineUnit(name: st.name, statements: sub, text: text))
+        }
+        if units.isEmpty { throw TDXEngineError.semantic("公式没有输出行（至少需要一行以 ':' 输出的指标）") }
+        return units
+    }
+
+    /// 递归收集表达式中的变量引用（函数名不会被收集，内置序列 C/H/O/L/V 等无赋值语句，自然跳过）
+    static func collectVars(_ e: TDXExpr, into set: inout Set<String>) {
+        switch e {
+        case .number: break
+        case .variable(let n): set.insert(n.uppercased())
+        case .unary(_, let r): collectVars(r, into: &set)
+        case .binary(_, let l, let r):
+            collectVars(l, into: &set)
+            collectVars(r, into: &set)
+        case .call(_, let args):
+            for a in args { collectVars(a, into: &set) }
+        }
+    }
+
+    /// 语句 → 公式文本（用于逐行缓存的 key）。纯函数，nonisolated 以便在 map 等非隔离闭包中调用
+    nonisolated static func stmtText(_ s: TDXStatement) -> String {
+        var t = s.name + (s.output ? ":" : ":=") + exprText(s.expr)
+        if s.output && !s.options.isEmpty { t += "," + s.options.joined(separator: ",") }
+        return t + ";"
+    }
+
+    /// 表达式 → 公式文本。纯函数，nonisolated
+    nonisolated static func exprText(_ e: TDXExpr) -> String {
+        switch e {
+        case .number(let n):
+            return n == n.rounded() ? String(format: "%.0f", n) : String(format: "%g", n)
+        case .variable(let n):
+            return n
+        case .unary(let op, let r):
+            return op + exprText(r)
+        case .binary(let op, let l, let r):
+            let sym: String
+            switch op {
+            case "and": sym = " AND "
+            case "or": sym = " OR "
+            default: sym = " \(op) "
+            }
+            return "(" + exprText(l) + sym + exprText(r) + ")"
+        case .call(let n, let args):
+            return n + "(" + args.map(exprText).joined(separator: ",") + ")"
+        }
     }
 }

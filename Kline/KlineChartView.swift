@@ -200,6 +200,31 @@ struct CanvasCurve: Equatable {
     var markerColors: [Color]? = nil
 }
 
+/// 主图各指标按「输出行」缓存计算结果：每个输出行（如一条 MA）独立缓存，
+/// 只重算公式文本（含参数）变化的行，其余输出行直接复用缓存结果。
+/// 例如 MA 组加一根 MA120，只有那一行的单元文本变化，其余 9 条均线复用缓存。
+/// 数据变化（切换周期/标的）会重建 K 线页并重置此缓存，天然全量重算。
+final class MainIndicatorCache {
+    /// 单个指标的缓存：公式快照 + 拆分的输出行单元 + 每行结果
+    struct UnitSet {
+        /// 上次生成 units 时的完整公式文本（参数变则变，触发重新拆分）
+        var formulaKey = ""
+        var units: [TDXOutputLineUnit] = []
+        var rows: [Row] = []
+    }
+    /// 单行缓存：该行单元文本 + 计算结果
+    struct Row {
+        var key = ""
+        var line: IndicatorLine? = nil
+    }
+    var ma = UnitSet()
+    var ema = UnitSet()
+    var boll = UnitSet()
+    var cmk = UnitSet()
+    var sar = UnitSet()
+    var custom = UnitSet()
+}
+
 // MARK: - 副图模型
 
 final class SubChartModel: ObservableObject {
@@ -388,6 +413,8 @@ struct KlineChartView: View {
 
     // 主图叠加指标（配置来自共享仓库，跨页面持久化）
     @State private var mainCurves: [IndicatorLine] = []
+    /// 主图各指标结果缓存（class 引用，修改内部属性不触发重绘；周期/标的切换重建页面时自动重置）
+    @State private var mainCache = MainIndicatorCache()
 
     // 三个副图（同一实例跨页面复用，配置不重置）
     @ObservedObject private var subTop: SubChartModel
@@ -399,6 +426,10 @@ struct KlineChartView: View {
     @State private var editorTarget: EditorTarget = .main
     /// 系统指标参数编辑页目标（与选择指标页同尺寸的底部面板，非全屏）
     @State private var paramEditorTarget: ParamEditorTarget? = nil
+    /// 指标/设置面板打开期间挂起指标重算：分别记录"主图 / 具体副图"哪些需要重算，
+    /// 关闭返回 K 线页时只重算被改动的对象，避免把未修改的指标也全量重算
+    @State private var pendingMainRefresh = false
+    @State private var pendingSubCharts: [SubChartModel] = []
 
     // 基础序列一次性缓存（供指标按需计算复用，避免拖拽/重算时反复整表 map）
     private let sortedAll: [KlineItem]
@@ -533,56 +564,161 @@ struct KlineChartView: View {
     }
 
     private func recomputeMainCurves(force: Bool = false) {
+        // 指标/设置面板打开期间不计算（全量计算开销大），只标记主图待重算，关闭返回后再算
+        if menuIsOpen { pendingMainRefresh = true; return }
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
-            if config.showMA {
-                for (i, p) in config.maConfig.periods.enumerated() where p > 0 {
-                    let src = config.maConfig.sources.indices.contains(i) ? config.maConfig.sources[i] : .close
-                    curves.append(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: sourceSeries(src), period: p),
-                                                color: maColor(i), style: .solid, lineWidth: 1, hideValue: false))
-                }
+            let store = SystemIndicatorStore.shared
+            let custom = activeCustomIndicator
+
+            // 每个指标按「输出行」缓存：仅该行公式文本（含参数）变化才重算那一行，其余行复用缓存
+
+            curves += mainRows(&mainCache.ma, enabled: config.showMA,
+                               formula: store.formula(for: "MA", values: mainMAValues(config.maConfig)),
+                               build: { i, out in
+                                   IndicatorLine(name: displayName(out.name), values: out.values,
+                                                 color: lineColor(from: out, fallback: maColor(i)),
+                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                               })
+            curves += mainRows(&mainCache.ema, enabled: config.showEMA,
+                               formula: store.formula(for: "EMA", values: mainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)),
+                               build: { i, out in
+                                   IndicatorLine(name: displayName(out.name), values: out.values,
+                                                 color: lineColor(from: out, fallback: maColor(i)),
+                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                               })
+            curves += mainRows(&mainCache.boll, enabled: config.showBOLL,
+                               formula: store.formula(for: "BOLL", values: mainBOLLValues()),
+                               build: { i, out in
+                                   IndicatorLine(name: displayName(out.name), values: out.values,
+                                                 color: lineColor(from: out, fallback: i == 0 ? ma10Color : bollColor),
+                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                               })
+            curves += mainRows(&mainCache.cmk, enabled: config.showCMK,
+                               formula: store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]),
+                               build: { i, out in
+                                   IndicatorLine(name: displayName(out.name), values: out.values,
+                                                 color: lineColor(from: out, fallback: maColor(i)),
+                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                               })
+            // SAR：红绿点（方向由公式引擎的 SAR 函数提供）
+            curves += mainRows(&mainCache.sar, enabled: config.showSAR,
+                               formula: store.formula(for: "SAR", values: [
+                                   "step": fmt(config.sarStep), "maxstep": fmt(config.sarMax)
+                               ]),
+                               build: { _, out in
+                                   IndicatorLine(name: "SAR", values: out.values, color: upColor,
+                                                 style: .pointdot, lineWidth: 1, hideValue: false,
+                                                 markerColors: out.markerDirections?.map { $0 ? upColor : downColor })
+                               })
+            // 自定义指标（切换或公式/颜色编辑后重算）
+            if let custom {
+                curves += mainRows(&mainCache.custom, enabled: true,
+                                   formula: custom.formula,
+                                   build: { i, out in
+                                       IndicatorLine(name: displayName(out.name), values: out.values,
+                                                     color: customLineColor(i, line: out, indicatorColor: custom.color),
+                                                     style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                                   })
+            } else {
+                mainCache.custom = MainIndicatorCache.UnitSet()
             }
-            if config.showEMA {
-                for (i, p) in config.emaConfig.periods.enumerated() where p > 0 {
-                    let src = config.emaConfig.sources.indices.contains(i) ? config.emaConfig.sources[i] : .close
-                    curves.append(IndicatorLine(name: "EMA\(p)", values: ChartSeries.ema(values: sourceSeries(src), period: p),
-                                                color: maColor(i), style: .solid, lineWidth: 1, hideValue: false))
-                }
-            }
-            if config.showBOLL {
-                let b = ChartSeries.boll(values: closes, period: config.bollConfig.period, mult: config.bollConfig.mult)
-                curves.append(IndicatorLine(name: "MID", values: b.mid, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "UP", values: b.up, color: bollColor, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "LOW", values: b.lo, color: bollColor, style: .solid, lineWidth: 1, hideValue: false))
-            }
-            if config.showCMK, let lines = try? TDXFormulaEngine.evaluate(formula: SystemFormulas.cmk(n: config.cmkN), data: sortedData) {
-                for (i, line) in lines.enumerated() {
-                    curves.append(IndicatorLine(name: displayName(line.name), values: line.values,
-                                                color: customLineColor(i, line: line, indicatorColor: nil),
-                                                style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue))
-                }
-            }
-            if config.showSAR {
-                let r = ChartSeries.sar(highs: highs, lows: lows, step: config.sarStep, maxStep: config.sarMax)
-                curves.append(IndicatorLine(name: "SAR", values: r.values, color: upColor, style: .pointdot, lineWidth: 1,
-                                            hideValue: false, markerColors: r.isUp.map { $0 ? upColor : downColor }))
-            }
-            if let custom = activeCustomIndicator,
-               let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: sortedData) {
-                for (i, line) in lines.enumerated() {
-                    curves.append(IndicatorLine(name: displayName(line.name), values: line.values,
-                                                color: customLineColor(i, line: line, indicatorColor: custom.color),
-                                                style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue))
-                }
-            }
+        } else {
+            // 裸K：不显示指标，清空自定义缓存（其余指标缓存保留，切回裸K时复用）
+            mainCache.custom = MainIndicatorCache.UnitSet()
         }
         mainCurves = curves
     }
 
+    /// 主图单指标按「输出行」缓存求值：仅某行单元文本（含参数）变化才重算该行，其余行复用缓存
+    private func mainRows(_ cache: inout MainIndicatorCache.UnitSet,
+                          enabled: Bool,
+                          formula: String?,
+                          build: (Int, TDXOutputLine) -> IndicatorLine?) -> [IndicatorLine] {
+        guard enabled, let formula else { return [] }
+        // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元
+        if cache.formulaKey != formula {
+            cache.formulaKey = formula
+            cache.units = (try? TDXFormulaEngine.splitOutputUnits(formula: formula)) ?? []
+            cache.rows = Array(repeating: MainIndicatorCache.Row(), count: cache.units.count)
+        }
+        var lines: [IndicatorLine] = []
+        for (i, unit) in cache.units.enumerated() {
+            // 该行单元文本与缓存一致 → 直接复用；否则只重算这一行
+            if cache.rows[i].key != unit.text {
+                cache.rows[i].key = unit.text
+                // 单元内可能含前置输出行（如 BOLL 的 UP 依赖输出行 MID），目标行是最后一个输出行
+                if let outs = try? TDXFormulaEngine.evaluate(statements: unit.statements, data: sortedData),
+                   let out = outs.last, let built = build(i, out), !allNaN(built.values) {
+                    cache.rows[i].line = built
+                } else {
+                    cache.rows[i].line = nil
+                }
+            }
+            if let line = cache.rows[i].line { lines.append(line) }
+        }
+        return lines
+    }
+
+    /// 主图 MA/EMA 参数（周期与数据源）
+    private func mainMAValues(_ cfg: MAConfig) -> [String: String] {
+        mainMAValues(periods: cfg.periods, sources: cfg.sources)
+    }
+
+    private func mainMAValues(periods: [Int], sources: [MAValueSource]) -> [String: String] {
+        var d: [String: String] = [:]
+        for i in 0..<8 {
+            let p = periods.indices.contains(i) ? periods[i] : 0
+            let src = sources.indices.contains(i) ? sources[i] : .close
+            d["p\(i + 1)"] = "\(p)"
+            d["src\(i + 1)"] = "\(sourceValue(src))"
+        }
+        return d
+    }
+
+    private func mainBOLLValues() -> [String: String] {
+        ["period": "\(config.bollConfig.period)", "mult": fmt(config.bollConfig.mult)]
+    }
+
+    /// 数据源 → 公式参数值（1=收盘 2=开盘 3=最高 4=最低 5=平均值）
+    private func sourceValue(_ s: MAValueSource) -> Int {
+        switch s {
+        case .close: return 1
+        case .open: return 2
+        case .high: return 3
+        case .low: return 4
+        case .avg: return 5
+        }
+    }
+
+    /// Double 转公式常量字符串（去除多余尾零）
+    private func fmt(_ v: Double) -> String { String(format: "%g", v) }
+
+    /// 参数字典 Int → String
+    private func stringParams(_ params: [String: Int]) -> [String: String] {
+        var d: [String: String] = [:]
+        for (k, v) in params { d[k] = "\(v)" }
+        return d
+    }
+
+    /// 整行是否全为 NaN（周期为 0 的 MA 行等）
+    private func allNaN(_ values: [Double]) -> Bool { values.allSatisfy { $0.isNaN } }
+
+    /// 公式输出行颜色：优先公式 COLORXXX，否则用默认配色
+    private func lineColor(from line: TDXOutputLine, fallback: Color) -> Color {
+        if let hex = line.colorHex, let c = Color(hex: hex) { return c }
+        return fallback
+    }
+
     private func recomputeSub(_ m: SubChartModel, force: Bool = false) {
+        // 指标/设置面板打开期间不计算（全量计算开销大），只标记该副图待重算，关闭返回后再算
+        if menuIsOpen {
+            if !pendingSubCharts.contains(where: { $0 === m }) { pendingSubCharts.append(m) }
+            return
+        }
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
@@ -607,94 +743,18 @@ struct KlineChartView: View {
                     curves.append(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: base, period: p),
                                                 color: maColor(i), style: .solid, lineWidth: 1, hideValue: false))
                 }
-            case .vmacd:
-                let r = ChartSeries.vmacd(volumes: volumes, short: m.param("short"), long: m.param("long"), m: m.param("m"))
-                curves.append(IndicatorLine(name: "DIFF", values: r.diff, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "DEA", values: r.dea, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "VMACD", values: r.hist, color: ma20Color, style: .stick, lineWidth: 1, hideValue: false, barColor: .sign))
-            case .vr:
-                let r = ChartSeries.vr(closes: closes, volumes: volumes, n: m.param("n"), m: m.param("m"))
-                curves.append(IndicatorLine(name: "VR", values: r.vr, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MAVR", values: r.ma, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .vrsi:
-                let r = ChartSeries.vrsi(volumes: volumes, n1: m.param("n1"), n2: m.param("n2"), n3: m.param("n3"))
-                curves.append(IndicatorLine(name: "VRSI\(m.param("n1"))", values: r.r1, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "VRSI\(m.param("n2"))", values: r.r2, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "VRSI\(m.param("n3"))", values: r.r3, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .obv:
-                let r = ChartSeries.obv(closes: closes, volumes: volumes, m: m.param("m"))
-                curves.append(IndicatorLine(name: "OBV", values: r.obv, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MAOBV", values: r.ma, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .macd:
-                let mres = ChartSeries.macd(values: closes, fast: m.param("fast"), slow: m.param("slow"), signal: m.param("signal"))
-                curves.append(IndicatorLine(name: "DIF", values: mres.dif, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "DEA", values: mres.dea, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MACD", values: mres.hist, color: ma20Color, style: .stick, lineWidth: 1, hideValue: false, barColor: .sign))
-            case .wmacd:
-                let mres = ChartSeries.wmacd(values: closes, fast: m.param("fast"), slow: m.param("slow"), signal: m.param("signal"))
-                curves.append(IndicatorLine(name: "WDIF", values: mres.dif, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "WDEA", values: mres.dea, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "WMACD", values: mres.hist, color: ma20Color, style: .stick, lineWidth: 1, hideValue: false, barColor: .sign))
-            case .dmi:
-                let r = ChartSeries.dmi(highs: highs, lows: lows, closes: closes, n: m.param("n"), m: m.param("m"))
-                curves.append(IndicatorLine(name: "PDI", values: r.pdi, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MDI", values: r.mdi, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "ADX", values: r.adx, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "ADXR", values: r.adxr, color: Color(red: 0.9, green: 0.6, blue: 0), style: .solid, lineWidth: 1, hideValue: false))
-            case .trix:
-                let r = ChartSeries.trix(closes: closes, n: m.param("n"), m: m.param("m"))
-                curves.append(IndicatorLine(name: "TRIX", values: r.trix, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MATRIX", values: r.ma, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .kdj:
-                let k = ChartSeries.kdj(highs: highs, lows: lows, closes: closes,
-                                        n: m.param("n"), kN: m.param("k"), dN: m.param("d"))
-                curves.append(IndicatorLine(name: "K", values: k.k, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "D", values: k.d, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "J", values: k.j, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .rsi:
-                let r1 = ChartSeries.rsi(values: closes, period: m.param("p1"))
-                let r2 = ChartSeries.rsi(values: closes, period: m.param("p2"))
-                let r3 = ChartSeries.rsi(values: closes, period: m.param("p3"))
-                curves.append(IndicatorLine(name: "RSI\(m.param("p1"))", values: r1, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "RSI\(m.param("p2"))", values: r2, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "RSI\(m.param("p3"))", values: r3, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .cci:
-                curves.append(IndicatorLine(name: "CCI", values: ChartSeries.cci(highs: highs, lows: lows, closes: closes, n: m.param("n")),
-                                            color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .kd:
-                let r = ChartSeries.kd(highs: highs, lows: lows, closes: closes, n: m.param("n"), m1: m.param("m1"), m2: m.param("m2"))
-                curves.append(IndicatorLine(name: "K", values: r.k, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "D", values: r.d, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .lwr:
-                let r = ChartSeries.lwr(highs: highs, lows: lows, closes: closes, n: m.param("n"), m1: m.param("m1"), m2: m.param("m2"))
-                curves.append(IndicatorLine(name: "LWR1", values: r.l1, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "LWR2", values: r.l2, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .marsi:
-                let r = ChartSeries.marsi(closes: closes, n1: m.param("n1"), n2: m.param("n2"))
-                curves.append(IndicatorLine(name: "MARSI\(m.param("n1"))", values: r.r1, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MARSI\(m.param("n2"))", values: r.r2, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .brar:
-                let r = ChartSeries.brar(highs: highs, lows: lows, opens: opens, closes: closes, n: m.param("n"))
-                curves.append(IndicatorLine(name: "BR", values: r.br, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "AR", values: r.ar, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .cr:
-                let r = ChartSeries.cr(highs: highs, lows: lows, closes: closes, n: m.param("n"),
-                                       m1: m.param("m1"), m2: m.param("m2"), m3: m.param("m3"))
-                curves.append(IndicatorLine(name: "CR", values: r.cr, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MA\(m.param("m1"))", values: r.ma1, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MA\(m.param("m2"))", values: r.ma2, color: ma20Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MA\(m.param("m3"))", values: r.ma3, color: Color(red: 0.9, green: 0.6, blue: 0), style: .solid, lineWidth: 1, hideValue: false))
-            case .mass:
-                let r = ChartSeries.mass(highs: highs, lows: lows, n: m.param("n"), n1: m.param("n1"), m: m.param("m"))
-                curves.append(IndicatorLine(name: "MASS", values: r.mass, color: ma5Color, style: .solid, lineWidth: 1, hideValue: false))
-                curves.append(IndicatorLine(name: "MAMASS", values: r.ma, color: ma10Color, style: .solid, lineWidth: 1, hideValue: false))
-            case .cdj, .col:
-                if let formula = m.kind.formula(with: m.params),
+            default:
+                // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
+                if let formula = SystemIndicatorStore.shared.formula(for: m.kind.rawValue, values: stringParams(m.params)),
                    let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: sortedData) {
                     for (i, line) in lines.enumerated() {
+                        guard !allNaN(line.values) else { continue }
                         curves.append(IndicatorLine(name: displayName(line.name), values: line.values,
-                                                    color: customLineColor(i, line: line, indicatorColor: nil),
-                                                    style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue))
+                                                    color: lineColor(from: line, fallback: maColor(i)),
+                                                    style: line.style, lineWidth: line.lineWidth,
+                                                    hideValue: line.hideValue,
+                                                    barColor: line.colorStick ? .sign : .fixed,
+                                                    markerColors: line.markerDirections?.map { $0 ? upColor : downColor }))
                     }
                 }
             }
@@ -840,7 +900,6 @@ struct KlineChartView: View {
                 drag.isDragging = true
                 // 记录最近触摸位置，作为双指缩放时的锚点（双指质心）
                 drag.lastTouchX = value.location.x
-                let y = value.location.y
                 // 区间统计边界拖动：命中边界线附近（或已处于边界拖动中）且起点在主图区域时，优先调整统计区间
                 if startInMain && displaySettings.showRangeStats {
                     let edge = statsDragEdge ?? statsEdge(atX: value.location.x, candleSpacing: candleSpacing)
@@ -1141,6 +1200,20 @@ struct KlineChartView: View {
         .onChange(of: customStore.indicators) { _ in
             syncCustomAfterStoreChange()
             refreshCurves()
+        }
+        .onChange(of: menuIsOpen) { isOpen in
+            // 面板关闭返回 K 线页：只重算期间被挂起的指标（主图/具体副图），未修改的不算
+            if !isOpen {
+                if pendingMainRefresh {
+                    pendingMainRefresh = false
+                    recomputeMainCurves()
+                }
+                if !pendingSubCharts.isEmpty {
+                    let subs = pendingSubCharts
+                    pendingSubCharts.removeAll()
+                    for m in subs { recomputeSub(m) }
+                }
+            }
         }
     }
 

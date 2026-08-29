@@ -1,0 +1,7 @@
+NAME=RSI
+SCOPE=sub
+FORMULA:
+LC:=REF(C,1);
+RSI{p1}:SMA(MAX(C-LC,0),{p1},1)/SMA(ABS(C-LC),{p1},1)*100;
+RSI{p2}:SMA(MAX(C-LC,0),{p2},1)/SMA(ABS(C-LC),{p2},1)*100;
+RSI{p3}:SMA(MAX(C-LC,0),{p3},1)/SMA(ABS(C-LC),{p3},1)*100;

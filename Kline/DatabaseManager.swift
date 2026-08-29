@@ -83,27 +83,6 @@ class DatabaseManager: ObservableObject {
         loadMetaList()
     }
 
-    /// 外部替换了 Documents/tdx.db 后调用：关闭旧连接、重开并刷新标的列表
-    func reload() {
-        dbQueue.async { [weak self] in
-            guard let self = self else { return }
-            if let db = self.db { sqlite3_close(db); self.db = nil }
-            self.openDatabase()
-        }
-    }
-
-    /// 用内置种子数据库覆盖 Documents 中的数据库（恢复默认数据）后重载
-    func restoreSeedDatabase() {
-        dbQueue.async { [weak self] in
-            guard let self = self, let seed = self.seedPath else { return }
-            let target = Self.writableDBPath
-            if let db = self.db { sqlite3_close(db); self.db = nil }
-            try? FileManager.default.removeItem(atPath: target)
-            try? FileManager.default.copyItem(atPath: seed, toPath: target)
-            self.openDatabase()
-        }
-    }
-
     func loadMetaList() {
         dbQueue.async { [weak self] in
             guard let self = self else { return }

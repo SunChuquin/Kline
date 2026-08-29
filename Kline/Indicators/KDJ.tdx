@@ -1,0 +1,7 @@
+NAME=KDJ
+SCOPE=sub
+FORMULA:
+RSV:=(HHV(H,{n})-C)/(HHV(H,{n})-LLV(L,{n}))*100;
+K:SMA(RSV,{k},1);
+D:SMA(K,{d},1);
+J:3*K-2*D;

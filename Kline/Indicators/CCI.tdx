@@ -1,0 +1,5 @@
+NAME=CCI
+SCOPE=sub
+FORMULA:
+TYP:=(H+L+C)/3;
+CCI:(TYP-MA(TYP,{n}))/(0.015*AVEDEV(TYP,{n}));

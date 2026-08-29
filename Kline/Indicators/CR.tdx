@@ -1,0 +1,8 @@
+NAME=CR
+SCOPE=sub
+FORMULA:
+MID:=(H+L+C)/3;
+CR:SUM(MAX(H-REF(MID,1),0),{n})/SUM(MAX(REF(MID,1)-L,0),{n})*100;
+MA{m1}:MA(CR,{m1});
+MA{m2}:MA(CR,{m2});
+MA{m3}:MA(CR,{m3});

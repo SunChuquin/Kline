@@ -1,0 +1,6 @@
+NAME=WMACD
+SCOPE=sub
+FORMULA:
+DIF:EMA(C,{slow})-EMA(C,{fast});
+DEA:EMA(DIF,{signal});
+WMACD:(DIF-DEA)*2,COLORSTICK;

@@ -1,0 +1,6 @@
+NAME=MACD
+SCOPE=sub
+FORMULA:
+DIF:EMA(C,{fast})-EMA(C,{slow});
+DEA:EMA(DIF,{signal});
+MACD:(DIF-DEA)*2,COLORSTICK;

@@ -15,9 +15,22 @@
 		D2C5C4AC2FE4F6CD00D5918E /* Kline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D2C5C4C12FE4F6CD00D5918E /* Exceptions for "Indicators" folder in "Kline" group */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Indicators/*.tdx",
+			);
+			target = D2C5C4AB2FE4F6CD00D5918E /* Kline */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D2C5C4AE2FE4F6CD00D5918E /* Kline */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D2C5C4C12FE4F6CD00D5918E /* Exceptions for "Indicators" folder in "Kline" group */,
+			);
 			path = Kline;
 			sourceTree = "<group>";
 		};

@@ -1,0 +1,6 @@
+NAME=KD
+SCOPE=sub
+FORMULA:
+RSV:=(C-LLV(L,{n}))/(HHV(H,{n})-LLV(L,{n}))*100;
+K:SMA(RSV,{m1},1);
+D:SMA(K,{m2},1);

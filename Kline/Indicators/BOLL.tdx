@@ -1,0 +1,6 @@
+NAME=BOLL
+SCOPE=main
+FORMULA:
+MID:MA(C,{period});
+UP:MID+{mult}*STD(C,{period});
+LOW:MID-{mult}*STD(C,{period});
