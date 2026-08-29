@@ -415,6 +415,8 @@ struct KlineChartView: View {
     @State private var mainCurves: [IndicatorLine] = []
     /// 主图各指标结果缓存（class 引用，修改内部属性不触发重绘；周期/标的切换重建页面时自动重置）
     @State private var mainCache = MainIndicatorCache()
+    /// 主图放大模式：隐藏三个副图 K 线区域（副图名称/指标栏保留并挤到最下方），主图占满剩余空间
+    @State private var mainFullscreen = false
 
     // 三个副图（同一实例跨页面复用，配置不重置）
     @ObservedObject private var subTop: SubChartModel
@@ -563,12 +565,17 @@ struct KlineChartView: View {
         return palette[index % palette.count]
     }
 
+    /// 主图是否裸K：用户手动设置 或 主图放大模式（全屏裸K，不计算任何指标）
+    private var isBareK: Bool { config.showBareK || mainFullscreen }
+
     private func recomputeMainCurves(force: Bool = false) {
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记主图待重算，关闭返回后再算
         if menuIsOpen { pendingMainRefresh = true; return }
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
+        // 主图放大（全屏裸K）：不计算任何主图指标
+        if mainFullscreen { mainCurves = []; return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
             let store = SystemIndicatorStore.shared
@@ -722,6 +729,12 @@ struct KlineChartView: View {
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
+        // 主图放大模式：副图不显示也不计算指标值（退出放大时重新计算）
+        if mainFullscreen {
+            m.curves = []
+            m.titleName = m.kind.rawValue
+            return
+        }
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
         var curves: [IndicatorLine] = []
         if m.activeCustomID != nil, let custom,
@@ -1071,8 +1084,8 @@ struct KlineChartView: View {
             let timeHeight: CGFloat = 18
             // 底部区域：新增的行情数据行 + 时间轴各占一行（同高）
             let chartHeight = max(1, geometry.size.height - 4 * legendHeight - 2 * timeHeight)
-            // 三个副图等高（各占 15%），多出的空间全部还给主图
-            let sub1Height = chartHeight * 0.15
+            // 主图放大模式下副图（含名称/指标栏）完全不显示，主图占满全部剩余空间
+            let sub1Height = mainFullscreen ? 0 : chartHeight * 0.15
             let sub2Height = sub1Height
             let sub3Height = sub1Height
             let mainHeight = max(1, chartHeight - sub1Height - sub2Height - sub3Height)
@@ -1089,15 +1102,17 @@ struct KlineChartView: View {
             VStack(spacing: 0) {
                 mainLegendRow(height: legendHeight).zIndex(30)
                 mainChart(width: width, candleSpacing: candleSpacing, height: mainHeight)
-                subLegendRow(model: subTop, height: legendHeight).zIndex(30)
-                subChart(model: subTop, width: width, candleSpacing: candleSpacing, height: sub1Height,
-                         slot: .top)
-                subLegendRow(model: subBottom, height: legendHeight).zIndex(30)
-                subChart(model: subBottom, width: width, candleSpacing: candleSpacing, height: sub2Height,
-                         slot: .bottom)
-                subLegendRow(model: subThird, height: legendHeight).zIndex(30)
-                subChart(model: subThird, width: width, candleSpacing: candleSpacing, height: sub3Height,
-                         slot: .third)
+                if !mainFullscreen {
+                    subLegendRow(model: subTop, height: legendHeight).zIndex(30)
+                    subChart(model: subTop, width: width, candleSpacing: candleSpacing, height: sub1Height,
+                             slot: .top)
+                    subLegendRow(model: subBottom, height: legendHeight).zIndex(30)
+                    subChart(model: subBottom, width: width, candleSpacing: candleSpacing, height: sub2Height,
+                             slot: .bottom)
+                    subLegendRow(model: subThird, height: legendHeight).zIndex(30)
+                    subChart(model: subThird, width: width, candleSpacing: candleSpacing, height: sub3Height,
+                             slot: .third)
+                }
                 // 时间轴上方新增一行：十字光标出现时显示 开/收/高/低/涨/额 行情数据
                 axisQuoteRow(width: width, height: timeHeight)
                 timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
@@ -1222,11 +1237,11 @@ struct KlineChartView: View {
         onHasCursorChange?(selectedIndex != nil || pinnedIndex != nil)
     }
 
-    private func refreshCurves() {
-        recomputeMainCurves()
-        recomputeSub(subTop)
-        recomputeSub(subBottom)
-        recomputeSub(subThird)
+    private func refreshCurves(force: Bool = false) {
+        recomputeMainCurves(force: force)
+        recomputeSub(subTop, force: force)
+        recomputeSub(subBottom, force: force)
+        recomputeSub(subThird, force: force)
     }
 
     private func model(for slot: SubSlot) -> SubChartModel {
@@ -1846,11 +1861,55 @@ struct KlineChartView: View {
                     showSubSheet = false
                     withAnimation { showMainSheet.toggle() }
                 })
-                if config.showBareK { legendText("裸K") }
+                if isBareK { legendText("裸K") }
                 ForEach(Array(mainCurves.enumerated()), id: \.offset) { _, line in
                     legendItem(line)
                 }
                 Spacer()
+                // 主图放大开关：进入后主图全屏裸K、显示全部 K 线；放大期间若双指缩放导致 K 线数变少，
+                // 再次点击只重新全显（保持放大）；仅当全部 K 线都在屏幕内时才退出放大并恢复最新 100 根
+                Button {
+                    if mainFullscreen {
+                        if count < maxVisibleCount {
+                            // 放大模式下双指缩放后非全显：重新让所有 K 线进入屏幕，保持放大
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                visibleCount = CGFloat(maxVisibleCount)
+                                endOffset = 0
+                            }
+                        } else {
+                            // 所有 K 线都在屏幕内：退出放大，恢复最新 100 根 K 线
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                mainFullscreen = false
+                                visibleCount = 100
+                                endOffset = 0
+                            }
+                        }
+                    } else {
+                        // 进入放大：主图全屏裸K，所有 K 线进入屏幕
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            mainFullscreen = true
+                            visibleCount = CGFloat(maxVisibleCount)
+                            endOffset = 0
+                        }
+                    }
+                    // 放大状态下双指缩放时，DragGesture 可能被 MagnificationGesture 抢占而 onEnded 未触发，
+                    // 导致 drag.isDragging 残留 true 拦截后续指标重算；这里强制重置并 force 重算，
+                    // 保证退出放大后主图和副图指标立即恢复计算
+                    drag.isDragging = false
+                    drag.needsRefreshAfterDrag = false
+                    refreshCurves(force: true)
+                } label: {
+                    // 图标语义：未放大或放大中需重新全显时显示"指向外"（点击进入放大/重新全显）；
+                    // 全部 K 线已全显可关闭时显示"指向内"（点击退出放大）
+                    let needShowAll = mainFullscreen && count < maxVisibleCount
+                    Image(systemName: needShowAll ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(mainFullscreen ? .blue : .gray)
+                        .frame(width: 22, height: 22, alignment: .center)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(mainFullscreen ? (count < maxVisibleCount ? "重新显示全部 K 线" : "退出主图放大") : "放大主图")
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1862,7 +1921,7 @@ struct KlineChartView: View {
 
     /// 主图指标名称按钮：固定显示当前时间周期，如"日线: MA"、"周线: 裸K"
     private var mainLegendTitle: String {
-        if config.showBareK { return "\(period.rawValue): 裸K" }
+        if isBareK { return "\(period.rawValue): 裸K" }
         var parts: [String] = []
         if config.showMA { parts.append("MA") }
         if config.showEMA { parts.append("EMA") }
