@@ -1,8 +1,9 @@
 NAME=VR
 SCOPE=sub
+GROUP=量能
 FORMULA:
 TH:=IF(C>REF(C,1),V,0);
 TL:=IF(C<REF(C,1),V,0);
 TQ:=IF(C=REF(C,1),V,0);
-VR:(SUM(TH,{n})*2+SUM(TQ,{n}))/(SUM(TL,{n})*2+SUM(TQ,{n}))*100;
-MAVR:MA(VR,{m});
+VR:(SUM(TH,26)*2+SUM(TQ,26))/(SUM(TL,26)*2+SUM(TQ,26))*100;
+MAVR:MA(VR,6);

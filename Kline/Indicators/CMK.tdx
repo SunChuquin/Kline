@@ -1,7 +1,7 @@
 NAME=CMK
 SCOPE=main
 FORMULA:
-N:={cmkN};
+N:=10;
 HLC:=REF(MA((H+L+C)/3,N),1);
 HV:=EMA(HHV(H,N),3);
 LV:=EMA(LLV(L,N),3);

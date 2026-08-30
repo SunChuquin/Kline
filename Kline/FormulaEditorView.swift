@@ -143,11 +143,23 @@ struct FormulaEditorView: View {
 }
 
 /// 新建/编辑指标表单
-private struct IndicatorEditSheet: View {
+struct IndicatorEditSheet: View {
     let indicator: CustomIndicator?
     let data: [KlineItem]
     var onCancel: () -> Void
     var onSave: (CustomIndicator) -> Void
+
+    // ---- 系统指标公式编辑模式 ----
+    /// 是否为系统指标（此时不编辑名称/作用域，保存写回 .tdx）
+    let isSystemIndicator: Bool
+    /// 系统指标初始公式模板（用于初始化输入框 & 判断是否有修改）
+    let systemInitialFormula: String
+    /// 是否可「恢复编译时内容」（系统指标 true，自定义指标 false）
+    let canRestoreBuiltin: Bool
+    /// 恢复编译时内容回调：返回恢复后的模板（nil 表示恢复失败）
+    var onRestoreBuiltin: (() -> String?)?
+    /// 系统指标保存回调（传入编辑后的公式模板）
+    var onSaveSystem: ((String) -> Void)?
 
     @State private var name: String
     @State private var formula: String
@@ -163,11 +175,17 @@ private struct IndicatorEditSheet: View {
 
     /// 名称与公式都非空才允许保存
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty && !formula.trimmingCharacters(in: .whitespaces).isEmpty
+        if isSystemIndicator {
+            return !formula.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return !name.trimmingCharacters(in: .whitespaces).isEmpty && !formula.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// 相对原始指标是否有未保存的修改
     private var hasChanges: Bool {
+        if isSystemIndicator {
+            return formula != systemInitialFormula
+        }
         if let ind = indicator {
             return name != ind.name
                 || formula != ind.formula
@@ -179,13 +197,23 @@ private struct IndicatorEditSheet: View {
         }
     }
 
-    init(indicator: CustomIndicator?, data: [KlineItem], onCancel: @escaping () -> Void, onSave: @escaping (CustomIndicator) -> Void) {
+    init(indicator: CustomIndicator?, data: [KlineItem], onCancel: @escaping () -> Void, onSave: @escaping (CustomIndicator) -> Void,
+         isSystemIndicator: Bool = false,
+         systemInitialFormula: String = "",
+         canRestoreBuiltin: Bool = false,
+         onRestoreBuiltin: (() -> String?)? = nil,
+         onSaveSystem: ((String) -> Void)? = nil) {
         self.indicator = indicator
         self.data = data
         self.onCancel = onCancel
         self.onSave = onSave
+        self.isSystemIndicator = isSystemIndicator
+        self.systemInitialFormula = systemInitialFormula
+        self.canRestoreBuiltin = canRestoreBuiltin
+        self.onRestoreBuiltin = onRestoreBuiltin
+        self.onSaveSystem = onSaveSystem
         _name = State(initialValue: indicator?.name ?? "")
-        _formula = State(initialValue: indicator?.formula ?? "")
+        _formula = State(initialValue: isSystemIndicator ? systemInitialFormula : (indicator?.formula ?? ""))
         _color = State(initialValue: indicator?.color ?? Color(hex: "1E88E5")!)
         _scope = State(initialValue: indicator?.scope ?? .sub)
     }
@@ -193,7 +221,7 @@ private struct IndicatorEditSheet: View {
     var body: some View {
         VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Text(indicator == nil ? "新建指标" : "编辑指标")
+                    Text(isSystemIndicator ? "编辑系统指标公式" : (indicator == nil ? "新建指标" : "编辑指标"))
                         .font(.system(size: 16, weight: .bold)).foregroundColor(.black)
                     Spacer(minLength: 4)
                     Button("全选") { inputController.selectAll() }
@@ -202,6 +230,11 @@ private struct IndicatorEditSheet: View {
                         .font(.system(size: 12)).foregroundColor(.blue)
                     Button("测试公式") { runTest() }
                         .font(.system(size: 12, weight: .medium)).foregroundColor(.blue)
+                    // 恢复编译时内容：仅系统指标可点（自定义指标禁用）
+                    Button("恢复编译时内容") { restoreBuiltin() }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(canRestoreBuiltin ? .orange : .gray)
+                        .disabled(!canRestoreBuiltin)
                     Button("保存") { save() }
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
@@ -224,7 +257,8 @@ private struct IndicatorEditSheet: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        // 名称 + 作用域 合在一行
+                        // 名称 + 作用域 合在一行（系统指标不编辑名称/作用域，隐藏）
+                        if !isSystemIndicator {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("名称").font(.system(size: 13, weight: .medium)).foregroundColor(.black)
@@ -252,6 +286,7 @@ private struct IndicatorEditSheet: View {
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         }
                         field("公式") {
                             FormulaTextView(text: Binding(
@@ -369,6 +404,11 @@ private struct IndicatorEditSheet: View {
     }
 
     private func save() {
+        // 系统指标：直接回调保存公式模板（由外部写回 .tdx）
+        if isSystemIndicator {
+            onSaveSystem?(formula)
+            return
+        }
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { return }
         var ind = indicator ?? CustomIndicator(name: trimmedName, formula: formula)
@@ -377,6 +417,14 @@ private struct IndicatorEditSheet: View {
         ind.scope = scope
         ind.colorHex = color.hexString
         onSave(ind)
+    }
+
+    /// 恢复编译时内容：从内置模板恢复当前编辑的系统指标公式
+    private func restoreBuiltin() {
+        guard let onRestoreBuiltin, let restored = onRestoreBuiltin() else { return }
+        formula = restored
+        testMessage = nil
+        testError = false
     }
 
     private func appendOption(_ opt: String) {
@@ -517,5 +565,78 @@ struct FormulaTextView: UIViewRepresentable {
             }
             return true
         }
+    }
+}
+
+// MARK: - 系统指标公式编辑器（复用 IndicatorEditSheet 的系统指标模式）
+
+/// 系统指标公式编辑容器：主图可切换指标，副图固定当前指标。
+/// 保存写回 Documents/indicator/*.tdx；「恢复编译时内容」仅系统指标可用。
+struct SystemIndicatorEditorContainer: View {
+    let data: [KlineItem]
+    /// true = 主图（可在 MA/EMA/BOLL/CMK/SAR 间切换），false = 副图（固定 initialSubId）
+    let isMain: Bool
+    var onClose: () -> Void
+    /// 保存成功回调：传入保存的指标 id（供外部重算）
+    var onSaved: (String) -> Void
+
+    private static let mainIds = ["MA", "EMA", "BOLL", "CMK", "SAR"]
+
+    @State private var mainId: String = "MA"
+    @State private var subId: String
+
+    init(data: [KlineItem], isMain: Bool, initialSubId: String = "",
+         onClose: @escaping () -> Void, onSaved: @escaping (String) -> Void) {
+        self.data = data
+        self.isMain = isMain
+        self.onClose = onClose
+        self.onSaved = onSaved
+        _subId = State(initialValue: initialSubId)
+    }
+
+    private var currentId: String { isMain ? mainId : subId }
+
+    var body: some View {
+        let id = currentId
+        VStack(spacing: 0) {
+            if isMain {
+                // 主图系统指标切换栏
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Self.mainIds, id: \.self) { mid in
+                            Button(mid) { mainId = mid }
+                                .font(.system(size: 13, weight: mainId == mid ? .semibold : .regular))
+                                .foregroundColor(mainId == mid ? .white : .black)
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .background(mainId == mid ? Color.blue : Color(uiColor: .systemGray6))
+                                .cornerRadius(6)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                }
+                Divider()
+            }
+            IndicatorEditSheet(
+                indicator: nil,
+                data: data,
+                onCancel: onClose,
+                onSave: { _ in },
+                isSystemIndicator: true,
+                systemInitialFormula: SystemIndicatorStore.shared.template(for: id) ?? "",
+                canRestoreBuiltin: true,
+                onRestoreBuiltin: {
+                    guard SystemIndicatorStore.shared.restoreBuiltin(for: id) else { return nil }
+                    return SystemIndicatorStore.shared.template(for: id)
+                },
+                onSaveSystem: { template in
+                    if SystemIndicatorStore.shared.saveTemplate(template, for: id) {
+                        onSaved(id)
+                    }
+                    onClose()
+                }
+            )
+            .id(id)
+        }
+        .background(Color.white)
     }
 }

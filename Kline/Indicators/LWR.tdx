@@ -1,5 +1,6 @@
 NAME=LWR
 SCOPE=sub
+GROUP=超买超卖
 FORMULA:
-LWR1:(HHV(H,{n})-C)/(HHV(H,{n})-LLV(L,{n}))*100;
-LWR2:SMA(LWR1,{m1},1);
+LWR1:(HHV(H,9)-C)/(HHV(H,9)-LLV(L,9))*100;
+LWR2:SMA(LWR1,3,1);

@@ -51,6 +51,8 @@ struct KlineDetailView: View {
     @State private var showSettings = false
     /// 自定义指标公式编辑器是否打开（由 K 线图内部触发，此处负责隐藏顶部栏实现真全屏）
     @State private var showCustomEditor = false
+    /// 系统指标公式编辑器是否打开（同样需隐藏顶部栏实现真全屏）
+    @State private var showSystemEditor = false
     @ObservedObject private var config = ChartConfigStore.shared
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
@@ -70,8 +72,8 @@ struct KlineDetailView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                // 自定义指标公式编辑器（真全屏）打开时隐藏顶部栏
-                if !showCustomEditor {
+                // 自定义/系统指标公式编辑器（真全屏）打开时隐藏顶部栏
+                if !showCustomEditor && !showSystemEditor {
                     // 顶部留白压缩为小固定值，减少状态栏区域的空白
                     Color.clear
                         .frame(height: 2)
@@ -389,7 +391,7 @@ struct KlineDetailView: View {
 
     private func chartView(series: ChartSeries) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
-                       showCustomEditor: $showCustomEditor, metaId: item.id, period: config.selectedPeriod,
+                       showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: config.selectedPeriod,
                        onPeriodSwitch: { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
                            pinEnabled = false

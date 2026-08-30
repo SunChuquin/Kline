@@ -1,4 +1,4 @@
 NAME=SAR
 SCOPE=main
 FORMULA:
-SAR1:SAR({step},{maxstep});
+SAR1:SAR(0.02,0.2);

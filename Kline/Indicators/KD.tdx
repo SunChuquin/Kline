@@ -1,6 +1,7 @@
 NAME=KD
 SCOPE=sub
+GROUP=超买超卖
 FORMULA:
-RSV:=(C-LLV(L,{n}))/(HHV(H,{n})-LLV(L,{n}))*100;
-K:SMA(RSV,{m1},1);
-D:SMA(K,{m2},1);
+RSV:=(C-LLV(L,9))/(HHV(H,9)-LLV(L,9))*100;
+K:SMA(RSV,3,1);
+D:SMA(K,3,1);

@@ -1,6 +1,7 @@
 NAME=BOLL
 SCOPE=main
 FORMULA:
-MID:MA(C,{period});
-UP:MID+{mult}*STD(C,{period});
-LOW:MID-{mult}*STD(C,{period});
+M:=20;
+MID:MA(CLOSE,M);
+UB:MID+2*STD(CLOSE,M);
+LB:MID-2*STD(CLOSE,M);

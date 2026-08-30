@@ -22,34 +22,7 @@ private func klineDebug(_ message: @autoclosure () -> String) {
     #endif
 }
 
-/// 副图可选指标类型（两个副图均可任选）
-enum SubChartKind: String, CaseIterable, Identifiable {
-    // 量能
-    case vol = "VOL"
-    case amo = "AMO"
-    case vmacd = "VMACD"
-    case vr = "VR"
-    case vrsi = "VRSI"
-    case obv = "OBV"
-    case col = "COL"
-    // 趋向
-    case macd = "MACD"
-    case wmacd = "WMACD"
-    case dmi = "DMI"
-    case trix = "TRIX"
-    // 超买超卖
-    case kdj = "KDJ"
-    case rsi = "RSI"
-    case cci = "CCI"
-    case kd = "KD"
-    case lwr = "LWR"
-    case marsi = "MARSI"
-    case brar = "BRAR"
-    case cr = "CR"
-    case mass = "MASS"
-    case cdj = "CDJ"
-    var id: String { rawValue }
-}
+/// 副图可选指标 id（对应 .tdx 文件名；VOL/AMO 为无模板的内置项）
 
 /// 主图显示类型
 enum ChartStyle: String, CaseIterable, Identifiable {
@@ -168,12 +141,6 @@ enum SubSlot: Hashable {
     case top, bottom, third
 }
 
-/// 全屏参数编辑页目标
-enum ParamEditorTarget: Equatable {
-    case main
-    case sub(SubSlot)
-}
-
 /// 指标柱状曲线颜色规则
 enum BarColorMode: Equatable {
     case fixed       // 使用曲线自身颜色
@@ -181,61 +148,20 @@ enum BarColorMode: Equatable {
     case candle      // 按对应K线涨跌着色（量柱）
 }
 
-// MARK: - 指标参数配置（可编辑）
-
-/// MA/EMA 计算数据源
-enum MAValueSource: String, CaseIterable, Identifiable {
-    case close = "CLOSE"
-    case open = "OPEN"
-    case high = "HIGH"
-    case low = "LOW"
-    case avg = "平均值"
-    var id: String { rawValue }
-}
-
-struct MAConfig: Equatable {
-    var periods: [Int] = [5, 10, 20, 60, 0, 0, 0, 0]
-    var sources: [MAValueSource] = Array(repeating: .close, count: 8)
-    mutating func sanitize() {
-        if periods.count != 8 { periods = Array(repeating: 0, count: 8) }
-        if sources.count != 8 { sources = Array(repeating: .close, count: 8) }
-        periods = periods.map { min(max($0, 0), 1000) }
-    }
-}
-
-struct EMAConfig: Equatable {
-    var periods: [Int] = [5, 10, 20, 60, 0, 0, 0, 0]
-    var sources: [MAValueSource] = Array(repeating: .close, count: 8)
-    mutating func sanitize() {
-        if periods.count != 8 { periods = Array(repeating: 0, count: 8) }
-        if sources.count != 8 { sources = Array(repeating: .close, count: 8) }
-        periods = periods.map { min(max($0, 0), 1000) }
-    }
-}
+// MARK: - 图表配置持久化仓库
 
 /// 图表配置持久化仓库：K 线页重建（切换周期 / 返回行情重新进入）时保持指标与设置不重置。
 final class ChartConfigStore: ObservableObject {
     static let shared = ChartConfigStore()
 
-    // 主图叠加指标开关
-    @Published var showMA = true
-    @Published var showEMA = false
-    @Published var showBOLL = false
+    // 主图叠加指标（按 .tdx 指标 id 的启用集合，数据驱动；默认 MA + CMK）
+    @Published var mainIndicators: Set<String> = ["MA", "CMK"]
     @Published var showBareK = false
-    @Published var showCMK = true
-    @Published var showSAR = false
     // 当前行情周期（跨页面/跨标的持久，返回行情再进入时保持上次选择）
     @Published var selectedPeriod: KlinePeriod = .daily
     // K线类型与图层显示（设置面板）
     @Published var chartStyle: ChartStyle = .bare
     @Published var displaySettings = ChartDisplaySettings()
-    // 主图指标参数
-    @Published var cmkN = 10
-    @Published var sarStep: Double = 0.02
-    @Published var sarMax: Double = 0.2
-    @Published var maConfig = MAConfig()
-    @Published var emaConfig = EMAConfig()
-    @Published var bollConfig = BOLLConfig()
     // 主图自定义指标
     @Published var activeCustomIndicatorID: UUID? = nil
     // 全局多/空镜像（顶部导航栏按钮控制）：开启后主图与所有副图图形取负镜像（空头）
@@ -247,18 +173,10 @@ final class ChartConfigStore: ObservableObject {
     let subThird = SubChartModel()
 
     private init() {
-        subTop.kind = .cdj
-        subTop.resetParams()
-        subBottom.kind = .col
-        subBottom.resetParams()
-        subThird.kind = .macd
-        subThird.resetParams()
+        subTop.kind = "CDJ"
+        subBottom.kind = "COL"
+        subThird.kind = "MACD"
     }
-}
-
-struct BOLLConfig: Equatable {
-    var period: Int = 20
-    var mult: Double = 2
 }
 
 // MARK: - 通用指标线
@@ -295,8 +213,11 @@ struct PrefetchCalcRequest {
     let series: TDXSharedSeries
     let volumes: [Double]        // 裁剪区间成交量
     let turnovers: [Double]      // 裁剪区间成交额
-    /// 主图公式文本（仅启用的指标，按固定顺序；空串表示未启用/无自定义指标）
+    /// 主图公式文本（仅启用的指标，按顺序；空串表示未启用/无自定义指标）
     let mainFormulas: [String]
+    /// 主图公式对应的指标 id（与 mainFormulas 一一对应；.tdx id 或 MainIndicatorCache.customKey），
+    /// 供主线程按 id 决定颜色/样式组装
+    let mainIDs: [String]
     /// 副图请求（3 个，与 subTop/subBottom/subThird 对应）
     let subs: [SubPrefetchRequest]
     /// 各主图公式上一块的增量求值状态（与 mainFormulas 一一对应；nil = 从头算）
@@ -306,7 +227,7 @@ struct PrefetchCalcRequest {
 }
 
 struct SubPrefetchRequest {
-    let kind: SubChartKind
+    let kind: String
     /// 自定义指标公式（启用自定义时非空，优先于系统公式）
     let customFormula: String?
     /// 系统指标公式（已替换参数）
@@ -360,43 +281,65 @@ private func prefetchLineColor(from line: TDXOutputLine, fallback: Color) -> Col
     return fallback
 }
 
-private func prefetchFmt(_ v: Double) -> String { String(format: "%g", v) }
+// MARK: - 主图数据驱动辅助（主图指标集合来自 .tdx，SCOPE=main）
 
-private func prefetchStringParams(_ params: [String: Int]) -> [String: String] {
-    var d: [String: String] = [:]
-    for (k, v) in params { d[k] = "\(v)" }
-    return d
+/// 主图指标条目：启用的 .tdx 主图指标 + 主图自定义指标
+struct MainIndicatorEntry {
+    let id: String       // .tdx 文件名 id，或 MainIndicatorCache.customKey
+    let formula: String
+    let isCustom: Bool
 }
 
-private func prefetchSourceValue(_ s: MAValueSource) -> Int {
-    switch s {
-    case .close: return 1
-    case .open: return 2
-    case .high: return 3
-    case .low: return 4
-    case .avg: return 5
+/// 计算当前启用的主图指标条目（顺序：.tdx 主图 defs → 自定义）
+private func mainIndicatorEntries(store: SystemIndicatorStore,
+                                  customStore: CustomIndicatorStore,
+                                  config: ChartConfigStore,
+                                  customFormula: String?) -> [MainIndicatorEntry] {
+    guard !config.showBareK else { return [] }
+    var entries: [MainIndicatorEntry] = []
+    for def in store.mainIndicatorDefs() where config.mainIndicators.contains(def.id) {
+        entries.append(MainIndicatorEntry(id: def.id,
+                                          formula: store.formula(for: def.id, values: [:]) ?? "",
+                                          isCustom: false))
+    }
+    if let customFormula {
+        entries.append(MainIndicatorEntry(id: MainIndicatorCache.customKey,
+                                          formula: customFormula, isCustom: true))
+    }
+    return entries
+}
+
+/// 主图指标默认颜色（未被公式 COLORXXX 覆盖时使用）
+private func mainLineDefaultColor(_ id: String, _ i: Int) -> Color {
+    switch id {
+    case "BOLL": return i == 0 ? prefetchMa10Color : prefetchBollColor
+    case "SAR": return prefetchUpColor
+    default: return prefetchMaColor(i)
     }
 }
 
-private func prefetchMainMAValues(periods: [Int], sources: [MAValueSource]) -> [String: String] {
-    var d: [String: String] = [:]
-    for i in 0..<8 {
-        let p = periods.indices.contains(i) ? periods[i] : 0
-        let src = sources.indices.contains(i) ? sources[i] : .close
-        d["p\(i + 1)"] = "\(p)"
-        d["src\(i + 1)"] = "\(prefetchSourceValue(src))"
+/// 主图输出行组装为 IndicatorLine：方向性标记（如 SAR）画红绿点，其余按公式样式/颜色
+private func buildMainLine(id: String, isCustom: Bool, customColor: Color?,
+                           i: Int, out: TDXOutputLine) -> IndicatorLine? {
+    guard !prefetchAllNaN(out.values) else { return nil }
+    let name = prefetchDisplayName(out.name)
+    if out.markerDirections != nil {
+        return IndicatorLine(name: name, values: out.values, color: prefetchUpColor,
+                             style: .pointdot, lineWidth: 1, hideValue: out.hideValue,
+                             markerColors: out.markerDirections?.map { $0 ? prefetchUpColor : prefetchDownColor })
     }
-    return d
+    let color: Color
+    if isCustom {
+        color = prefetchCustomLineColor(i, line: out, indicatorColor: customColor)
+    } else {
+        color = prefetchLineColor(from: out, fallback: mainLineDefaultColor(id, i))
+    }
+    return IndicatorLine(name: name, values: out.values, color: color,
+                         style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
 }
 
-private func prefetchMainMAValues(_ cfg: MAConfig) -> [String: String] {
-    prefetchMainMAValues(periods: cfg.periods, sources: cfg.sources)
-}
-
-private func prefetchMainBOLLValues() -> [String: String] {
-    let config = ChartConfigStore.shared
-    return ["period": "\(config.bollConfig.period)", "mult": prefetchFmt(config.bollConfig.mult)]
-}
+/// VOL/AMO 量均线固定周期（0=隐藏，公式固定值，不再支持编辑）
+private let volMAFixedPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
 
 /// 主图各指标按「输出行」缓存计算结果：每个输出行（如一条 MA）独立缓存，
 /// 只重算公式文本（含参数）变化的行，其余输出行直接复用缓存结果。
@@ -415,41 +358,29 @@ final class MainIndicatorCache {
         var key = ""
         var line: IndicatorLine? = nil
     }
-    var ma = UnitSet()
-    var ema = UnitSet()
-    var boll = UnitSet()
-    var cmk = UnitSet()
-    var sar = UnitSet()
-    var custom = UnitSet()
+    /// 按指标 id（.tdx 文件名）缓存各主图指标的单元结果；数据驱动，新增指标自动加入
+    var units: [String: UnitSet] = [:]
+    /// 主图自定义指标的固定缓存 key（区别于 .tdx 系统指标）
+    static let customKey = "__custom__"
 }
 
 // MARK: - 副图模型
 
 final class SubChartModel: ObservableObject {
-    @Published var kind: SubChartKind = .vol
+    @Published var kind: String = "VOL"
     @Published var activeCustomID: UUID? = nil
     @Published var titleName: String = "VOL"
     @Published var curves: [IndicatorLine] = [] {
         didSet {
             // 诊断：任何把「非空」副图曲线清成空的写操作都打印调用栈，定位变空根因
             if !oldValue.isEmpty && curves.isEmpty {
-                klineDebug("[KlineDebug] ⚠️副图清空 \(kind.rawValue) 旧=\(oldValue.count)->新=0 | 栈:\(Thread.callStackSymbols.prefix(10).joined(separator:" | "))")
+                klineDebug("[KlineDebug] ⚠️副图清空 \(kind) 旧=\(oldValue.count)->新=0 | 栈:\(Thread.callStackSymbols.prefix(10).joined(separator:" | "))")
             }
         }
     }
     @Published var color: Color = Color(hex: "0050FF")!
-    /// 系统副图指标的整数参数（键 → 值）
-    @Published var params: [String: Int] = [:]
-    /// VOL/AMO 的量均线周期（0=隐藏）
-    @Published var volPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
 
     var isCustom: Bool { activeCustomID != nil }
-
-    func resetParams() {
-        params = kind.defaultParams
-    }
-
-    func param(_ key: String) -> Int { params[key] ?? 0 }
 }
 
 /// 仅缓存排序后的 K 线数据；指标一律用静态方法按需(可见配置)计算，不再整表预计算未用指标。
@@ -472,85 +403,6 @@ struct ChartSeries {
             let outIdx = i - period
             if outIdx >= 0, values[outIdx].isFinite { sum -= values[outIdx]; valid -= 1 }
             if valid >= period { result[i] = sum / Double(period) }
-        }
-        return result
-    }
-
-    static func ema(values: [Double], period: Int) -> [Double] {
-        var result = Array(repeating: Double.nan, count: values.count)
-        guard period > 0 else { return result }
-        let k = 2.0 / Double(period + 1)
-        var prev: Double?
-        for (i, v) in values.enumerated() {
-            if let p = prev { result[i] = v * k + p * (1 - k); prev = result[i] }
-            else { result[i] = v; prev = v }
-        }
-        return result
-    }
-
-    static func rollingStd(_ values: [Double], period: Int) -> [Double] {
-        var result = Array(repeating: Double.nan, count: values.count)
-        guard period > 0, values.count >= period else { return result }
-        for i in (period - 1)..<values.count {
-            let window = Array(values[(i - period + 1)...i])
-            let mean = window.reduce(0, +) / Double(period)
-            let variance = window.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(period)
-            result[i] = sqrt(variance)
-        }
-        return result
-    }
-
-    static func boll(values: [Double], period: Int, mult: Double) -> (mid: [Double], up: [Double], lo: [Double]) {
-        let mid = ma(values: values, period: period)
-        let sd = rollingStd(values, period: period)
-        return (mid, zip(mid, sd).map { $0 + mult * $1 }, zip(mid, sd).map { $0 - mult * $1 })
-    }
-
-    static func macd(values: [Double], fast: Int, slow: Int, signal: Int) -> (dif: [Double], dea: [Double], hist: [Double]) {
-        let dif = zip(ema(values: values, period: fast), ema(values: values, period: slow)).map { $0 - $1 }
-        let dea = ema(values: dif, period: signal)
-        return (dif, dea, zip(dif, dea).map { 2 * ($0 - $1) })
-    }
-
-    /// WMACD（空头视角 MACD）：DIF 改为 慢周期 EMA - 快周期 EMA，其余同 MACD
-    static func wmacd(values: [Double], fast: Int, slow: Int, signal: Int) -> (dif: [Double], dea: [Double], hist: [Double]) {
-        let dif = zip(ema(values: values, period: slow), ema(values: values, period: fast)).map { $0 - $1 }
-        let dea = ema(values: dif, period: signal)
-        return (dif, dea, zip(dif, dea).map { 2 * ($0 - $1) })
-    }
-
-    static func kdj(highs: [Double], lows: [Double], closes: [Double], n: Int, kN: Int, dN: Int) -> (k: [Double], d: [Double], j: [Double]) {
-        var kArr: [Double] = []; var dArr: [Double] = []; var jArr: [Double] = []
-        var prevK = 50.0; var prevD = 50.0
-        for i in 0..<closes.count {
-            let loIndex = max(0, i - n + 1)
-            let lo = lows[loIndex...i].min() ?? 0
-            let hi = highs[loIndex...i].max() ?? 0
-            let rsv = (hi - lo) == 0 ? 50 : (closes[i] - lo) / (hi - lo) * 100
-            let k = (Double(kN - 1) * prevK + rsv) / Double(kN)
-            let d = (Double(dN - 1) * prevD + k) / Double(dN)
-            kArr.append(k); dArr.append(d); jArr.append(3 * k - 2 * d)
-            prevK = k; prevD = d
-        }
-        return (kArr, dArr, jArr)
-    }
-
-    static func rsi(values: [Double], period: Int) -> [Double] {
-        var result = Array(repeating: Double.nan, count: values.count)
-        guard values.count > period, period > 0 else { return result }
-        var avgGain = 0.0; var avgLoss = 0.0
-        for i in 1...period {
-            let c = values[i] - values[i - 1]
-            avgGain += max(c, 0) / Double(period)
-            avgLoss += max(-c, 0) / Double(period)
-        }
-        func rv(_ g: Double, _ l: Double) -> Double { l == 0 ? 100 : 100 - 100 / (1 + g / l) }
-        result[period] = rv(avgGain, avgLoss)
-        for i in (period + 1)..<values.count {
-            let c = values[i] - values[i - 1]
-            avgGain = (avgGain * Double(period - 1) + max(c, 0)) / Double(period)
-            avgLoss = (avgLoss * Double(period - 1) + max(-c, 0)) / Double(period)
-            result[i] = rv(avgGain, avgLoss)
         }
         return result
     }
@@ -649,9 +501,12 @@ struct KlineChartView: View {
 
     /// 自定义指标公式编辑器是否打开（由详情页持有状态，打开时隐藏顶部栏实现真全屏）
     @Binding var showCustomEditor: Bool
+    /// 系统指标公式编辑器是否打开（由详情页持有状态，打开时隐藏顶部栏实现真全屏）
+    @Binding var showSystemEditor: Bool
     @State private var editorTarget: EditorTarget = .main
-    /// 系统指标参数编辑页目标（与选择指标页同尺寸的底部面板，非全屏）
-    @State private var paramEditorTarget: ParamEditorTarget? = nil
+    /// 系统指标公式编辑目标：true=主图（可切换），false=副图（编辑 initialSubId）
+    @State private var systemEditorIsMain: Bool? = nil
+    @State private var systemEditorSubId: String = ""
     /// 指标/设置面板打开期间挂起指标重算：分别记录"主图 / 具体副图"哪些需要重算，
     /// 关闭返回 K 线页时只重算被改动的对象，避免把未修改的指标也全量重算
     @State private var pendingMainRefresh = false
@@ -664,6 +519,7 @@ struct KlineChartView: View {
     init(series: ChartSeries, chartStyle: Binding<ChartStyle>,
          displaySettings: Binding<ChartDisplaySettings> = .constant(ChartDisplaySettings()),
          showCustomEditor: Binding<Bool> = .constant(false),
+         showSystemEditor: Binding<Bool> = .constant(false),
          metaId: Int? = nil,
          period: KlinePeriod = .daily,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
@@ -684,6 +540,7 @@ struct KlineChartView: View {
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
+        self._showSystemEditor = showSystemEditor
         let all = series.sorted
         self.sortedAll = all
         self.baseCloses = all.map(\.close)
@@ -825,20 +682,6 @@ struct KlineChartView: View {
         return (-r.upperBound)...(-r.lowerBound)
     }
 
-    /// MA/EMA 数据源序列：CLOSE/OPEN/HIGH/LOW/平均值(开收高低均值)
-    private func sourceSeries(_ source: MAValueSource) -> [Double] {
-        switch source {
-        case .close: return closes
-        case .open: return opens
-        case .high: return highs
-        case .low: return lows
-        case .avg:
-            var out = [Double](repeating: 0, count: closes.count)
-            for i in 0..<closes.count { out[i] = (opens[i] + closes[i] + highs[i] + lows[i]) / 4 }
-            return out
-        }
-    }
-
     /// 指标栏取值：有光标时取光标值，否则取可见窗口最右侧值。
     /// 全部改为 O(1)/有界查找，避免拖拽时对整表做 O(n) 反向扫描（卡顿根源之一）。
     private func legendValue(_ arr: [Double]) -> Double? {
@@ -967,67 +810,27 @@ struct KlineChartView: View {
                 ? (0, bgCoverageEnd)
                 : mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
 
-            // 每个指标按「输出行」缓存：仅该行公式文本（含参数）变化才重算那一行，其余行复用缓存
-
-            curves += mainRows(&mainCache.ma, enabled: config.showMA,
-                               formula: store.formula(for: "MA", values: mainMAValues(config.maConfig)),
-                               calcStart: calcStart, calcEnd: calcEnd,
-                               build: { i, out in
-                                   IndicatorLine(name: displayName(out.name), values: out.values,
-                                                 color: lineColor(from: out, fallback: maColor(i)),
-                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
-                               })
-            curves += mainRows(&mainCache.ema, enabled: config.showEMA,
-                               formula: store.formula(for: "EMA", values: mainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)),
-                               calcStart: calcStart, calcEnd: calcEnd,
-                               build: { i, out in
-                                   IndicatorLine(name: displayName(out.name), values: out.values,
-                                                 color: lineColor(from: out, fallback: maColor(i)),
-                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
-                               })
-            curves += mainRows(&mainCache.boll, enabled: config.showBOLL,
-                               formula: store.formula(for: "BOLL", values: mainBOLLValues()),
-                               calcStart: calcStart, calcEnd: calcEnd,
-                               build: { i, out in
-                                   IndicatorLine(name: displayName(out.name), values: out.values,
-                                                 color: lineColor(from: out, fallback: i == 0 ? ma10Color : bollColor),
-                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
-                               })
-            curves += mainRows(&mainCache.cmk, enabled: config.showCMK,
-                               formula: store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]),
-                               calcStart: calcStart, calcEnd: calcEnd,
-                               build: { i, out in
-                                   IndicatorLine(name: displayName(out.name), values: out.values,
-                                                 color: lineColor(from: out, fallback: maColor(i)),
-                                                 style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
-                               })
-            // SAR：红绿点（方向由公式引擎的 SAR 函数提供）
-            curves += mainRows(&mainCache.sar, enabled: config.showSAR,
-                               formula: store.formula(for: "SAR", values: [
-                                   "step": fmt(config.sarStep), "maxstep": fmt(config.sarMax)
-                               ]),
-                               calcStart: calcStart, calcEnd: calcEnd,
-                               build: { _, out in
-                                   IndicatorLine(name: "SAR", values: out.values, color: upColor,
-                                                 style: .pointdot, lineWidth: 1, hideValue: false,
-                                                 markerColors: out.markerDirections?.map { $0 ? upColor : downColor })
-                               })
-            // 自定义指标（切换或公式/颜色编辑后重算）
-            if let custom {
-                curves += mainRows(&mainCache.custom, enabled: true,
-                                   formula: custom.formula,
+            // 数据驱动：主图指标集合来自 .tdx（SCOPE=main），只计算已启用的，按输出行缓存
+            let entries = mainIndicatorEntries(store: store, customStore: customStore,
+                                               config: config, customFormula: custom?.formula)
+            let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
+            let activeIDs = Set(entries.map { $0.id })
+            for entry in entries {
+                curves += mainRows(for: entry.id, enabled: true, formula: entry.formula,
                                    calcStart: calcStart, calcEnd: calcEnd,
                                    build: { i, out in
-                                       IndicatorLine(name: displayName(out.name), values: out.values,
-                                                     color: customLineColor(i, line: out, indicatorColor: custom.color),
-                                                     style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                                       buildMainLine(id: entry.id, isCustom: entry.isCustom,
+                                                     customColor: entry.isCustom ? customColor : nil,
+                                                     i: i, out: out)
                                    })
-            } else {
-                mainCache.custom = MainIndicatorCache.UnitSet()
+            }
+            // 清理已禁用/不再使用的指标缓存，避免残留占用
+            for key in mainCache.units.keys where !activeIDs.contains(key) {
+                mainCache.units[key] = nil
             }
         } else {
             // 裸K：不显示指标，清空自定义缓存（其余指标缓存保留，切回裸K时复用）
-            mainCache.custom = MainIndicatorCache.UnitSet()
+            mainCache.units[MainIndicatorCache.customKey] = nil
         }
         mainCurves = curves
         // 写回 (标的, 周期) 缓存：切走再回来时恢复主图曲线与覆盖状态，不重复计算
@@ -1057,12 +860,13 @@ struct KlineChartView: View {
 
     /// 主图单指标按「输出行」缓存求值：仅某行单元文本（含参数）变化才重算该行，其余行复用缓存。
     /// 计算使用「裁剪区间」数据（可见窗口+预热），计算量≈可见窗口+预热，与总 K 数无关
-    private func mainRows(_ cache: inout MainIndicatorCache.UnitSet,
+    private func mainRows(for id: String,
                           enabled: Bool,
                           formula: String?,
                           calcStart: Int, calcEnd: Int,
                           build: (Int, TDXOutputLine) -> IndicatorLine?) -> [IndicatorLine] {
         guard enabled, let formula else { return [] }
+        var cache = mainCache.units[id] ?? MainIndicatorCache.UnitSet()
         // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元；计算区间变化也须重建
         let formulaKey = "\(formula)|\(calcStart)|\(calcEnd)"
         if cache.formulaKey != formulaKey {
@@ -1086,48 +890,8 @@ struct KlineChartView: View {
             }
             if let line = cache.rows[i].line { lines.append(line) }
         }
+        mainCache.units[id] = cache
         return lines
-    }
-
-    /// 主图 MA/EMA 参数（周期与数据源）
-    private func mainMAValues(_ cfg: MAConfig) -> [String: String] {
-        mainMAValues(periods: cfg.periods, sources: cfg.sources)
-    }
-
-    private func mainMAValues(periods: [Int], sources: [MAValueSource]) -> [String: String] {
-        var d: [String: String] = [:]
-        for i in 0..<8 {
-            let p = periods.indices.contains(i) ? periods[i] : 0
-            let src = sources.indices.contains(i) ? sources[i] : .close
-            d["p\(i + 1)"] = "\(p)"
-            d["src\(i + 1)"] = "\(sourceValue(src))"
-        }
-        return d
-    }
-
-    private func mainBOLLValues() -> [String: String] {
-        ["period": "\(config.bollConfig.period)", "mult": fmt(config.bollConfig.mult)]
-    }
-
-    /// 数据源 → 公式参数值（1=收盘 2=开盘 3=最高 4=最低 5=平均值）
-    private func sourceValue(_ s: MAValueSource) -> Int {
-        switch s {
-        case .close: return 1
-        case .open: return 2
-        case .high: return 3
-        case .low: return 4
-        case .avg: return 5
-        }
-    }
-
-    /// Double 转公式常量字符串（去除多余尾零）
-    private func fmt(_ v: Double) -> String { String(format: "%g", v) }
-
-    /// 参数字典 Int → String
-    private func stringParams(_ params: [String: Int]) -> [String: String] {
-        var d: [String: String] = [:]
-        for (k, v) in params { d[k] = "\(v)" }
-        return d
     }
 
     /// 整行是否全为 NaN（周期为 0 的 MA 行等）
@@ -1141,7 +905,7 @@ struct KlineChartView: View {
 
     private func recomputeSub(_ m: SubChartModel, force: Bool = false) {
         // 诊断：每次调用都打印（含调用来源栈），定位曲线被清空的具体路径
-        klineDebug("[KlineDebug] recomputeSub调用 \(m.kind.rawValue) 现curves=\(m.curves.count) force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
+        klineDebug("[KlineDebug] recomputeSub调用 \(m.kind) 现curves=\(m.curves.count) force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记该副图待重算，关闭返回后再算
         if menuIsOpen {
             if !pendingSubCharts.contains(where: { $0 === m }) { pendingSubCharts.append(m) }
@@ -1152,13 +916,13 @@ struct KlineChartView: View {
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         // 主图放大模式：副图不显示也不计算指标值（退出放大时重新计算）
         if mainFullscreen {
-            if !m.curves.isEmpty { klineDebug("[KlineDebug] 清空(mainFullscreen): \(m.kind.rawValue)") }
+            if !m.curves.isEmpty { klineDebug("[KlineDebug] 清空(mainFullscreen): \(m.kind)") }
             m.curves = []
-            m.titleName = m.kind.rawValue
+            m.titleName = m.kind
             return
         }
         // 诊断：进入 recomputeSub 时曲线已为空（说明之前被某路径清空）
-        if m.curves.isEmpty { klineDebug("[KlineDebug] recomputeSub进入时空: \(m.kind.rawValue) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) force=\(force)") }
+        if m.curves.isEmpty { klineDebug("[KlineDebug] recomputeSub进入时空: \(m.kind) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) force=\(force)") }
         // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
         // 直接从缓存恢复该槽位完整曲线，避免在主线程全量重算副图指标造成明显卡顿。
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
@@ -1169,10 +933,10 @@ struct KlineChartView: View {
                entry.bgCoverageEnd >= endIndex,
                let curves = entry.subCurves[slot], !curves.isEmpty,
                curves.allSatisfy({ $0.values.count == sortedData.count }) {
-                klineDebug("[KlineDebug] 恢复缓存: \(m.kind.rawValue) curves=\(curves.count)")
+                klineDebug("[KlineDebug] 恢复缓存: \(m.kind) curves=\(curves.count)")
                 m.curves = curves
                 let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind.rawValue
+                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind
                 m.color = customInd?.color ?? Color(hex: "0050FF")!
                 return
             }
@@ -1184,16 +948,16 @@ struct KlineChartView: View {
         let bgCovered = bgCoverageEnd >= endIndex
         let curvesMatchCurrentData = m.curves.allSatisfy { $0.values.count == sortedData.count }
         if bgCovered, !force, !m.curves.isEmpty, curvesMatchCurrentData {
-            klineDebug("[KlineDebug] return(bgCovered) \(m.kind.rawValue) curves=\(m.curves.count)")
+            klineDebug("[KlineDebug] return(bgCovered) \(m.kind) curves=\(m.curves.count)")
             return
         }
         // 后台尚未覆盖可见窗口：不在此同步计算近似指标（显示全部时会卡顿），
         // 保持当前已覆盖曲线，未覆盖部分渲染时因 NaN 自然显示为空，由后台 prefetch 补齐
         if !force, !bgCovered, !m.curves.isEmpty, curvesMatchCurrentData {
-            klineDebug("[KlineDebug] return(未覆盖) \(m.kind.rawValue) curves=\(m.curves.count)")
+            klineDebug("[KlineDebug] return(未覆盖) \(m.kind) curves=\(m.curves.count)")
             return
         }
-        klineDebug("[KlineDebug] 进入计算 \(m.kind.rawValue) 旧curves=\(m.curves.count) bgCovered=\(bgCovered) 匹配=\(curvesMatchCurrentData) force=\(force)")
+        klineDebug("[KlineDebug] 进入计算 \(m.kind) 旧curves=\(m.curves.count) bgCovered=\(bgCovered) 匹配=\(curvesMatchCurrentData) force=\(force)")
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
         // 计算区间：后台已覆盖窗口时用后台正确覆盖 [0...bgCoverageEnd]，否则前台近似（合并已算区间）
         let (calcStart, calcEnd) = bgCovered
@@ -1209,25 +973,23 @@ struct KlineChartView: View {
                                           style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue)
                 curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
             }
-        } else {
-            switch m.kind {
-            case .vol, .amo:
-                let isAmo = m.kind == .amo
-                let baseAll = isAmo ? turnovers : volumes
-                // 始终裁剪到 [calcStart...calcEnd]，padToFull 会补齐前后 NaN 到全量长度
-                let baseSlice = baseAll.isEmpty ? [] : Array(baseAll[calcStart...min(calcEnd, baseAll.count - 1)])
-                curves.append(padToFull(IndicatorLine(name: m.kind.rawValue, values: baseSlice,
-                                                      color: isAmo ? upColor : downColor,
-                                                      style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
+        } else if m.kind == "VOL" || m.kind == "AMO" {
+            let isAmo = m.kind == "AMO"
+            let baseAll = isAmo ? turnovers : volumes
+            // 始终裁剪到 [calcStart...calcEnd]，padToFull 会补齐前后 NaN 到全量长度
+            let baseSlice = baseAll.isEmpty ? [] : Array(baseAll[calcStart...min(calcEnd, baseAll.count - 1)])
+            curves.append(padToFull(IndicatorLine(name: m.kind, values: baseSlice,
+                                                  color: isAmo ? upColor : downColor,
+                                                  style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
+                                    calcStart: calcStart, calcEnd: calcEnd))
+            for (i, p) in volMAFixedPeriods.enumerated() where p > 0 {
+                curves.append(padToFull(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: baseSlice, period: p),
+                                                      color: maColor(i), style: .solid, lineWidth: 1, hideValue: false),
                                         calcStart: calcStart, calcEnd: calcEnd))
-                for (i, p) in m.volPeriods.enumerated() where p > 0 {
-                    curves.append(padToFull(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: baseSlice, period: p),
-                                                          color: maColor(i), style: .solid, lineWidth: 1, hideValue: false),
-                                            calcStart: calcStart, calcEnd: calcEnd))
-                }
-            default:
+            }
+        } else {
                 // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
-                if let formula = SystemIndicatorStore.shared.formula(for: m.kind.rawValue, values: stringParams(m.params)),
+                if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:]),
                    let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
                     for (i, line) in lines.enumerated() {
                         guard !allNaN(line.values) else { continue }
@@ -1240,17 +1002,16 @@ struct KlineChartView: View {
                         curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
                     }
                 }
-            }
         }
         // 防空保护：重算结果为空（如公式在裁剪区间求值失败/裁剪数据异常）时保留旧曲线，
         // 避免副图被清空变空白；后台分块预计算随后会用正确结果覆盖
         if !curves.isEmpty || m.curves.isEmpty {
-            if curves.isEmpty { klineDebug("[KlineDebug] 防空:计算空将覆盖 \(m.kind.rawValue) 旧=\(m.curves.count)") }
+            if curves.isEmpty { klineDebug("[KlineDebug] 防空:计算空将覆盖 \(m.kind) 旧=\(m.curves.count)") }
             m.curves = curves
-            m.titleName = (m.isCustom ? custom?.name : nil) ?? m.kind.rawValue
+            m.titleName = (m.isCustom ? custom?.name : nil) ?? m.kind
             m.color = custom?.color ?? Color(hex: "0050FF")!
         } else {
-            klineDebug("[KlineDebug] 防空:计算空保留旧 \(m.kind.rawValue) 旧=\(m.curves.count) bgCovered=\(bgCovered) calc=\(calcStart)...\(calcEnd) calcData=\(calcData.count)")
+            klineDebug("[KlineDebug] 防空:计算空保留旧 \(m.kind) 旧=\(m.curves.count) bgCovered=\(bgCovered) calc=\(calcStart)...\(calcEnd) calcData=\(calcData.count)")
         }
         // 写回 (标的, 周期) 缓存：副图曲线按槽位存储，切回该周期时直接恢复
         if let metaId = metaId {
@@ -1259,7 +1020,7 @@ struct KlineChartView: View {
             // 配置已变：失效旧缓存并同步本地覆盖状态，取消旧后台任务后用新配置重启，
             // 否则本地 bgCoverageEnd 保持旧大值会导致 startPrefetch 误判已算完而跳过重算
             if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
-                klineDebug("[KlineDebug] 副图配置变化(\(m.kind.rawValue)) bgCoverageEnd=0 重启prefetch | 三副图count=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)] 当前m=\(m.curves.count)")
+                klineDebug("[KlineDebug] 副图配置变化(\(m.kind)) bgCoverageEnd=0 重启prefetch | 三副图count=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)] 当前m=\(m.curves.count)")
                 bgCoverageEnd = 0
                 prefetchToken = nil
                 startPrefetch()
@@ -1349,24 +1110,16 @@ struct KlineChartView: View {
             }
         }
         let r: (min: Double, max: Double)
-        switch m.kind {
-        case .vol, .amo:
+        if m.kind == "VOL" || m.kind == "AMO" {
+            // VOL/AMO 无公式模板，是成交量/成交额柱，最低值恒为 0
             let mx = values.max() ?? 1
             r = (0, mx * 1.08)
-        case .macd, .vmacd, .wmacd:
-            let mx = values.map { abs($0) }.max() ?? 1
-            let mm = max(mx * 1.15, 0.0001)
-            r = (-mm, mm)
-        case .rsi, .vrsi:
-            r = (0, 100)
-        case .kdj, .kd, .lwr, .marsi, .cdj, .col:
-            let lo = min(values.min() ?? 0, 0)
-            let hi = max(values.max() ?? 100, 100)
-            r = (lo, hi)
-        default:
-            guard let mn = values.min(), let mx = values.max(), mn != mx else { r = (0, 100); break }
+        } else if let mn = values.min(), let mx = values.max(), mn != mx {
+            // 其余均为 .tdx 公式输出曲线，统一按实际数据 min/max 加留白，不按指标名特判
             let pad = (mx - mn) * 0.05
             r = (mn - pad, mx + pad)
+        } else {
+            r = (0, 100)
         }
         // 空头镜像（取负）：范围镜像为 (-max)...(-min)，曲线随之镜像
         if config.mainMirrored { return (-r.max, -r.min) }
@@ -1375,7 +1128,7 @@ struct KlineChartView: View {
 
     // MARK: - 手势
 
-    private var menuIsOpen: Bool { showMainSheet || showSubSheet || showCustomEditor || paramEditorTarget != nil }
+    private var menuIsOpen: Bool { showMainSheet || showSubSheet || showCustomEditor || showSystemEditor }
 
     private func isInPanel(_ y: CGFloat, _ top: CGFloat, _ bottom: CGFloat) -> Bool { y >= top && y <= bottom }
 
@@ -1730,6 +1483,20 @@ struct KlineChartView: View {
                 }
             }
             .overlay {
+                if showSystemEditor, let isMain = systemEditorIsMain {
+                    SystemIndicatorEditorContainer(data: sortedData, isMain: isMain, initialSubId: systemEditorSubId) {
+                        showSystemEditor = false
+                    } onSaved: { _ in
+                        if isMain {
+                            recomputeMainCurves(force: true)
+                        } else {
+                            recomputeSub(model(for: editingSlot), force: true)
+                        }
+                    }
+                    .zIndex(55)
+                }
+            }
+            .overlay {
                 if showMainSheet {
                     bottomSheet(geometry: geometry, heightFraction: 0.8) {
                         mainSheetContent
@@ -1738,14 +1505,6 @@ struct KlineChartView: View {
                     bottomSheet(geometry: geometry, heightFraction: 0.8) {
                         subSheetContent
                     } onClose: { showSubSheet = false }
-                }
-            }
-            .overlay {
-                if let target = paramEditorTarget {
-                    bottomSheet(geometry: geometry, heightFraction: 0.8) {
-                        paramEditorView(for: target)
-                    } onClose: { paramEditorTarget = nil }
-                    .zIndex(60)
                 }
             }
             .onChange(of: pinEnabled) { enabled in
@@ -1788,11 +1547,11 @@ struct KlineChartView: View {
             prefetchToken = nil
         }
         .onChange(of: selectedIndex) { newIdx in
-            klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind.rawValue):\(subTop.curves.count), \(subBottom.kind.rawValue):\(subBottom.curves.count), \(subThird.kind.rawValue):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
+            klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
             notifyHasCursor()
         }
         .onChange(of: pinnedIndex) { newIdx in
-            klineDebug("[KlineDebug] 光标变化(pinnedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind.rawValue):\(subTop.curves.count), \(subBottom.kind.rawValue):\(subBottom.curves.count), \(subThird.kind.rawValue):\(subThird.curves.count)] selected:\(String(describing: selectedIndex))")
+            klineDebug("[KlineDebug] 光标变化(pinnedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] selected:\(String(describing: selectedIndex))")
             notifyHasCursor()
         }
         .onChange(of: config.showBareK) { _ in
@@ -1912,7 +1671,7 @@ struct KlineChartView: View {
                 self.commitPrefetch(request, result, updateCurves: shouldCommit || isLastBlock)
                 self.bgCoverageEnd = bgEnd
                 // 诊断：每块推进后副图状态（排查曲线是否在 bgEnd 更新后被清空）
-                klineDebug("[KlineDebug] 块后快照(bgEnd=\(bgEnd)) | [\(subTop.kind.rawValue):\(subTop.curves.count), \(subBottom.kind.rawValue):\(subBottom.curves.count), \(subThird.kind.rawValue):\(subThird.curves.count)]")
+                klineDebug("[KlineDebug] 块后快照(bgEnd=\(bgEnd)) | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)]")
                 // 仅在曲线真正提交时推进缓存的覆盖末端，保证缓存 bgCoverageEnd 与实际存储曲线
                 // 的覆盖一致；否则会出现「声称已覆盖」但曲线未覆盖可见窗口，切回该周期后
                 // bgCovered 误判为真、recomputeSub 提前返回 → 副图空白
@@ -1968,29 +1727,25 @@ struct KlineChartView: View {
         let volumes = Array(self.volumes[calcStart...calcEnd])
         let turnovers = Array(self.turnovers[calcStart...calcEnd])
         let store = SystemIndicatorStore.shared
-        // 主图：固定顺序（MA/EMA/BOLL/CMK/SAR/自定义），未启用用空串占位，
+        // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按顺序生成公式与 id，
         // 保证后台结果与提交组装的索引严格一一对应，避免中途配置变化导致错位
-        var main: [String] = ["", "", "", "", "", ""]
-        if !config.showBareK {
-            if config.showMA { main[0] = store.formula(for: "MA", values: mainMAValues(config.maConfig)) ?? "" }
-            if config.showEMA { main[1] = store.formula(for: "EMA", values: mainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)) ?? "" }
-            if config.showBOLL { main[2] = store.formula(for: "BOLL", values: mainBOLLValues()) ?? "" }
-            if config.showCMK { main[3] = store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]) ?? "" }
-            if config.showSAR { main[4] = store.formula(for: "SAR", values: ["step": fmt(config.sarStep), "maxstep": fmt(config.sarMax)]) ?? "" }
-            if let custom = activeCustomIndicator { main[5] = custom.formula }
-        }
+        let entries = mainIndicatorEntries(store: store, customStore: customStore,
+                                           config: config, customFormula: activeCustomIndicator?.formula)
+        let main = entries.map { $0.formula }
+        let mainIDs = entries.map { $0.id }
         // 副图（3 个，与 subTop/subBottom/subThird 对应）
         var subs: [SubPrefetchRequest] = []
         for m in [subTop, subBottom, subThird] {
             let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
             let isCustom = m.activeCustomID != nil && customInd != nil
             let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == .vol || m.kind == .amo) ? nil : store.formula(for: m.kind.rawValue, values: stringParams(m.params))
-            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: m.volPeriods))
+            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:])
+            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
         }
         return PrefetchCalcRequest(calcStart: calcStart, calcEnd: calcEnd, data: data,
                                    series: series,
-                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs,
+                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, mainIDs: mainIDs,
+                                   subs: subs,
                                    resumingMain: resumingMain, resumingSubs: resumingSubs)
     }
 
@@ -2025,33 +1780,21 @@ struct KlineChartView: View {
     private func commitPrefetch(_ req: PrefetchCalcRequest, _ result: PrefetchCalcResult, updateCurves: Bool) {
         guard updateCurves else { return }
         // ===== 进入commit时的副图快照（任何修改前，诊断用）=====
-        klineDebug("[KlineDebug] commit进入快照 | [\(subTop.kind.rawValue):\(subTop.curves.count), \(subBottom.kind.rawValue):\(subBottom.curves.count), \(subThird.kind.rawValue):\(subThird.curves.count)] cursor=\(selectedIndex == nil ? "无" : "有") bgEnd=\(bgCoverageEnd)")
+        klineDebug("[KlineDebug] commit进入快照 | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] cursor=\(selectedIndex == nil ? "无" : "有") bgEnd=\(bgCoverageEnd)")
         let cs = req.calcStart, ce = req.calcEnd
-        // ---- 主图（固定顺序，与 makePrefetchRequest 的 mainFormulas 一一对应）----
+        // ---- 主图（数据驱动，与 makePrefetchRequest 的 mainFormulas/mainIDs 一一对应）----
         var curves: [IndicatorLine] = []
-        func appendMain(_ idx: Int, color: (Int, TDXOutputLine) -> Color,
-                        sar: Bool = false, name: String? = nil, lineWidth: Double? = nil) {
-            guard idx < result.main.count else { return }
+        let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
+        for (idx, id) in req.mainIDs.enumerated() {
+            guard idx < result.main.count else { continue }
+            let isCustom = id == MainIndicatorCache.customKey
             for (i, out) in result.main[idx].enumerated() {
                 guard !allNaN(out.values) else { continue }
-                curves.append(padToFull(IndicatorLine(name: name ?? displayName(out.name), values: out.values,
-                                                      color: color(i, out),
-                                                      // SAR 固定小圆点（与 recomputeMainCurves 保持一致），
-                                                      // 否则公式输出行默认 solid 会被画成线条
-                                                      style: sar ? .pointdot : out.style,
-                                                      lineWidth: lineWidth ?? out.lineWidth,
-                                                      hideValue: out.hideValue,
-                                                      markerColors: sar ? out.markerDirections?.map { $0 ? upColor : downColor } : nil),
-                                        calcStart: cs, calcEnd: ce))
+                if let built = buildMainLine(id: id, isCustom: isCustom,
+                                             customColor: isCustom ? customColor : nil, i: i, out: out) {
+                    curves.append(padToFull(built, calcStart: cs, calcEnd: ce))
+                }
             }
-        }
-        appendMain(0, color: { lineColor(from: $1, fallback: maColor($0)) })                                        // MA
-        appendMain(1, color: { lineColor(from: $1, fallback: maColor($0)) })                                        // EMA
-        appendMain(2, color: { lineColor(from: $1, fallback: $0 == 0 ? ma10Color : bollColor) })                   // BOLL
-        appendMain(3, color: { lineColor(from: $1, fallback: maColor($0)) })                                        // CMK
-        appendMain(4, color: { _, _ in upColor }, sar: true, name: "SAR", lineWidth: 1)                            // SAR
-        if let custom = activeCustomIndicator {
-            appendMain(5, color: { customLineColor($0, line: $1, indicatorColor: custom.color) })                  // 自定义
         }
         mainCurves = curves
         // ---- 副图 ----
@@ -2069,10 +1812,10 @@ struct KlineChartView: View {
                                                              style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue),
                                                calcStart: cs, calcEnd: ce))
                 }
-            } else if subReq.kind == .vol || subReq.kind == .amo {
-                let isAmo = subReq.kind == .amo
+            } else if subReq.kind == "VOL" || subReq.kind == "AMO" {
+                let isAmo = subReq.kind == "AMO"
                 let baseSlice = isAmo ? req.turnovers : req.volumes
-                subCurves.append(padToFull(IndicatorLine(name: subReq.kind.rawValue, values: baseSlice,
+                subCurves.append(padToFull(IndicatorLine(name: subReq.kind, values: baseSlice,
                                                          color: isAmo ? upColor : downColor,
                                                          style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
                                            calcStart: cs, calcEnd: ce))
@@ -2098,16 +1841,16 @@ struct KlineChartView: View {
             // 求值算好当前指标曲线，此时保留它比覆盖为空更合理
             if !subCurves.isEmpty || m.curves.isEmpty {
                 let old = m.curves.count
-                klineDebug("[KlineDebug] commit覆盖 \(subReq.kind.rawValue) \(old)->\(subCurves.count)")
+                klineDebug("[KlineDebug] commit覆盖 \(subReq.kind) \(old)->\(subCurves.count)")
                 if old > 0 && subCurves.isEmpty {
                     klineDebug("[KlineDebug]   ↑ 非空被清空！调用栈:\(Thread.callStackSymbols.prefix(6).joined(separator:" | "))")
                 }
                 m.curves = subCurves
                 let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind.rawValue
+                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind
                 m.color = customInd?.color ?? Color(hex: "0050FF")!
             } else {
-                klineDebug("[KlineDebug] commit保留旧 \(subReq.kind.rawValue) 旧=\(m.curves.count)")
+                klineDebug("[KlineDebug] commit保留旧 \(subReq.kind) 旧=\(m.curves.count)")
             }
         }
         // 写回 (标的, 周期) 缓存：后台正确结果落盘，切走再回来直接恢复
@@ -2138,31 +1881,23 @@ struct KlineChartView: View {
         let customStore = CustomIndicatorStore.shared
         let store = SystemIndicatorStore.shared
         var parts: [String] = []
-        // 主图：固定顺序（MA/EMA/BOLL/CMK/SAR/自定义）
-        var main = ["", "", "", "", "", ""]
-        if !config.showBareK {
-            if config.showMA { main[0] = store.formula(for: "MA", values: prefetchMainMAValues(config.maConfig)) ?? "" }
-            if config.showEMA { main[1] = store.formula(for: "EMA", values: prefetchMainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)) ?? "" }
-            if config.showBOLL { main[2] = store.formula(for: "BOLL", values: prefetchMainBOLLValues()) ?? "" }
-            if config.showCMK { main[3] = store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]) ?? "" }
-            if config.showSAR { main[4] = store.formula(for: "SAR", values: ["step": prefetchFmt(config.sarStep), "maxstep": prefetchFmt(config.sarMax)]) ?? "" }
-            if let customID = config.activeCustomIndicatorID,
-               let custom = customStore.indicators.first(where: { $0.id == customID }) {
-                main[5] = custom.formula
-            }
-        }
-        parts.append(main.joined(separator: "§"))
-        // 副图：3 个槽位，含指标类型、参数（VOL/AMO 量均线周期）
+        // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按 id+公式 参与指纹
+        let customID = config.activeCustomIndicatorID
+        let custom = customStore.indicators.first { $0.id == customID }
+        let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
+                                           customFormula: custom?.formula)
+        parts.append(entries.map { "\($0.id)::\($0.formula)" }.joined(separator: "§"))
+        // 副图：3 个槽位，含指标类型、公式（VOL/AMO 量均线周期）
         for m in [config.subTop, config.subBottom, config.subThird] {
             let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
             let isCustom = m.activeCustomID != nil && customInd != nil
-            var s = m.kind.rawValue
+            var s = m.kind
             if isCustom, let customInd {
                 s += "|CUSTOM|" + customInd.formula
-            } else if m.kind == .vol || m.kind == .amo {
-                s += "|" + m.volPeriods.map(String.init).joined(separator: ",")
+            } else if m.kind == "VOL" || m.kind == "AMO" {
+                s += "|" + volMAFixedPeriods.map(String.init).joined(separator: ",")
             } else {
-                s += "|" + (store.formula(for: m.kind.rawValue, values: prefetchStringParams(m.params)) ?? "")
+                s += "|" + (store.formula(for: m.kind, values: [:]) ?? "")
             }
             parts.append(s)
         }
@@ -2211,31 +1946,26 @@ struct KlineChartView: View {
         let store = SystemIndicatorStore.shared
         let volumes = data.map(\.volume)
         let turnovers = data.map(\.turnover)
-        // 主图：固定顺序（MA/EMA/BOLL/CMK/SAR/自定义），未启用用空串占位
-        var main: [String] = ["", "", "", "", "", ""]
-        if !config.showBareK {
-            if config.showMA { main[0] = store.formula(for: "MA", values: prefetchMainMAValues(config.maConfig)) ?? "" }
-            if config.showEMA { main[1] = store.formula(for: "EMA", values: prefetchMainMAValues(periods: config.emaConfig.periods, sources: config.emaConfig.sources)) ?? "" }
-            if config.showBOLL { main[2] = store.formula(for: "BOLL", values: prefetchMainBOLLValues()) ?? "" }
-            if config.showCMK { main[3] = store.formula(for: "CMK", values: ["cmkN": "\(config.cmkN)"]) ?? "" }
-            if config.showSAR { main[4] = store.formula(for: "SAR", values: ["step": prefetchFmt(config.sarStep), "maxstep": prefetchFmt(config.sarMax)]) ?? "" }
-            if let customID = config.activeCustomIndicatorID,
-               let custom = customStore.indicators.first(where: { $0.id == customID }) {
-                main[5] = custom.formula
-            }
-        }
+        // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义
+        let customID = config.activeCustomIndicatorID
+        let custom = customStore.indicators.first { $0.id == customID }
+        let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
+                                           customFormula: custom?.formula)
+        let main = entries.map { $0.formula }
+        let mainIDs = entries.map { $0.id }
         // 副图（3 个，与 subTop/subBottom/subThird 对应）
         var subs: [SubPrefetchRequest] = []
         for m in [config.subTop, config.subBottom, config.subThird] {
             let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
             let isCustom = m.activeCustomID != nil && customInd != nil
             let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == .vol || m.kind == .amo) ? nil : store.formula(for: m.kind.rawValue, values: prefetchStringParams(m.params))
-            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: m.volPeriods))
+            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:])
+            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
         }
         return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
                                    series: TDXSharedSeries(data: data),
-                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs,
+                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, mainIDs: mainIDs,
+                                   subs: subs,
                                    resumingMain: [], resumingSubs: [])
     }
 
@@ -2246,27 +1976,18 @@ struct KlineChartView: View {
                                       entry: ChartCacheStore.Entry, data: [KlineItem], fingerprint: String) {
         let config = ChartConfigStore.shared
         var curves: [IndicatorLine] = []
-        func appendMain(_ idx: Int, color: (Int, TDXOutputLine) -> Color,
-                        sar: Bool = false, name: String? = nil, lineWidth: Double? = nil) {
-            guard idx < result.main.count else { return }
+        let customStore = CustomIndicatorStore.shared
+        let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
+        for (idx, id) in req.mainIDs.enumerated() {
+            guard idx < result.main.count else { continue }
+            let isCustom = id == MainIndicatorCache.customKey
             for (i, out) in result.main[idx].enumerated() {
                 guard !prefetchAllNaN(out.values) else { continue }
-                curves.append(IndicatorLine(name: name ?? prefetchDisplayName(out.name), values: out.values,
-                                            color: color(i, out),
-                                            // SAR 固定小圆点，避免默认 solid 被画成线条
-                                            style: sar ? .pointdot : out.style,
-                                            lineWidth: lineWidth ?? out.lineWidth, hideValue: out.hideValue,
-                                            markerColors: sar ? out.markerDirections?.map { $0 ? prefetchUpColor : prefetchDownColor } : nil))
+                if let built = buildMainLine(id: id, isCustom: isCustom,
+                                             customColor: isCustom ? customColor : nil, i: i, out: out) {
+                    curves.append(built)
+                }
             }
-        }
-        appendMain(0, color: { prefetchLineColor(from: $1, fallback: prefetchMaColor($0)) })                            // MA
-        appendMain(1, color: { prefetchLineColor(from: $1, fallback: prefetchMaColor($0)) })                            // EMA
-        appendMain(2, color: { prefetchLineColor(from: $1, fallback: $0 == 0 ? prefetchMa10Color : prefetchBollColor) }) // BOLL
-        appendMain(3, color: { prefetchLineColor(from: $1, fallback: prefetchMaColor($0)) })                            // CMK
-        appendMain(4, color: { _, _ in prefetchUpColor }, sar: true, name: "SAR", lineWidth: 1)                        // SAR
-        if let customID = config.activeCustomIndicatorID,
-           let custom = CustomIndicatorStore.shared.indicators.first(where: { $0.id == customID }) {
-            appendMain(5, color: { prefetchCustomLineColor($0, line: $1, indicatorColor: custom.color) })               // 自定义
         }
         entry.mainCurves = curves
         // 副图
@@ -2284,10 +2005,10 @@ struct KlineChartView: View {
                                             color: prefetchCustomLineColor(j, line: out, indicatorColor: customInd?.color),
                                             style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue))
                 }
-            } else if subReq.kind == .vol || subReq.kind == .amo {
-                let isAmo = subReq.kind == .amo
+            } else if subReq.kind == "VOL" || subReq.kind == "AMO" {
+                let isAmo = subReq.kind == "AMO"
                 let baseSlice = isAmo ? req.turnovers : req.volumes
-                sc.append(IndicatorLine(name: subReq.kind.rawValue, values: baseSlice,
+                sc.append(IndicatorLine(name: subReq.kind, values: baseSlice,
                                         color: isAmo ? prefetchUpColor : prefetchDownColor,
                                         style: .stick, lineWidth: 1, hideValue: false, barColor: .candle))
                 for (p, period) in subReq.volPeriods.enumerated() where period > 0 {
@@ -2800,7 +2521,7 @@ struct KlineChartView: View {
                 .equatable()
                 .offset(x: panOffset)
             // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；其他指标保留顶底两个值
-            let labelRatios: [CGFloat] = (m.kind == .vol || m.kind == .amo) ? [0] : [0, 1]
+            let labelRatios: [CGFloat] = (m.kind == "VOL" || m.kind == "AMO") ? [0] : [0, 1]
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
                                ratios: labelRatios, formatter: subFmt)
 
@@ -2909,7 +2630,7 @@ struct KlineChartView: View {
                 let nanCount = line.values.filter { $0.isNaN }.count
                 let firstNonNaN = line.values.firstIndex { !$0.isNaN }.map { "startIdx=\($0)" } ?? "全NaN"
                 let selV = (selectedIndex.flatMap { $0 < line.values.count ? line.values[$0] : nil }).map { "\($0)" } ?? "nil/越界"
-                klineDebug("[KlineDebug] 副图legend \(m.kind.rawValue) [\(i)]\(line.name) endIdx=\(endIndex) endV=\(endV) sel=\(String(describing: selectedIndex)) selV=\(selV) nan=\(nanCount)/\(line.values.count) \(firstNonNaN)")
+                klineDebug("[KlineDebug] 副图legend \(m.kind) [\(i)]\(line.name) endIdx=\(endIndex) endV=\(endV) sel=\(String(describing: selectedIndex)) selV=\(selV) nan=\(nanCount)/\(line.values.count) \(firstNonNaN)")
             }
         }
         return ZStack {
@@ -2922,7 +2643,7 @@ struct KlineChartView: View {
                 // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式
                 ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
                     legendItem(line, mirrored: config.mainMirrored,
-                               formatter: (m.kind == .vol || m.kind == .amo) ? { formatVolume($0) } : nil)
+                               formatter: (m.kind == "VOL" || m.kind == "AMO") ? { formatVolume($0) } : nil)
                 }
                 Spacer()
             }
@@ -3022,24 +2743,25 @@ struct KlineChartView: View {
     /// 主图指标名称按钮：固定显示当前时间周期，如"日线: MA"、"周线: 裸K"
     private var mainLegendTitle: String {
         if isBareK { return "\(period.rawValue): 裸K" }
+        let store = SystemIndicatorStore.shared
         var parts: [String] = []
-        if config.showMA { parts.append("MA") }
-        if config.showEMA { parts.append("EMA") }
-        if config.showBOLL { parts.append("BOLL") }
-        if config.showCMK { parts.append("CMK") }
-        if config.showSAR { parts.append("SAR") }
+        for def in store.mainIndicatorDefs() where config.mainIndicators.contains(def.id) {
+            parts.append(def.name)
+        }
         if let a = activeCustomIndicator { parts.append(a.name) }
         if parts.isEmpty { return "\(period.rawValue): 裸K" }
         return "\(period.rawValue): \(parts.joined(separator: "/"))"
     }
 
     /// 副图坐标数值格式化
-    private func subFormatter(for kind: SubChartKind) -> (Double) -> String {
-        switch kind {
-        case .vol, .amo: return { formatVolume($0) }
-        case .macd, .vmacd, .wmacd: return { String(format: "%.3f", $0) }
-        case .obv, .brar: return { String(format: "%.2f", $0) }
-        default: return { String(format: "%.1f", $0) }
+    private func subFormatter(for kind: String) -> (Double) -> String {
+        // VOL/AMO 按转换单位显示（万/亿/万亿）；其余均为 .tdx 公式输出，统一按量级自适应精度
+        guard kind != "VOL", kind != "AMO" else { return { formatVolume($0) } }
+        return { v in
+            let av = abs(v)
+            if av >= 1000 { return String(format: "%.0f", v) }
+            if av >= 1 { return String(format: "%.2f", v) }
+            return String(format: "%.3f", v)
         }
     }
 
@@ -3283,157 +3005,6 @@ struct KlineChartView: View {
         }
     }
 
-    // MARK: - 全屏参数编辑页（双击指标名称打开）
-
-    private func paramEditorView(for target: ParamEditorTarget) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(editorTitle(for: target)).font(.system(size: 16, weight: .bold)).foregroundColor(.black)
-                Spacer()
-                if canResetParams(for: target) {
-                    Button("重置") { resetParams(for: target) }
-                        .font(.system(size: 14)).foregroundColor(.orange)
-                        .padding(.trailing, 12)
-                }
-                // 返回：关闭参数编辑面板并回到对应的选择指标页面
-                Button("返回") {
-                    paramEditorTarget = nil
-                    switch target {
-                    case .main:
-                        withAnimation { showMainSheet = true }
-                    case .sub(let slot):
-                        editingSlot = slot
-                        withAnimation { showSubSheet = true }
-                    }
-                }
-                .font(.system(size: 14)).foregroundColor(.blue)
-                .padding(.trailing, 12)
-                Button("完成") { paramEditorTarget = nil }
-                    .font(.system(size: 14)).foregroundColor(.blue)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch target {
-                    case .main:
-                        if config.showMA {
-                            paramRow(title: "MA 周期与数据源（0=隐藏）") {
-                                maSourceEditor($config.maConfig.periods, $config.maConfig.sources) { recomputeMainCurves(force: true) }
-                            }
-                        }
-                        if config.showEMA {
-                            paramRow(title: "EMA 周期与数据源（0=隐藏）") {
-                                maSourceEditor($config.emaConfig.periods, $config.emaConfig.sources) { recomputeMainCurves(force: true) }
-                            }
-                        }
-                        if config.showBOLL {
-                            paramRow(title: "BOLL 参数") {
-                                HStack(spacing: 12) {
-                                    numberField("周期", $config.bollConfig.period, range: 1...1000) { recomputeMainCurves(force: true) }
-                                    numberField("倍数", $config.bollConfig.mult, range: 0.1...10) { recomputeMainCurves(force: true) }
-                                }
-                            }
-                        }
-                        if config.showCMK {
-                            paramRow(title: "CMK 参数") {
-                                HStack(spacing: 12) {
-                                    numberField("N", $config.cmkN, range: 1...300) { recomputeMainCurves(force: true) }
-                                }
-                            }
-                        }
-                        if config.showSAR {
-                            paramRow(title: "SAR 参数") {
-                                HStack(spacing: 12) {
-                                    numberField("步长", $config.sarStep, range: 0.001...0.1) { recomputeMainCurves(force: true) }
-                                    numberField("极限", $config.sarMax, range: 0.01...1) { recomputeMainCurves(force: true) }
-                                }
-                            }
-                        }
-                        if !config.showMA && !config.showEMA && !config.showBOLL && !config.showCMK
-                            && !config.showSAR {
-                            Text("当前没有可编辑的系统指标").font(.system(size: 13)).foregroundColor(.gray).padding(24)
-                        }
-                    case .sub(let slot):
-                        let m = model(for: slot)
-                        if m.isCustom {
-                            Text("自定义指标请通过公式编辑器修改").font(.system(size: 13)).foregroundColor(.gray).padding(24)
-                        } else {
-                            subParamsEditor(m)
-                        }
-                    }
-                    Spacer(minLength: 24)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white)
-    }
-
-    private func editorTitle(for target: ParamEditorTarget) -> String {
-        switch target {
-        case .main: return "主图指标参数"
-        case .sub(let slot): return "\(model(for: slot).titleName) 参数"
-        }
-    }
-
-    /// 是否有可重置的系统参数（自定义指标无系统参数，隐藏重置按钮）
-    private func canResetParams(for target: ParamEditorTarget) -> Bool {
-        switch target {
-        case .main: return true
-        case .sub(let slot): return !model(for: slot).isCustom
-        }
-    }
-
-    /// 重置系统指标参数为默认值
-    private func resetParams(for target: ParamEditorTarget) {
-        switch target {
-        case .main:
-            config.maConfig = MAConfig()
-            config.emaConfig = EMAConfig()
-            config.bollConfig = BOLLConfig()
-            config.cmkN = 10
-            config.sarStep = 0.02
-            config.sarMax = 0.2
-            recomputeMainCurves(force: true)
-        case .sub(let slot):
-            let m = model(for: slot)
-            m.resetParams()
-            if m.kind == .vol || m.kind == .amo {
-                m.volPeriods = [5, 10, 0, 0, 0, 0, 0, 0]
-            }
-            recomputeSub(m, force: true)
-        }
-    }
-
-    private func subParamsEditor(_ m: SubChartModel) -> some View {
-        Group {
-            if m.kind == .vol || m.kind == .amo {
-                paramRow(title: "量均线周期（0=隐藏）") {
-                    periodsEditor(Binding(get: { m.volPeriods },
-                                           set: { v in m.volPeriods = v; recomputeSub(m, force: true) })) { }
-                }
-            } else {
-                let specs = m.kind.paramSpecs
-                if specs.isEmpty {
-                    Text("该指标无参数可调").font(.system(size: 13)).foregroundColor(.gray).padding(24)
-                } else {
-                    paramRow(title: "\(m.kind.rawValue) 参数") {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 12)], spacing: 10) {
-                            ForEach(specs) { spec in
-                                let binding = Binding(
-                                    get: { m.params[spec.key] ?? spec.defaultValue },
-                                    set: { v in m.params[spec.key] = v; recomputeSub(m, force: true) }
-                                )
-                                numberField(spec.label, binding, range: spec.range)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - 底部面板容器
 
     private func bottomSheet<Content: View>(geometry: GeometryProxy, heightFraction: CGFloat,
@@ -3461,27 +3032,21 @@ struct KlineChartView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    groupHeader("均线型")
+                    // 系统主图指标（数据驱动，集合来自 .tdx SCOPE=main）
+                    groupHeader("主图指标")
                     LazyVGrid(columns: gridColumns, spacing: 8) {
-                        mainTile("MA", on: config.showMA) { toggleMain(.ma) }
-                        mainTile("EMA", on: config.showEMA) { toggleMain(.ema) }
+                        ForEach(mainIndicatorDefsForSheet, id: \.id) { def in
+                            mainTile(def.name, on: config.mainIndicators.contains(def.id)) { toggleMain(def.id) }
+                        }
                     }
                     .padding(.horizontal, 16).padding(.bottom, 6)
 
-                    groupHeader("路径型")
-                    LazyVGrid(columns: gridColumns, spacing: 8) {
-                        mainTile("BOLL", on: config.showBOLL) { toggleMain(.boll) }
-                        mainTile("CMK", on: config.showCMK) { toggleMain(.cmk) }
-                        mainTile("SAR", on: config.showSAR) { toggleMain(.sar) }
-                    }
-                    .padding(.horizontal, 16).padding(.bottom, 6)
-
-                    // 系统指标参数入口
-                    if config.showMA || config.showEMA || config.showBOLL || config.showCMK
-                        || config.showSAR {
-                        paramEntryRow(title: "参数设置") {
+                    // 系统指标公式编辑入口
+                    if !mainIndicatorDefsForSheet.isEmpty {
+                        paramEntryRow(title: "公式编辑") {
                             showMainSheet = false
-                            paramEditorTarget = .main
+                            systemEditorIsMain = true
+                            showSystemEditor = true
                         }
                     }
 
@@ -3505,16 +3070,15 @@ struct KlineChartView: View {
 
     private var gridColumns: [GridItem] { [GridItem(.adaptive(minimum: 80), spacing: 8)] }
 
-    private enum MainRowKey { case ma, ema, boll, cmk, sar }
+    /// 主图选择页数据驱动指标列表（来自 .tdx SCOPE=main）
+    private var mainIndicatorDefsForSheet: [SystemIndicatorDef] { SystemIndicatorStore.shared.mainIndicatorDefs() }
     private var mainCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .main } }
 
-    private func toggleMain(_ group: MainRowKey) {
-        switch group {
-        case .ma: config.showMA.toggle()
-        case .ema: config.showEMA.toggle()
-        case .boll: config.showBOLL.toggle()
-        case .cmk: config.showCMK.toggle()
-        case .sar: config.showSAR.toggle()
+    private func toggleMain(_ id: String) {
+        if config.mainIndicators.contains(id) {
+            config.mainIndicators.remove(id)
+        } else {
+            config.mainIndicators.insert(id)
         }
         recomputeMainCurves(force: true)
     }
@@ -3568,29 +3132,28 @@ struct KlineChartView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(SubChartKind.groupOrder, id: \.self) { g in
-                        let kinds = SubChartKind.allCases.filter { $0.group == g }
-                        if !kinds.isEmpty {
-                            groupHeader(g)
-                            LazyVGrid(columns: gridColumns, spacing: 8) {
-                                ForEach(kinds) { k in
-                                    subTile(k.rawValue, selected: !m.isCustom && m.kind == k) {
-                                        m.activeCustomID = nil
-                                        m.kind = k
-                                        m.resetParams()
-                                        recomputeSub(m, force: true)
-                                    }
+                    ForEach(subSelectionGroups, id: \.0) { g, kinds in
+                        groupHeader(g)
+                        LazyVGrid(columns: gridColumns, spacing: 8) {
+                            ForEach(kinds, id: \.self) { k in
+                                subTile(k, selected: !m.isCustom && m.kind == k) {
+                                    m.activeCustomID = nil
+                                    m.kind = k
+                                    recomputeSub(m, force: true)
                                 }
                             }
-                            .padding(.horizontal, 16).padding(.bottom, 6)
                         }
+                        .padding(.horizontal, 16).padding(.bottom, 6)
                     }
 
-                    // 系统指标参数入口
-                    if !m.isCustom {
-                        paramEntryRow(title: "\(m.kind.rawValue) 参数设置") {
+                    // 公式式系统指标（有 .tdx 模板，如 MACD/KDJ）才提供公式编辑；VOL/AMO 无模板不提供
+                    if !m.isCustom,
+                       SystemIndicatorStore.shared.template(for: m.kind) != nil {
+                        paramEntryRow(title: "\(m.kind) 公式编辑") {
                             showSubSheet = false
-                            paramEditorTarget = .sub(editingSlot)
+                            systemEditorIsMain = false
+                            systemEditorSubId = m.kind
+                            showSystemEditor = true
                         }
                     }
 
@@ -3610,6 +3173,28 @@ struct KlineChartView: View {
                 }
             }
         }
+    }
+
+    /// 副图选择分组（数据驱动）：内置无模板的 VOL/AMO + 所有 SCOPE=sub 的 .tdx，按 GROUP 分组
+    private var subSelectionGroups: [(String, [String])] {
+        let store = SystemIndicatorStore.shared
+        var map: [String: [String]] = [:]
+        // 内置无模板项：VOL/AMO 走专用成交量柱绘制，不在 .tdx 中
+        map["量能", default: []].append("VOL")
+        map["量能", default: []].append("AMO")
+        // .tdx 副图：GROUP 取自定义的 tdx 字段
+        for def in store.subIndicatorDefs() {
+            let g = def.group.isEmpty ? "其他" : def.group
+            map[g, default: []].append(def.id)
+        }
+        var result: [(String, [String])] = []
+        for g in SystemIndicatorStore.subGroupOrder where map[g] != nil {
+            result.append((g, map[g]!))
+        }
+        for g in map.keys where !SystemIndicatorStore.subGroupOrder.contains(g) {
+            result.append((g, map[g]!))
+        }
+        return result
     }
 
     /// 副图指标格：单选，选中名称蓝色
@@ -3700,120 +3285,6 @@ struct KlineChartView: View {
             Button("完成") { onClose() }.font(.system(size: 14)).foregroundColor(.blue)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-    }
-
-    private func paramRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 11)).foregroundColor(.gray)
-            content()
-        }
-        .padding(.horizontal, 16).padding(.bottom, 10)
-    }
-
-    private func periodsEditor(_ periods: Binding<[Int]>, _ onChange: @escaping () -> Void) -> some View {
-        let list = Array(0..<8)
-        return VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(stride(from: 0, to: 8, by: 4)), id: \.self) { rowStart in
-                HStack(spacing: 12) {
-                    ForEach(list[rowStart..<min(rowStart + 4, 8)], id: \.self) { idx in
-                        smallNumberFieldPe(label: "\(idx + 1)", value: Binding(
-                            get: { periods.wrappedValue.indices.contains(idx) ? String(periods.wrappedValue[idx]) : "0" },
-                            set: { nv in
-                                var arr = periods.wrappedValue
-                                if arr.count != 8 { arr = Array(repeating: 0, count: 8) }
-                                arr[idx] = min(max(Int(nv) ?? 0, 0), 1000)
-                                periods.wrappedValue = arr
-                                onChange()
-                            }
-                        ))
-                    }
-                }
-            }
-        }
-    }
-
-    /// MA/EMA 参数编辑：每个周期字段右侧带数据源下拉（CLOSE/OPEN/HIGH/LOW/平均值）
-    private func maSourceEditor(_ periods: Binding<[Int]>, _ sources: Binding<[MAValueSource]>, _ onChange: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(0..<8), id: \.self) { idx in
-                HStack(spacing: 8) {
-                    Text("\(idx + 1)")
-                        .font(.system(size: 9))
-                        .foregroundColor(.gray)
-                        .frame(width: 16, alignment: .leading)
-                    TextField("", text: Binding(
-                        get: { periods.wrappedValue.indices.contains(idx) ? String(periods.wrappedValue[idx]) : "0" },
-                        set: { nv in
-                            var arr = periods.wrappedValue
-                            if arr.count != 8 { arr = Array(repeating: 0, count: 8) }
-                            arr[idx] = min(max(Int(nv) ?? 0, 0), 1000)
-                            periods.wrappedValue = arr
-                            onChange()
-                        }
-                    ))
-                    .font(.system(size: 12)).keyboardType(.numberPad)
-                    .padding(.horizontal, 6).padding(.vertical, 4)
-                    .background(Color(uiColor: .systemGray6)).cornerRadius(4)
-                    .frame(width: 60)
-                    Picker("", selection: Binding(
-                        get: { sources.wrappedValue.indices.contains(idx) ? sources.wrappedValue[idx] : .close },
-                        set: { nv in
-                            var arr = sources.wrappedValue
-                            if arr.count != 8 { arr = Array(repeating: .close, count: 8) }
-                            arr[idx] = nv
-                            sources.wrappedValue = arr
-                            onChange()
-                        }
-                    )) {
-                        ForEach(MAValueSource.allCases) { s in
-                            Text(s.rawValue).tag(s)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity)
-                }
-            }
-        }
-    }
-
-    private func smallNumberFieldPe(label: String, value: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.system(size: 9)).foregroundColor(.gray)
-            TextField("", text: value)
-                .font(.system(size: 12)).keyboardType(.numberPad)
-                .padding(.horizontal, 6).padding(.vertical, 4)
-                .background(Color(uiColor: .systemGray6)).cornerRadius(4)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func numberField(_ label: String, _ value: Binding<Int>, range: ClosedRange<Int>, _ onChange: @escaping () -> Void = {}) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.system(size: 9)).foregroundColor(.gray)
-            TextField("", text: Binding(
-                get: { String(value.wrappedValue) },
-                set: { nv in value.wrappedValue = min(max(Int(nv) ?? value.wrappedValue, range.lowerBound), range.upperBound); onChange() }
-            ))
-            .font(.system(size: 13)).keyboardType(.numberPad)
-            .padding(.horizontal, 6).padding(.vertical, 4)
-            .background(Color(uiColor: .systemGray6)).cornerRadius(4)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func numberField(_ label: String, _ value: Binding<Double>, range: ClosedRange<Double>, _ onChange: @escaping () -> Void = {}) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.system(size: 9)).foregroundColor(.gray)
-            TextField("", text: Binding(
-                get: { String(format: "%.1f", value.wrappedValue) },
-                set: { nv in value.wrappedValue = min(max(Double(nv) ?? value.wrappedValue, range.lowerBound), range.upperBound); onChange() }
-            ))
-            .font(.system(size: 13)).keyboardType(.decimalPad)
-            .padding(.horizontal, 6).padding(.vertical, 4)
-            .background(Color(uiColor: .systemGray6)).cornerRadius(4)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 十字光标辅助
