@@ -1,0 +1,7 @@
+NAME=KQA
+SCOPE=main
+FORMULA:
+X1:=20;
+X2:=10;
+KH:REF(HHV(H,X1),1);
+KL:REF(LLV(L,X2),1);

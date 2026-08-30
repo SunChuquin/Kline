@@ -702,6 +702,13 @@ struct TDXEvaluator {
         case "SMA":
             try requireArgs(fn, vals, 3)
             return smaInc(vals[0], period: Int(scalar(vals[1])), m: scalar(vals[2]), tailKey: callKey(fn, args))
+        case "DMA":
+            try requireArgs(fn, vals, 2)
+            return dmaInc(vals[0], vals[1], tailKey: callKey(fn, args))
+        case "MEMA":
+            // 通达信 MEMA(X,N) = (X + (N-1)*Y')/N = SMA(X,N,1)
+            try requireArgs(fn, vals, 2)
+            return smaInc(vals[0], period: Int(scalar(vals[1])), m: 1, tailKey: callKey(fn, args))
         case "REF":
             try requireArgs(fn, vals, 2)
             return referenceInc(vals[0], n: Int(scalar(vals[1])))
@@ -774,7 +781,8 @@ struct TDXEvaluator {
         let offset = seq.count - barCount
         guard period > 0, len > 0 else { return result }
         if ema {
-            let k = weight / Double(period + 1)
+            // 通达信 EMA(X,N) = (2*X + (N-1)*Y')/(N+1)，平滑系数 2/(N+1)
+            let k = 2 * weight / Double(period + 1)
             var prev = incState.exprTails[tailKey]
             var prevValid = false
             if let p = prev, !p.isNaN { prevValid = true }
@@ -823,6 +831,36 @@ struct TDXEvaluator {
             if v.isNaN { continue }
             if prevValid {
                 let cur = (m * v + (Double(period) - m) * prev!) / Double(period)
+                result[i - start] = cur
+                prev = cur
+            } else {
+                result[i - start] = v
+                prev = v
+                prevValid = true
+            }
+        }
+        incState.exprTails[tailKey] = prevValid ? prev : .nan
+        return result
+    }
+
+    /// 增量 DMA(X,A)：动态移动平均 Y = A*X + (1-A)*Y'，A 为逐根权重序列；
+    /// 递归，用 exprTail 里上一块末尾继续（与 SMA/EMA 一致，保证分块预计算正确）
+    private mutating func dmaInc(_ seq: [Double], _ a: [Double], tailKey: String) -> [Double] {
+        let start = incStart
+        let len = incLen
+        var result = Array(repeating: Double.nan, count: len)
+        let offset = seq.count - barCount
+        guard len > 0 else { return result }
+        var prev = incState.exprTails[tailKey]
+        var prevValid = false
+        if let p = prev, !p.isNaN { prevValid = true }
+        for i in start..<barCount {
+            let v = seq[offset + i]
+            if v.isNaN { continue }
+            let alpha = a[offset + i]
+            if alpha.isNaN { continue }
+            if prevValid {
+                let cur = alpha * v + (1 - alpha) * prev!
                 result[i - start] = cur
                 prev = cur
             } else {
@@ -1157,6 +1195,14 @@ struct TDXEvaluator {
             let period = Int(scalar(vals[1]))
             let m = scalar(vals[2])
             return sma(vals[0], period: period, m: m)
+        case "DMA":
+            // DMA(X, A)：动态移动平均，Y = A*X + (1-A)*Y'，A 为逐根权重序列
+            try requireArgs(fn, vals, 2)
+            return dma(vals[0], vals[1])
+        case "MEMA":
+            // 通达信 MEMA(X,N) = (X + (N-1)*Y')/N = SMA(X,N,1)
+            try requireArgs(fn, vals, 2)
+            return sma(vals[0], period: Int(scalar(vals[1])), m: 1)
         case "REF":
             try requireArgs(fn, vals, 2)
             return reference(vals[0], n: Int(scalar(vals[1])))
@@ -1269,7 +1315,8 @@ struct TDXEvaluator {
         let offset = seq.count - barCount
         guard period > 0 else { return result }
         if ema {
-            let k = weight / Double(period + 1)
+            // 通达信 EMA(X,N) = (2*X + (N-1)*Y')/(N+1)，平滑系数 2/(N+1)
+            let k = 2 * weight / Double(period + 1)
             var prev: Double?
             for i in 0..<barCount {
                 let v = seq[offset + i]
@@ -1311,6 +1358,28 @@ struct TDXEvaluator {
             if v.isNaN { continue }
             if let p = prev {
                 let cur = (m * v + (Double(period) - m) * p) / Double(period)
+                result[i] = cur
+                prev = cur
+            } else {
+                result[i] = v
+                prev = v
+            }
+        }
+        return result
+    }
+
+    /// 非增量 DMA(X,A)：动态移动平均 Y = A*X + (1-A)*Y'，A 为逐根权重序列
+    private func dma(_ seq: [Double], _ a: [Double]) -> [Double] {
+        var result = Array(repeating: Double.nan, count: barCount)
+        let offset = seq.count - barCount
+        var prev: Double?
+        for i in 0..<barCount {
+            let v = seq[offset + i]
+            if v.isNaN { continue }
+            let alpha = a[offset + i]
+            if alpha.isNaN { continue }
+            if let p = prev {
+                let cur = alpha * v + (1 - alpha) * p
                 result[i] = cur
                 prev = cur
             } else {

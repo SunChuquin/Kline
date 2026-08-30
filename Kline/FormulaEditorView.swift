@@ -574,13 +574,19 @@ struct FormulaTextView: UIViewRepresentable {
 /// 保存写回 Documents/indicator/*.tdx；「恢复编译时内容」仅系统指标可用。
 struct SystemIndicatorEditorContainer: View {
     let data: [KlineItem]
-    /// true = 主图（可在 MA/EMA/BOLL/CMK/SAR 间切换），false = 副图（固定 initialSubId）
+    /// true = 主图（可在所有 SCOPE=main 的 .tdx 指标间切换），false = 副图（固定 initialSubId）
     let isMain: Bool
     var onClose: () -> Void
     /// 保存成功回调：传入保存的指标 id（供外部重算）
     var onSaved: (String) -> Void
 
-    private static let mainIds = ["MA", "EMA", "BOLL", "CMK", "SAR"]
+    /// 主图系统指标列表（数据驱动，来自 .tdx SCOPE=main），仅显示当前勾选启用的指标
+    private var mainIds: [String] {
+        let enabled = ChartConfigStore.shared.mainIndicators
+        return SystemIndicatorStore.shared.mainIndicatorDefs()
+            .map { $0.id }
+            .filter { enabled.contains($0) }
+    }
 
     @State private var mainId: String = "MA"
     @State private var subId: String
@@ -592,6 +598,12 @@ struct SystemIndicatorEditorContainer: View {
         self.onClose = onClose
         self.onSaved = onSaved
         _subId = State(initialValue: initialSubId)
+        // 默认选勾选启用的第一个主图指标；若列表已不含 "MA"，兜底用列表首个
+        let enabled = ChartConfigStore.shared.mainIndicators
+        let ids = SystemIndicatorStore.shared.mainIndicatorDefs().map { $0.id }.filter { enabled.contains($0) }
+        if !ids.isEmpty && !ids.contains("MA") {
+            _mainId = State(initialValue: ids[0])
+        }
     }
 
     private var currentId: String { isMain ? mainId : subId }
@@ -603,7 +615,7 @@ struct SystemIndicatorEditorContainer: View {
                 // 主图系统指标切换栏
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(Self.mainIds, id: \.self) { mid in
+                        ForEach(mainIds, id: \.self) { mid in
                             Button(mid) { mainId = mid }
                                 .font(.system(size: 13, weight: mainId == mid ? .semibold : .regular))
                                 .foregroundColor(mainId == mid ? .white : .black)

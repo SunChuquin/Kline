@@ -450,6 +450,8 @@ struct KlineChartView: View {
     @State private var pinnedPrice: Double? = nil
     @State private var showMainSheet = false
     @State private var showSubSheet = false
+    /// 重置内置指标前的确认对话框
+    @State private var showResetBuiltinConfirm = false
     @State private var editingSlot: SubSlot = .top
     @State private var visibleCount: CGFloat = 100
     @State private var endOffset: Int = 0
@@ -2646,6 +2648,25 @@ struct KlineChartView: View {
                                formatter: (m.kind == "VOL" || m.kind == "AMO") ? { formatVolume($0) } : nil)
                 }
                 Spacer()
+                // 副图1：最右侧「回到最新」按钮（右指带尾单箭头）。
+                // 屏幕最右 K 线不是最后一根时高亮可点；点击直接加载最新 K 线（屏幕显示 100 根）。
+                if m === subTop {
+                    let atLatest = endIndex >= sortedData.count - 1
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            visibleCount = 100
+                            endOffset = 0
+                        }
+                    } label: {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(atLatest ? Color.gray.opacity(0.35) : Color.blue)
+                            .frame(width: 22, height: 22, alignment: .center)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(atLatest)
+                }
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -3282,9 +3303,24 @@ struct KlineChartView: View {
         HStack {
             Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.black)
             Spacer()
+            Button("重置内置指标") { showResetBuiltinConfirm = true }
+                .font(.system(size: 13)).foregroundColor(.red)
             Button("完成") { onClose() }.font(.system(size: 14)).foregroundColor(.blue)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
+        .alert("重置内置指标", isPresented: $showResetBuiltinConfirm) {
+            Button("重置", role: .destructive) { performResetBuiltin() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将把所有内置指标恢复为编译时的内容，确定重置吗？")
+        }
+    }
+
+    /// 重置所有内置指标为编译时内容，并立即重算主图与三个副图
+    private func performResetBuiltin() {
+        SystemIndicatorStore.shared.restoreAllBuiltin()
+        recomputeMainCurves(force: true)
+        for m in [subTop, subBottom, subThird] { recomputeSub(m, force: true) }
     }
 
     // MARK: - 十字光标辅助

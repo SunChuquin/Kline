@@ -1,6 +1,5 @@
 NAME=XS
-SCOPE=sub
-GROUP=趋向
+SCOPE=main
 FORMULA:
 N:=13;
 VAR2:=CLOSE*VOL;

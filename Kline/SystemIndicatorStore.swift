@@ -197,6 +197,21 @@ final class SystemIndicatorStore: ObservableObject {
         return write(content, for: id)
     }
 
+    /// 重置所有内置指标为「编译时内容」：把 bundle 内每个内置 .tdx 覆盖写回 Documents。
+    /// 返回是否全部成功。用户自建（bundle 无对应源）的 .tdx 不受影响。
+    @discardableResult
+    func restoreAllBuiltin() -> Bool {
+        var urls = Bundle.main.urls(forResourcesWithExtension: fileExt, subdirectory: builtinSubdir) ?? []
+        if urls.isEmpty { urls = Bundle.main.urls(forResourcesWithExtension: fileExt, subdirectory: nil) ?? [] }
+        var ok = true
+        for src in urls {
+            guard let content = try? String(contentsOf: src, encoding: .utf8) else { ok = false; continue }
+            let id = src.deletingPathExtension().lastPathComponent
+            if !write(content, for: id) { ok = false }
+        }
+        return ok
+    }
+
     /// 写入 Documents/indicator/<id>.tdx 并重载（重载成功后 defs 更新）
     private func write(_ content: String, for id: String) -> Bool {
         let fm = FileManager.default
