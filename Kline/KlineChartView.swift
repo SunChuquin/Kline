@@ -278,12 +278,18 @@ struct PrefetchCalcRequest {
     let calcStart: Int
     let calcEnd: Int
     let data: [KlineItem]        // 裁剪区间数据
+    /// 完整基础序列（整个标的的 C/H/L/O/V/AMOUNT），各块共享引用，避免重复 map
+    let series: TDXSharedSeries
     let volumes: [Double]        // 裁剪区间成交量
     let turnovers: [Double]      // 裁剪区间成交额
     /// 主图公式文本（仅启用的指标，按固定顺序；空串表示未启用/无自定义指标）
     let mainFormulas: [String]
     /// 副图请求（3 个，与 subTop/subBottom/subThird 对应）
     let subs: [SubPrefetchRequest]
+    /// 各主图公式上一块的增量求值状态（与 mainFormulas 一一对应；nil = 从头算）
+    let resumingMain: [TDXIncrementalState?]
+    /// 各副图公式上一块的增量求值状态（与 subs 一一对应；nil = 从头算）
+    let resumingSubs: [TDXIncrementalState?]
 }
 
 struct SubPrefetchRequest {
@@ -302,6 +308,10 @@ struct PrefetchCalcResult {
     let main: [[TDXOutputLine]]
     /// 与 subs 一一对应（VOL/AMO 为空，主线程用成交量/成交额组装）
     let subs: [[TDXOutputLine]]
+    /// 各主图公式算完后的最新增量状态（供下一块延续）
+    let newMainStates: [TDXIncrementalState]
+    /// 各副图公式算完后的最新增量状态（供下一块延续）
+    let newSubStates: [TDXIncrementalState]
 }
 
 // MARK: - 后台预计算辅助（文件级私有）
@@ -731,10 +741,8 @@ struct KlineChartView: View {
 
     private var count: Int { min(max(20, Int(visibleCount.rounded())), capVisibleCount) }
     private var maxVisibleCount: Int { sortedData.count }
-    /// 非放大模式下屏幕最多显示的 K 线数（放大模式下才允许显示全部）
-    private let normalMaxVisible = 250
-    /// 当前可用的最大可见 K 线数：放大模式显示全部，非放大模式最多 250 根
-    private var capVisibleCount: Int { mainFullscreen ? maxVisibleCount : min(maxVisibleCount, normalMaxVisible) }
+    /// 可见 K 线数上限：非放大与放大模式都允许显示全部 K 线（不限制）
+    private var capVisibleCount: Int { maxVisibleCount }
     private var endIndex: Int {
         let maxEnd = sortedData.count - 1
         let minEnd = max(0, count - 1)
@@ -849,8 +857,10 @@ struct KlineChartView: View {
     // MARK: - 指标计算区间（裁剪）
 
     /// 指标预热长度：往前多算这一段历史，保证 MA（需前 N 根）与 EMA/SMA 等递归指标
-    /// 在可见窗口内已收敛、数值准确；也避免每次拖动/缩放后全量重算
-    private let indicatorWarmup = 500
+    /// 在可见窗口内已收敛、数值准确；也避免每次拖动/缩放后全量重算。
+    /// 取 50 使前台近似总计算量 ≈ 可见窗口(默认100) + 预热(50) ≈ 150 根，降低打开标的时的卡顿；
+    /// 长周期指标在可见窗口前段的收敛精度会略降，由后台分块预计算随后覆盖为正确值
+    private let indicatorWarmup = 50
     /// 指标计算区间的起点索引（绝对，需要区间）：可见窗口起点往前推预热长度，最小为 0
     private var indicatorCalcStart: Int { max(0, startIndex - indicatorWarmup) }
     /// 指标计算区间的终点索引（绝对，需要区间）：覆盖到可见窗口末端即可
@@ -916,6 +926,10 @@ struct KlineChartView: View {
         // 未强制重算时直接复用后台结果；指标配置变化（force）时用正确覆盖区间重算，避免退化为近似
         let bgCovered = bgCoverageEnd >= endIndex
         if bgCovered, !force, !mainCurves.isEmpty { return }
+        // 后台尚未覆盖可见窗口（如缩放到全部 / 滑到未算区域）：不在此同步计算近似指标，
+        // 同步计算量随可见 K 数线性增长，显示全部时会阻塞主线程卡顿；保持当前已覆盖曲线，
+        // 未覆盖部分渲染时因 NaN 自然显示裸K，由后台 prefetch 继续推进覆盖后替换
+        if !force, !bgCovered, !mainCurves.isEmpty { return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
             let store = SystemIndicatorStore.shared
@@ -1114,6 +1128,9 @@ struct KlineChartView: View {
         let bgCovered = bgCoverageEnd >= endIndex
         let curvesMatchCurrentData = m.curves.allSatisfy { $0.values.count == sortedData.count }
         if bgCovered, !force, !m.curves.isEmpty, curvesMatchCurrentData { return }
+        // 后台尚未覆盖可见窗口：不在此同步计算近似指标（显示全部时会卡顿），
+        // 保持当前已覆盖曲线，未覆盖部分渲染时因 NaN 自然显示为空，由后台 prefetch 补齐
+        if !force, !bgCovered, !m.curves.isEmpty, curvesMatchCurrentData { return }
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
         // 计算区间：后台已覆盖窗口时用后台正确覆盖 [0...bgCoverageEnd]，否则前台近似（合并已算区间）
         let (calcStart, calcEnd) = bgCovered
@@ -1499,6 +1516,35 @@ struct KlineChartView: View {
         startPrefetch()
     }
 
+    /// 退出放大时按十字光标设定可见窗口：
+    /// - 两个光标 A/B：显示 A前10根 + A + A与B之间 + B + B后10根
+    /// - 一个光标：以光标为中心显示 100 根（前49 + 光标 + 后50）
+    /// - 无光标：保持最新 100 根
+    private func applyExitWindowFromCursors() {
+        let maxEnd = max(0, sortedData.count - 1)
+        // 两个光标（固定光标 + 活动光标）：A=左、B=右，显示 [A-10 ... B+10]
+        if let aIdx = pinnedIndex, let bIdx = selectedIndex, aIdx != bIdx {
+            let left = min(aIdx, bIdx)
+            let right = max(aIdx, bIdx)
+            let start = max(0, left - 10)
+            let end = min(maxEnd, right + 10)
+            visibleCount = CGFloat(max(20, end - start + 1))
+            endOffset = max(0, maxEnd - end)
+            return
+        }
+        // 一个光标：以光标所在K线为中心，前 49 + 1 + 后 50 = 100 根
+        if let center = selectedIndex ?? pinnedIndex {
+            let start = clamp(center - 49, 0, max(0, maxEnd - 99))
+            let end = min(maxEnd, start + 99)
+            visibleCount = 100
+            endOffset = max(0, maxEnd - end)
+            return
+        }
+        // 无光标：恢复最新 100 根
+        visibleCount = 100
+        endOffset = 0
+    }
+
     /// 生成覆盖单个图表面板区域的双指手势层（按面板分片，不覆盖 legend 行的按钮）
     private func twoFingerLayer(width: CGFloat, rect: CGRect) -> some View {
         TwoFingerGestureHook(
@@ -1525,7 +1571,11 @@ struct KlineChartView: View {
             let sub1Height = mainFullscreen ? 0 : chartHeight * 0.15
             let sub2Height = sub1Height
             let sub3Height = sub1Height
-            let mainHeight = max(1, chartHeight - sub1Height - sub2Height - sub3Height)
+            let mainHeight = mainFullscreen
+                // 放大模式：副图不显示，主图占满 legend 行 + 行情行 + 时间轴之外的剩余空间，
+                // 保证 VStack 总高度仍等于屏幕高度，顶部 legend 栏和底部时间轴位置不因居中而偏移
+                ? max(1, geometry.size.height - legendHeight - 2 * timeHeight)
+                : max(1, chartHeight - sub1Height - sub2Height - sub3Height)
 
             let mainTop = legendHeight
             let mainBottom = mainTop + mainHeight
@@ -1730,6 +1780,14 @@ struct KlineChartView: View {
         }
         let token = UUID()
         prefetchToken = token
+        // 完整基础序列只构建一次，各块共享引用（避免每块重复 map 全部基础数据）
+        let series = TDXSharedSeries(data: sortedData)
+        // 上一块算完后的增量状态（供下一块只算新增区间、复用前缀，避免每块从数据开头整段重算）；
+        // 空数组 = 从头算。公式与上一块不一致（配置中途变化）时清空状态，防止新旧公式状态错位
+        var resumingMain: [TDXIncrementalState?] = []
+        var resumingSubs: [TDXIncrementalState?] = []
+        var lastMainFormulas: [String] = []
+        var lastSubFormulas: [String?] = []
         Task { @MainActor in
             while self.prefetchToken == token {
                 // 指标/设置面板打开期间暂停预计算，避免空转与干扰面板操作
@@ -1737,16 +1795,21 @@ struct KlineChartView: View {
                     await Task.yield()
                     continue
                 }
-                // 从数据开头（最左）向右推进：下一块覆盖到 bgCoverageEnd + block
+                // 从数据开头（最左）向右推进：块大小随覆盖推进呈几何增长（每次约翻倍）。
+                // 结合增量求值（上一块状态延续，每块只算新增区间）使总计算量 ≈ O(N)，
+                // 接近一次全量，大幅缩短总耗时
                 let currentEnd = max(0, self.bgCoverageEnd)
-                let bgEnd = min(self.sortedData.count - 1, currentEnd + self.prefetchBlockSize)
+                let step = max(self.prefetchBlockSize, currentEnd)
+                let bgEnd = min(self.sortedData.count - 1, currentEnd + step)
                 guard bgEnd > currentEnd else {
                     // 已全部算完：标记周期预计算完成，并让外层继续预计算其它未计算周期
                     self.finishPrefetch()
                     break
                 }
-                // 主线程构造计算请求（从数据开头起算，保证递归指标数值最正确）
-                guard let request = self.makePrefetchRequest(calcStart: 0, calcEnd: bgEnd) else { break }
+                // 主线程构造计算请求（携带共享序列与上一块增量状态；从数据开头起算保证递归指标数值最正确）
+                guard let request = self.makePrefetchRequest(calcStart: 0, calcEnd: bgEnd, series: series,
+                                                             resumingMain: resumingMain,
+                                                             resumingSubs: resumingSubs) else { break }
                 // 后台线程执行指标求值（纯计算，不触碰任何 UI/状态）
                 let result = await Task.detached(priority: .utility) {
                     Self.evaluatePrefetch(request)
@@ -1757,14 +1820,29 @@ struct KlineChartView: View {
                 // 避免全量曲线组装占用主线程影响手势流畅度；松手后下一块会补上
                 guard self.prefetchToken == token else { break }
                 let shouldCommit = bgEnd >= self.endIndex && !self.drag.isDragging
-                self.commitPrefetch(request, result, updateCurves: shouldCommit)
+                // 拖动中会跳过曲线提交；但若这一整块已覆盖到数据末尾（prefetch 即将结束），
+                // 即使在拖动中也强制提交，否则覆盖末端已到末尾、曲线却因拖动中跳过提交而陈旧，
+                // 退出拖动后 bgCovered 误判为已覆盖、prefetchDone 又跳过重启 → 指标永不补齐
+                let isLastBlock = bgEnd >= self.sortedData.count - 1
+                self.commitPrefetch(request, result, updateCurves: shouldCommit || isLastBlock)
                 self.bgCoverageEnd = bgEnd
                 // 仅在曲线真正提交时推进缓存的覆盖末端，保证缓存 bgCoverageEnd 与实际存储曲线
                 // 的覆盖一致；否则会出现「声称已覆盖」但曲线未覆盖可见窗口，切回该周期后
                 // bgCovered 误判为真、recomputeSub 提前返回 → 副图空白
-                if shouldCommit, let metaId = self.metaId {
+                if (shouldCommit || isLastBlock), let metaId = self.metaId {
                     let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
                     entry.bgCoverageEnd = max(entry.bgCoverageEnd, bgEnd)
+                }
+                // 把本块最新增量状态传给下一块；公式与上一块不一致（配置中途变化）时从头算
+                let subsFormulas = request.subs.map { $0.customFormula ?? $0.formula }
+                if request.mainFormulas == lastMainFormulas, subsFormulas == lastSubFormulas {
+                    resumingMain = result.newMainStates.map { Optional($0) }
+                    resumingSubs = result.newSubStates.map { Optional($0) }
+                } else {
+                    resumingMain = []
+                    resumingSubs = []
+                    lastMainFormulas = request.mainFormulas
+                    lastSubFormulas = subsFormulas
                 }
                 // 让出主线程，先刷新 UI 再算下一块
                 await Task.yield()
@@ -1792,8 +1870,12 @@ struct KlineChartView: View {
         onPeriodPrefetched?(period)
     }
 
-    /// 主线程构造预计算每块的请求：快照裁剪数据、启用的指标公式与参数（全部 Sendable，可跨线程）
-    private func makePrefetchRequest(calcStart: Int, calcEnd: Int) -> PrefetchCalcRequest? {
+    /// 主线程构造预计算每块的请求：快照裁剪数据、启用的指标公式与参数（全部 Sendable，可跨线程）。
+    /// series 为完整基础序列（各块共享，避免重复 map）；resumingMain/resumingSubs 为上一块算完的
+    /// 增量状态（与公式一一对应；空数组 = 从头算），后台只算新增区间、复用前缀
+    private func makePrefetchRequest(calcStart: Int, calcEnd: Int, series: TDXSharedSeries,
+                                     resumingMain: [TDXIncrementalState?] = [],
+                                     resumingSubs: [TDXIncrementalState?] = []) -> PrefetchCalcRequest? {
         guard !sortedData.isEmpty, calcStart >= 0, calcStart <= calcEnd, calcEnd < sortedData.count else { return nil }
         let data = Array(sortedData[calcStart...calcEnd])
         let volumes = Array(self.volumes[calcStart...calcEnd])
@@ -1820,21 +1902,34 @@ struct KlineChartView: View {
             subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: m.volPeriods))
         }
         return PrefetchCalcRequest(calcStart: calcStart, calcEnd: calcEnd, data: data,
-                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs)
+                                   series: series,
+                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs,
+                                   resumingMain: resumingMain, resumingSubs: resumingSubs)
     }
 
-    /// 后台线程：对请求中的每个公式求值（纯计算，无任何 UI/状态访问，线程安全）
+    /// 后台线程：对请求中的每个公式求值（纯计算，无任何 UI/状态访问，线程安全）。
+    /// 使用增量求值：携带上一块状态，只算新增区间，返回最新状态供下一块延续
     nonisolated static func evaluatePrefetch(_ req: PrefetchCalcRequest) -> PrefetchCalcResult {
-        let main: [[TDXOutputLine]] = req.mainFormulas.map { formula in
-            guard !formula.isEmpty else { return [] }
-            return (try? TDXFormulaEngine.evaluate(formula: formula, data: req.data)) ?? []
+        var newMainStates: [TDXIncrementalState] = []
+        let main: [[TDXOutputLine]] = req.mainFormulas.enumerated().map { i, formula in
+            guard !formula.isEmpty else { newMainStates.append(TDXIncrementalState()); return [] }
+            let resuming = i < req.resumingMain.count ? req.resumingMain[i] : nil
+            let r = (try? TDXFormulaEngine.evaluateIncremental(formula: formula, series: req.series,
+                                                               barCount: req.data.count, resuming: resuming))
+            newMainStates.append(r?.state ?? TDXIncrementalState())
+            return r?.lines ?? []
         }
-        let subs: [[TDXOutputLine]] = req.subs.map { s in
+        var newSubStates: [TDXIncrementalState] = []
+        let subs: [[TDXOutputLine]] = req.subs.enumerated().map { i, s in
             let f = s.customFormula ?? s.formula
-            guard let f, !f.isEmpty else { return [] }
-            return (try? TDXFormulaEngine.evaluate(formula: f, data: req.data)) ?? []
+            guard let f, !f.isEmpty else { newSubStates.append(TDXIncrementalState()); return [] }
+            let resuming = i < req.resumingSubs.count ? req.resumingSubs[i] : nil
+            let r = (try? TDXFormulaEngine.evaluateIncremental(formula: f, series: req.series,
+                                                               barCount: req.data.count, resuming: resuming))
+            newSubStates.append(r?.state ?? TDXIncrementalState())
+            return r?.lines ?? []
         }
-        return PrefetchCalcResult(main: main, subs: subs)
+        return PrefetchCalcResult(main: main, subs: subs, newMainStates: newMainStates, newSubStates: newSubStates)
     }
 
     /// 主线程：把后台求得的原始输出行组装为 IndicatorLine，更新主图/副图曲线（含标题与颜色）。
@@ -2038,7 +2133,9 @@ struct KlineChartView: View {
             subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: m.volPeriods))
         }
         return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
-                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs)
+                                   series: TDXSharedSeries(data: data),
+                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, subs: subs,
+                                   resumingMain: [], resumingSubs: [])
     }
 
     /// 主线程：把后台求得的原始输出行组装为 IndicatorLine 并写入全局缓存。
@@ -2752,11 +2849,10 @@ struct KlineChartView: View {
                                 endOffset = 0
                             }
                         } else {
-                            // 所有 K 线都在屏幕内：退出放大，恢复最新 100 根 K 线
+                            // 所有 K 线都在屏幕内：退出放大，按十字光标位置设定可见窗口
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 mainFullscreen = false
-                                visibleCount = 100
-                                endOffset = 0
+                                applyExitWindowFromCursors()
                             }
                         }
                     } else {
