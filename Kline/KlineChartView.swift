@@ -922,6 +922,18 @@ struct KlineChartView: View {
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         // 主图放大（全屏裸K）：不计算任何主图指标
         if mainFullscreen { mainCurves = []; return }
+        // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
+        // 直接从缓存恢复完整曲线，避免在主线程全量重算所有主图指标造成明显卡顿。
+        // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
+        if bgCoverageEnd >= endIndex, let metaId = metaId {
+            let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
+            if entry.configFingerprint == Self.currentConfigFingerprint(),
+               entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty {
+                mainCurves = entry.mainCurves
+                mainCache = entry.mainCache
+                return
+            }
+        }
         // 后台正确计算已覆盖整个可见窗口（从数据开头起算，数值最正确）：
         // 未强制重算时直接复用后台结果；指标配置变化（force）时用正确覆盖区间重算，避免退化为近似
         let bgCovered = bgCoverageEnd >= endIndex
@@ -1120,6 +1132,23 @@ struct KlineChartView: View {
             m.curves = []
             m.titleName = m.kind.rawValue
             return
+        }
+        // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
+        // 直接从缓存恢复该槽位完整曲线，避免在主线程全量重算副图指标造成明显卡顿。
+        // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
+        if bgCoverageEnd >= endIndex, let metaId = metaId {
+            let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
+            let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
+            if entry.configFingerprint == Self.currentConfigFingerprint(),
+               entry.bgCoverageEnd >= endIndex,
+               let curves = entry.subCurves[slot], !curves.isEmpty,
+               curves.allSatisfy({ $0.values.count == sortedData.count }) {
+                m.curves = curves
+                let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind.rawValue
+                m.color = customInd?.color ?? Color(hex: "0050FF")!
+                return
+            }
         }
         // 后台正确计算已覆盖整个可见窗口：未强制重算时直接复用；指标变化（force）时用正确覆盖区间重算。
         // 注意：m.curves 是跨周期共享的副图模型曲线，切换周期/配置变更后可能残留其它周期的旧曲线
