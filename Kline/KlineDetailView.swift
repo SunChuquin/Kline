@@ -171,10 +171,9 @@ struct KlineDetailView: View {
         LinkedViewStore.shared.configs(for: item.id)
     }
 
-    /// 顶部留白 + 第一行工具栏高度（信息栏从该位置开始；覆盖层需精确对齐）
-    /// 用实测工具行高度 + 顶部 2 留白；未测得时回退 36
-    private var topToolbarAreaHeight: CGFloat {
-        (measuredTopBarHeight > 0 ? measuredTopBarHeight : 34) + 2
+    /// 信息栏顶部相对整页顶部的偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5
+    private var infoBarTopOffset: CGFloat {
+        (measuredTopBarHeight > 0 ? measuredTopBarHeight : 34) + 2 + 0.5
     }
 
     var body: some View {
@@ -187,7 +186,14 @@ struct KlineDetailView: View {
                         Color.clear
                             .frame(height: 2)
 
-                        topBar
+                        // 第一行：工具栏
+                        toolbarRow
+                        // 工具栏与信息栏之间的分界线
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 0.5)
+                        // 第二行：信息栏
+                        infoBarRow
                     }
 
                     // 图表区域：始终占满剩余空间，内部显示加载/空/图表
@@ -196,11 +202,12 @@ struct KlineDetailView: View {
                 .frame(maxHeight: .infinity)
                 .background(Color.white.ignoresSafeArea())
 
-                // 「边」开启时：可拖分隔线覆盖层从信息栏顶部开始，横贯信息栏+主图+副图+时间轴上一行+时间轴（不含顶部工具栏）
+                // 「边」开启时：可拖分隔线覆盖层从信息栏顶部开始
+                // （工具栏已独立，故固定偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5）
                 if dualLink && edgeAdjust {
                     linkedDividerOverlay(size: geometry.size)
-                        .offset(y: topToolbarAreaHeight)
-                        .frame(height: max(0, geometry.size.height - topToolbarAreaHeight))
+                        .offset(y: infoBarTopOffset)
+                        .frame(height: max(0, geometry.size.height - infoBarTopOffset))
                 }
             }
             .overlay {
@@ -250,117 +257,113 @@ struct KlineDetailView: View {
         .frame(width: totalWidth, height: size.height)
     }
 
-    /// 顶部两行：第一行工具栏（返回 + 功能按钮），第二行信息栏（标的名称/代码/类型）
-    private var topBar: some View {
-        VStack(spacing: 0) {
-            // ---- 第一行：工具栏 ----
-            HStack(spacing: 6) {
-                // 返回
-                Button(action: {
-                    onClose()
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 30, height: 28)
-                        .background(Color.gray.opacity(0.12))
-                        .cornerRadius(6)
-                }
-
-                Spacer()
-
-                // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标（现有逻辑）
-                if dualLink && !chartHasCursor {
-                    // 「边」：默认关闭不高亮；点击开启高亮，开启后出现可拖动分界线，且禁止十字光标
-                    Button(action: {
-                        edgeAdjust.toggle()
-                    }) {
-                        Text("边")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(edgeAdjust ? .blue : .gray)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
-                } else {
-                    // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
-                    Button(action: {
-                        if pinEnabled {
-                            pinEnabled = false
-                        } else if chartHasCursor {
-                            pinEnabled = true
-                        }
-                    }) {
-                        Image(systemName: pinEnabled ? "pin.fill" : "pin")
-                            .font(.system(size: 15))
-                            .foregroundColor(pinEnabled ? .blue : .gray)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(!pinEnabled && !chartHasCursor)
-                }
-
-                // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
-                Button(action: {
-                    let wasOn = dualLink
-                    withAnimation { dualLink.toggle() }
-                    // 退出双联动时关闭边线调节，避免残留不可拖动/禁光标状态
-                    if wasOn {
-                        edgeAdjust = false
-                        pinEnabled = false
-                    }
-                }) {
-                    Text("联")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(dualLink ? .blue : .gray)
-                        .frame(width: 32, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
-
-                // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
-                Button(action: {
-                    config.mainMirrored.toggle()
-                }) {
-                    Text(config.mainMirrored ? "空" : "多")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(config.mainMirrored ? .blue : .gray)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
-
-                // K线设置
-                Button(action: {
-                    withAnimation { showSettings = true }
-                }) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 15))
-                        .foregroundColor(.gray)
-                        .frame(width: 32, height: 28)
-                        .contentShape(Rectangle())
-                }
+    /// 顶部第一行：工具栏（返回 + 功能按钮）
+    private var toolbarRow: some View {
+        HStack(spacing: 6) {
+            // 返回
+            Button(action: {
+                onClose()
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                    .frame(width: 30, height: 28)
+                    .background(Color.gray.opacity(0.12))
+                    .cornerRadius(6)
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 8)
-            .padding(.vertical, 3)
-            // 测量第一行工具栏高度（供覆盖层起始偏移对齐；+顶部2留白在读取处加）
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: TopBarHeightPreferenceKey.self,
-                                           value: proxy.size.height)
+
+            Spacer()
+
+            // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标（现有逻辑）
+            if dualLink && !chartHasCursor {
+                // 「边」：默认关闭不高亮；点击开启高亮，开启后出现可拖动分界线，且禁止十字光标
+                Button(action: {
+                    edgeAdjust.toggle()
+                }) {
+                    Text("边")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(edgeAdjust ? .blue : .gray)
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
                 }
-            )
+                .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
+            } else {
+                // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
+                Button(action: {
+                    if pinEnabled {
+                        pinEnabled = false
+                    } else if chartHasCursor {
+                        pinEnabled = true
+                    }
+                }) {
+                    Image(systemName: pinEnabled ? "pin.fill" : "pin")
+                        .font(.system(size: 15))
+                        .foregroundColor(pinEnabled ? .blue : .gray)
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!pinEnabled && !chartHasCursor)
+            }
 
-            // 工具栏与信息栏之间的分界线
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(height: 0.5)
+            // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
+            Button(action: {
+                let wasOn = dualLink
+                withAnimation { dualLink.toggle() }
+                // 退出双联动时关闭边线调节，避免残留不可拖动/禁光标状态
+                if wasOn {
+                    edgeAdjust = false
+                    pinEnabled = false
+                }
+            }) {
+                Text("联")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(dualLink ? .blue : .gray)
+                    .frame(width: 32, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
 
-            // ---- 第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型） ----
+            // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
+            Button(action: {
+                config.mainMirrored.toggle()
+            }) {
+                Text(config.mainMirrored ? "空" : "多")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(config.mainMirrored ? .blue : .gray)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
+
+            // K线设置
+            Button(action: {
+                withAnimation { showSettings = true }
+            }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 15))
+                    .foregroundColor(.gray)
+                    .frame(width: 32, height: 28)
+                    .contentShape(Rectangle())
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 8)
+        .padding(.vertical, 3)
+        .background(Color.white)
+        // 测量工具栏行高度（供 infoBarTopOffset 对齐）
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: TopBarHeightPreferenceKey.self,
+                                       value: proxy.size.height)
+            }
+        )
+    }
+
+    /// 顶部第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型）
+    private var infoBarRow: some View {
+        Group {
             if dualLink {
-                // 联动：按视图数量分格，每格显示对应视图的(代码+周期)，格子间用竖线分隔，
-                // 分隔位置与主图视图边界对齐（2视图用可调占比，3/4视图等分）
+                // 联动：按视图数量分格，每格显示对应视图的(代码+周期)，格子间用竖线分隔
                 GeometryReader { geo in
                     infoLinkedRow(width: geo.size.width)
                 }
