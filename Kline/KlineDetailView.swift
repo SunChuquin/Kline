@@ -196,114 +196,120 @@ struct KlineDetailView: View {
         }
     }
 
-    /// 顶部单行：返回 + 名称/代码/类型 + 周期切换 + K线设置
+    /// 顶部两行：第一行工具栏（返回 + 功能按钮），第二行信息栏（标的名称/代码/类型）
     private var topBar: some View {
-        HStack(spacing: 6) {
-            // 返回
-            Button(action: {
-                onClose()
-            }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(width: 30, height: 30)
-                    .background(Color.gray.opacity(0.12))
-                    .cornerRadius(6)
-            }
-
-            // 名称 / 代码 / 类型
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(item.name)
-                        .font(.system(size: 14, weight: .bold))
+        VStack(spacing: 0) {
+            // ---- 第一行：工具栏 ----
+            HStack(spacing: 6) {
+                // 返回
+                Button(action: {
+                    onClose()
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.black)
-                        .lineLimit(1)
-                    Text(item.displayCode)
-                        .font(.system(size: 10))
-                        .foregroundColor(.gray)
+                        .frame(width: 30, height: 30)
+                        .background(Color.gray.opacity(0.12))
+                        .cornerRadius(6)
                 }
+
+                Spacer()
+
+                // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标（现有逻辑）
+                if dualLink && !chartHasCursor {
+                    // 「边」：默认关闭不高亮；点击开启高亮，开启后出现可拖动分界线，且禁止十字光标
+                    Button(action: {
+                        edgeAdjust.toggle()
+                    }) {
+                        Text("边")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(edgeAdjust ? .blue : .gray)
+                            .frame(width: 32, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
+                } else {
+                    // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
+                    Button(action: {
+                        if pinEnabled {
+                            pinEnabled = false
+                        } else if chartHasCursor {
+                            pinEnabled = true
+                        }
+                    }) {
+                        Image(systemName: pinEnabled ? "pin.fill" : "pin")
+                            .font(.system(size: 15))
+                            .foregroundColor(pinEnabled ? .blue : .gray)
+                            .frame(width: 32, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .disabled(!pinEnabled && !chartHasCursor)
+                }
+
+                // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
+                Button(action: {
+                    let wasOn = dualLink
+                    withAnimation { dualLink.toggle() }
+                    // 退出双联动时关闭边线调节，避免残留不可拖动/禁光标状态
+                    if wasOn {
+                        edgeAdjust = false
+                        pinEnabled = false
+                    }
+                }) {
+                    Text("联")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(dualLink ? .blue : .gray)
+                        .frame(width: 32, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
+
+                // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
+                Button(action: {
+                    config.mainMirrored.toggle()
+                }) {
+                    Text(config.mainMirrored ? "空" : "多")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(config.mainMirrored ? .blue : .gray)
+                        .frame(width: 28, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
+
+                // K线设置
+                Button(action: {
+                    withAnimation { showSettings = true }
+                }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15))
+                        .foregroundColor(.gray)
+                        .frame(width: 32, height: 30)
+                        .contentShape(Rectangle())
+                }
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 8)
+            .padding(.vertical, 6)
+
+            // ---- 第二行：信息栏（标的名称 / 代码 / 类型） ----
+            HStack(spacing: 6) {
+                Text(item.name)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                Text(item.displayCode)
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                Spacer()
                 Text(item.type)
-                    .font(.system(size: 8))
+                    .font(.system(size: 10))
                     .foregroundColor(.gray)
                     .lineLimit(1)
             }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
-            // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标（现有逻辑）
-            if dualLink && !chartHasCursor {
-                // 「边」：默认关闭不高亮；点击开启高亮，开启后出现可拖动分界线，且禁止十字光标
-                Button(action: {
-                    edgeAdjust.toggle()
-                }) {
-                    Text("边")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(edgeAdjust ? .blue : .gray)
-                        .frame(width: 32, height: 30)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
-            } else {
-                // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
-                Button(action: {
-                    if pinEnabled {
-                        pinEnabled = false
-                    } else if chartHasCursor {
-                        pinEnabled = true
-                    }
-                }) {
-                    Image(systemName: pinEnabled ? "pin.fill" : "pin")
-                        .font(.system(size: 15))
-                        .foregroundColor(pinEnabled ? .blue : .gray)
-                        .frame(width: 32, height: 30)
-                        .contentShape(Rectangle())
-                }
-                .disabled(!pinEnabled && !chartHasCursor)
-            }
-
-            // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
-            Button(action: {
-                let wasOn = dualLink
-                withAnimation { dualLink.toggle() }
-                // 退出双联动时关闭边线调节，避免残留不可拖动/禁光标状态
-                if wasOn {
-                    edgeAdjust = false
-                    pinEnabled = false
-                }
-            }) {
-                Text("联")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(dualLink ? .blue : .gray)
-                    .frame(width: 32, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
-
-            // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
-            Button(action: {
-                config.mainMirrored.toggle()
-            }) {
-                Text(config.mainMirrored ? "空" : "多")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(config.mainMirrored ? .blue : .gray)
-                    .frame(width: 28, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
-
-            // K线设置
-            Button(action: {
-                withAnimation { showSettings = true }
-            }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15))
-                    .foregroundColor(.gray)
-                    .frame(width: 32, height: 30)
-                    .contentShape(Rectangle())
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 8)
-        .padding(.vertical, 4)
         .background(Color.white)
         .overlay(
             Rectangle()
