@@ -156,6 +156,11 @@ struct KlineDetailView: View {
         LinkedViewCount(rawValue: LinkedViewStore.shared.configs(for: item.id).count) ?? .two
     }
 
+    /// 当前标的的联动视图配置（用于信息栏列出各视图代码+周期）
+    private var linkedViews: [LinkedViewConfig] {
+        LinkedViewStore.shared.configs(for: item.id)
+    }
+
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
@@ -208,7 +213,7 @@ struct KlineDetailView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.black)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 30, height: 28)
                         .background(Color.gray.opacity(0.12))
                         .cornerRadius(6)
                 }
@@ -224,7 +229,7 @@ struct KlineDetailView: View {
                         Text("边")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(edgeAdjust ? .blue : .gray)
-                            .frame(width: 32, height: 30)
+                            .frame(width: 32, height: 28)
                             .contentShape(Rectangle())
                     }
                     .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
@@ -240,7 +245,7 @@ struct KlineDetailView: View {
                         Image(systemName: pinEnabled ? "pin.fill" : "pin")
                             .font(.system(size: 15))
                             .foregroundColor(pinEnabled ? .blue : .gray)
-                            .frame(width: 32, height: 30)
+                            .frame(width: 32, height: 28)
                             .contentShape(Rectangle())
                     }
                     .disabled(!pinEnabled && !chartHasCursor)
@@ -259,7 +264,7 @@ struct KlineDetailView: View {
                     Text("联")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(dualLink ? .blue : .gray)
-                        .frame(width: 32, height: 30)
+                        .frame(width: 32, height: 28)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
@@ -271,7 +276,7 @@ struct KlineDetailView: View {
                     Text(config.mainMirrored ? "空" : "多")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(config.mainMirrored ? .blue : .gray)
-                        .frame(width: 28, height: 30)
+                        .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
@@ -283,40 +288,68 @@ struct KlineDetailView: View {
                     Image(systemName: "gearshape")
                         .font(.system(size: 15))
                         .foregroundColor(.gray)
-                        .frame(width: 32, height: 30)
+                        .frame(width: 32, height: 28)
                         .contentShape(Rectangle())
                 }
             }
             .padding(.leading, 8)
             .padding(.trailing, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 3)
 
-            // ---- 第二行：信息栏（标的名称 / 代码 / 类型） ----
+            // 工具栏与信息栏之间的分界线
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(height: 0.5)
+
+            // ---- 第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型） ----
             HStack(spacing: 6) {
-                Text(item.name)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.black)
-                    .lineLimit(1)
-                Text(item.displayCode)
-                    .font(.system(size: 11))
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
+                if dualLink {
+                    // 联动：把每个视图的(代码+周期)依次列出
+                    ForEach(linkedViews, id: \.index) { v in
+                        infoPill(code: v.displayCode, period: v.period.rawValue)
+                    }
+                } else {
+                    Text(item.name)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                    Text(item.displayCode)
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                }
                 Spacer()
-                Text(item.type)
-                    .font(.system(size: 10))
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
+                if !dualLink {
+                    Text(item.type)
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 3)
         }
         .background(Color.white)
         .overlay(
+            // 信息栏与主图之间的分界线（工具栏与信息栏之间加一条）
             Rectangle()
                 .fill(Color.gray.opacity(0.3))
                 .frame(height: 0.5),
             alignment: .bottom
         )
+    }
+
+    /// 信息栏单个标的标签：代码 + 周期
+    private func infoPill(code: String, period: String) -> some View {
+        HStack(spacing: 3) {
+            Text(code)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.blue)
+            Text(period)
+                .font(.system(size: 10))
+                .foregroundColor(.gray)
+        }
+        .lineLimit(1)
     }
 
     private var chartArea: some View {
