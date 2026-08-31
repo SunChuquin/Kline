@@ -105,7 +105,7 @@ struct KlineDataGroup: Identifiable {
     let weeklyData: [KlineItem]
 }
 
-enum KlinePeriod: String, CaseIterable, Identifiable {
+enum KlinePeriod: String, CaseIterable, Identifiable, Codable {
     case daily = "日线"
     case weekly = "周线"
     case monthly = "月线"
