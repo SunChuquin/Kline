@@ -9,6 +9,60 @@ import SwiftUI
 import Combine
 import UIKit
 
+/// 双联动分界线：独立持有拖动状态。
+/// 拖动中只更新本视图自身的 @State（只重画这条分隔线，实时跟随手指），
+/// 不触碰左右 K 线图宽度，因此不影响图表手势、也不会因拖动反复重渲染重型图表；
+/// 松手才通过 onCommit 把最终比例一次性写回 config（图表随之调整）。
+struct DualSplitDivider: View {
+    /// 左右总宽
+    let totalWidth: CGFloat
+    /// 当前已提交的左视图占比（手势开始基准）
+    let committed: Double
+    /// 松手回调：把最终占比写回持久状态
+    let onCommit: (Double) -> Void
+
+    /// 占比调节范围
+    private let minRatio = 0.2
+    private let maxRatio = 0.8
+    /// 分界线宽度
+    private let handleWidth: CGFloat = 14
+    /// 拖动中实时显示的比例（持久提交前的临时值）；非拖动时保持 committed
+    @State private var dragRatio: Double?
+
+    var body: some View {
+        let shownRatio = dragRatio ?? committed
+        GeometryReader { geo in
+            Rectangle()
+                .fill(Color.gray.opacity(0.35))
+                .overlay(
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 5))
+                        .foregroundColor(.gray.opacity(0.7))
+                )
+                .frame(width: handleWidth)
+                .position(x: totalWidth * CGFloat(shownRatio), y: geo.size.height / 2)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let usable = max(totalWidth - handleWidth, 1.0)
+                            let delta = Double(value.translation.width / usable)
+                            dragRatio = clamp(committed + delta, minRatio, maxRatio)
+                        }
+                        .onEnded { value in
+                            let usable = max(totalWidth - handleWidth, 1.0)
+                            let delta = Double(value.translation.width / usable)
+                            onCommit(clamp(committed + delta, minRatio, maxRatio))
+                            dragRatio = nil
+                        }
+                )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
+}
+
 /// 全局详情页路由：在根视图以全屏 overlay 呈现 K 线详情，避免 fullScreenCover 偶发白屏
 final class DetailRouter: ObservableObject {
     static let shared = DetailRouter()
@@ -251,60 +305,29 @@ struct KlineDetailView: View {
     /// 双联动：左日线、右周线，十字光标按日期联动。
     /// 左右各用独立的副图模型（isolatedSubs），避免共享副图模型被不同数据长度的曲线互相覆盖。
     /// 中间分界线可按住左右拖动，调整左右视图的屏幕占比；占比持久记忆（config.dualSplitRatio）。
+    /// 分界线是独立子视图，拖动时只重画分隔线本身（实时跟随、不重渲染左右图表，也不干扰图表手势），
+    /// 松手才一次性把最终比例写入 config，图表随之调整。
     private func dualLinkArea(daily: ChartSeries, weekly: ChartSeries) -> some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
-            let minRatio: Double = 0.2
-            let maxRatio: Double = 0.8
-            // 拖动中实时用拖动比例，否则用已记忆占比
-            let shownRatio = clamp(dragRatio ?? config.dualSplitRatio, minRatio, maxRatio)
-            HStack(spacing: 0) {
-                // 左日线：接收联动光标时把联动K线居中显示
-                chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true)
-                    .frame(width: totalWidth * shownRatio)
-                dividerHandle(minRatio: minRatio, maxRatio: maxRatio, totalWidth: totalWidth)
-                // 右周线：保持现有联动逻辑（贴右边缘）
-                chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false)
-                    .frame(maxWidth: .infinity)
+            ZStack(alignment: .topLeading) {
+                // 左日线：宽度 = 已记忆占比；右周线占满剩余
+                HStack(spacing: 0) {
+                    chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true)
+                        .frame(width: totalWidth * config.dualSplitRatio)
+                    chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false)
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 可拖动分界线（覆盖层，独立持有拖动状态）
+                DualSplitDivider(totalWidth: totalWidth,
+                                 committed: config.dualSplitRatio) { newRatio in
+                    config.dualSplitRatio = newRatio
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-
-    /// 可拖动分界线：按住左右拖动，实时改变左视图占比。
-    /// 拖动中把实时比例写入 @State dragRatio（@State 更新必然触发重算，分界线实时跟随），
-    /// 松手才持久化到 config.dualSplitRatio。
-    private func dividerHandle(minRatio: Double, maxRatio: Double, totalWidth: CGFloat) -> some View {
-        Rectangle()
-            .fill(Color.gray.opacity(0.35))
-            .overlay(
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 5))
-                    .foregroundColor(.gray.opacity(0.7))
-            )
-            .frame(width: 14)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        // 位移换算为比例增量：左右净宽 = 总宽 - 分隔条宽；基准取手势开始时的记忆占比
-                        let usable = max(totalWidth - 14, 1)
-                        let delta = Double(value.translation.width / usable)
-                        dragRatio = min(maxRatio, max(minRatio, config.dualSplitRatio + delta))
-                    }
-                    .onEnded { _ in
-                        if let r = dragRatio {
-                            config.dualSplitRatio = r
-                        }
-                        dragRatio = nil
-                    }
-            )
-    }
-
-    /// 拖动分界线过程中实时显示的比例（拖动中非 nil，松手清空还原为记忆占比）
-    @State private var dragRatio: Double? = nil
-
-    private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
 
     private var loadingView: some View {
         VStack(spacing: 16) {
