@@ -192,18 +192,43 @@ final class ChartConfigStore: ObservableObject {
     let subTop = SubChartModel()
     let subBottom = SubChartModel()
     let subThird = SubChartModel()
-    /// 三个副图的按周期记忆（key = 周期，value = 三副图 kind）
-    private var subscriptByPeriod: [KlinePeriod: [String]] = [:]
-    /// 把某周期的三副图记忆应用进共享 subTop/subBottom/subThird（无记忆时保持现有默认）
-    func applySubKinds(for period: KlinePeriod) {
-        guard let kinds = subscriptByPeriod[period], kinds.count == 3 else { return }
-        subTop.kind = kinds[0]
-        subBottom.kind = kinds[1]
-        subThird.kind = kinds[2]
+
+    /// 三副图按周期记忆（key = 周期，value = 三副图选择；无记忆时用默认 CDJ/COL/MACD）
+    private var subscriptByPeriod: [KlinePeriod: [SubChartSelection]] = [:]
+
+    /// 三副图默认选择
+    private static let defaultSubSelections: [SubChartSelection] = [
+        SubChartSelection(kind: "CDJ", customID: nil),
+        SubChartSelection(kind: "COL", customID: nil),
+        SubChartSelection(kind: "MACD", customID: nil),
+    ]
+
+    /// 取某周期的三副图记忆（无记忆时返回默认选择），不修改共享模型。
+    /// 后台预计算、双联动隔离视图等"不落地共享模型"的读取统一走这里，保证副图按周期完全独立。
+    func subSelections(for period: KlinePeriod) -> [SubChartSelection] {
+        if let s = subscriptByPeriod[period], s.count == 3 { return s }
+        return Self.defaultSubSelections
     }
-    /// 记录当前三副图的选择到某周期
+
+    /// 把某周期的三副图记忆应用进共享 subTop/subBottom/subThird（无记忆时用默认）
+    func applySubKinds(for period: KlinePeriod) {
+        let sels = subSelections(for: period)
+        apply(sels[0], to: subTop)
+        apply(sels[1], to: subBottom)
+        apply(sels[2], to: subThird)
+    }
+    /// 记录当前三副图的选择（含自定义指标 id）到某周期
     func recordSubKinds(for period: KlinePeriod) {
-        subscriptByPeriod[period] = [subTop.kind, subBottom.kind, subThird.kind]
+        subscriptByPeriod[period] = [sel(from: subTop), sel(from: subBottom), sel(from: subThird)]
+    }
+    private func apply(_ s: SubChartSelection, to m: SubChartModel) {
+        if m.kind != s.kind || m.activeCustomID != s.customID {
+            m.kind = s.kind
+            m.activeCustomID = s.customID
+        }
+    }
+    private func sel(from m: SubChartModel) -> SubChartSelection {
+        SubChartSelection(kind: m.kind, customID: m.activeCustomID)
     }
 
     private init() {
@@ -418,13 +443,17 @@ final class SubChartModel: ObservableObject {
     var isCustom: Bool { activeCustomID != nil }
 }
 
-/// 复制一份副图模型的配置到独立实例（仅复制配置，不复制曲线；双联动隔离用）
-private func copySubConfig(_ src: SubChartModel) -> SubChartModel {
+/// 单个副图槽位的一次选择记忆（指标类型 + 所属自定义指标 id）
+struct SubChartSelection {
+    var kind: String
+    var customID: UUID?
+}
+
+/// 从一次副图选择构建独立实例（仅配置；titleName/color 由 recomputeSub 按指标重算补齐；双联动隔离用）
+private func subModel(from s: SubChartSelection) -> SubChartModel {
     let m = SubChartModel()
-    m.kind = src.kind
-    m.activeCustomID = src.activeCustomID
-    m.titleName = src.titleName
-    m.color = src.color
+    m.kind = s.kind
+    m.activeCustomID = s.customID
     return m
 }
 
@@ -616,16 +645,18 @@ struct KlineChartView: View {
         // 副图复用共享仓库中的同一实例，保证切换周期/重新进入后指标不重置；
         // 双联动（isolatedSubs）时改用独立实例，复制共享配置，曲线各自按本视图数据计算，互不覆盖
         let store = ChartConfigStore.shared
-        // 应用该周期的三副图记忆到共享模型，再据此赋值/复制副图实例
-        store.applySubKinds(for: period)
+        // 双联动隔离视图：直接按本视图周期解析三副图选择到独立实例（不落地共享模型，
+        // 避免左右日线/周线先后 init 时互相覆盖选择，保证右周线副图也按周线自身记忆显示）
         if isolatedSubs {
+            let sels = store.subSelections(for: period)
             // 用 @StateObject 保存隔离模型：@StateObject 只取首次创建的值并跨 re-init 稳定保留，
             // 避免双联动视图被反复 init 时 @ObservedObject 采纳新建空模型导致副图曲线清空
-            self._subTop = StateObject(wrappedValue: copySubConfig(store.subTop))
-            self._subBottom = StateObject(wrappedValue: copySubConfig(store.subBottom))
-            self._subThird = StateObject(wrappedValue: copySubConfig(store.subThird))
+            self._subTop = StateObject(wrappedValue: subModel(from: sels[0]))
+            self._subBottom = StateObject(wrappedValue: subModel(from: sels[1]))
+            self._subThird = StateObject(wrappedValue: subModel(from: sels[2]))
         } else {
-            // 非隔离：直接持有共享仓库中的同一实例（保持跨页面/切周期指标不重置）
+            // 非隔离：应用该周期记忆到共享模型并持有同一实例（保持跨页面/切周期指标不重置）
+            store.applySubKinds(for: period)
             self._subTop = StateObject(wrappedValue: store.subTop)
             self._subBottom = StateObject(wrappedValue: store.subBottom)
             self._subThird = StateObject(wrappedValue: store.subThird)
@@ -2046,17 +2077,16 @@ struct KlineChartView: View {
         let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
                                            customFormula: custom?.formula, period: period)
         parts.append(entries.map { "\($0.id)::\($0.formula)" }.joined(separator: "§"))
-        // 副图：3 个槽位，含指标类型、公式（VOL/AMO 量均线周期）
-        for m in [config.subTop, config.subBottom, config.subThird] {
-            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-            let isCustom = m.activeCustomID != nil && customInd != nil
-            var s = m.kind
-            if isCustom, let customInd {
+        // 副图：3 个槽位，按该周期记忆读取，含指标类型、公式（VOL/AMO 量均线周期）
+        for sel in config.subSelections(for: period) {
+            let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
+            var s = sel.kind
+            if let customInd {
                 s += "|CUSTOM|" + customInd.formula
-            } else if m.kind == "VOL" || m.kind == "AMO" {
+            } else if sel.kind == "VOL" || sel.kind == "AMO" {
                 s += "|" + volMAFixedPeriods.map(String.init).joined(separator: ",")
             } else {
-                s += "|" + (store.formula(for: m.kind, values: [:], period: period) ?? "")
+                s += "|" + (store.formula(for: sel.kind, values: [:], period: period) ?? "")
             }
             parts.append(s)
         }
@@ -2112,14 +2142,13 @@ struct KlineChartView: View {
                                            customFormula: custom?.formula, period: period)
         let main = entries.map { $0.formula }
         let mainIDs = entries.map { $0.id }
-        // 副图（3 个，与 subTop/subBottom/subThird 对应）
+        // 副图（3 个，按该周期记忆，与 subTop/subBottom/subThird 对应）
         var subs: [SubPrefetchRequest] = []
-        for m in [config.subTop, config.subBottom, config.subThird] {
-            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-            let isCustom = m.activeCustomID != nil && customInd != nil
-            let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:], period: period)
-            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
+        for sel in config.subSelections(for: period) {
+            let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
+            let customFormula = customInd?.formula
+            let formula = (sel.kind == "VOL" || sel.kind == "AMO") ? nil : store.formula(for: sel.kind, values: [:], period: period)
+            subs.append(SubPrefetchRequest(kind: sel.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
         }
         return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
                                    series: TDXSharedSeries(data: data),
@@ -2151,13 +2180,14 @@ struct KlineChartView: View {
         entry.mainCurves = curves
         // 副图
         var subCurves: [Int: [IndicatorLine]] = [:]
-        for (i, m) in [config.subTop, config.subBottom, config.subThird].enumerated() {
+        let subSels = config.subSelections(for: period)
+        for (i, sel) in subSels.enumerated() {
             guard i < req.subs.count, i < result.subs.count else { continue }
             let subReq = req.subs[i]
             let raw = result.subs[i]
             var sc: [IndicatorLine] = []
             if subReq.customFormula != nil {
-                let customInd = CustomIndicatorStore.shared.indicators.first { $0.id == m.activeCustomID }
+                let customInd = sel.customID.flatMap { id in CustomIndicatorStore.shared.indicators.first { $0.id == id } }
                 for (j, out) in raw.enumerated() {
                     guard !prefetchAllNaN(out.values) else { continue }
                     sc.append(IndicatorLine(name: prefetchDisplayName(out.name), values: out.values,
@@ -2208,6 +2238,7 @@ struct KlineChartView: View {
 
     private func activateSubCustom(_ m: SubChartModel, _ ind: CustomIndicator?) {
         m.activeCustomID = ind?.id
+        ChartConfigStore.shared.recordSubKinds(for: self.period)
         recomputeSub(m, force: true)
     }
 
