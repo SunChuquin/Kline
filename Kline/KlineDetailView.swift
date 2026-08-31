@@ -185,9 +185,10 @@ struct KlineDetailView: View {
             Button(action: {
                 withAnimation { dualLink.toggle() }
             }) {
-                Text(dualLink ? "2️⃣" : "1️⃣")
+                Text("联")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(dualLink ? .blue : .gray)
+                    .background(dualLink ? Color.blue.opacity(0.18) : Color.clear)
                     .frame(width: 32, height: 30)
                     .contentShape(Rectangle())
             }
