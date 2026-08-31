@@ -141,6 +141,11 @@ final class SystemIndicatorStore: ObservableObject {
         defs[period.folderName] ?? [:]
     }
 
+    /// 外部（如自定义指标增删改落地 USER_*.tdx 后）触发重载所有周期的定义
+    func reloadAllPeriods() {
+        loadAllPeriods()
+    }
+
     /// 用参数替换公式模板中的 {key} 占位符，返回可直接求值的公式（只查该周期的定义）
     func formula(for id: String, values: [String: String], period: KlinePeriod) -> String? {
         guard let def = defs(for: period)[id] else { return nil }

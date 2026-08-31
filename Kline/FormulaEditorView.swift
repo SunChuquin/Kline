@@ -165,6 +165,8 @@ struct IndicatorEditSheet: View {
     @State private var formula: String
     @State private var color: Color
     @State private var scope: IndicatorScope = .sub
+    /// 适用范围（选中的周期集合）；全周期与 Set(KlinePeriod.allCases) 等价，保存时统一记为 nil
+    @State private var applicablePeriods: Set<KlinePeriod> = Set(KlinePeriod.allCases)
     @State private var style: TDXLineStyle = .solid
     @State private var thickness: Int = 1
     @State private var testMessage: String?
@@ -191,6 +193,7 @@ struct IndicatorEditSheet: View {
                 || formula != ind.formula
                 || scope != ind.scope
                 || color.hexString != ind.colorHex
+                || applicablePeriods != Set(ind.applicablePeriods ?? KlinePeriod.allCases)
         } else {
             return !name.trimmingCharacters(in: .whitespaces).isEmpty
                 || !formula.trimmingCharacters(in: .whitespaces).isEmpty
@@ -216,6 +219,7 @@ struct IndicatorEditSheet: View {
         _formula = State(initialValue: isSystemIndicator ? systemInitialFormula : (indicator?.formula ?? ""))
         _color = State(initialValue: indicator?.color ?? Color(hex: "1E88E5")!)
         _scope = State(initialValue: indicator?.scope ?? .sub)
+        _applicablePeriods = State(initialValue: Set(indicator?.applicablePeriods ?? KlinePeriod.allCases))
     }
 
     var body: some View {
@@ -287,6 +291,21 @@ struct IndicatorEditSheet: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        }
+                        // 适用范围（仅自定义指标）：全周期 or 单/多周期
+                        field("适用范围") {
+                            HStack(spacing: 8) {
+                                styleChip("全周期", opt: "", selected: applicablePeriods == Set(KlinePeriod.allCases)) {
+                                    applicablePeriods = Set(KlinePeriod.allCases)
+                                }
+                                ForEach(KlinePeriod.allCases) { p in
+                                    styleChip(p.rawValue, opt: "", selected: applicablePeriods.contains(p)) {
+                                        toggleApplicable(p)
+                                    }
+                                }
+                            }
+                            Text("选择该指标可用的周期。不同周期各有一份独立参数副本（USER_<名称>.tdx），可单独编辑")
+                                .font(.system(size: 10)).foregroundColor(.gray)
                         }
                         field("公式") {
                             FormulaTextView(text: Binding(
@@ -375,6 +394,17 @@ struct IndicatorEditSheet: View {
         }
     }
 
+    private func toggleApplicable(_ period: KlinePeriod) {
+        if applicablePeriods == Set(KlinePeriod.allCases) {
+            // 从全周期开始单点：改为仅选中该周期
+            applicablePeriods = [period]
+        } else if applicablePeriods.contains(period) {
+            applicablePeriods.remove(period)
+        } else {
+            applicablePeriods.insert(period)
+        }
+    }
+
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.system(size: 13, weight: .medium)).foregroundColor(.black)
@@ -416,6 +446,7 @@ struct IndicatorEditSheet: View {
         ind.formula = formula
         ind.scope = scope
         ind.colorHex = color.hexString
+        ind.applicablePeriods = applicablePeriods == Set(KlinePeriod.allCases) ? nil : Array(applicablePeriods)
         onSave(ind)
     }
 
