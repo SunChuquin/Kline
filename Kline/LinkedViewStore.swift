@@ -12,6 +12,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// 联动视图数量（2 / 3 / 4）
 enum LinkedViewCount: Int, CaseIterable, Identifiable, Codable {

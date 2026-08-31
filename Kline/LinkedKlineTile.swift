@@ -270,20 +270,22 @@ struct SearchContentView: View {
     }
 
     private func row(_ item: MetaItem) -> some View {
-        HStack {
-            Text(item.name)
-                .font(.system(size: 14))
-                .foregroundColor(.black)
-                .lineLimit(1)
-            Spacer()
-            Text(item.displayCode)
-                .font(.system(size: 12))
-                .foregroundColor(.gray)
+        VStack(spacing: 0) {
+            HStack {
+                Text(item.name)
+                    .font(.system(size: 14))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                Spacer()
+                Text(item.displayCode)
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+            Divider().padding(.leading, 12)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
-        Divider().padding(.leading, 12)
     }
 
     private func performSearch(keyword: String) {
