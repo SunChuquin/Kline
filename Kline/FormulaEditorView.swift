@@ -615,7 +615,7 @@ struct SystemIndicatorEditorContainer: View {
 
     /// 主图系统指标列表（数据驱动，来自 .tdx SCOPE=main），仅显示当前勾选启用的指标
     private var mainIds: [String] {
-        let enabled = ChartConfigStore.shared.mainIndicators
+        let enabled = ChartConfigStore.shared.mainIndicators(for: period)
         return SystemIndicatorStore.shared.mainIndicatorDefs(period: period)
             .map { $0.id }
             .filter { enabled.contains($0) }
@@ -633,7 +633,7 @@ struct SystemIndicatorEditorContainer: View {
         self.onSaved = onSaved
         _subId = State(initialValue: initialSubId)
         // 默认选勾选启用的第一个主图指标；若列表已不含 "MA"，兜底用列表首个
-        let enabled = ChartConfigStore.shared.mainIndicators
+        let enabled = ChartConfigStore.shared.mainIndicators(for: period)
         let ids = SystemIndicatorStore.shared.mainIndicatorDefs(period: period).map { $0.id }.filter { enabled.contains($0) }
         if !ids.isEmpty && !ids.contains("MA") {
             _mainId = State(initialValue: ids[0])

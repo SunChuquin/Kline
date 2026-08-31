@@ -154,23 +154,57 @@ enum BarColorMode: Equatable {
 final class ChartConfigStore: ObservableObject {
     static let shared = ChartConfigStore()
 
-    // 主图叠加指标（按 .tdx 指标 id 的启用集合，数据驱动；默认 MA + CMK）
-    @Published var mainIndicators: Set<String> = ["MA", "CMK"]
+    /// 主图叠加指标（按周期独立，key = 周期；缺省用默认集合）。数据驱动，key 为 .tdx 指标 id。
+    @Published var mainIndicatorsByPeriod: [KlinePeriod: Set<String>] = [:]
+    /// 当前周期启用的主图指标（缺省 MA + CMK）
+    func mainIndicators(for period: KlinePeriod) -> Set<String> {
+        mainIndicatorsByPeriod[period] ?? ["MA", "CMK"]
+    }
+    /// 切换某主图指标的启用状态并保存到对应周期
+    func toggleMainIndicator(_ id: String, period: KlinePeriod) {
+        var cur = mainIndicators(for: period)
+        if cur.contains(id) { cur.remove(id) } else { cur.insert(id) }
+        var copy = mainIndicatorsByPeriod
+        copy[period] = cur
+        mainIndicatorsByPeriod = copy
+    }
     @Published var showBareK = false
     // 当前行情周期（跨页面/跨标的持久，返回行情再进入时保持上次选择）
     @Published var selectedPeriod: KlinePeriod = .daily
     // K线类型与图层显示（设置面板）
     @Published var chartStyle: ChartStyle = .bare
     @Published var displaySettings = ChartDisplaySettings()
-    // 主图自定义指标
-    @Published var activeCustomIndicatorID: UUID? = nil
+    // 主图自定义指标（按周期独立）
+    @Published var activeCustomByPeriod: [KlinePeriod: UUID] = [:]
+    /// 当前周期激活的自定义指标 id
+    func activeCustomIndicatorID(for period: KlinePeriod) -> UUID? {
+        activeCustomByPeriod[period]
+    }
+    func setActiveCustom(_ id: UUID?, for period: KlinePeriod) {
+        var copy = activeCustomByPeriod
+        if let id { copy[period] = id } else { copy.removeValue(forKey: period) }
+        activeCustomByPeriod = copy
+    }
     // 全局多/空镜像（顶部导航栏按钮控制）：开启后主图与所有副图图形取负镜像（空头）
     @Published var mainMirrored = false
 
-    // 三个副图（跨页面保留同一实例，避免重建）
+    // 三个副图（跨周期共享实例，但选择按周期记忆）
     let subTop = SubChartModel()
     let subBottom = SubChartModel()
     let subThird = SubChartModel()
+    /// 三个副图的按周期记忆（key = 周期，value = 三副图 kind）
+    private var subscriptByPeriod: [KlinePeriod: [String]] = [:]
+    /// 把某周期的三副图记忆应用进共享 subTop/subBottom/subThird（无记忆时保持现有默认）
+    func applySubKinds(for period: KlinePeriod) {
+        guard let kinds = subscriptByPeriod[period], kinds.count == 3 else { return }
+        subTop.kind = kinds[0]
+        subBottom.kind = kinds[1]
+        subThird.kind = kinds[2]
+    }
+    /// 记录当前三副图的选择到某周期
+    func recordSubKinds(for period: KlinePeriod) {
+        subscriptByPeriod[period] = [subTop.kind, subBottom.kind, subThird.kind]
+    }
 
     private init() {
         subTop.kind = "CDJ"
@@ -298,7 +332,7 @@ private func mainIndicatorEntries(store: SystemIndicatorStore,
                                   period: KlinePeriod) -> [MainIndicatorEntry] {
     guard !config.showBareK else { return [] }
     var entries: [MainIndicatorEntry] = []
-    for def in store.mainIndicatorDefs(period: period) where config.mainIndicators.contains(def.id) {
+    for def in store.mainIndicatorDefs(period: period) where config.mainIndicators(for: period).contains(def.id) {
         entries.append(MainIndicatorEntry(id: def.id,
                                           formula: store.formula(for: def.id, values: [:], period: period) ?? "",
                                           isCustom: false))
@@ -582,6 +616,8 @@ struct KlineChartView: View {
         // 副图复用共享仓库中的同一实例，保证切换周期/重新进入后指标不重置；
         // 双联动（isolatedSubs）时改用独立实例，复制共享配置，曲线各自按本视图数据计算，互不覆盖
         let store = ChartConfigStore.shared
+        // 应用该周期的三副图记忆到共享模型，再据此赋值/复制副图实例
+        store.applySubKinds(for: period)
         if isolatedSubs {
             // 用 @StateObject 保存隔离模型：@StateObject 只取首次创建的值并跨 re-init 稳定保留，
             // 避免双联动视图被反复 init 时 @ObservedObject 采纳新建空模型导致副图曲线清空
@@ -615,9 +651,9 @@ struct KlineChartView: View {
         }
     }
 
-    /// 当前主图自定义指标（从共享仓库中的 ID 派生）
+    /// 当前主图自定义指标（从共享仓库中按当前周期激活的 ID 派生）
     private var activeCustomIndicator: CustomIndicator? {
-        customStore.indicators.first { $0.id == config.activeCustomIndicatorID }
+        customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) && availableInCurrentPeriod($0) }
     }
 
     // MARK: - 配色
@@ -852,7 +888,7 @@ struct KlineChartView: View {
             let entries = mainIndicatorEntries(store: store, customStore: customStore,
                                                config: config, customFormula: custom?.formula,
                                                period: self.period)
-            let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
+            let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
             let activeIDs = Set(entries.map { $0.id })
             for entry in entries {
                 curves += mainRows(for: entry.id, enabled: true, formula: entry.formula,
@@ -1907,7 +1943,7 @@ struct KlineChartView: View {
         let cs = req.calcStart, ce = req.calcEnd
         // ---- 主图（数据驱动，与 makePrefetchRequest 的 mainFormulas/mainIDs 一一对应）----
         var curves: [IndicatorLine] = []
-        let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
+        let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
         for (idx, id) in req.mainIDs.enumerated() {
             guard idx < result.main.count else { continue }
             let isCustom = id == MainIndicatorCache.customKey
@@ -2005,7 +2041,7 @@ struct KlineChartView: View {
         let store = SystemIndicatorStore.shared
         var parts: [String] = []
         // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按 id+公式 参与指纹
-        let customID = config.activeCustomIndicatorID
+        let customID = config.activeCustomIndicatorID(for: period)
         let custom = customStore.indicators.first { $0.id == customID }
         let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
                                            customFormula: custom?.formula, period: period)
@@ -2055,7 +2091,7 @@ struct KlineChartView: View {
                 entry.isPrefetching = false
                 return
             }
-            Self.commitToCache(req, r, entry: entry, data: data, fingerprint: fingerprint)
+            Self.commitToCache(req, r, entry: entry, data: data, fingerprint: fingerprint, period: period)
             entry.isPrefetching = false
             entry.prefetchDone = true
         }
@@ -2070,7 +2106,7 @@ struct KlineChartView: View {
         let volumes = data.map(\.volume)
         let turnovers = data.map(\.turnover)
         // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义
-        let customID = config.activeCustomIndicatorID
+        let customID = config.activeCustomIndicatorID(for: period)
         let custom = customStore.indicators.first { $0.id == customID }
         let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
                                            customFormula: custom?.formula, period: period)
@@ -2096,11 +2132,11 @@ struct KlineChartView: View {
     /// 全量覆盖（calcStart=0、calcEnd=末尾），无需 NaN 填充
     @MainActor
     private static func commitToCache(_ req: PrefetchCalcRequest, _ result: PrefetchCalcResult,
-                                      entry: ChartCacheStore.Entry, data: [KlineItem], fingerprint: String) {
+                                      entry: ChartCacheStore.Entry, data: [KlineItem], fingerprint: String, period: KlinePeriod) {
         let config = ChartConfigStore.shared
         var curves: [IndicatorLine] = []
         let customStore = CustomIndicatorStore.shared
-        let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
+        let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: period) }?.color
         for (idx, id) in req.mainIDs.enumerated() {
             guard idx < result.main.count else { continue }
             let isCustom = id == MainIndicatorCache.customKey
@@ -2166,7 +2202,7 @@ struct KlineChartView: View {
     }
 
     private func activateCustom(_ ind: CustomIndicator?) {
-        config.activeCustomIndicatorID = ind?.id
+        config.setActiveCustom(ind?.id, for: self.period)
         recomputeMainCurves(force: true)
     }
 
@@ -2176,9 +2212,9 @@ struct KlineChartView: View {
     }
 
     private func syncCustomAfterStoreChange() {
-        if config.activeCustomIndicatorID != nil,
-           !customStore.indicators.contains(where: { $0.id == config.activeCustomIndicatorID }) {
-            config.activeCustomIndicatorID = nil
+        if let cur = config.activeCustomIndicatorID(for: self.period),
+           !customStore.indicators.contains(where: { $0.id == cur }) {
+            config.setActiveCustom(nil, for: self.period)
         }
         for m in [subTop, subBottom, subThird] {
             if m.activeCustomID != nil,
@@ -2887,7 +2923,7 @@ struct KlineChartView: View {
         if isBareK { return "\(period.rawValue): 裸K" }
         let store = SystemIndicatorStore.shared
         var parts: [String] = []
-        for def in store.mainIndicatorDefs(period: self.period) where config.mainIndicators.contains(def.id) {
+        for def in store.mainIndicatorDefs(period: self.period) where config.mainIndicators(for: self.period).contains(def.id) {
             parts.append(def.name)
         }
         if let a = activeCustomIndicator { parts.append(a.name) }
@@ -3178,7 +3214,7 @@ struct KlineChartView: View {
                     groupHeader("主图指标")
                     LazyVGrid(columns: gridColumns, spacing: 8) {
                         ForEach(mainIndicatorDefsForSheet, id: \.id) { def in
-                            mainTile(def.name, on: config.mainIndicators.contains(def.id)) { toggleMain(def.id) }
+                            mainTile(def.name, on: config.mainIndicators(for: self.period).contains(def.id)) { toggleMain(def.id) }
                         }
                     }
                     .padding(.horizontal, 16).padding(.bottom, 6)
@@ -3214,14 +3250,16 @@ struct KlineChartView: View {
 
     /// 主图选择页数据驱动指标列表（来自 .tdx SCOPE=main）
     private var mainIndicatorDefsForSheet: [SystemIndicatorDef] { SystemIndicatorStore.shared.mainIndicatorDefs(period: self.period) }
-    private var mainCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .main } }
+    private var mainCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .main && availableInCurrentPeriod($0) } }
+
+    /// 该自定义指标是否适用于当前周期（适用范围为全周期 nil 也包含当前周期）
+    private func availableInCurrentPeriod(_ ind: CustomIndicator) -> Bool {
+        let applicable = CustomIndicatorStore.applicablePeriods(of: ind)
+        return applicable.contains(period)
+    }
 
     private func toggleMain(_ id: String) {
-        if config.mainIndicators.contains(id) {
-            config.mainIndicators.remove(id)
-        } else {
-            config.mainIndicators.insert(id)
-        }
+        config.toggleMainIndicator(id, period: self.period)
         recomputeMainCurves(force: true)
     }
 
@@ -3281,6 +3319,7 @@ struct KlineChartView: View {
                                 subTile(k, selected: !m.isCustom && m.kind == k) {
                                     m.activeCustomID = nil
                                     m.kind = k
+                                    ChartConfigStore.shared.recordSubKinds(for: self.period)
                                     recomputeSub(m, force: true)
                                 }
                             }
@@ -3354,7 +3393,7 @@ struct KlineChartView: View {
         }
     }
 
-    private var subCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .sub } }
+    private var subCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .sub && availableInCurrentPeriod($0) } }
     private func slotTitle(_ slot: SubSlot) -> String {
         switch slot {
         case .top: return "副图一"
