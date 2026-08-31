@@ -36,10 +36,6 @@ struct LinkedKlineTile: View {
     /// 本视图标的对应的数据（按当前 view.metaID+period 加载）
     @State private var chartSeries: ChartSeries? = nil
     @State private var isLoading = true
-    /// 当前加载的标的，用于校验 chartSeries 是否仍与 view 同步
-    @State private var loadedMetaID: Int? = nil
-    /// 当前加载的周期，用于校验 chartSeries 是否仍与 view 同步
-    @State private var loadedPeriod: KlinePeriod? = nil
     /// 递增加载序号：丢弃过期异步结果，避免快速切周期时旧结果覆盖新周期数据
     @State private var loadTicket = 0
 
@@ -51,16 +47,10 @@ struct LinkedKlineTile: View {
     /// 副图二滑动切周期用到的联动同步对象（本视图自持）
     @StateObject private var localLinkSync = DualLinkSync()
 
-    /// 当前加载的数据是否与视图要求的(标的,周期)一致
-    private var isDataCurrent: Bool {
-        !isLoading && loadedMetaID == view.metaID && loadedPeriod == view.period
-    }
-
     var body: some View {
         ZStack(alignment: .topLeading) {
             Group {
-                // 仅当数据(标的,周期)与当前视图一致时显示图表，否则转加载/空，杜绝错配
-                if !isDataCurrent {
+                if isLoading {
                     Color.white
                         .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
                 } else if let series = chartSeries {
@@ -110,19 +100,13 @@ struct LinkedKlineTile: View {
         }
         let ticket = loadTicket + 1
         loadTicket = ticket
-        // 同步先清掉与当前不匹配的旧数据，避免「新周期身份 + 旧周期数据」渲染
-        if loadedMetaID != view.metaID || loadedPeriod != view.period {
-            chartSeries = nil
-        }
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
             let rows = databaseManager.fetchBars(metaId: view.metaID, period: view.period)
             DispatchQueue.main.async {
-                // 只有仍是最新一轮、且请求的(标的,周期)与当前一致才写入，否则丢弃
+                // 只有仍是最新一轮才写入，丢弃切周期期间过期的旧结果
                 guard self.loadTicket == ticket else { return }
                 self.chartSeries = rows.isEmpty ? nil : ChartSeries(data: rows)
-                self.loadedMetaID = self.view.metaID
-                self.loadedPeriod = self.view.period
                 self.isLoading = false
             }
         }
