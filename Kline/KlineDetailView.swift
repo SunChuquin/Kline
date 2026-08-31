@@ -256,9 +256,8 @@ struct KlineDetailView: View {
             let totalWidth = geo.size.width
             let minRatio: Double = 0.2
             let maxRatio: Double = 0.8
-            // 拖动过程同步显示：基础占比 + 本次拖动位移换算（手势结束才写入记忆）
-            let shownRatio = clamp(config.dualSplitRatio + Double(splitDragOffset / max(totalWidth, 1.0)),
-                                   minRatio, maxRatio)
+            // 拖动中实时用拖动比例，否则用已记忆占比
+            let shownRatio = clamp(dragRatio ?? config.dualSplitRatio, minRatio, maxRatio)
             HStack(spacing: 0) {
                 // 左日线：接收联动光标时把联动K线居中显示
                 chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true)
@@ -272,8 +271,9 @@ struct KlineDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 可拖动分界线：按住左右拖动，实时改变左视图占比并持久记忆。
-    /// 用 @GestureState 记录本次拖动位移（拖动中不写持久状态，避免重建打断手势，也避免影响兄弟图表的手势）
+    /// 可拖动分界线：按住左右拖动，实时改变左视图占比。
+    /// 拖动中把实时比例写入 @State dragRatio（@State 更新必然触发重算，分界线实时跟随），
+    /// 松手才持久化到 config.dualSplitRatio。
     private func dividerHandle(minRatio: Double, maxRatio: Double, totalWidth: CGFloat) -> some View {
         Rectangle()
             .fill(Color.gray.opacity(0.35))
@@ -286,22 +286,23 @@ struct KlineDetailView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .updating($splitDragOffset) { value, state, _ in
-                        // 位移换算为比例增量：左右净宽 = 总宽 - 分隔条宽
-                        let usable = max(totalWidth - 14, 1)
-                        state = Double(value.translation.width / usable)
-                    }
-                    .onEnded { value in
+                    .onChanged { value in
+                        // 位移换算为比例增量：左右净宽 = 总宽 - 分隔条宽；基准取手势开始时的记忆占比
                         let usable = max(totalWidth - 14, 1)
                         let delta = Double(value.translation.width / usable)
-                        let raw = config.dualSplitRatio + delta
-                        config.dualSplitRatio = min(maxRatio, max(minRatio, raw))
+                        dragRatio = min(maxRatio, max(minRatio, config.dualSplitRatio + delta))
+                    }
+                    .onEnded { _ in
+                        if let r = dragRatio {
+                            config.dualSplitRatio = r
+                        }
+                        dragRatio = nil
                     }
             )
     }
 
-    /// 本次拖动分界线已产生的位移（手势期间才非零，结束自动归零）
-    @GestureState private var splitDragOffset: CGFloat = 0
+    /// 拖动分界线过程中实时显示的比例（拖动中非 nil，松手清空还原为记忆占比）
+    @State private var dragRatio: Double? = nil
 
     private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
 
