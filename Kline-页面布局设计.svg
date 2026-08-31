@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" width="720" height="600" role="img" aria-label="K线详情页布局结构图">
+  <rect x="0" y="0" width="720" height="600" fill="#FFFFFF"/>
+
+  <text x="190" y="52" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="14" font-weight="500" fill="#171717">单视图（dualLink = false）</text>
+  <text x="535" y="52" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="14" font-weight="500" fill="#171717">联动视图（dualLink = true）</text>
+
+  <!-- Panel A: single view -->
+  <rect x="40" y="62" width="300" height="468" rx="8" fill="#F7F7F8" stroke="rgba(23,23,23,0.12)"/>
+  <rect x="41" y="63" width="298" height="39" fill="#EFEFF2"/>
+  <rect x="41" y="103" width="298" height="28" fill="#EFEFF2"/>
+  <rect x="41" y="133" width="298" height="24" fill="#EFEFF2"/>
+  <rect x="41" y="269" width="298" height="22" fill="#EFEFF2"/>
+  <rect x="41" y="341" width="298" height="22" fill="#EFEFF2"/>
+  <rect x="41" y="413" width="298" height="22" fill="#EFEFF2"/>
+  <rect x="41" y="485" width="298" height="21" fill="#EFEFF2"/>
+  <rect x="41" y="508" width="298" height="21" fill="#EFEFF2"/>
+  <line x1="41" y1="102" x2="339" y2="102" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="132" x2="339" y2="132" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="158" x2="339" y2="158" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="268" x2="339" y2="268" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="292" x2="339" y2="292" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="340" x2="339" y2="340" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="364" x2="339" y2="364" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="412" x2="339" y2="412" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="436" x2="339" y2="436" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="484" x2="339" y2="484" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="41" y1="507" x2="339" y2="507" stroke="rgba(23,23,23,0.12)"/>
+  <text x="190" y="86" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">‹ 返回 · 边/📌 · 联 · 多/空 · 设置</text>
+  <text x="190" y="122" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="14" font-weight="500" fill="#171717">标的名称 · 代码 · 类型</text>
+  <text x="190" y="149" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">日线: MA  MA5:12.3  MA10:12.8  ⛶</text>
+  <text x="190" y="284" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">VOL</text>
+  <text x="190" y="320" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图一 ←→ 切周期</text>
+  <text x="190" y="356" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">MACD  DIF  DEA</text>
+  <text x="190" y="392" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图二 ←→ 切标的</text>
+  <text x="190" y="428" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">KDJ</text>
+  <text x="190" y="464" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图三</text>
+  <text x="190" y="500" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">开 高 低 收 量 额</text>
+  <text x="190" y="523" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">时间轴</text>
+  <polyline points="54,225 78,212 102,197 126,210 150,190 174,200 198,182 222,188 246,194 270,177 294,184 318,191" fill="none" stroke="#22A5F7" stroke-width="1.5" stroke-linecap="round"/>
+  <g fill="#3C2ECA">
+    <rect x="50" y="210" width="8" height="30"/><line x1="54" y1="195" x2="54" y2="250" stroke="#3C2ECA"/>
+    <rect x="98" y="180" width="8" height="35"/><line x1="102" y1="170" x2="102" y2="228" stroke="#3C2ECA"/>
+    <rect x="122" y="190" width="8" height="40"/><line x1="126" y1="178" x2="126" y2="242" stroke="#3C2ECA"/>
+    <rect x="194" y="165" width="8" height="35"/><line x1="198" y1="155" x2="198" y2="212" stroke="#3C2ECA"/>
+    <rect x="218" y="172" width="8" height="33"/><line x1="222" y1="162" x2="222" y2="218" stroke="#3C2ECA"/>
+    <rect x="266" y="160" width="8" height="35"/><line x1="270" y1="150" x2="270" y2="208" stroke="#3C2ECA"/>
+    <rect x="290" y="168" width="8" height="32"/><line x1="294" y1="158" x2="294" y2="212" stroke="#3C2ECA"/>
+  </g>
+  <g fill="#A9AEFF">
+    <rect x="74" y="200" width="8" height="25"/><line x1="78" y1="188" x2="78" y2="235" stroke="#A9AEFF"/>
+    <rect x="146" y="175" width="8" height="30"/><line x1="150" y1="165" x2="150" y2="215" stroke="#A9AEFF"/>
+    <rect x="170" y="185" width="8" height="30"/><line x1="174" y1="172" x2="174" y2="225" stroke="#A9AEFF"/>
+    <rect x="242" y="178" width="8" height="32"/><line x1="246" y1="168" x2="246" y2="220" stroke="#A9AEFF"/>
+    <rect x="314" y="175" width="8" height="33"/><line x1="318" y1="165" x2="318" y2="218" stroke="#A9AEFF"/>
+  </g>
+
+  <!-- Panel B: linked view -->
+  <rect x="380" y="62" width="310" height="468" rx="8" fill="#F7F7F8" stroke="rgba(23,23,23,0.12)"/>
+  <rect x="381" y="63" width="308" height="39" fill="#EFEFF2"/>
+  <rect x="381" y="103" width="308" height="28" fill="#EFEFF2"/>
+  <rect x="382" y="133" width="167" height="16" fill="#EFEFF2"/>
+  <rect x="552" y="133" width="137" height="16" fill="#EFEFF2"/>
+  <rect x="382" y="465" width="167" height="31" fill="#EFEFF2"/>
+  <rect x="552" y="465" width="137" height="31" fill="#EFEFF2"/>
+  <rect x="382" y="498" width="167" height="31" fill="#EFEFF2"/>
+  <rect x="552" y="498" width="137" height="31" fill="#EFEFF2"/>
+  <line x1="381" y1="102" x2="689" y2="102" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="132" x2="689" y2="132" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="150" x2="549" y2="150" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="552" y1="150" x2="689" y2="150" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="320" x2="549" y2="320" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="552" y1="320" x2="689" y2="320" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="368" x2="549" y2="368" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="552" y1="368" x2="689" y2="368" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="416" x2="549" y2="416" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="552" y1="416" x2="689" y2="416" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="464" x2="549" y2="464" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="552" y1="464" x2="689" y2="464" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="381" y1="497" x2="549" y2="497" stroke="rgba(23,23,23,0.12)"/>
+  <line x1="552" y1="497" x2="689" y2="497" stroke="rgba(23,23,23,0.12)"/>
+  <text x="535" y="86" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">‹ 返回 · 边/📌 · 联 · 多/空 · 设置</text>
+  <text x="465" y="122" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="14" font-weight="500" fill="#171717">000001 日</text>
+  <text x="620" y="122" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="14" font-weight="500" fill="#171717">000001 周</text>
+  <text x="465" y="146" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">日线: MA</text>
+  <text x="620" y="146" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">周线: MA</text>
+  <text x="465" y="348" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图1</text>
+  <text x="620" y="348" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图1</text>
+  <text x="465" y="396" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图2 · 🔍</text>
+  <text x="620" y="396" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图2 · 🔍</text>
+  <text x="465" y="444" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图3</text>
+  <text x="620" y="444" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">副图3</text>
+  <text x="465" y="484" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">开 收 高 低</text>
+  <text x="620" y="484" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">开 收 高 低</text>
+  <text x="465" y="518" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">时间轴</text>
+  <text x="620" y="518" text-anchor="middle" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">时间轴</text>
+  <g fill="#3C2ECA">
+    <rect x="394" y="240" width="8" height="35"/><line x1="398" y1="228" x2="398" y2="285" stroke="#3C2ECA"/>
+    <rect x="442" y="210" width="8" height="40"/><line x1="446" y1="200" x2="446" y2="262" stroke="#3C2ECA"/>
+    <rect x="466" y="220" width="8" height="35"/><line x1="470" y1="208" x2="470" y2="268" stroke="#3C2ECA"/>
+    <rect x="514" y="190" width="8" height="38"/><line x1="518" y1="180" x2="518" y2="238" stroke="#3C2ECA"/>
+    <rect x="602" y="208" width="7" height="36"/><line x1="606" y1="198" x2="606" y2="256" stroke="#3C2ECA"/>
+    <rect x="642" y="196" width="7" height="36"/><line x1="646" y1="186" x2="646" y2="244" stroke="#3C2ECA"/>
+  </g>
+  <g fill="#A9AEFF">
+    <rect x="418" y="230" width="8" height="32"/><line x1="422" y1="220" x2="422" y2="272" stroke="#A9AEFF"/>
+    <rect x="490" y="205" width="8" height="35"/><line x1="494" y1="196" x2="494" y2="250" stroke="#A9AEFF"/>
+    <rect x="562" y="235" width="7" height="33"/><line x1="566" y1="224" x2="566" y2="278" stroke="#A9AEFF"/>
+    <rect x="582" y="225" width="7" height="30"/><line x1="586" y1="215" x2="586" y2="266" stroke="#A9AEFF"/>
+    <rect x="622" y="218" width="7" height="32"/><line x1="626" y1="207" x2="626" y2="262" stroke="#A9AEFF"/>
+    <rect x="662" y="206" width="7" height="30"/><line x1="666" y1="196" x2="666" y2="252" stroke="#A9AEFF"/>
+  </g>
+  <!-- 静态 tile 分隔线 -->
+  <line x1="550.5" y1="132" x2="550.5" y2="530" stroke="rgba(23,23,23,0.12)" stroke-width="1"/>
+  <!-- 信息栏格子竖线（与 tile 分隔线同 x） -->
+  <line x1="550.5" y1="103" x2="550.5" y2="131" stroke="rgba(23,23,23,0.12)"/>
+  <!-- 「边」可拖手柄：信息栏顶 → 时间轴底 -->
+  <rect x="543" y="103" width="15" height="426" rx="7.5" fill="#4B3FE3" opacity="0.92"/>
+  <circle cx="550.5" cy="200" r="1.6" fill="#FFFFFF"/>
+  <circle cx="550.5" cy="308" r="1.6" fill="#FFFFFF"/>
+  <circle cx="550.5" cy="416" r="1.6" fill="#FFFFFF"/>
+
+  <text x="40" y="560" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">单视图：副图一 ←→ 切周期，副图二 ←→ 切标的；🔍 覆盖式搜索栏仅在联动 tile 显示</text>
+  <text x="40" y="582" font-family="SF Pro Text, PingFang SC, system-ui, sans-serif" font-size="12" fill="#52525B">联动：每格 = LinkedKlineTile（独立标的+周期，LinkedViews.json 持久化）；蓝手柄 = 「边」可拖分隔线（信息栏顶 → 时间轴底）</text>
+</svg>
