@@ -134,8 +134,14 @@ struct LinkedKlineTile: View {
                     chartSearchBar
                 }
             }
-            .id(series.sorted)
+            .id(chartIdentity)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 图表身份：绑定(标的,周期)。周期/标的切换必定创建全新图表状态，
+    /// 避免折返时(如 周→月→周)SwiftUI 按数据内容复用旧视图、残留已清的隔离副图导致空白
+    private var chartIdentity: String {
+        "\(view.metaID)-\(view.period.rawValue)"
     }
 
     /// 占位（原详情页在切周期/标的时会重置 pin；本 tile 已无全局 pin，保留空实现保证类型一致）
