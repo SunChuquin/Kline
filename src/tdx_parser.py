@@ -343,8 +343,8 @@ def sort_like_windows(file_list):
 
 class TDXDataGenerator:
     def __init__(self, is_del: bool = False, is_demo: bool = False):
-        self.db = '../../tdx.db' if platform.system() != 'Windows' else '../../../../tdx.db'
-        self.base_path = '../../tdx_data/' if platform.system() != 'Windows' else '../../../../tdx_data/'
+        self.db = '../../tdx.db' if platform.system() == 'Windows' else '../../../../tdx.db'
+        self.base_path = '../../tdx_data/' if platform.system() == 'Windows' else '../../../../tdx_data/'
         self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}
         self.date_cache = {}
         self.is_demo = is_demo
@@ -585,7 +585,7 @@ class TDXDataGenerator:
                     file_type = exist_meta[file_name]['type']
                     first_date = exist_meta[file_name]['first_date']
                     last_date = content[-1][:8]
-                    meta_value = [file_name, code, name, file_type, first_date, last_date, fp.tell()]
+                    meta_value = [meta_id, file_name, code, name, file_type, first_date, last_date, fp.tell()]
                     for p in exist_periods:
                         emap = exist_periods[p]
                         if meta_id in emap:
@@ -599,7 +599,7 @@ class TDXDataGenerator:
                         file_type = '沪深京指数' if file_name[:6] in ['SZ#399', 'SH#000', 'SH#999'] else '沪深主板'
                     first_date = content[0][:8]
                     last_date = content[-1][:8]
-                    meta_value = [file_name, code, name, file_type, first_date, last_date, fp.tell()]
+                    meta_value = [meta_id, file_name, code, name, file_type, first_date, last_date, fp.tell()]
 
                 daily_rows, weekly_rows, monthly_rows, quarterly_rows, yearly_rows = self.handle_data(meta_id, content, init_states)
 
@@ -624,7 +624,7 @@ class TDXDataGenerator:
     def create_db_data(self):
         self.precompute_monday_cache_by_range()
 
-        meta_fields = ['file', 'code', 'name', 'type', 'first_date', 'last_date', 'last_size']
+        meta_fields = ['id', 'file', 'code', 'name', 'type', 'first_date', 'last_date', 'last_size']
         kline_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
         weekly_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
         monthly_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']

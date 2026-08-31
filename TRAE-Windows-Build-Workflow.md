@@ -16,10 +16,11 @@
 4. [第二步：监控 Actions 运行进度](#第二步监控-actions-运行进度)
 5. [第三步：下载 IPA 产物](#第三步下载-ipa-产物)
 6. [第四步：编译失败分析与自修复](#第四步编译失败分析与自修复)
-7. [完整闭环示例（本机实测）](#完整闭环示例本机实测)
-8. [常用命令速查](#常用命令速查)
-9. [故障排查](#故障排查)
-10. [限制与注意事项](#限制与注意事项)
+7. [第五步：自动安装到 iPad（pymobiledevice3）](#第五步自动安装到-ipadpymobiledevice3)
+8. [完整闭环示例（本机实测）](#完整闭环示例本机实测)
+9. [常用命令速查](#常用命令速查)
+10. [故障排查](#故障排查)
+11. [限制与注意事项](#限制与注意事项)
 
 ---
 
@@ -32,8 +33,9 @@
 | 项目仓库 | 已配置 `.github/workflows/build.yml`，参考 [iOS-GitHub-Actions-CI.md](./iOS-GitHub-Actions-CI.md) | `gh run list` |
 | GitHub Secrets | `CERTIFICATE_BASE64` / `CERTIFICATE_PASSWORD` / `PROVISION_PROFILE_BASE64` 已配置 | 见 CI 文档 |
 | 工作目录 | 切换到 Xcode 项目所在目录（含 `.github` 子目录的仓库根） | `cd c:\Users\sunck\home\projects\ios\Kline` |
+| iOS 安装工具链 | 已建 Python 3.10 venv 并装 `pymobiledevice3`（见第五步） | `.venv-ios\Scripts\pymobiledevice3.exe --help` |
 
-> **关键点**：本工作流**不需要** Windows 安装 Xcode 或 act 等本地编译工具。所有编译在 GitHub Actions 的 `macos-latest` runner 上完成，TRAE 仅负责编排与诊断。
+> **关键点**：本工作流**不需要** Windows 安装 Xcode 或 act 等本地编译工具。所有编译在 GitHub Actions 的 `macos-latest` runner 上完成，TRAE 仅负责编排与诊断。IPA 安装则通过本机 `pymobiledevice3` 经 USB 推送到 iPad。
 
 ---
 
@@ -50,6 +52,8 @@
 │  5a. 成功 → gh run download <id>        │                      │
 │  5b. 失败 → gh run view --log-failed   │                      │
 │      → 定位 error 行 → 修复 → 回到 1     │                      │
+│  6. pymobiledevice3 apps install       │                      │
+│      <ipa> （USB 推送到 iPad）          │                      │
 └─────────────────────────────────────────────────────────────┘
                                           │
                                           ▼
@@ -63,7 +67,7 @@
                           └───────────────────────────────┘
 ```
 
-核心思想：**TRAE 不直接编译 Swift，而是把 GitHub Actions 当作云端的 Xcode**。`gh` CLI 既是触发器，也是日志读取器，还是产物下载器。
+核心思想：**TRAE 不直接编译 Swift，而是把 GitHub Actions 当作云端的 Xcode**。`gh` CLI 既是触发器，也是日志读取器，还是产物下载器；`pymobiledevice3` 则把下载好的 IPA 经 USB 一键装入 iPad，形成「构建 → 下载 → 安装」的完整闭环。
 
 ---
 
@@ -138,7 +142,7 @@ gh run download <RUN_ID> --dir c:\Users\sunck\home\projects\ios\artifacts
 # c:\Users\sunck\home\projects\ios\artifacts\Kline\Kline.ipa   (~931 KB)
 ```
 
-下载完成后，IPA 文件即可通过 **爱思助手**、TrollStore 等方式安装到 iOS 设备。
+下载完成后，IPA 文件即可自动安装到已连接的 iOS 设备（见下一步），也可手动交给 **爱思助手**、TrollStore 等工具。
 
 ---
 
@@ -193,6 +197,70 @@ gh run view <FAILED_RUN_ID> --log-failed 2>&1 | Select-String -Pattern "error:|w
 
 ---
 
+## 第五步：自动安装到 iPad（pymobiledevice3）
+
+这一步让 TRAE 把下载好的 IPA 经 **USB** 直接装到 iPad，无需再手动用爱思助手。本质是 CLI 版的 iOS 通信/安装工具，签名机制与爱思助手一致（都需要已签名的 IPA + 描述文件包含目标设备 UDID）。
+
+### 5.1 一次性的环境准备（已完成，发现可复用）
+
+scoop 里并**没有** `libimobiledevice`/`ideviceinstaller` 的现成 manifest（别照抄网络上"scoop install"的说法），本机改用 Python 版工具，装法如下：
+
+```bash
+# 本机默认 Python 是 3.8，太旧；pymobiledevice3 需要 ≥3.9，故用已装的 Python 3.10 建独立 venv
+py -3.10 -m venv  c:\Users\sunck\home\projects\ios\.venv-ios
+c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pip.exe install pymobiledevice3
+# 装完即可用（成品可执行文件在 venv 的 Scripts 目录）
+c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe --help
+```
+
+> 若日后换机器，只需重建这个 venv；`pymobiledevice3` 本身跨平台（Win/macOS/Linux 都支持 USB 连接 iOS）。
+
+### 5.2 确认设备连接
+
+```bash
+# 列出通过 USB 连接的 iOS 设备（拿 UDID）
+c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe usbmux list
+```
+
+成功应输出类似：
+
+```json
+[
+    {
+        "ConnectionType": "USB",
+        "DeviceClass": "iPad",
+        "DeviceName": "孙楚昆的iPad",
+        "ProductType": "iPad5,2",
+        "ProductVersion": "15.8.8",
+        "UniqueDeviceID": "b36adcb0...f81fe"
+    }
+]
+```
+
+> **首次配对**：iPad 连接后若提示"要信任此电脑吗？"必须先在 iPad 上**手动点"信任"**——这一步物理上无法自动化，做一次，之后永久生效。若设备已通过爱思助手/iTunes 连接过，通常已自动信任。
+
+### 5.3 安装 IPA（关键命令）
+
+```bash
+# 升级式安装：不卸载已装 App，直接覆盖应用本体，保留其沙盒/文档数据
+c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe apps install ^
+    c:\Users\sunck\home\projects\ios\artifacts\Kline\Kline.ipa
+```
+
+- 输出进度 `5%→100% Complete`，最后出现 **`Installation succeed.`** 即成功（Kline 实测约 2 秒）。
+- **不要**先用 `apps uninstall` 卸载——那会清空沙盒数据；直接用 `apps install` 是升级语义，保数据。
+
+### 5.4 验证已安装
+
+```bash
+# 查看已安装用户 App，确认 Bundle ID 存在
+c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe apps list | Select-String "Kline"
+```
+
+确认出现 `com.sunck.Kline` 且 `"ProfileValidated": true` 即安装成功、签名有效。
+
+---
+
 ## 完整闭环示例（本机实测）
 
 以下三个 commit 构成 2026-08-27 的完整验证链，全部记录在 `git log` 中，可随时复查：
@@ -231,6 +299,12 @@ git add <具体文件>                          # 只加改动的文件，别用
 git commit -m "消息"                       # 提交
 git push origin main                       # 推送触发 Actions
 git log --oneline -5                       # 查看最近提交
+
+# === iOS 设备安装（USB） ===
+SET PM=.venv-ios\Scripts\pymobiledevice3.exe   # 简写（在 ios 根目录执行）
+%PM% usbmux list                            # 列出已连接 iOS 设备（拿 UDID）
+%PM% apps list | findstr Kline             # 查看已装 App
+%PM% apps install artifacts\Kline\Kline.ipa # 升级式安装 IPA
 ```
 
 ---
@@ -247,6 +321,9 @@ git log --oneline -5                       # 查看最近提交
 | 产物目录为空 | `gh run download` 必须等 run 完全结束 | 先 `gh run watch` 等成功再下载 |
 | `gh` 提示权限不足 | token 缺 `repo` scope | `gh auth refresh -s repo` 重新授权 |
 | 推送被拒（non-fast-forward） | 远端有新提交 | `git pull --rebase origin main` 后再推 |
+| `pymobiledevice3` 报 `TypeError: 'type' object is not subscriptable` | 本机默认 Python 3.8 太旧，工具需 ≥3.9 | 用 Python 3.10 venv（见第五步），勿用系统 3.8 |
+| `usbmux list` 空 / 找不到设备 | 设备未连、或未点"信任此电脑" | 插好 USB、iPad 解锁并确认已信任 |
+| `Installation failed` | IPA 签名失效/描述文件不含该设备 | 重新触发构建，确认描述文件含目标 UDID |
 
 ---
 
@@ -258,9 +335,12 @@ git log --oneline -5                       # 查看最近提交
 4. **敏感文件不入库**：`*.p12`、`*.mobileprovision`、`*_base64.txt`、`tdx.db` 等应放在 `.gitignore` 中或仓库根之外。本工作流中 `git add` 始终只加具体源码文件。
 5. **TRAE 的 RunCommand 终端是 PowerShell**：命令里用 `;` 串联、用 `Select-String` 而非 `grep`、路径用反斜杠或正斜杠均可。
 6. **错误分析只能读日志，不能下断点**：相比 macOS 本地 Xcode 调试，缺少交互式调试器。弥补方式：在代码里大量用 `os_log`/`print` 输出运行时日志，再用 Console.app 或设备日志分析。
+7. **安装工具是 Python venv**：iOS 安装走 `.venv-ios`（Python 3.10），不要用系统默认的 Python 3.8。venv 目录较大，建议加入项目的 `.gitignore`。
+8. **升级式安装保留数据**：重复装同一 App 直接用 `apps install` 即可（升级语义保沙盒数据），**不要**先 uninstall。
+9. **首次配对需手动**：iPad 首次连电脑要人工点"信任"，之后永久生效，不影响后续自动化。
 
 ---
 
-**文档版本**：1.0  
-**更新日期**：2026-08-27  
+**文档版本**：2.0  
+**更新日期**：2026-08-31  
 **配套文档**：[iOS-GitHub-Actions-CI.md](./iOS-GitHub-Actions-CI.md)（CI 初始搭建指南）
