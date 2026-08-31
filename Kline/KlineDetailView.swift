@@ -163,21 +163,28 @@ struct KlineDetailView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            VStack(spacing: 0) {
-                // 自定义/系统指标公式编辑器（真全屏）打开时隐藏顶部栏
-                if !showCustomEditor && !showSystemEditor {
-                    // 顶部留白压缩为小固定值，减少状态栏区域的空白
-                    Color.clear
-                        .frame(height: 2)
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    // 自定义/系统指标公式编辑器（真全屏）打开时隐藏顶部栏
+                    if !showCustomEditor && !showSystemEditor {
+                        // 顶部留白压缩为小固定值，减少状态栏区域的空白
+                        Color.clear
+                            .frame(height: 2)
 
-                    topBar
+                        topBar
+                    }
+
+                    // 图表区域：始终占满剩余空间，内部显示加载/空/图表
+                    chartArea
                 }
+                .frame(maxHeight: .infinity)
+                .background(Color.white.ignoresSafeArea())
 
-                // 图表区域：始终占满剩余空间，内部显示加载/空/图表
-                chartArea
+                // 「边」开启时：可拖分隔线覆盖层横贯整页（含信息栏），实时拖拽调整各视图宽度
+                if dualLink && edgeAdjust {
+                    linkedDividerOverlay(size: geometry.size)
+                }
             }
-            .frame(maxHeight: .infinity)
-            .background(Color.white.ignoresSafeArea())
             .overlay {
                 if showSettings {
                     settingsOverlay(geometry: geometry)
@@ -199,6 +206,27 @@ struct KlineDetailView: View {
                 loadData()
             }
         }
+    }
+
+    /// 整页（信息栏+主图）可拖分隔线覆盖层：每条分隔线独立实时拖拽
+    private func linkedDividerOverlay(size: CGSize) -> some View {
+        let totalWidth = size.width
+        let views = linkedViews
+        let count = views.count
+        let dividers = config.dualDividers(for: count)
+        let bounds = [0.0] + dividers + [1.0]
+        return ZStack(alignment: .topLeading) {
+            ForEach(dividers.indices, id: \.self) { i in
+                DualSplitDivider(totalWidth: totalWidth,
+                                 committed: dividers[i],
+                                 minLimit: i == 0 ? 0.12 : (bounds[i] + 0.06),
+                                 maxLimit: i == dividers.count - 1 ? 0.88 : (bounds[i + 2] - 0.06),
+                                 onCommit: { newPos in
+                                     updateDivider(at: i, count: count, to: newPos)
+                                 })
+            }
+        }
+        .frame(width: totalWidth, height: size.height)
     }
 
     /// 顶部两行：第一行工具栏（返回 + 功能按钮），第二行信息栏（标的名称/代码/类型）
@@ -433,18 +461,7 @@ struct KlineDetailView: View {
                         .position(x: totalWidth * CGFloat(dividers[i]), y: geo.size.height / 2)
                         .allowsHitTesting(false)
                 }
-                // 「边」开启时：可拖动分隔线覆盖层（每条独立可拖）
-                if edgeAdjust {
-                    ForEach(dividers.indices, id: \.self) { i in
-                        DualSplitDivider(totalWidth: totalWidth,
-                                         committed: dividers[i],
-                                         minLimit: i == 0 ? 0.12 : (bounds[i] + 0.06),
-                                         maxLimit: i == dividers.count - 1 ? 0.88 : (bounds[i + 2] - 0.06),
-                                         onCommit: { newPos in
-                                             updateDivider(at: i, count: count, to: newPos)
-                                         })
-                    }
-                }
+                // 注：可拖分隔线覆盖层由全局 linkedDividerOverlay 提供（横贯信息栏+主图）
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
