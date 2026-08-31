@@ -1,8 +1,14 @@
-# 脚本名称: tdx_parser.py
+# 脚本名称: tdx_parser2.py
 
-import sqlite3, os, re, sys, time
+import sqlite3, os, re, sys, time, threading, platform
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional, Tuple
+
+
+# 强制以 UTF-8 输出/读取，避免 Windows 控制台中文乱码
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stdin.reconfigure(encoding='utf-8')
 
 class TDXDatabase:
     """
@@ -14,6 +20,9 @@ class TDXDatabase:
     TABLE_SCHEMA = {
         'daily': ['file', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo'],
         'weekly': ['file', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo'],
+        'monthly': ['file', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo'],
+        'quarterly': ['file', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo'],
+        'yearly': ['file', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo'],
         'meta': ['file', 'name', 'type', 'code'],
     }
 
@@ -43,7 +52,7 @@ class TDXDatabase:
             self.conn.row_factory = sqlite3.Row  # 使查询结果可以通过列名访问
             self.cursor = self.conn.cursor()
             # 开启外键约束（如果需要）
-            self.cursor.execute("PRAGMA foreign_keys = ON;")
+            # self.cursor.execute("PRAGMA foreign_keys = ON;")
             print(f"成功连接到数据库: {self.db_path}")
         except sqlite3.Error as e:
             print(f"连接数据库失败: {e}")
@@ -333,13 +342,13 @@ def sort_like_windows(file_list):
 
 
 class TDXDataGenerator:
-    def __init__(self, is_del: bool = False):
-        self.db = './tdx.db'
-        self.base_path = '../../tdx_data/'
-        self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}  # ✅ 新增：记录被跳过的文件
+    def __init__(self, is_del: bool = False, is_demo: bool = False):
+        self.db = '../../tdx.db' if platform.system() != 'Windows' else '../../../../tdx.db'
+        self.base_path = '../../tdx_data/' if platform.system() != 'Windows' else '../../../../tdx_data/'
+        self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}
         self.date_cache = {}
+        self.is_demo = is_demo
 
-        # 1.删除旧数据库
         print(f"{'全量更新' if is_del else '增量更新'}")
         if os.path.exists(self.db):
             if is_del:
@@ -348,30 +357,20 @@ class TDXDataGenerator:
         else:
             is_del = True
 
-        # 2.连接数据库（文件不存在时会自动创建）
         self.conn = sqlite3.connect(self.db)
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.cursor = self.conn.cursor()
         if is_del:
             self.create_empty_db()
 
-        # 4.解析并导入所有表数据
         self.create_db_data()
         self.show()
 
-        # 5.提交事务并关闭连接
         self.conn.commit()
         self.conn.close()
 
     def create_empty_db(self):
-        """
-        创建一个空的数据库。
-        如果文件已存在，会先删除再重建。
-        """
-
-        # ----- 开启外键约束（为了数据完整性）-----
-        self.cursor.execute("PRAGMA foreign_keys = ON;")
-
-        # ----- 1. 创建 meta 表（股票/指数/概念的身份信息）-----
         self.cursor.execute("""
             CREATE TABLE meta (
                 id INTEGER PRIMARY KEY,
@@ -384,8 +383,6 @@ class TDXDataGenerator:
                 last_size INTEGER
             )
         """)
-
-        # ----- 2. 创建 daily 表（日线数据）-----
         self.cursor.execute("""
             CREATE TABLE daily (
                 meta_id INTEGER,
@@ -400,8 +397,6 @@ class TDXDataGenerator:
                 FOREIGN KEY (meta_id) REFERENCES meta(id)
             )
         """)
-
-        # ----- 3. 创建 weekly 表（周线数据）-----
         self.cursor.execute("""
             CREATE TABLE weekly (
                 meta_id INTEGER,
@@ -416,172 +411,314 @@ class TDXDataGenerator:
                 FOREIGN KEY (meta_id) REFERENCES meta(id)
             )
         """)
-
+        self.cursor.execute("""
+            CREATE TABLE monthly (
+                meta_id INTEGER,
+                date INTEGER COLLATE BINARY,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                vol REAL,
+                amo REAL,
+                PRIMARY KEY (meta_id, date),
+                FOREIGN KEY (meta_id) REFERENCES meta(id)
+            )
+        """)
+        self.cursor.execute("""
+            CREATE TABLE quarterly (
+                meta_id INTEGER,
+                date INTEGER COLLATE BINARY,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                vol REAL,
+                amo REAL,
+                PRIMARY KEY (meta_id, date),
+                FOREIGN KEY (meta_id) REFERENCES meta(id)
+            )
+        """)
+        self.cursor.execute("""
+            CREATE TABLE yearly (
+                meta_id INTEGER,
+                date INTEGER COLLATE BINARY,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                vol REAL,
+                amo REAL,
+                PRIMARY KEY (meta_id, date),
+                FOREIGN KEY (meta_id) REFERENCES meta(id)
+            )
+        """)
         print(f"✅ 空数据库创建成功: {self.db}")
-        print("   包含表: daily, weekly, meta")
+        print("   包含表: daily, weekly, monthly, quarterly, yearly, meta")
 
     def precompute_monday_cache_by_range(self):
-        """
-        直接按日期范围预计算所有可能的交易日
-        """
         start_date = datetime(1990, 1, 1)
         end_date = datetime.now()
         current = start_date
 
         while current <= end_date:
             date_int = int(current.strftime('%Y%m%d'))
-            # 跳过非交易日（周末）
-            if current.weekday() < 7:  # 0=周一, 4=周五
+            if current.weekday() < 7:
                 monday = current - timedelta(days=current.weekday())
                 self.date_cache[date_int] = int(monday.strftime('%Y%m%d'))
             current += timedelta(days=1)
 
         print(f"✅ 日期映射表预计算完成，共 {len(self.date_cache)} 个交易日。")
 
-    def handle_data(self, meta_id: int, content: List[str], last_monday: int, weekly_groups: Dict) -> List:
-        # 记录上一根K线的日期和周一
+    def period_key(self, date_int, period):
+        """按周期将交易日 YYYYMMDD 归到对应的分组键"""
+        s = str(date_int)
+        year = int(s[:4])
+        month = int(s[4:6])
+        if period == 'weekly':
+            return self.date_cache[date_int]      # 所在周的周一
+        if period == 'monthly':
+            return year * 100 + month             # YYYYMM
+        if period == 'quarterly':
+            return year * 10 + (month - 1) // 3 + 1  # YYYYQ, Q=1~4
+        if period == 'yearly':
+            return year                           # YYYY
+        raise ValueError(f"未知周期: {period}")
+
+    def handle_data(self, meta_id, content, init_states):
         daily_rows = []
+        periods = ['weekly', 'monthly', 'quarterly', 'yearly']
+        state = {}
+        for p in periods:
+            last_key, groups = init_states.get(p, (None, {}))
+            state[p] = [last_key, groups]
 
         for line in content:
-            # 日表处理
-            parts = line.strip().split(';')
+            parts = line.split(';')
+            parts[-1] = parts[-1].strip()
             row = [
                 meta_id,
-                int(parts[0]),  # date
-                float(parts[1]),  # open
-                float(parts[2]),  # high
-                float(parts[3]),  # low
-                float(parts[4]),  # close
-                float(parts[5]) if parts[5] else None,  # vol
-                float(parts[6]) if parts[6] else None  # amo
+                int(parts[0]),
+                float(parts[1]),
+                float(parts[2]),
+                float(parts[3]),
+                float(parts[4]),
+                float(parts[5]) if parts[5] else None,
+                float(parts[6]) if parts[6] else None
             ]
             daily_rows.append(row)
 
-            # 周表处理
-            date_int = row[1]
-            if last_monday is None:
-                last_monday = self.date_cache[date_int]
-                weekly_groups[last_monday] = row.copy()
-                continue
+            for p in periods:
+                key = self.period_key(row[1], p)
+                last_key, groups = state[p]
+                if key != last_key:
+                    groups[key] = row.copy()
+                    state[p][0] = key
+                else:
+                    cur = groups[key]
+                    cur[3] = max(cur[3], row[3])
+                    cur[4] = min(cur[4], row[4])
+                    cur[5] = row[5]
+                    cur[6] += row[6]
+                    cur[7] += row[7]
 
-            current_monday = self.date_cache[date_int]
-            if current_monday == last_monday:
-                # 同一周，直接更新
-                cur = weekly_groups[current_monday]
-                # cur[1] = row[1]  # 开启则表示周线使用最后一天的日期，否则为周一
-                cur[3] = max(cur[3], row[3])
-                cur[4] = min(cur[4], row[4])
-                cur[5] = row[5]
-                cur[6] += row[6]
-                cur[7] += row[7]
-                continue
+        return [
+            daily_rows,
+            list(state['weekly'][1].values()),
+            list(state['monthly'][1].values()),
+            list(state['quarterly'][1].values()),
+            list(state['yearly'][1].values()),
+        ]
 
-            # 跨周了（当前K线属于新的一周）
-            weekly_groups[current_monday] = row.copy()
-            last_monday = current_monday
-        return [daily_rows, list(weekly_groups.values())]
+    def _process_file(self, file, meta_id, exist_meta, exist_periods, exist_file):
+        result = {
+            'skipped': False,
+            'skip_reason': None,
+            'skip_detail': None,
+            'meta_value': None,
+            'daily_rows': None,
+            'weekly_rows': None,
+            'monthly_rows': None,
+            'quarterly_rows': None,
+            'yearly_rows': None,
+            'file': file,
+            'meta_id': meta_id,
+        }
+
+        try:
+            file_name = file[:-4]
+            kline_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
+            period_fields = ['date', 'open', 'high', 'low', 'close', 'vol', 'amo']
+
+            last_size = exist_meta[file_name]['last_size'] if file_name in exist_meta else 0
+            if last_size > 0:
+                if os.path.getsize(os.path.join(self.base_path, file)) == last_size:
+                    result['skipped'] = True
+                    result['skip_reason'] = '无变更'
+                    return result
+                last_size -= 18
+
+            with open(os.path.join(self.base_path, file), 'r', encoding='gbk') as fp:
+                fp.seek(last_size)
+                content = fp.readlines()
+
+                if last_size == 0:
+                    info_parts = re.split(r'\s+', content.pop(0).strip())
+                    code = info_parts.pop(0)
+                    info_parts.pop(-1)
+                    info_parts.pop(-1)
+                    name = ' '.join(info_parts)
+                    if '债' in name:
+                        result['skipped'] = True
+                        result['skip_reason'] = '条件过滤'
+                        return result
+                    content.pop(0)
+                content.pop(-1)
+
+                if not len(content) or file.split('#')[0] in ['42', '46', '12'] or file_name in ['62#H11014', '62#931265']:
+                    result['skipped'] = True
+                    result['skip_reason'] = '条件过滤'
+                    return result
+
+                init_states = {}
+                if file_name in exist_file:
+                    file_type = exist_meta[file_name]['type']
+                    first_date = exist_meta[file_name]['first_date']
+                    last_date = content[-1][:8]
+                    meta_value = [file_name, code, name, file_type, first_date, last_date, fp.tell()]
+                    for p in exist_periods:
+                        emap = exist_periods[p]
+                        if meta_id in emap:
+                            last_date_int = emap[meta_id]['last_date']
+                            key = self.period_key(last_date_int, p)
+                            row = [meta_id] + [emap[meta_id][f] for f in period_fields]
+                            init_states[p] = (key, {key: row})
+                else:
+                    file_type = '扩展行情指数'
+                    if file_name.split('#')[0] in ['SH', 'SZ']:
+                        file_type = '沪深京指数' if file_name[:6] in ['SZ#399', 'SH#000', 'SH#999'] else '沪深主板'
+                    first_date = content[0][:8]
+                    last_date = content[-1][:8]
+                    meta_value = [file_name, code, name, file_type, first_date, last_date, fp.tell()]
+
+                daily_rows, weekly_rows, monthly_rows, quarterly_rows, yearly_rows = self.handle_data(meta_id, content, init_states)
+
+                result['meta_value'] = meta_value
+                result['daily_rows'] = daily_rows
+                result['weekly_rows'] = weekly_rows
+                result['monthly_rows'] = monthly_rows
+                result['quarterly_rows'] = quarterly_rows
+                result['yearly_rows'] = yearly_rows
+
+        except UnicodeDecodeError as e:
+            result['skipped'] = True
+            result['skip_reason'] = '编码错误'
+            result['skip_detail'] = [file, f'{str(e)[:30]}']
+        except Exception as e:
+            result['skipped'] = True
+            result['skip_reason'] = '未知异常'
+            result['skip_detail'] = [file, f'{str(e)[:50]}']
+
+        return result
 
     def create_db_data(self):
-        """
-        解析 data 目录下的所有 TXT 文件，导入 daily 和 meta 表，并同时生成周线数据
-        """
         self.precompute_monday_cache_by_range()
 
         meta_fields = ['file', 'code', 'name', 'type', 'first_date', 'last_date', 'last_size']
         kline_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
         weekly_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
-        file_list = sort_like_windows(os.listdir(self.base_path))
+        monthly_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
+        quarterly_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
+        yearly_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
+        if self.is_demo:
+            file_list = ["c:\\Users\\sunck\\home\\export\\data\\SH#999999.txt"]
+        else:
+            file_list = sort_like_windows(os.listdir(self.base_path))
         total_files = len(file_list)
         processed = 0
 
-        print(f"\n📁 开始导入数据（日线 + 周线同步生成），共 {total_files} 个文件...")
+        print(f"\n -> 开始导入数据（日线 + 周线 + 月线 + 季线 + 年线同步生成），共 {total_files} 个文件...")
         with TDXDatabase(self.db) as db:
-            exist_meta = db.query("SELECT id, file, code, name, first_date, last_date, last_size, type FROM meta ORDER BY id;")
-            exist_weekly = db.query("SELECT meta_id, date, open, high, low, close, vol, amo, MAX(date) AS last_date FROM weekly GROUP BY meta_id;")
+            exist_meta = db.query("SELECT id, file, code, name, first_date, last_size, type FROM meta ORDER BY id;")
+            exist_periods = {}
+            for period, tbl in [('weekly', 'weekly'), ('monthly', 'monthly'), ('quarterly', 'quarterly'), ('yearly', 'yearly')]:
+                exist_periods[period] = db.query(
+                    f"SELECT meta_id, date, open, high, low, close, vol, amo, MAX(date) AS last_date FROM {tbl} GROUP BY meta_id;"
+                )
 
             exist_meta = {item['file']: item for item in exist_meta}
-            exist_weekly = {item['meta_id']: item for item in exist_weekly}
+            for period in exist_periods:
+                exist_periods[period] = {item['meta_id']: item for item in exist_periods[period]}
             exist_file = exist_meta.keys()
+
             next_id = len(exist_meta) + 1
+            file_id_map = {}
             for file in file_list:
-                try:
-                    # if file != 'SZ#002613.txt':
-                    #     continue
+                file_name = file[:-4]
+                if file_name in exist_meta:
+                    file_id_map[file] = exist_meta[file_name]['id']
+                else:
+                    file_id_map[file] = next_id
+                    next_id += 1
 
-                    file_name = file[:-4]
+            for i in range(0, total_files, 2):
+                file1 = file_list[i]
+                file2 = file_list[i + 1] if i + 1 < total_files else None
 
-                    # 减去18，是为了过滤掉末尾的 "#数据来源:通达信"
-                    last_size = exist_meta[file_name]['last_size'] if file_name in exist_file else 0
-                    if last_size > 0:
-                        if os.path.getsize(self.base_path + file) == last_size:
-                            self.skipped_files['无变更'].append(file)
-                            processed += 1
-                            continue
-                        last_size -= 18
+                meta_id1 = file_id_map[file1]
+                meta_id2 = file_id_map[file2] if file2 else None
 
-                    with open(self.base_path + file, 'r', encoding='gbk') as fp:
-                        fp.seek(last_size)
-                        content = fp.readlines()
+                results = [None, None]
 
-                        if last_size == 0:
-                            info_parts = re.split(r'\s+', content.pop(0).strip())
-                            code = info_parts[0]
-                            name = info_parts[1]
-                            if '债' in name:
-                                self.skipped_files['条件过滤'].append(file)
-                                processed += 1
-                                continue
-                            content.pop(0)
-                        content.pop(-1)
+                def worker(idx, file, meta_id):
+                    if file is None:
+                        return
+                    results[idx] = self._process_file(
+                        file, meta_id, exist_meta, exist_periods, exist_file
+                    )
 
-                        # 条件过滤：“空行”、“指定文件”
-                        if not len(content) or file.split('#')[0] in ['42', '46', '12'] or file_name in ['62#H11014', '62#931265']:
-                            self.skipped_files['条件过滤'].append(file)
-                            processed += 1
-                            continue
+                t1 = threading.Thread(target=worker, args=(0, file1, meta_id1))
+                threads = [t1]
+                if file2:
+                    t2 = threading.Thread(target=worker, args=(1, file2, meta_id2))
+                    threads.append(t2)
 
-                        # 构建数据
-                        if file_name in exist_file:
-                            meta_id = exist_meta[file_name]['id']
-                            first_date = exist_meta[file_name]['first_date']
-                            last_date = exist_meta[file_name]['last_date']
-                            last_monday = self.date_cache[exist_weekly[meta_id]['last_date']]
-                            weekly_groups = exist_weekly[meta_id]
-                            weekly_groups.pop('last_date')
-                            weekly_groups = {last_monday: [weekly_groups[item] for item in weekly_fields]}
-                            meta_value = [file_name, code, name, file_type, first_date, last_date, fp.tell()]
-                        else:
-                            file_type = '扩展行情指数'
-                            if file_name.split('#')[0] in ['SH', 'SZ']:
-                                file_type = '沪深京指数' if file_name[:6] in ['SZ#399', 'SH#000', 'SH#999'] else '沪深主板'
-                            first_date = content[0][:8]
-                            last_date = content[-1][:8]
-                            meta_value = [file_name, code, name, file_type, first_date, last_date, fp.tell()]
-                            meta_id = next_id
-                            next_id += 1
-                            last_monday = None
-                            weekly_groups = {}
-                        daily_rows, weekly_rows = self.handle_data(meta_id, content, last_monday, weekly_groups)
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
 
-                        # 写入数据
+                for result in results:
+                    if result is None:
+                        continue
+                    if result['skipped']:
+                        if result['skip_reason'] == '无变更':
+                            self.skipped_files['无变更'].append(result['file'])
+                        elif result['skip_reason'] == '条件过滤':
+                            self.skipped_files['条件过滤'].append(result['file'])
+                        elif result['skip_reason'] == '编码错误':
+                            self.skipped_files['编码错误'].append(result['skip_detail'])
+                        elif result['skip_reason'] == '未知异常':
+                            self.skipped_files['未知异常'].append(result['skip_detail'])
+                    else:
                         db.insert_tables({
-                            'meta': [meta_fields, [meta_value]],
-                            'daily': [kline_fields, daily_rows],
-                            'weekly': [weekly_fields, weekly_rows],
+                            'meta': [meta_fields, [result['meta_value']]],
+                            'daily': [kline_fields, result['daily_rows']],
+                            'weekly': [weekly_fields, result['weekly_rows']],
+                            'monthly': [monthly_fields, result['monthly_rows']],
+                            'quarterly': [quarterly_fields, result['quarterly_rows']],
+                            'yearly': [yearly_fields, result['yearly_rows']],
                         })
-                except UnicodeDecodeError as e:
-                    self.skipped_files['编码错误'].append([file, f'{str(e)[:30]}'])
-                except Exception as e:
-                    self.skipped_files['未知异常'].append([file, f'{str(e)[:50]}'])
 
-                # 更新进度条
-                bar_length = 30
-                processed += 1
+                processed += len([r for r in results if r is not None])
                 progress = (processed / total_files) * 100 if total_files > 0 else 0
-                filled = int(bar_length * processed // total_files) if total_files > 0 else 0
-                bar = '█' * filled + '░' * (bar_length - filled)
-                sys.stdout.write(f'\r  进度: [{bar}] {progress:.1f}% ({processed}/{total_files}) 当前文件: {file[:20]}')
-                sys.stdout.flush()
+                if processed % 10 == 0 or processed == total_files:
+                    bar_length = 30
+                    filled = int(bar_length * processed // total_files) if total_files > 0 else 0
+                    bar = '█' * filled + '░' * (bar_length - filled)
+                    current_file = file2 if file2 else file1
+                    sys.stdout.write(f'\r  进度: [{bar}] {progress:.1f}% ({processed}/{total_files}) 当前文件: {current_file[:20]}')
+                    sys.stdout.flush()
 
         print(f"✅ 数据导入完成！共处理 {total_files} 个文件")
         if self.skipped_files:
@@ -602,25 +739,18 @@ class TDXDataGenerator:
 
 
 if __name__ == "__main__":
-    """
-    通达信高级导出：
-    1.沪深主板
-    2.ETF跟踪指数
-    """
-
-    ##########################
     param = input('是否默认使用增量更新？如果是，请直接回车, 否则请输入任意字符再回车, 进行全量更新 > ')
     param = False if param == '' else True
-    ##########################
 
     print(f"\n开始时间: {time.strftime('%Y.%m.%d   %H:%M:%S')}")
     time0 = time.time()
     tdx = TDXDataGenerator(param)
+    #tdx = TDXDataGenerator(param, is_demo=True)
     time1 = time.time()
     print(f"结束时间: {time.strftime('%Y.%m.%d   %H:%M:%S')}")
 
     _ = round((time1 - time0), 4)
-    if int(_//60):
-        print(f'run time:{int(_//60)}分{int(_%60)}秒')
+    if int(_ // 60):
+        print(f'run time:{int(_ // 60)}分{int(_ % 60)}秒')
     else:
-        print(f'run time:{int(_%60)}秒')
+        print(f'run time:{int(_ % 60)}秒')

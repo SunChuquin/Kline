@@ -65,7 +65,7 @@ struct KlineDetailView: View {
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
     @State private var monthlySeries: ChartSeries? = nil
-    @State private var seasonalSeries: ChartSeries? = nil
+    @State private var quarterlySeries: ChartSeries? = nil
     @State private var yearlySeries: ChartSeries? = nil
     @State private var isLoading = true
     /// 📌 固定光标模式开关（高亮表示已开启）
@@ -87,7 +87,7 @@ struct KlineDetailView: View {
         case .daily: return dailySeries
         case .weekly: return weeklySeries
         case .monthly: return monthlySeries
-        case .seasonal: return seasonalSeries
+        case .quarterly: return quarterlySeries
         case .yearly: return yearlySeries
         }
     }
@@ -505,14 +505,14 @@ struct KlineDetailView: View {
             let daily = databaseManager.fetchDailyData(metaId: item.id)
             let weekly = databaseManager.fetchWeeklyData(metaId: item.id)
             let monthly = databaseManager.fetchMonthlyData(metaId: item.id)
-            let seasonal = databaseManager.fetchSeasonalData(metaId: item.id)
+            let quarterly = databaseManager.fetchquarterlyData(metaId: item.id)
             let yearly = databaseManager.fetchYearlyData(metaId: item.id)
 
             DispatchQueue.main.async {
                 self.dailySeries = daily.isEmpty ? nil : ChartSeries(data: daily)
                 self.weeklySeries = weekly.isEmpty ? nil : ChartSeries(data: weekly)
                 self.monthlySeries = monthly.isEmpty ? nil : ChartSeries(data: monthly)
-                self.seasonalSeries = seasonal.isEmpty ? nil : ChartSeries(data: seasonal)
+                self.quarterlySeries = quarterly.isEmpty ? nil : ChartSeries(data: quarterly)
                 self.yearlySeries = yearly.isEmpty ? nil : ChartSeries(data: yearly)
                 self.isLoading = false
             }
@@ -533,7 +533,7 @@ struct KlineDetailView: View {
             case .daily: data = dailySeries?.sorted
             case .weekly: data = weeklySeries?.sorted
             case .monthly: data = monthlySeries?.sorted
-            case .seasonal: data = seasonalSeries?.sorted
+            case .quarterly: data = quarterlySeries?.sorted
             case .yearly: data = yearlySeries?.sorted
             }
             guard let data, !data.isEmpty else { continue }

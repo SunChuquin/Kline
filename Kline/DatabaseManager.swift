@@ -154,8 +154,8 @@ class DatabaseManager: ObservableObject {
     }
 
     /// 读取指定标的全量季线数据（表不存在时返回空，忽略）
-    func fetchSeasonalData(metaId: Int) -> [KlineItem] {
-        fetchPeriodTable(metaId: metaId, table: "seasonal")
+    func fetchquarterlyData(metaId: Int) -> [KlineItem] {
+        fetchPeriodTable(metaId: metaId, table: "quarterly")
     }
 
     /// 读取指定标的全量年线数据（表不存在时返回空，忽略）
