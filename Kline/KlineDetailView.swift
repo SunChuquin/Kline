@@ -205,9 +205,13 @@ struct KlineDetailView: View {
                 // 「边」开启时：可拖分隔线覆盖层从信息栏顶部开始
                 // （工具栏已独立，故固定偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5）
                 if dualLink && edgeAdjust {
-                    linkedDividerOverlay(size: geometry.size)
+                    // 顺序很关键：必须先把覆盖层裁到「信息栏顶→屏幕底」的高度，再 offset 下移。
+                    // 若先 offset 再 frame，offset 不改变布局尺寸，frame 的默认居中对齐会把
+                    // 整屏高的内容在裁小后的容器里重新居中，实际起点变成 offset/2
+                    // （真机曾表现为分隔线从工具栏中间开始画）
+                    linkedDividerOverlay(width: geometry.size.width,
+                                         height: max(0, geometry.size.height - infoBarTopOffset))
                         .offset(y: infoBarTopOffset)
-                        .frame(height: max(0, geometry.size.height - infoBarTopOffset))
                 }
             }
             .overlay {
@@ -236,9 +240,10 @@ struct KlineDetailView: View {
         }
     }
 
-    /// 整页（信息栏+主图）可拖分隔线覆盖层：每条分隔线独立实时拖拽
-    private func linkedDividerOverlay(size: CGSize) -> some View {
-        let totalWidth = size.width
+    /// 整页（信息栏+主图）可拖分隔线覆盖层：每条分隔线独立实时拖拽。
+    /// 高度由调用方传入（已裁掉顶部工具栏区域），本视图只负责在给定区域内排布分隔线
+    private func linkedDividerOverlay(width: CGFloat, height: CGFloat) -> some View {
+        let totalWidth = width
         let views = linkedViews
         let count = views.count
         let dividers = config.dualDividers(for: count)
@@ -254,7 +259,7 @@ struct KlineDetailView: View {
                                  })
             }
         }
-        .frame(width: totalWidth, height: size.height)
+        .frame(width: totalWidth, height: height)
     }
 
     /// 顶部第一行：工具栏（返回 + 功能按钮）
