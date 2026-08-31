@@ -230,9 +230,6 @@ struct KlineDetailView: View {
                     Text("边")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(edgeAdjust ? .blue : .gray)
-                        .background(edgeAdjust ? Color.blue.opacity(0.18) : Color.clear)
-                        .padding(.horizontal, 9)
-                        .frame(alignment: .center)
                         .frame(width: 32, height: 30)
                         .contentShape(Rectangle())
                 }
@@ -268,7 +265,6 @@ struct KlineDetailView: View {
                 Text("联")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(dualLink ? .blue : .gray)
-                    .background(dualLink ? Color.blue.opacity(0.18) : Color.clear)
                     .frame(width: 32, height: 30)
                     .contentShape(Rectangle())
             }
