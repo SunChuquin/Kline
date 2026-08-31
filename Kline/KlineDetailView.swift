@@ -41,6 +41,14 @@ final class DetailRouter: ObservableObject {
     }
 }
 
+/// 双视图联动同步对象：左右两个 K 线图（左日线/右周线）通过它按日期（YYYYMMDD 整数）同步十字光标
+final class DualLinkSync: ObservableObject {
+    @Published var cursorDate: Int? = nil
+    /// 最近一次 cursorDate 是否由「右侧视图用户直接操作」产生。
+    /// 左视图据此决定是否把联动K线居中显示；左视图自身拖动产生的回声不算
+    var lastCursorFromRightUser = false
+}
+
 struct KlineDetailView: View {
     @ObservedObject private var databaseManager = DatabaseManager.shared
     @ObservedObject private var detailRouter = DetailRouter.shared
@@ -56,18 +64,33 @@ struct KlineDetailView: View {
     @ObservedObject private var config = ChartConfigStore.shared
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
+    @State private var monthlySeries: ChartSeries? = nil
+    @State private var seasonalSeries: ChartSeries? = nil
+    @State private var yearlySeries: ChartSeries? = nil
     @State private var isLoading = true
     /// 📌 固定光标模式开关（高亮表示已开启）
     @State private var pinEnabled = false
     /// 图表当前是否已有任意十字光标（控制 📌 按钮是否可开启）
     @State private var chartHasCursor = false
+    /// 单视图 / 双联动模式：双联动时左右对半分，左日线、右周线，十字光标按日期联动
+    @State private var dualLink = false
+    /// 双视图联动同步（日线/周线图共享）
+    @State private var linkSync = DualLinkSync()
 
     init(item: MetaItem, onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
         self.onClose = onClose
     }
 
-    private var currentSeries: ChartSeries? { config.selectedPeriod == .daily ? dailySeries : weeklySeries }
+    private var currentSeries: ChartSeries? {
+        switch config.selectedPeriod {
+        case .daily: return dailySeries
+        case .weekly: return weeklySeries
+        case .monthly: return monthlySeries
+        case .seasonal: return seasonalSeries
+        case .yearly: return yearlySeries
+        }
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -158,6 +181,18 @@ struct KlineDetailView: View {
             }
             .disabled(!pinEnabled && !chartHasCursor)
 
+            // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
+            Button(action: {
+                withAnimation { dualLink.toggle() }
+            }) {
+                Text(dualLink ? "2️⃣" : "1️⃣")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(dualLink ? .blue : .gray)
+                    .frame(width: 32, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
+
             // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
             Button(action: {
                 config.mainMirrored.toggle()
@@ -200,12 +235,27 @@ struct KlineDetailView: View {
             Group {
                 if isLoading {
                     loadingView
+                } else if dualLink, let daily = dailySeries, let weekly = weeklySeries {
+                    dualLinkArea(daily: daily, weekly: weekly)
                 } else if currentSeries == nil {
                     emptyDataView
                 } else if let s = currentSeries {
-                    chartView(series: s)
+                    chartView(series: s, period: config.selectedPeriod, linked: false)
                 }
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 双联动：左右对半分，左日线、右周线，十字光标按日期联动。
+    /// 左右各用独立的副图模型（isolatedSubs），避免共享副图模型被不同数据长度的曲线互相覆盖
+    private func dualLinkArea(daily: ChartSeries, weekly: ChartSeries) -> some View {
+        HStack(spacing: 0) {
+            // 左日线：接收联动光标时把联动K线居中显示
+            chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true)
+            Divider().frame(width: 0.5)
+            // 右周线：保持现有联动逻辑（贴右边缘）
+            chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -389,10 +439,11 @@ struct KlineDetailView: View {
         }
     }
 
-    private func chartView(series: ChartSeries) -> some View {
+    private func chartView(series: ChartSeries, period: KlinePeriod, linked: Bool, isolated: Bool = false, linkAutoCenter: Bool = false) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
-                       showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: config.selectedPeriod,
-                       onPeriodSwitch: { newPeriod in
+                       showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: period,
+                       isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
+                       onPeriodSwitch: linked ? { _ in } : { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
                            pinEnabled = false
                            withAnimation { config.selectedPeriod = newPeriod }
@@ -415,7 +466,8 @@ struct KlineDetailView: View {
                        pinEnabled: $pinEnabled,
                        onHasCursorChange: { has in
                            chartHasCursor = has
-                       })
+                       },
+                       linkSync: linked ? linkSync : nil)
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -446,14 +498,21 @@ struct KlineDetailView: View {
         }
         isLoading = true
 
-        // 后台串行加载并预计算指标（全量历史），避免阻塞主线程
+        // 后台串行加载并预计算指标（全量历史），避免阻塞主线程。
+        // 月/季/年线表可能不存在，不存在时对应查询返回空、series 为 nil，仅加载日/周线
         DispatchQueue.global(qos: .userInitiated).async {
             let daily = databaseManager.fetchDailyData(metaId: item.id)
             let weekly = databaseManager.fetchWeeklyData(metaId: item.id)
+            let monthly = databaseManager.fetchMonthlyData(metaId: item.id)
+            let seasonal = databaseManager.fetchSeasonalData(metaId: item.id)
+            let yearly = databaseManager.fetchYearlyData(metaId: item.id)
 
             DispatchQueue.main.async {
                 self.dailySeries = daily.isEmpty ? nil : ChartSeries(data: daily)
                 self.weeklySeries = weekly.isEmpty ? nil : ChartSeries(data: weekly)
+                self.monthlySeries = monthly.isEmpty ? nil : ChartSeries(data: monthly)
+                self.seasonalSeries = seasonal.isEmpty ? nil : ChartSeries(data: seasonal)
+                self.yearlySeries = yearly.isEmpty ? nil : ChartSeries(data: yearly)
                 self.isLoading = false
             }
         }
@@ -468,7 +527,14 @@ struct KlineDetailView: View {
         let metaId = item.id
         let visible = config.selectedPeriod
         for period in KlinePeriod.allCases where period != finished && period != visible {
-            let data = period == .daily ? dailySeries?.sorted : weeklySeries?.sorted
+            let data: [KlineItem]?
+            switch period {
+            case .daily: data = dailySeries?.sorted
+            case .weekly: data = weeklySeries?.sorted
+            case .monthly: data = monthlySeries?.sorted
+            case .seasonal: data = seasonalSeries?.sorted
+            case .yearly: data = yearlySeries?.sorted
+            }
             guard let data, !data.isEmpty else { continue }
             // 是否已预计算、配置是否已过期，由 KlineChartView.prefetchOtherPeriod 内部判断
             KlineChartView.prefetchOtherPeriod(metaId: metaId, period: period, data: data)

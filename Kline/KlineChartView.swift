@@ -12,7 +12,7 @@ import UIKit
 // MARK: - K线调试日志（可用开关控制）
 /// 是否输出 [KlineDebug] 调试日志。排查副图曲线/后台预计算问题时改为 `true`，定位完成后改回 `false`。
 /// 仅在 DEBUG 构建生效；发布构建（Release）完全不输出，无性能影响。
-private let klineDebugLoggingEnabled = false
+private let klineDebugLoggingEnabled = true
 
 /// 统一调试日志入口：关闭时（或非 DEBUG 构建）不产生任何输出。
 /// 用 @autoclosure 延迟字符串拼接，关闭时零开销。
@@ -383,6 +383,16 @@ final class SubChartModel: ObservableObject {
     var isCustom: Bool { activeCustomID != nil }
 }
 
+/// 复制一份副图模型的配置到独立实例（仅复制配置，不复制曲线；双联动隔离用）
+private func copySubConfig(_ src: SubChartModel) -> SubChartModel {
+    let m = SubChartModel()
+    m.kind = src.kind
+    m.activeCustomID = src.activeCustomID
+    m.titleName = src.titleName
+    m.color = src.color
+    return m
+}
+
 /// 仅缓存排序后的 K 线数据；指标一律用静态方法按需(可见配置)计算，不再整表预计算未用指标。
 struct ChartSeries {
     let sorted: [KlineItem]
@@ -426,6 +436,10 @@ struct KlineChartView: View {
     let metaId: Int?
     /// 当前行情周期（用于主图指标名称按钮显示 "日线: MA" 之类前缀）
     let period: KlinePeriod
+    /// 是否使用独立的副图模型实例（双联动左右视图各用一套，避免共享模型被不同数据长度的曲线互相覆盖）
+    private let isolatedSubs: Bool
+    /// 接收联动光标并自动滚动到窗口外K线时，是否把该K线居中显示（左日线视图传 true，右周线视图保持贴右边缘的现有逻辑）
+    private let linkAutoCenter: Bool
     /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
     let onPeriodSwitch: ((KlinePeriod) -> Void)?
     /// 当前周期后台预计算全部完成后的回调（用于外层继续预计算其它未计算周期）
@@ -438,6 +452,11 @@ struct KlineChartView: View {
     @Binding var pinEnabled: Bool
     /// 是否有任意光标在屏幕上（供详情页控制 📌 按钮可点/高亮）
     let onHasCursorChange: ((Bool) -> Void)?
+    /// 双视图联动同步（左日线/右周线共用；单视图时传入独立空对象，cursorDate 不变化、无副作用）。
+    /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
+    @ObservedObject var linkSync: DualLinkSync
+    /// 联动：本视图是否正由用户直接拖动光标（用于区分「右侧用户操作」与「左侧拖动回声」）
+    @State private var linkUserDragging = false
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
 
@@ -497,9 +516,9 @@ struct KlineChartView: View {
     private let prefetchBlockSize = 500
 
     // 三个副图（同一实例跨页面复用，配置不重置）
-    @ObservedObject private var subTop: SubChartModel
-    @ObservedObject private var subBottom: SubChartModel
-    @ObservedObject private var subThird: SubChartModel
+    @StateObject private var subTop: SubChartModel
+    @StateObject private var subBottom: SubChartModel
+    @StateObject private var subThird: SubChartModel
 
     /// 自定义指标公式编辑器是否打开（由详情页持有状态，打开时隐藏顶部栏实现真全屏）
     @Binding var showCustomEditor: Bool
@@ -524,21 +543,27 @@ struct KlineChartView: View {
          showSystemEditor: Binding<Bool> = .constant(false),
          metaId: Int? = nil,
          period: KlinePeriod = .daily,
+         isolatedSubs: Bool = false,
+         linkAutoCenter: Bool = false,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
          onPeriodPrefetched: ((KlinePeriod) -> Void)? = nil,
          onSwitchItem: ((Int) -> Void)? = nil,
          canSwitchItem: ((Int) -> Bool)? = nil,
          pinEnabled: Binding<Bool> = .constant(false),
-         onHasCursorChange: ((Bool) -> Void)? = nil) {
+         onHasCursorChange: ((Bool) -> Void)? = nil,
+         linkSync: DualLinkSync? = nil) {
         self.series = series
         self.metaId = metaId
         self.period = period
+        self.isolatedSubs = isolatedSubs
+        self.linkAutoCenter = linkAutoCenter
         self.onPeriodSwitch = onPeriodSwitch
         self.onPeriodPrefetched = onPeriodPrefetched
         self.onSwitchItem = onSwitchItem
         self.canSwitchItem = canSwitchItem
         self._pinEnabled = pinEnabled
         self.onHasCursorChange = onHasCursorChange
+        self.linkSync = linkSync ?? DualLinkSync()
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -553,11 +578,21 @@ struct KlineChartView: View {
         self.baseTurnovers = all.map(\.turnover)
         // 全数据集预计算跳空缺口（一次计算，绘制时只按可见区间过滤）
         self._gaps = State(initialValue: Self.computeGaps(all))
-        // 副图复用共享仓库中的同一实例，保证切换周期/重新进入后指标不重置
+        // 副图复用共享仓库中的同一实例，保证切换周期/重新进入后指标不重置；
+        // 双联动（isolatedSubs）时改用独立实例，复制共享配置，曲线各自按本视图数据计算，互不覆盖
         let store = ChartConfigStore.shared
-        self._subTop = ObservedObject(wrappedValue: store.subTop)
-        self._subBottom = ObservedObject(wrappedValue: store.subBottom)
-        self._subThird = ObservedObject(wrappedValue: store.subThird)
+        if isolatedSubs {
+            // 用 @StateObject 保存隔离模型：@StateObject 只取首次创建的值并跨 re-init 稳定保留，
+            // 避免双联动视图被反复 init 时 @ObservedObject 采纳新建空模型导致副图曲线清空
+            self._subTop = StateObject(wrappedValue: copySubConfig(store.subTop))
+            self._subBottom = StateObject(wrappedValue: copySubConfig(store.subBottom))
+            self._subThird = StateObject(wrappedValue: copySubConfig(store.subThird))
+        } else {
+            // 非隔离：直接持有共享仓库中的同一实例（保持跨页面/切周期指标不重置）
+            self._subTop = StateObject(wrappedValue: store.subTop)
+            self._subBottom = StateObject(wrappedValue: store.subBottom)
+            self._subThird = StateObject(wrappedValue: store.subThird)
+        }
         // 同一标的内切换周期：从 (标的, 周期) 缓存恢复上次的计算结果与覆盖状态，
         // 保证切回该周期时已算过的部分不重算、不丢失（LRU 保留最近 3 个标的的所有周期）。
         // 仅当缓存所用指标配置指纹与当前一致时才恢复，否则视为无效、按新配置重新计算
@@ -1008,7 +1043,7 @@ struct KlineChartView: View {
         // 防空保护：重算结果为空（如公式在裁剪区间求值失败/裁剪数据异常）时保留旧曲线，
         // 避免副图被清空变空白；后台分块预计算随后会用正确结果覆盖
         if !curves.isEmpty || m.curves.isEmpty {
-            if curves.isEmpty { klineDebug("[KlineDebug] 防空:计算空将覆盖 \(m.kind) 旧=\(m.curves.count)") }
+            if curves.isEmpty { klineDebug("[DualLink] recomputeSub 计算空将覆盖 \(m.kind) isolated=\(isolatedSubs) 旧=\(m.curves.count) win=[\(startIndex)...\(endIndex)] calc=\(calcStart)...\(calcEnd)") }
             m.curves = curves
             m.titleName = (m.isCustom ? custom?.name : nil) ?? m.kind
             m.color = custom?.color ?? Color(hex: "0050FF")!
@@ -1201,6 +1236,7 @@ struct KlineChartView: View {
                         let col = Int((value.location.x / candleSpacing).rounded(.down))
                         let idx = startIndex + col
                         if idx >= startIndex && idx <= endIndex {
+                            linkUserDragging = true   // 用户直接拖动光标（用于联动来源标记）
                             selectedIndex = idx
                             crosshairY = value.location.y
                         }
@@ -1247,6 +1283,8 @@ struct KlineChartView: View {
                 // 关键：无论手势如何结束（含提前 return 的分支），都必须重置拖拽状态，
                 // 否则 isDragging 一直为 true，后续切换/修改指标的重算都会被跳过
                 drag.isDragging = false
+                // 用户拖动结束，清除联动来源标记（之后的光标变化都是回声/联动，不再触发左侧居中）
+                linkUserDragging = false
                 // 平移/缩放会改变可见窗口，指标裁剪区间需跟随；这里无条件重算一次。
                 // 无窗口变化（如轻点）时裁剪区间缓存键不变，直接复用缓存，开销几乎为零
                 drag.needsRefreshAfterDrag = false
@@ -1279,6 +1317,8 @@ struct KlineChartView: View {
                     if selectedIndex != nil {
                         selectedIndex = nil; crosshairY = nil
                     } else if idx >= startIndex && idx <= endIndex {
+                        // 点击创建光标也视为用户直接操作（联动来源标记），使右视图点击能同步到左视图
+                        linkUserDragging = true
                         selectedIndex = idx; crosshairY = value.location.y
                     }
                 }
@@ -1308,6 +1348,9 @@ struct KlineChartView: View {
     /// 双指手势开始：以双指质心起始位置对应K线为缩放锚点，初始化缩放基准
     private func handleTwoFingerBegin(centroidX: CGFloat, width: CGFloat) {
         drag.twoFingerActive = true
+        // 双指手势接管：复位单指光标拖动状态，避免粘滞导致联动被忽略
+        linkUserDragging = false
+        drag.cursorDragging = false
         selectedIndex = nil; crosshairY = nil
         zoomBase = visibleCount
         zoomAnchorIndex = nil
@@ -1411,6 +1454,7 @@ struct KlineChartView: View {
 
             let mainTop = legendHeight
             let mainBottom = mainTop + mainHeight
+            let mainCenterY = mainTop + mainHeight / 2
             let s1Top = mainBottom + legendHeight
             let s1Bottom = s1Top + sub1Height
             let s2Top = s1Bottom + legendHeight
@@ -1453,7 +1497,7 @@ struct KlineChartView: View {
             .overlay {
                 // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
                 ZStack(alignment: .topLeading) {
-                    cursorOverlay(index: selectedIndex, y: crosshairY, compare: pinnedIndex, fixedPrice: nil, width: width, height: geometry.size.height,
+                    cursorOverlay(index: selectedIndex, y: crosshairY ?? mainCenterY, compare: pinnedIndex, fixedPrice: nil, width: width, height: geometry.size.height,
                                   candleSpacing: candleSpacing,
                                   mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
                                   s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
@@ -1551,10 +1595,14 @@ struct KlineChartView: View {
         .onChange(of: selectedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
             notifyHasCursor()
+            publishLinkCursor(index: newIdx)
         }
         .onChange(of: pinnedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(pinnedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] selected:\(String(describing: selectedIndex))")
             notifyHasCursor()
+        }
+        .onChange(of: linkSync.cursorDate) { date in
+            applyLinkCursor(date)
         }
         .onChange(of: config.showBareK) { _ in
             // 顶部栏裸K按钮切换后立即重算（隐藏/恢复主图指标）
@@ -1594,6 +1642,76 @@ struct KlineChartView: View {
     /// 屏幕上是否有任意光标（固定光标或可交互光标），通知详情页用于控制 📌 按钮
     private func notifyHasCursor() {
         onHasCursorChange?(selectedIndex != nil || pinnedIndex != nil)
+    }
+
+    /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象（双联动时同步到另一视图）。
+    /// 记录本次发布是否由「右侧视图用户直接操作」产生（左视图据此决定是否居中；自身回声不算）
+    private func publishLinkCursor(index: Int?) {
+        linkSync.lastCursorFromRightUser = !linkAutoCenter && linkUserDragging
+        // 消费后立即复位，防止来源标记因手势中断/多次发布而粘滞
+        linkUserDragging = false
+        let date: Int?
+        if let index, index < sortedData.count { date = sortedData[index].date } else { date = nil }
+        klineDebug("[DualLink] publish \(period.rawValue) idx=\(String(describing: index)) date=\(String(describing: date)) fromRight=\(linkSync.lastCursorFromRightUser) dragging=\(linkUserDragging)")
+        if linkSync.cursorDate != date { linkSync.cursorDate = date }
+    }
+
+    /// 应用另一视图发布的联动光标：把本视图光标移动到对应日期最近的 K 线
+    private func applyLinkCursor(_ date: Int?) {
+        klineDebug("[DualLink] applyLink \(period.rawValue) 进入 date=\(String(describing: date)) dragCursor=\(drag.cursorDragging) fromRight=\(linkSync.lastCursorFromRightUser) win=[\(startIndex)...\(endIndex)] sel=\(String(describing: selectedIndex))")
+        // 本视图正在被用户直接拖动光标（手势进行中）：忽略联动。
+        // 否则回声会把光标拽到别的K线，下一帧手指又拉回，产生"先出现在蜡烛图位置再闪到手指位置"的闪烁
+        if drag.cursorDragging { klineDebug("[DualLink] \(period.rawValue) 守卫1拖动中忽略"); return }
+        // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
+        linkUserDragging = false
+        // 该日期正是本视图当前光标所在日期 → 自己发布的，忽略，避免回环
+        if let idx = selectedIndex, idx < sortedData.count, sortedData[idx].date == date { klineDebug("[DualLink] \(period.rawValue) 守卫同日期忽略"); return }
+        // 左视图只响应「右侧用户直接操作」产生的位置光标；自身回声不响应。
+        // date == nil（取消）必须放行，否则右侧取消时左视图收不到、光标无法清除
+        if linkAutoCenter && date != nil && !linkSync.lastCursorFromRightUser { klineDebug("[DualLink] \(period.rawValue) 守卫2非右用户忽略"); return }
+        klineDebug("[DualLink] applyLink 进入 date=\(String(describing: date)) win=[\(startIndex)...\(endIndex)] n=\(sortedData.count) subs=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)] bgEnd=\(bgCoverageEnd)")
+        if let date {
+            if let idx = nearestIndex(to: date) {
+                // 仅当联动光标由「右侧用户直接操作」产生时才居中（避免左侧自身拖动被回声触发居中）
+                if linkAutoCenter && linkSync.lastCursorFromRightUser {
+                    // 始终居中：无论联动K线是否已在窗口内，都把窗口滚到使其居中显示
+                    let half = count / 2
+                    let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
+                    let newOffset = max(0, (sortedData.count - 1) - targetEnd)
+                    if newOffset != endOffset {
+                        endOffset = newOffset
+                        refreshCurves()
+                        startPrefetch()
+                    }
+                } else if idx < startIndex || idx > endIndex {
+                    // 非居中（右周线，或左侧回声）：仅当联动K线在窗口外才滚动，贴右边缘
+                    let targetEnd = min(sortedData.count - 1, max(idx, count - 1))
+                    endOffset = max(0, (sortedData.count - 1) - targetEnd)
+                    refreshCurves()
+                    startPrefetch()
+                }
+                selectedIndex = idx
+                crosshairY = nil   // 无真实触摸 y，交给 overlay 用主图中心渲染
+            }
+        } else {
+            selectedIndex = nil
+            crosshairY = nil
+        }
+        klineDebug("[DualLink] applyLink 结束 sel=\(String(describing: selectedIndex)) subs=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)]")
+        notifyHasCursor()
+    }
+
+    /// 找到日期与 target 最接近的 K 线索引（日/周视图跨周期联动用）
+    private func nearestIndex(to target: Int) -> Int? {
+        guard !sortedData.isEmpty else { return nil }
+        if let exact = sortedData.firstIndex(where: { $0.date == target }) { return exact }
+        var best = 0
+        var bestDiff = abs(sortedData[0].date - target)
+        for i in 1..<sortedData.count {
+            let d = abs(sortedData[i].date - target)
+            if d < bestDiff { bestDiff = d; best = i }
+        }
+        return best
     }
 
     private func refreshCurves(force: Bool = false) {

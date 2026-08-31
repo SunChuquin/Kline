@@ -335,7 +335,7 @@ def sort_like_windows(file_list):
 class TDXDataGenerator:
     def __init__(self, is_del: bool = False):
         self.db = './tdx.db'
-        self.base_path = '../data/'
+        self.base_path = '../../tdx_data/'
         self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}  # ✅ 新增：记录被跳过的文件
         self.date_cache = {}
 

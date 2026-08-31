@@ -108,6 +108,9 @@ struct KlineDataGroup: Identifiable {
 enum KlinePeriod: String, CaseIterable, Identifiable {
     case daily = "日线"
     case weekly = "周线"
+    case monthly = "月线"
+    case seasonal = "季线"
+    case yearly = "年线"
 
     var id: String { rawValue }
 }

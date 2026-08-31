@@ -148,6 +148,30 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// 读取指定标的全量月线数据（表不存在时返回空，忽略）
+    func fetchMonthlyData(metaId: Int) -> [KlineItem] {
+        fetchPeriodTable(metaId: metaId, table: "monthly")
+    }
+
+    /// 读取指定标的全量季线数据（表不存在时返回空，忽略）
+    func fetchSeasonalData(metaId: Int) -> [KlineItem] {
+        fetchPeriodTable(metaId: metaId, table: "seasonal")
+    }
+
+    /// 读取指定标的全量年线数据（表不存在时返回空，忽略）
+    func fetchYearlyData(metaId: Int) -> [KlineItem] {
+        fetchPeriodTable(metaId: metaId, table: "yearly")
+    }
+
+    /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空
+    private func fetchPeriodTable(metaId: Int, table: String) -> [KlineItem] {
+        dbQueue.sync {
+            guard let db = db else { return [] }
+            let query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? ORDER BY date DESC;"
+            return runBarsQuery(db: db, query: query, metaId: metaId)
+        }
+    }
+
     /// 统一执行 K 线查询并组装结果（需已在 dbQueue 上）
     private func runBarsQuery(db: OpaquePointer, query: String, metaId: Int) -> [KlineItem] {
         var statement: OpaquePointer?
