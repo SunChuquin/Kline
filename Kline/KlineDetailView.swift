@@ -302,13 +302,15 @@ struct KlineDetailView: View {
                 .frame(height: 0.5)
 
             // ---- 第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型） ----
-            HStack(spacing: 6) {
-                if dualLink {
-                    // 联动：把每个视图的(代码+周期)依次列出
-                    ForEach(linkedViews, id: \.index) { v in
-                        infoPill(code: v.displayCode, period: v.period.rawValue)
-                    }
-                } else {
+            if dualLink {
+                // 联动：按视图数量分格，每格显示对应视图的(代码+周期)，格子间用竖线分隔，
+                // 分隔位置与主图视图边界对齐（2视图用可调占比，3/4视图等分）
+                GeometryReader { geo in
+                    infoLinkedRow(width: geo.size.width)
+                }
+                .frame(height: 22)
+            } else {
+                HStack(spacing: 6) {
                     Text(item.name)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.black)
@@ -317,26 +319,52 @@ struct KlineDetailView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.gray)
                         .lineLimit(1)
-                }
-                Spacer()
-                if !dualLink {
+                    Spacer()
                     Text(item.type)
                         .font(.system(size: 10))
                         .foregroundColor(.gray)
                         .lineLimit(1)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 3)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 3)
         }
         .background(Color.white)
         .overlay(
-            // 信息栏与主图之间的分界线（工具栏与信息栏之间加一条）
+            // 信息栏与主图之间的分界线
             Rectangle()
                 .fill(Color.gray.opacity(0.3))
                 .frame(height: 0.5),
             alignment: .bottom
         )
+    }
+
+    /// 联动信息栏：按视图数等宽分格（与主图多视图边界对齐；2视图用已占比，3/4等分）
+    private func infoLinkedRow(width: CGFloat) -> some View {
+        let views = linkedViews
+        let count = views.count
+        let isTwo = count == 2
+        // 各视图左边界：2视图 [0, committed]，3/4视图等分；追加右边界 width
+        let bounds: [Double] = isTwo ? [0.0, config.dualSplitRatio, 1.0]
+                                     : (0...(count)).map { Double($0) / Double(count) }
+        return ZStack(alignment: .topLeading) {
+            // 各视图的标的信息（位于各自格子中央）
+            ForEach(views.indices, id: \.self) { i in
+                let left = CGFloat(bounds[i]) * width
+                let right = CGFloat(bounds[i + 1]) * width
+                infoPill(code: views[i].displayCode, period: views[i].period.rawValue)
+                    .frame(width: right - left, alignment: .center)
+            }
+            // 视图之间的竖直分隔线（去掉首尾边界线，与主图视图边界对齐）
+            ForEach(1..<count, id: \.self) { i in
+                let x = CGFloat(bounds[i]) * width
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 0.5)
+                    .position(x: x, y: 11)
+            }
+        }
+        .frame(width: width, height: 22)
     }
 
     /// 信息栏单个标的标签：代码 + 周期
