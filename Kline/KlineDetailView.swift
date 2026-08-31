@@ -9,6 +9,14 @@ import SwiftUI
 import Combine
 import UIKit
 
+/// 顶部第一行工具栏高度（供可拖分隔线覆盖层的起始偏移对齐）
+struct TopBarHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// 双联动分界线：独立持有拖动状态。
 /// 拖动中只更新本视图自身的 @State（只重画这条分隔线，实时跟随手指），
 /// 不触碰左右 K 线图宽度，因此不影响图表手势、也不会因拖动反复重渲染重型图表；
@@ -135,6 +143,8 @@ struct KlineDetailView: View {
     @State private var showResetLinkedConfirm = false
     /// 双视图联动同步（日线/周线图共享）
     @State private var linkSync = DualLinkSync()
+    /// 顶部第一行工具栏实测高度（用于信息栏起始位置对齐可拖覆盖层）
+    @State private var measuredTopBarHeight: CGFloat = 0
 
     init(item: MetaItem, onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
@@ -161,6 +171,12 @@ struct KlineDetailView: View {
         LinkedViewStore.shared.configs(for: item.id)
     }
 
+    /// 顶部留白 + 第一行工具栏高度（信息栏从该位置开始；覆盖层需精确对齐）
+    /// 用实测工具行高度 + 顶部 2 留白；未测得时回退 36
+    private var topToolbarAreaHeight: CGFloat {
+        (measuredTopBarHeight > 0 ? measuredTopBarHeight : 34) + 2
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
@@ -180,9 +196,11 @@ struct KlineDetailView: View {
                 .frame(maxHeight: .infinity)
                 .background(Color.white.ignoresSafeArea())
 
-                // 「边」开启时：可拖分隔线覆盖层横贯整页（含信息栏），实时拖拽调整各视图宽度
+                // 「边」开启时：可拖分隔线覆盖层从信息栏顶部开始，横贯信息栏+主图+副图+时间轴上一行+时间轴（不含顶部工具栏）
                 if dualLink && edgeAdjust {
                     linkedDividerOverlay(size: geometry.size)
+                        .offset(y: topToolbarAreaHeight)
+                        .frame(height: max(0, geometry.size.height - topToolbarAreaHeight))
                 }
             }
             .overlay {
@@ -191,6 +209,9 @@ struct KlineDetailView: View {
                         .transition(.opacity)
                         .zIndex(10)
                 }
+            }
+            .onPreferenceChange(TopBarHeightPreferenceKey.self) { h in
+                if h > 0 { measuredTopBarHeight = h }
             }
         }
         .onAppear {
@@ -323,6 +344,13 @@ struct KlineDetailView: View {
             .padding(.leading, 8)
             .padding(.trailing, 8)
             .padding(.vertical, 3)
+            // 测量第一行工具栏高度（供覆盖层起始偏移对齐；+顶部2留白在读取处加）
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: TopBarHeightPreferenceKey.self,
+                                           value: proxy.size.height)
+                }
+            )
 
             // 工具栏与信息栏之间的分界线
             Rectangle()
