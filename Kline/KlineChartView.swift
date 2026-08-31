@@ -554,6 +554,9 @@ struct KlineChartView: View {
     let showSubTwoSearchButton: Bool
     /// 副图二 🔍 按钮点击回调
     let onSubTwoSearch: (() -> Void)?
+    /// 信息栏「主图指标名称按钮」桥接：非 nil 时按钮不在图表内渲染，
+    /// 由外层（详情页信息栏最左侧）显示，标题/点击行为通过它同步
+    let mainLegendPortal: MainLegendPortal?
     /// 双视图联动同步（左日线/右周线共用；单视图时传入独立空对象，cursorDate 不变化、无副作用）。
     /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
     @ObservedObject var linkSync: DualLinkSync
@@ -657,6 +660,7 @@ struct KlineChartView: View {
          swapSubSwipeRoles: Bool = false,
          showSubTwoSearchButton: Bool = false,
          onSubTwoSearch: (() -> Void)? = nil,
+         mainLegendPortal: MainLegendPortal? = nil,
          linkSync: DualLinkSync? = nil) {
         self.series = series
         self.metaId = metaId
@@ -673,6 +677,7 @@ struct KlineChartView: View {
         self.swapSubSwipeRoles = swapSubSwipeRoles
         self.showSubTwoSearchButton = showSubTwoSearchButton
         self.onSubTwoSearch = onSubTwoSearch
+        self.mainLegendPortal = mainLegendPortal
         self.linkSync = linkSync ?? DualLinkSync()
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
@@ -1735,11 +1740,17 @@ struct KlineChartView: View {
         .onAppear {
             // 记录当前图表配置状态（周期/主图/副图/自定义），供外部读取 debug_log.txt 做自动化校验
             logChartState()
+            // 把主图指标按钮标题/点击行为同步给外层信息栏
+            syncMainLegendPortal()
             // 副图配置已持久化在共享仓库，无需重置
             refreshCurves()
             // 先显示当前可见窗口（不卡），随后分块预计算更久远历史指标
             startPrefetch()
             notifyHasCursor()
+        }
+        .onChange(of: mainLegendTitle) { _ in
+            // 指标配置/裸K/放大模式等引起标题变化时，同步给外层信息栏按钮
+            syncMainLegendPortal()
         }
         .onDisappear {
             // 视图被移除（切换周期/退出详情页）时停止本视图的预计算任务：
@@ -2976,10 +2987,14 @@ struct KlineChartView: View {
     private func mainLegendRow(height: CGFloat) -> some View {
         ZStack {
             HStack(spacing: 8) {
-                IndicatorNameButton(title: mainLegendTitle, onTap: {
-                    showSubSheet = false
-                    withAnimation { showMainSheet.toggle() }
-                })
+                // 指标名称按钮已挪到外层信息栏最左侧（经 mainLegendPortal 同步）；
+                // 未提供 portal 的旧用法仍在图表内渲染按钮
+                if mainLegendPortal == nil {
+                    IndicatorNameButton(title: mainLegendTitle, onTap: {
+                        showSubSheet = false
+                        withAnimation { showMainSheet.toggle() }
+                    })
+                }
                 if isBareK { legendText("裸K") }
                 ForEach(Array(mainCurves.enumerated()), id: \.offset) { _, line in
                     legendItem(line, mirrored: config.mainMirrored)
@@ -3067,6 +3082,16 @@ struct KlineChartView: View {
         if let a = activeCustomIndicator { parts.append(a.name) }
         if parts.isEmpty { return "\(period.rawValue): 裸K" }
         return "\(period.rawValue): \(parts.joined(separator: "/"))"
+    }
+
+    /// 把主图指标按钮的标题/点击行为同步给外层信息栏（提供 portal 时）
+    private func syncMainLegendPortal() {
+        guard let portal = mainLegendPortal else { return }
+        portal.title = mainLegendTitle
+        portal.onTap = {
+            self.showSubSheet = false
+            withAnimation { self.showMainSheet.toggle() }
+        }
     }
 
     /// 副图坐标数值格式化
@@ -3879,7 +3904,8 @@ func decimatedIndices(count: Int, step: Int) -> [Int] {
 }
 
 /// 指标名称按钮：单击立即切换选择面板；参数编辑入口在面板内
-private struct IndicatorNameButton: View {
+/// （信息栏也用它渲染主图指标按钮，故不对本文件私有）
+struct IndicatorNameButton: View {
     let title: String
     let onTap: () -> Void
 

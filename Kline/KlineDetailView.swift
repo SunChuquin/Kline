@@ -111,6 +111,16 @@ final class DualLinkSync: ObservableObject {
     var lastCursorFromRightUser = false
 }
 
+/// 信息栏「主图指标名称按钮」桥接：图表把按钮标题（如"日线: MA"）与点击行为
+/// （打开主图指标选择面板）同步给外层，外层在信息栏最左侧渲染按钮，
+/// 无需了解图表内部状态即可保证两处显示与交互一致
+final class MainLegendPortal: ObservableObject {
+    /// 按钮标题；图表未就绪/加载中时为空串
+    @Published var title: String = ""
+    /// 点击行为（打开主图指标选择面板）；由图表同步注入
+    var onTap: (() -> Void)? = nil
+}
+
 struct KlineDetailView: View {
     @ObservedObject private var databaseManager = DatabaseManager.shared
     @ObservedObject private var detailRouter = DetailRouter.shared
@@ -145,6 +155,10 @@ struct KlineDetailView: View {
     @State private var linkSync = DualLinkSync()
     /// 顶部第一行工具栏实测高度（用于信息栏起始位置对齐可拖覆盖层）
     @State private var measuredTopBarHeight: CGFloat = 0
+    /// 单视图：信息栏最左侧主图指标按钮的桥接（图表同步标题/点击行为）
+    @StateObject private var mainLegendPortal = MainLegendPortal()
+    /// 联动：各视图信息栏格子的按钮桥接（按视图 index 取用；最多支持 4 视图）
+    @State private var tilePortals: [MainLegendPortal] = (0..<4).map { _ in MainLegendPortal() }
 
     init(item: MetaItem, onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
@@ -375,6 +389,9 @@ struct KlineDetailView: View {
                 .frame(height: 22)
             } else {
                 HStack(spacing: 6) {
+                    // 主图指标名称按钮（从图表内指标栏挪到信息栏最左侧）
+                    IndicatorNameButton(title: mainLegendPortal.title,
+                                        onTap: { mainLegendPortal.onTap?() })
                     Text(item.name)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.black)
@@ -411,12 +428,14 @@ struct KlineDetailView: View {
         let dividers = config.dualDividers(for: count)
         let bounds = [0.0] + dividers + [1.0]
         return ZStack(alignment: .topLeading) {
-            // 各视图的标的信息（位于各自格子中央）
+            // 各视图格子：主图指标按钮（最左侧）+ 代码周期
             ForEach(views.indices, id: \.self) { i in
                 let left = CGFloat(bounds[i]) * width
                 let right = CGFloat(bounds[i + 1]) * width
-                infoPill(code: views[i].displayCode, period: views[i].period.rawValue)
-                    .frame(width: right - left, alignment: .center)
+                LinkedInfoCell(portal: tilePortal(at: i),
+                               code: views[i].displayCode,
+                               period: views[i].period.rawValue)
+                    .frame(width: right - left, height: 22, alignment: .leading)
             }
             // 视图之间的竖直分隔线（样式与主图一致）
             ForEach(1..<count, id: \.self) { i in
@@ -430,17 +449,9 @@ struct KlineDetailView: View {
         .frame(width: width, height: 22)
     }
 
-    /// 信息栏单个标的标签：代码 + 周期
-    private func infoPill(code: String, period: String) -> some View {
-        HStack(spacing: 3) {
-            Text(code)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.blue)
-            Text(period)
-                .font(.system(size: 10))
-                .foregroundColor(.gray)
-        }
-        .lineLimit(1)
+    /// 联动第 index 个视图的信息栏按钮桥接（越界兜底取最后一个，避免偶发崩溃）
+    private func tilePortal(at index: Int) -> MainLegendPortal {
+        tilePortals[min(max(index, 0), tilePortals.count - 1)]
     }
 
     private var chartArea: some View {
@@ -455,7 +466,8 @@ struct KlineDetailView: View {
                 } else if currentSeries == nil {
                     emptyDataView
                 } else if let s = currentSeries {
-                    chartView(series: s, period: config.selectedPeriod, linked: false)
+                    chartView(series: s, period: config.selectedPeriod, linked: false,
+                              mainLegendPortal: mainLegendPortal)
                 }
             }
         }
@@ -521,6 +533,7 @@ struct KlineDetailView: View {
                         ownerMetaID: item.id,
                         linkAutoCenter: v.index == 0,
                         suppressCrosshair: edgeAdjust,
+                        mainLegendPortal: tilePortal(at: v.index),
                         showCustomEditor: $showCustomEditor,
                         showSystemEditor: $showSystemEditor,
                         onCursorChange: { has in
@@ -769,7 +782,8 @@ struct KlineDetailView: View {
     }
 
     private func chartView(series: ChartSeries, period: KlinePeriod, linked: Bool, isolated: Bool = false,
-                           linkAutoCenter: Bool = false, suppressCrosshair: Bool = false) -> some View {
+                           linkAutoCenter: Bool = false, suppressCrosshair: Bool = false,
+                           mainLegendPortal: MainLegendPortal? = nil) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: period,
                        isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
@@ -799,6 +813,7 @@ struct KlineDetailView: View {
                            chartHasCursor = has
                        },
                        suppressCrosshair: suppressCrosshair,
+                       mainLegendPortal: mainLegendPortal,
                        linkSync: linked ? linkSync : nil)
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -829,6 +844,8 @@ struct KlineDetailView: View {
             return
         }
         isLoading = true
+        // 图表将重建，先清空信息栏按钮标题，避免短暂显示旧周期指标
+        mainLegendPortal.title = ""
 
         // 后台串行加载并预计算指标（全量历史），避免阻塞主线程。
         // 月/季/年线表可能不存在，不存在时对应查询返回空、series 为 nil，仅加载日/周线
@@ -871,5 +888,28 @@ struct KlineDetailView: View {
             // 是否已预计算、配置是否已过期，由 KlineChartView.prefetchOtherPeriod 内部判断
             KlineChartView.prefetchOtherPeriod(metaId: metaId, period: period, data: data)
         }
+    }
+}
+
+/// 联动信息栏单个格子：主图指标名称按钮（最左侧）+ 代码周期标签。
+/// 独立观察 portal，指标标题变化时只刷新本格子，不影响其它视图
+private struct LinkedInfoCell: View {
+    @ObservedObject var portal: MainLegendPortal
+    let code: String
+    let period: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            IndicatorNameButton(title: portal.title,
+                                onTap: { portal.onTap?() })
+            Text(code)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.blue)
+            Text(period)
+                .font(.system(size: 10))
+                .foregroundColor(.gray)
+        }
+        .lineLimit(1)
+        .padding(.leading, 4)
     }
 }

@@ -23,6 +23,8 @@ struct LinkedKlineTile: View {
     let linkAutoCenter: Bool
     /// 当前是否处于「边」边线调节（禁止十字光标）
     let suppressCrosshair: Bool
+    /// 信息栏「主图指标按钮」桥接（由详情页持有并渲染，本视图转交给图表同步标题/点击行为）
+    let mainLegendPortal: MainLegendPortal
 
     @Binding var showCustomEditor: Bool
     @Binding var showSystemEditor: Bool
@@ -74,6 +76,8 @@ struct LinkedKlineTile: View {
         let ticket = loadTicket + 1
         loadTicket = ticket
         isLoading = true
+        // 图表将重建，先清空信息栏按钮标题，避免短暂显示旧周期/旧标的指标
+        mainLegendPortal.title = ""
         DispatchQueue.global(qos: .userInitiated).async {
             let rows = databaseManager.fetchBars(metaId: view.metaID, period: view.period)
             DispatchQueue.main.async {
@@ -137,6 +141,7 @@ struct LinkedKlineTile: View {
                                searchFocused = true
                            }
                        },
+                       mainLegendPortal: mainLegendPortal,
                        linkSync: localLinkSync)
             .overlay {
                 if showSearch {

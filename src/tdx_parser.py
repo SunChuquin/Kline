@@ -343,8 +343,8 @@ def sort_like_windows(file_list):
 
 class TDXDataGenerator:
     def __init__(self, is_del: bool = False, is_demo: bool = False):
-        self.db = '../../tdx.db' if platform.system() == 'Windows' else '../../../../tdx.db'
-        self.base_path = '../../tdx_data/' if platform.system() == 'Windows' else '../../../../tdx_data/'
+        self.db = '../../tdx.db' if platform.system() != 'Windows' else '../../../../tdx.db'
+        self.base_path = '../../tdx_data/' if platform.system() != 'Windows' else '../../../../tdx_data/'
         self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}
         self.date_cache = {}
         self.is_demo = is_demo
