@@ -571,11 +571,13 @@ struct FormulaTextView: UIViewRepresentable {
 // MARK: - 系统指标公式编辑器（复用 IndicatorEditSheet 的系统指标模式）
 
 /// 系统指标公式编辑容器：主图可切换指标，副图固定当前指标。
-/// 保存写回 Documents/indicator/*.tdx；「恢复编译时内容」仅系统指标可用。
+/// 保存写回对该周期目录的 .tdx；「恢复编译时内容」仅系统指标可用。
 struct SystemIndicatorEditorContainer: View {
     let data: [KlineItem]
     /// true = 主图（可在所有 SCOPE=main 的 .tdx 指标间切换），false = 副图（固定 initialSubId）
     let isMain: Bool
+    /// 当前编辑的行情周期：写回/读取 Documents/indicator/<周期目录>/*.tdx
+    let period: KlinePeriod
     var onClose: () -> Void
     /// 保存成功回调：传入保存的指标 id（供外部重算）
     var onSaved: (String) -> Void
@@ -583,7 +585,7 @@ struct SystemIndicatorEditorContainer: View {
     /// 主图系统指标列表（数据驱动，来自 .tdx SCOPE=main），仅显示当前勾选启用的指标
     private var mainIds: [String] {
         let enabled = ChartConfigStore.shared.mainIndicators
-        return SystemIndicatorStore.shared.mainIndicatorDefs()
+        return SystemIndicatorStore.shared.mainIndicatorDefs(period: period)
             .map { $0.id }
             .filter { enabled.contains($0) }
     }
@@ -591,16 +593,17 @@ struct SystemIndicatorEditorContainer: View {
     @State private var mainId: String = "MA"
     @State private var subId: String
 
-    init(data: [KlineItem], isMain: Bool, initialSubId: String = "",
+    init(data: [KlineItem], isMain: Bool, period: KlinePeriod, initialSubId: String = "",
          onClose: @escaping () -> Void, onSaved: @escaping (String) -> Void) {
         self.data = data
         self.isMain = isMain
+        self.period = period
         self.onClose = onClose
         self.onSaved = onSaved
         _subId = State(initialValue: initialSubId)
         // 默认选勾选启用的第一个主图指标；若列表已不含 "MA"，兜底用列表首个
         let enabled = ChartConfigStore.shared.mainIndicators
-        let ids = SystemIndicatorStore.shared.mainIndicatorDefs().map { $0.id }.filter { enabled.contains($0) }
+        let ids = SystemIndicatorStore.shared.mainIndicatorDefs(period: period).map { $0.id }.filter { enabled.contains($0) }
         if !ids.isEmpty && !ids.contains("MA") {
             _mainId = State(initialValue: ids[0])
         }
@@ -634,14 +637,14 @@ struct SystemIndicatorEditorContainer: View {
                 onCancel: onClose,
                 onSave: { _ in },
                 isSystemIndicator: true,
-                systemInitialFormula: SystemIndicatorStore.shared.template(for: id) ?? "",
+                systemInitialFormula: SystemIndicatorStore.shared.template(for: id, period: period) ?? "",
                 canRestoreBuiltin: true,
                 onRestoreBuiltin: {
-                    guard SystemIndicatorStore.shared.restoreBuiltin(for: id) else { return nil }
-                    return SystemIndicatorStore.shared.template(for: id)
+                    guard SystemIndicatorStore.shared.restoreBuiltin(for: id, period: period) else { return nil }
+                    return SystemIndicatorStore.shared.template(for: id, period: period)
                 },
                 onSaveSystem: { template in
-                    if SystemIndicatorStore.shared.saveTemplate(template, for: id) {
+                    if SystemIndicatorStore.shared.saveTemplate(template, for: id, period: period) {
                         onSaved(id)
                     }
                     onClose()

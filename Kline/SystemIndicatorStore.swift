@@ -2,9 +2,11 @@
 //  SystemIndicatorStore.swift
 //  Kline
 //
-//  系统指标定义存储：内置公式模板随 App 打包（bundle/Indicators/*.tdx），
-//  首次启动复制到 Documents/indicator/*.tdx，之后优先从 Documents 加载，
-//  可通过 Finder / 文件 App 替换 Documents/indicator/*.tdx 单独更新指标公式，无需重装 App。
+//  系统指标定义存储：内置公式模板随 App 打包（bundle/Indicators/*.tdx）。
+//  按周期分目录存储：Documents/indicator/<周期目录名>/*.tdx，每个周期目录内都有一份内置模板的
+//  独立克隆副本（目录名取数据库周期表英文名：daily/weekly/monthly/quarterly/yearly）。
+//  这样不同周期即使选择同一指标，也能各自维护不同的指标参数（数据驱动：参数即 .tdx 模板内容）。
+//  每个周期的首启会用 bundle 内置模板初始化该周期目录；用户可通过文件 App 单独改某周期的 .tdx。
 //
 //  Created by 孙楚昆 on 2026/8/29.
 //
@@ -21,7 +23,7 @@ struct SystemIndicatorDef {
     let formulaTemplate: String    // 公式模板（固定值，不含占位符）
 }
 
-/// 系统指标仓库：加载并解析 .tdx 定义文件
+/// 系统指标仓库：按周期分目录加载并解析 .tdx 定义文件
 final class SystemIndicatorStore: ObservableObject {
     static let shared = SystemIndicatorStore()
 
@@ -31,20 +33,21 @@ final class SystemIndicatorStore: ObservableObject {
     /// 主图指标展示顺序（内置，用于选择页排序；是否为主图由 .tdx 的 SCOPE= 决定）
     static let mainOrder: [String] = ["MA", "EMA", "BOLL", "CMK", "SAR"]
 
-    /// 已加载的定义（key = 指标 id）
-    @Published var defs: [String: SystemIndicatorDef] = [:]
+    /// 已加载的定义：key = 周期目录名（daily...），value = 该周期的 {指标 id: 定义}
+    @Published var defs: [String: [String: SystemIndicatorDef]] = [:]
 
-    /// Documents 下可写的指标目录
-    static var writableDir: String {
+    /// Documents 下某个周期的可写指标目录（Documents/indicator/<周期目录名>）
+    static func writableDir(for period: KlinePeriod) -> String {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("indicator", isDirectory: true).path
+        return docs.appendingPathComponent("indicator", isDirectory: true)
+            .appendingPathComponent(period.folderName, isDirectory: true).path
     }
 
     private let builtinSubdir = "Indicators"
     private let fileExt = "tdx"
 
     private init() {
-        load()
+        loadAllPeriods()
     }
 
     /// 解析 .tdx 内容（NAME= / SCOPE= / GROUP= / FORMULA: 后为多行模板）
@@ -80,40 +83,36 @@ final class SystemIndicatorStore: ObservableObject {
                                   formulaTemplate: template.joined(separator: "\n"))
     }
 
-    private func load() {
+    /// 为所有周期建立目录、同步内置模板并加载各自的定义。
+    /// 迁移策略：每个周期目录直接用 bundle 内置模板初始化（忽略旧的扁平 Documents/indicator 副本）。
+    private func loadAllPeriods() {
         let fm = FileManager.default
-        let dir = Self.writableDir
-        // 目录不存在时创建
-        if !fm.fileExists(atPath: dir) {
-            try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        }
-        // 每次加载都同步 bundle 中沙盒尚缺的模板：新增的 .tdx 也会被复制进来；
-        // copyBuiltin 只复制沙盒不存在的文件，已存在的用户修改副本不会被覆盖。
-        copyBuiltin(to: dir)
-        // 解析 Documents/indicator/*.tdx
-        var result: [String: SystemIndicatorDef] = [:]
-        if let files = try? fm.contentsOfDirectory(atPath: dir) {
-            for f in files where f.hasSuffix(".\(fileExt)") {
-                let id = (f as NSString).deletingPathExtension
-                let path = dir + "/" + f
-                var content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-                // 迁移旧版模板：若沙盒副本仍含 {占位符}，或副图模板缺少 GROUP 分组行，
-                // 用内置固定值模板覆盖，保证新逻辑生效且用户可在此基础上继续编辑
-                let isSub = content.contains("SCOPE=sub") || content.contains("SCOPE=SUB")
-                let needsRefresh = content.contains("{") || (isSub && !content.contains("GROUP="))
-                if needsRefresh, let builtin = builtinContent(for: id) {
-                    try? builtin.write(toFile: path, atomically: true, encoding: .utf8)
-                    content = builtin
-                }
-                if let def = parse(content: content, id: id) {
-                    result[id] = def
+        var result: [String: [String: SystemIndicatorDef]] = [:]
+        for period in KlinePeriod.allCases {
+            let dir = Self.writableDir(for: period)
+            if !fm.fileExists(atPath: dir) {
+                try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            }
+            // 每次加载都同步 bundle 中该周期目录尚缺的模板：新增的 .tdx 也会被复制进来；
+            // copyBuiltin 只复制不存在的文件，已存在的用户修改副本不会被覆盖。
+            copyBuiltin(to: dir)
+            var section: [String: SystemIndicatorDef] = [:]
+            if let files = try? fm.contentsOfDirectory(atPath: dir) {
+                for f in files where f.hasSuffix(".\(fileExt)") {
+                    let id = (f as NSString).deletingPathExtension
+                    let path = dir + "/" + f
+                    let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                    if let def = parse(content: content, id: id) {
+                        section[id] = def
+                    }
                 }
             }
+            result[period.folderName] = section
         }
         defs = result
     }
 
-    /// 复制内置模板到 Documents/indicator
+    /// 复制内置模板到指定周期目录
     private func copyBuiltin(to dir: String) {
         let fm = FileManager.default
         // 兼容两种打包方式：打包进 Indicators/ 子目录，或按通配符扁平化到 bundle 根目录
@@ -129,7 +128,7 @@ final class SystemIndicatorStore: ObservableObject {
         }
     }
 
-    /// 读取 bundle 内内置模板内容（用于恢复编译时内容 / 旧占位符模板迁移）
+    /// 读取 bundle 内内置模板内容（用于恢复编译时内容）
     private func builtinContent(for id: String) -> String? {
         var url = Bundle.main.url(forResource: id, withExtension: fileExt, subdirectory: builtinSubdir)
         if url == nil { url = Bundle.main.url(forResource: id, withExtension: fileExt, subdirectory: nil) }
@@ -137,9 +136,14 @@ final class SystemIndicatorStore: ObservableObject {
         return try? String(contentsOf: url, encoding: .utf8)
     }
 
-    /// 用参数替换公式模板中的 {key} 占位符，返回可直接求值的公式
-    func formula(for id: String, values: [String: String]) -> String? {
-        guard let def = defs[id] else { return nil }
+    /// 某周期的全部定义
+    func defs(for period: KlinePeriod) -> [String: SystemIndicatorDef] {
+        defs[period.folderName] ?? [:]
+    }
+
+    /// 用参数替换公式模板中的 {key} 占位符，返回可直接求值的公式（只查该周期的定义）
+    func formula(for id: String, values: [String: String], period: KlinePeriod) -> String? {
+        guard let def = defs(for: period)[id] else { return nil }
         var s = def.formulaTemplate
         for (k, v) in values {
             s = s.replacingOccurrences(of: "{\(k)}", with: v)
@@ -147,14 +151,14 @@ final class SystemIndicatorStore: ObservableObject {
         return s
     }
 
-    /// 当前（Documents 中可写副本的）公式模板（仅 FORMULA 部分）
-    func template(for id: String) -> String? {
-        defs[id]?.formulaTemplate
+    /// 某周期可写副本的（仅 FORMULA 部分）公式模板
+    func template(for id: String, period: KlinePeriod) -> String? {
+        defs(for: period)[id]?.formulaTemplate
     }
 
-    /// 所有副图 .tdx 定义（SCOPE=sub），按组序 + id 排序，供选择页数据驱动展示分组
-    func subIndicatorDefs() -> [SystemIndicatorDef] {
-        defs.values
+    /// 该周期所有副图 .tdx 定义（SCOPE=sub），按组序 + id 排序
+    func subIndicatorDefs(period: KlinePeriod) -> [SystemIndicatorDef] {
+        defs(for: period).values
             .filter { $0.scope == .sub }
             .sorted { a, b in
                 let ia = Self.subGroupOrder.firstIndex(of: a.group) ?? Int.max
@@ -164,9 +168,9 @@ final class SystemIndicatorStore: ObservableObject {
             }
     }
 
-    /// 所有主图 .tdx 定义（SCOPE=main），按 mainOrder + id 排序，供主图选择页数据驱动展示
-    func mainIndicatorDefs() -> [SystemIndicatorDef] {
-        defs.values
+    /// 该周期所有主图 .tdx 定义（SCOPE=main），按 mainOrder + id 排序
+    func mainIndicatorDefs(period: KlinePeriod) -> [SystemIndicatorDef] {
+        defs(for: period).values
             .filter { $0.scope == .main }
             .sorted { a, b in
                 let ia = Self.mainOrder.firstIndex(of: a.id) ?? Int.max
@@ -176,46 +180,41 @@ final class SystemIndicatorStore: ObservableObject {
             }
     }
 
-    /// 把所有新公式模板写回 Documents/indicator/<id>.tdx（保留 NAME/SCOPE/GROUP 头），并重载。
-    /// 保存成功后 defs 立即更新，图表重算即可生效。
+    /// 把新公式模板写回该周期的 Documents/indicator/<周期目录>/<id>.tdx，并重载。
     @discardableResult
-    func saveTemplate(_ template: String, for id: String) -> Bool {
-        guard let def = defs[id] else { return false }
+    func saveTemplate(_ template: String, for id: String, period: KlinePeriod) -> Bool {
+        guard let def = defs(for: period)[id] else { return false }
         let scopeStr = def.scope == .main ? "main" : "sub"
         let groupLine = def.group.isEmpty ? "" : "GROUP=\(def.group)\n"
         let content = "NAME=\(def.name)\nSCOPE=\(scopeStr)\n\(groupLine)FORMULA:\n\(template)"
-        return write(content, for: id)
+        return write(content, for: id, period: period)
     }
 
-    /// 恢复该指标的「编译时内容」：把内置打包模板复制回 Documents/indicator/<id>.tdx，并重载。
+    /// 恢复该指标在该周期的「编译时内容」：把内置打包模板复制回该周期目录的 .tdx，并重载。
     @discardableResult
-    func restoreBuiltin(for id: String) -> Bool {
-        var src = Bundle.main.url(forResource: id, withExtension: fileExt, subdirectory: builtinSubdir)
-        if src == nil { src = Bundle.main.url(forResource: id, withExtension: fileExt, subdirectory: nil) }
-        guard let src,
-              let content = try? String(contentsOf: src, encoding: .utf8) else { return false }
-        return write(content, for: id)
+    func restoreBuiltin(for id: String, period: KlinePeriod) -> Bool {
+        guard let content = builtinContent(for: id) else { return false }
+        return write(content, for: id, period: period)
     }
 
-    /// 重置所有内置指标为「编译时内容」：把 bundle 内每个内置 .tdx 覆盖写回 Documents。
-    /// 返回是否全部成功。用户自建（bundle 无对应源）的 .tdx 不受影响。
+    /// 重置该周期所有内置指标为「编译时内容」：把 bundle 内每个内置 .tdx 覆盖写回该周期目录。
     @discardableResult
-    func restoreAllBuiltin() -> Bool {
+    func restoreAllBuiltin(period: KlinePeriod) -> Bool {
         var urls = Bundle.main.urls(forResourcesWithExtension: fileExt, subdirectory: builtinSubdir) ?? []
         if urls.isEmpty { urls = Bundle.main.urls(forResourcesWithExtension: fileExt, subdirectory: nil) ?? [] }
         var ok = true
         for src in urls {
             guard let content = try? String(contentsOf: src, encoding: .utf8) else { ok = false; continue }
             let id = src.deletingPathExtension().lastPathComponent
-            if !write(content, for: id) { ok = false }
+            if !write(content, for: id, period: period) { ok = false }
         }
         return ok
     }
 
-    /// 写入 Documents/indicator/<id>.tdx 并重载（重载成功后 defs 更新）
-    private func write(_ content: String, for id: String) -> Bool {
+    /// 写入某周期目录的 .tdx 并重载该周期定义
+    private func write(_ content: String, for id: String, period: KlinePeriod) -> Bool {
         let fm = FileManager.default
-        let dir = Self.writableDir
+        let dir = Self.writableDir(for: period)
         try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let path = dir + "/\(id).tdx"
         do {
@@ -223,7 +222,27 @@ final class SystemIndicatorStore: ObservableObject {
         } catch {
             return false
         }
-        load()
-        return defs[id] != nil
+        reload(period: period)
+        return defs(for: period)[id] != nil
+    }
+
+    /// 重新加载单个周期的定义
+    private func reload(period: KlinePeriod) {
+        let fm = FileManager.default
+        let dir = Self.writableDir(for: period)
+        var section: [String: SystemIndicatorDef] = [:]
+        if let files = try? fm.contentsOfDirectory(atPath: dir) {
+            for f in files where f.hasSuffix(".\(fileExt)") {
+                let id = (f as NSString).deletingPathExtension
+                let path = dir + "/" + f
+                let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                if let def = parse(content: content, id: id) {
+                    section[id] = def
+                }
+            }
+        }
+        var all = defs
+        all[period.folderName] = section
+        defs = all
     }
 }

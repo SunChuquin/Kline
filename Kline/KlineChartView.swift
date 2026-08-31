@@ -294,12 +294,13 @@ struct MainIndicatorEntry {
 private func mainIndicatorEntries(store: SystemIndicatorStore,
                                   customStore: CustomIndicatorStore,
                                   config: ChartConfigStore,
-                                  customFormula: String?) -> [MainIndicatorEntry] {
+                                  customFormula: String?,
+                                  period: KlinePeriod) -> [MainIndicatorEntry] {
     guard !config.showBareK else { return [] }
     var entries: [MainIndicatorEntry] = []
-    for def in store.mainIndicatorDefs() where config.mainIndicators.contains(def.id) {
+    for def in store.mainIndicatorDefs(period: period) where config.mainIndicators.contains(def.id) {
         entries.append(MainIndicatorEntry(id: def.id,
-                                          formula: store.formula(for: def.id, values: [:]) ?? "",
+                                          formula: store.formula(for: def.id, values: [:], period: period) ?? "",
                                           isCustom: false))
     }
     if let customFormula {
@@ -598,7 +599,7 @@ struct KlineChartView: View {
         // 仅当缓存所用指标配置指纹与当前一致时才恢复，否则视为无效、按新配置重新计算
         if let metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
-            let fingerprint = Self.currentConfigFingerprint()
+            let fingerprint = Self.currentConfigFingerprint(period: self.period)
             if entry.configFingerprint == fingerprint {
                 _mainCurves = State(initialValue: entry.mainCurves)
                 _mainCache = State(initialValue: entry.mainCache)
@@ -823,7 +824,7 @@ struct KlineChartView: View {
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
         if bgCoverageEnd >= endIndex, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
-            if entry.configFingerprint == Self.currentConfigFingerprint(),
+            if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
                entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty {
                 mainCurves = entry.mainCurves
                 mainCache = entry.mainCache
@@ -849,7 +850,8 @@ struct KlineChartView: View {
 
             // 数据驱动：主图指标集合来自 .tdx（SCOPE=main），只计算已启用的，按输出行缓存
             let entries = mainIndicatorEntries(store: store, customStore: customStore,
-                                               config: config, customFormula: custom?.formula)
+                                               config: config, customFormula: custom?.formula,
+                                               period: self.period)
             let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID }?.color
             let activeIDs = Set(entries.map { $0.id })
             for entry in entries {
@@ -873,7 +875,7 @@ struct KlineChartView: View {
         // 写回 (标的, 周期) 缓存：切走再回来时恢复主图曲线与覆盖状态，不重复计算
         if let metaId = metaId {
             let store = ChartCacheStore.shared
-            let fp = Self.currentConfigFingerprint()
+            let fp = Self.currentConfigFingerprint(period: self.period)
             // 配置已变：先失效旧缓存（清完成标记/覆盖/曲线），避免旧配置的“已完成”被误用
             if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
                 // 本视图预计算进度也归零，避免写回 max 把缓存覆盖末端顶回旧值（否则恢复后 bgCovered 误判、副图空白）
@@ -966,7 +968,7 @@ struct KlineChartView: View {
         if bgCoverageEnd >= endIndex, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
-            if entry.configFingerprint == Self.currentConfigFingerprint(),
+            if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
                entry.bgCoverageEnd >= endIndex,
                let curves = entry.subCurves[slot], !curves.isEmpty,
                curves.allSatisfy({ $0.values.count == sortedData.count }) {
@@ -1026,7 +1028,7 @@ struct KlineChartView: View {
             }
         } else {
                 // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
-                if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:]),
+                if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: self.period),
                    let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
                     for (i, line) in lines.enumerated() {
                         guard !allNaN(line.values) else { continue }
@@ -1053,7 +1055,7 @@ struct KlineChartView: View {
         // 写回 (标的, 周期) 缓存：副图曲线按槽位存储，切回该周期时直接恢复
         if let metaId = metaId {
             let store = ChartCacheStore.shared
-            let fp = Self.currentConfigFingerprint()
+            let fp = Self.currentConfigFingerprint(period: self.period)
             // 配置已变：失效旧缓存并同步本地覆盖状态，取消旧后台任务后用新配置重启，
             // 否则本地 bgCoverageEnd 保持旧大值会导致 startPrefetch 误判已算完而跳过重算
             if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
@@ -1530,7 +1532,7 @@ struct KlineChartView: View {
             }
             .overlay {
                 if showSystemEditor, let isMain = systemEditorIsMain {
-                    SystemIndicatorEditorContainer(data: sortedData, isMain: isMain, initialSubId: systemEditorSubId) {
+                    SystemIndicatorEditorContainer(data: sortedData, isMain: isMain, period: self.period, initialSubId: systemEditorSubId) {
                         showSystemEditor = false
                     } onSaved: { _ in
                         if isMain {
@@ -1735,7 +1737,7 @@ struct KlineChartView: View {
         if let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             if entry.prefetchDone, entry.bgCoverageEnd >= sortedData.count - 1,
-               entry.configFingerprint == Self.currentConfigFingerprint() { return }
+               entry.configFingerprint == Self.currentConfigFingerprint(period: self.period) { return }
         }
         // 标记缓存条目正在预计算，避免后台「其它周期预计算」对该周期重复启动
         if let metaId = metaId {
@@ -1850,7 +1852,8 @@ struct KlineChartView: View {
         // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按顺序生成公式与 id，
         // 保证后台结果与提交组装的索引严格一一对应，避免中途配置变化导致错位
         let entries = mainIndicatorEntries(store: store, customStore: customStore,
-                                           config: config, customFormula: activeCustomIndicator?.formula)
+                                           config: config, customFormula: activeCustomIndicator?.formula,
+                                           period: self.period)
         let main = entries.map { $0.formula }
         let mainIDs = entries.map { $0.id }
         // 副图（3 个，与 subTop/subBottom/subThird 对应）
@@ -1859,7 +1862,7 @@ struct KlineChartView: View {
             let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
             let isCustom = m.activeCustomID != nil && customInd != nil
             let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:])
+            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:], period: self.period)
             subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
         }
         return PrefetchCalcRequest(calcStart: calcStart, calcEnd: calcEnd, data: data,
@@ -1976,7 +1979,7 @@ struct KlineChartView: View {
         // 写回 (标的, 周期) 缓存：后台正确结果落盘，切走再回来直接恢复
         if let metaId = metaId {
             let store = ChartCacheStore.shared
-            let fp = Self.currentConfigFingerprint()
+            let fp = Self.currentConfigFingerprint(period: self.period)
             store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp)
             let e = store.entry(for: metaId, period: period)
             e.mainCurves = mainCurves
@@ -1996,7 +1999,7 @@ struct KlineChartView: View {
 
     /// 当前指标配置指纹：主图开关/参数 + 三个副图指标与参数（含自定义指标公式）。
     /// 用于判断某 (标的, 周期) 的缓存是否仍与当前配置一致：配置变了 → 缓存视为无效、重算。
-    static func currentConfigFingerprint() -> String {
+    static func currentConfigFingerprint(period: KlinePeriod) -> String {
         let config = ChartConfigStore.shared
         let customStore = CustomIndicatorStore.shared
         let store = SystemIndicatorStore.shared
@@ -2005,7 +2008,7 @@ struct KlineChartView: View {
         let customID = config.activeCustomIndicatorID
         let custom = customStore.indicators.first { $0.id == customID }
         let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
-                                           customFormula: custom?.formula)
+                                           customFormula: custom?.formula, period: period)
         parts.append(entries.map { "\($0.id)::\($0.formula)" }.joined(separator: "§"))
         // 副图：3 个槽位，含指标类型、公式（VOL/AMO 量均线周期）
         for m in [config.subTop, config.subBottom, config.subThird] {
@@ -2017,7 +2020,7 @@ struct KlineChartView: View {
             } else if m.kind == "VOL" || m.kind == "AMO" {
                 s += "|" + volMAFixedPeriods.map(String.init).joined(separator: ",")
             } else {
-                s += "|" + (store.formula(for: m.kind, values: [:]) ?? "")
+                s += "|" + (store.formula(for: m.kind, values: [:], period: period) ?? "")
             }
             parts.append(s)
         }
@@ -2031,7 +2034,7 @@ struct KlineChartView: View {
     static func prefetchOtherPeriod(metaId: Int, period: KlinePeriod, data: [KlineItem]) {
         guard !data.isEmpty else { return }
         let cache = ChartCacheStore.shared
-        let currentFP = currentConfigFingerprint()
+        let currentFP = currentConfigFingerprint(period: period)
         // 配置已变化：先使旧缓存失效，避免旧配置的「已完成」被误判为无需计算
         cache.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: currentFP)
         let entry = cache.entry(for: metaId, period: period)
@@ -2041,14 +2044,14 @@ struct KlineChartView: View {
         entry.isPrefetching = true
         // 记录本次计算所用的配置指纹，供恢复时校验是否已过期
         let fingerprint = currentFP
-        guard let req = makeFullRequest(data: data) else { entry.isPrefetching = false; return }
+        guard let req = makeFullRequest(data: data, period: period) else { entry.isPrefetching = false; return }
         let result = Task.detached(priority: .utility) {
             Self.evaluatePrefetch(req)
         }
         Task { @MainActor in
             let r = await result.value
             // 计算期间指标配置可能已变化：与本次快照不一致时丢弃旧配置结果，避免污染缓存
-            guard currentConfigFingerprint() == fingerprint else {
+            guard currentConfigFingerprint(period: period) == fingerprint else {
                 entry.isPrefetching = false
                 return
             }
@@ -2059,7 +2062,7 @@ struct KlineChartView: View {
     }
 
     /// 构造指定 (标的, 周期) 全量指标计算请求（公式与可见视图完全一致，读取共享配置）
-    private static func makeFullRequest(data: [KlineItem]) -> PrefetchCalcRequest? {
+    private static func makeFullRequest(data: [KlineItem], period: KlinePeriod) -> PrefetchCalcRequest? {
         guard !data.isEmpty else { return nil }
         let config = ChartConfigStore.shared
         let customStore = CustomIndicatorStore.shared
@@ -2070,7 +2073,7 @@ struct KlineChartView: View {
         let customID = config.activeCustomIndicatorID
         let custom = customStore.indicators.first { $0.id == customID }
         let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
-                                           customFormula: custom?.formula)
+                                           customFormula: custom?.formula, period: period)
         let main = entries.map { $0.formula }
         let mainIDs = entries.map { $0.id }
         // 副图（3 个，与 subTop/subBottom/subThird 对应）
@@ -2079,7 +2082,7 @@ struct KlineChartView: View {
             let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
             let isCustom = m.activeCustomID != nil && customInd != nil
             let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:])
+            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:], period: period)
             subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
         }
         return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
@@ -2884,7 +2887,7 @@ struct KlineChartView: View {
         if isBareK { return "\(period.rawValue): 裸K" }
         let store = SystemIndicatorStore.shared
         var parts: [String] = []
-        for def in store.mainIndicatorDefs() where config.mainIndicators.contains(def.id) {
+        for def in store.mainIndicatorDefs(period: self.period) where config.mainIndicators.contains(def.id) {
             parts.append(def.name)
         }
         if let a = activeCustomIndicator { parts.append(a.name) }
@@ -3210,7 +3213,7 @@ struct KlineChartView: View {
     private var gridColumns: [GridItem] { [GridItem(.adaptive(minimum: 80), spacing: 8)] }
 
     /// 主图选择页数据驱动指标列表（来自 .tdx SCOPE=main）
-    private var mainIndicatorDefsForSheet: [SystemIndicatorDef] { SystemIndicatorStore.shared.mainIndicatorDefs() }
+    private var mainIndicatorDefsForSheet: [SystemIndicatorDef] { SystemIndicatorStore.shared.mainIndicatorDefs(period: self.period) }
     private var mainCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .main } }
 
     private func toggleMain(_ id: String) {
@@ -3287,7 +3290,7 @@ struct KlineChartView: View {
 
                     // 公式式系统指标（有 .tdx 模板，如 MACD/KDJ）才提供公式编辑；VOL/AMO 无模板不提供
                     if !m.isCustom,
-                       SystemIndicatorStore.shared.template(for: m.kind) != nil {
+                       SystemIndicatorStore.shared.template(for: m.kind, period: self.period) != nil {
                         paramEntryRow(title: "\(m.kind) 公式编辑") {
                             showSubSheet = false
                             systemEditorIsMain = false
@@ -3322,7 +3325,7 @@ struct KlineChartView: View {
         map["量能", default: []].append("VOL")
         map["量能", default: []].append("AMO")
         // .tdx 副图：GROUP 取自定义的 tdx 字段
-        for def in store.subIndicatorDefs() {
+        for def in store.subIndicatorDefs(period: self.period) {
             let g = def.group.isEmpty ? "其他" : def.group
             map[g, default: []].append(def.id)
         }
@@ -3436,7 +3439,7 @@ struct KlineChartView: View {
 
     /// 重置所有内置指标为编译时内容，并立即重算主图与三个副图
     private func performResetBuiltin() {
-        SystemIndicatorStore.shared.restoreAllBuiltin()
+        SystemIndicatorStore.shared.restoreAllBuiltin(period: self.period)
         recomputeMainCurves(force: true)
         for m in [subTop, subBottom, subThird] { recomputeSub(m, force: true) }
     }

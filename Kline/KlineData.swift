@@ -113,6 +113,18 @@ enum KlinePeriod: String, CaseIterable, Identifiable {
     case yearly = "年线"
 
     var id: String { rawValue }
+
+    /// 沙盒指示器目录中的周期文件夹名（与数据库周期表英文名一致）。
+    /// 用于「按周期分目录」存储/加载各自独立的指标模板与参数。
+    var folderName: String {
+        switch self {
+        case .daily: return "daily"
+        case .weekly: return "weekly"
+        case .monthly: return "monthly"
+        case .quarterly: return "quarterly"
+        case .yearly: return "yearly"
+        }
+    }
 }
 
 /// 图表图层显示设置（由设置面板控制，绑定传入 K 线图）
