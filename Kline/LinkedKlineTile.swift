@@ -53,7 +53,7 @@ struct LinkedKlineTile: View {
         ZStack(alignment: .topLeading) {
             Group {
                 // 仅当数据(标的,周期)与当前视图一致时显示图表，否则转加载/空，杜绝错配
-                if isLoading || loadedKey != (view.metaID, view.period) {
+                if isLoading || loadedKey != .some((view.metaID, view.period)) {
                     Color.white
                         .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
                 } else if let series = chartSeries {
@@ -105,7 +105,7 @@ struct LinkedKlineTile: View {
         loadTicket = ticket
         let targetKey = (view.metaID, view.period)
         // 同步先清掉与当前不匹配的旧数据，避免「新周期身份 + 旧周期数据」渲染
-        if loadedKey != targetKey {
+        if loadedKey != .some(targetKey) {
             chartSeries = nil
             loadedKey = nil
         }
