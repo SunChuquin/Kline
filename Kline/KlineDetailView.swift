@@ -338,7 +338,7 @@ struct KlineDetailView: View {
     /// 分界线是独立子视图，拖动时只重画分隔线本身（实时跟随、不重渲染左右图表，也不干扰图表手势），
     /// 松手才一次性把最终比例写入 config，图表随之调整。
     /// 双联动：按 LinkedViewStore 的配置横向排布 2/3/4 个视图（每个视图独立标的+周期）。
-    /// 视图之间以细分界线分隔；副图一切标的、副图二切周期（由 LinkedKlineTile 内部接管）。
+    /// 视图之间以细分界线分隔；副图一切周期、副图二切标的（由 LinkedKlineTile 内部接管）。
     /// 2 个视图时「边」开启可拖动分界线调节左视图占比（保持既有功能）；3/4 视图等宽排列、仅显示划分界线。
     private func dualLinkArea() -> some View {
         GeometryReader { geo in

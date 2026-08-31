@@ -3,7 +3,7 @@
 //  Kline
 //
 //  联动多视图中的单个视图块：持有独立(标的,周期)，自行加载该标的该周期的数据，
-//  并渲染 KlineChartView。副图一滑动切标的、副图二滑动切周期（联动态交换角色），
+//  并渲染 KlineChartView。副图一滑动切周期、副图二滑动切标的（与常规一致），
 //  副图二指标栏最右侧提供 🔍 搜索（覆盖式搜索栏 + 系统键盘）。
 //
 //  Created by 孙楚昆 on 2026/8/31.
@@ -119,7 +119,7 @@ struct LinkedKlineTile: View {
                        pinEnabled: .constant(false),
                        onHasCursorChange: onCursorChange,
                        suppressCrosshair: suppressCrosshair,
-                       swapSubSwipeRoles: true,
+                       swapSubSwipeRoles: false,
                        showSubTwoSearchButton: true,
                        onSubTwoSearch: {
                            showSearch = true
