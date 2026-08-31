@@ -36,6 +36,10 @@ struct LinkedKlineTile: View {
     /// 本视图标的对应的数据（按当前 view.metaID+period 加载）
     @State private var chartSeries: ChartSeries? = nil
     @State private var isLoading = true
+    /// 当前加载的(标的,周期)，用于校验 chartSeries 是否仍与 view 同步
+    @State private var loadedKey: (Int, KlinePeriod)? = nil
+    /// 递增加载序号：丢弃过期异步结果，避免快速切周期时旧结果覆盖新周期数据
+    @State private var loadTicket = 0
 
     /// 副图二 🔍 搜索栏是否展开
     @State private var showSearch = false
@@ -48,7 +52,8 @@ struct LinkedKlineTile: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Group {
-                if isLoading {
+                // 仅当数据(标的,周期)与当前视图一致时显示图表，否则转加载/空，杜绝错配
+                if isLoading || loadedKey != (view.metaID, view.period) {
                     Color.white
                         .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
                 } else if let series = chartSeries {
@@ -96,11 +101,22 @@ struct LinkedKlineTile: View {
             isLoading = true
             return
         }
+        let ticket = loadTicket + 1
+        loadTicket = ticket
+        let targetKey = (view.metaID, view.period)
+        // 同步先清掉与当前不匹配的旧数据，避免「新周期身份 + 旧周期数据」渲染
+        if loadedKey != targetKey {
+            chartSeries = nil
+            loadedKey = nil
+        }
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
             let rows = databaseManager.fetchBars(metaId: view.metaID, period: view.period)
             DispatchQueue.main.async {
+                // 只有仍是最新一轮、且请求的(标的,周期)与当前一致才写入，否则丢弃
+                guard self.loadTicket == ticket, self.view.metaID == targetKey.0, self.view.period == targetKey.1 else { return }
                 self.chartSeries = rows.isEmpty ? nil : ChartSeries(data: rows)
+                self.loadedKey = (self.view.metaID, self.view.period)
                 self.isLoading = false
             }
         }
