@@ -1459,6 +1459,17 @@ struct KlineChartView: View {
         onPeriodSwitch(cases[target])
     }
 
+    /// 记录当前图表的周期与指标配置状态到沙盒 debug_log.txt（供外部自动化校验）
+    private func logChartState() {
+        let mains = config.mainIndicators(for: self.period).sorted().joined(separator: ",")
+        let subs = config.subSelections(for: self.period)
+            .map { sel in sel.customID.map { "\(sel.kind)#\(String($0.uuidString.prefix(8)))" } ?? sel.kind }
+            .joined(separator: ",")
+        let custom = config.activeCustomIndicatorID(for: self.period)
+            .map { String($0.uuidString.prefix(8)) } ?? "无"
+        DebugLogger.shared.log("图表出现 标的:\(metaId.map(String.init) ?? "无") 周期:\(self.period.rawValue) 主图:[\(mains)] 副图:[\(subs)] 自定义:\(custom)")
+    }
+
     /// 某方向是否存在可切换的周期（-1 更小 / +1 更大），用于副图滑动方向提示
     private func canSwitchPeriod(_ dir: Int) -> Bool {
         let cases = KlinePeriod.allCases
@@ -1722,6 +1733,8 @@ struct KlineChartView: View {
         }
         .background(Color.white)
         .onAppear {
+            // 记录当前图表配置状态（周期/主图/副图/自定义），供外部读取 debug_log.txt 做自动化校验
+            logChartState()
             // 副图配置已持久化在共享仓库，无需重置
             refreshCurves()
             // 先显示当前可见窗口（不卡），随后分块预计算更久远历史指标

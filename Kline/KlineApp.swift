@@ -14,6 +14,7 @@ struct KlineApp: App {
 
     init() {
         print("[Kline] 启动构建版本: \(KlineApp.appVersion)")
+        DebugLogger.shared.log("== App 启动 == 版本:\(KlineApp.appVersion)")
     }
 
     var body: some Scene {

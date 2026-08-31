@@ -567,6 +567,7 @@ struct KlineDetailView: View {
                         Menu {
                             ForEach(KlinePeriod.allCases) { period in
                                 Button {
+                                    DebugLogger.shared.log("设置面板切换周期: \(period.rawValue)")
                                     withAnimation { config.selectedPeriod = period }
                                 } label: {
                                     if config.selectedPeriod == period {
@@ -769,6 +770,7 @@ struct KlineDetailView: View {
                        isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
                        onPeriodSwitch: linked ? { _ in } : { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
+                           DebugLogger.shared.log("图表滑动切换周期: \(newPeriod.rawValue)")
                            pinEnabled = false
                            withAnimation { config.selectedPeriod = newPeriod }
                        },
