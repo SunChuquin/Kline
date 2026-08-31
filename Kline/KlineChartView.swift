@@ -187,12 +187,28 @@ final class ChartConfigStore: ObservableObject {
     }
     // 全局多/空镜像（顶部导航栏按钮控制）：开启后主图与所有副图图形取负镜像（空头）
     @Published var mainMirrored = false
-    /// 双联动时左视图（日线）占左右总宽的比例（不含分隔条）；持久记忆
-    @Published var dualSplitRatio: Double = 0.5 {
-        didSet { UserDefaults.standard.set(dualSplitRatio, forKey: Self.splitRatioKey) }
+    /// 双联动的各分隔线位置（归一化 0..1，长度为 视图数-1；2视图=[左分界]，3=[左,中]，4=[左,中,右]）。
+    /// 每靠一条分隔线独立持久记忆，点击「边」后可拖动调整对应视图宽度。
+    @Published var dualSplitPositions: [Double] = [0.5] {
+        didSet {
+            if let data = try? JSONEncoder().encode(dualSplitPositions) {
+                UserDefaults.standard.set(data, forKey: Self.splitPositionsKey)
+            }
+        }
     }
-    /// UserDefaults 键：双联动左右视图占比
-    static let splitRatioKey = "kline.dualLink.splitRatio"
+    /// UserDefaults 键：双联动各分隔线位置
+    static let splitPositionsKey = "kline.dualLink.splitPositions"
+    /// 旧版单一占比键（兼容迁移到新数组模型）
+    static let legacySplitRatioKey = "kline.dualLink.splitRatio"
+
+    /// 取 N 个视图的分隔线位置；长度不足时补齐到 N-1 个（默认均分）
+    func dualDividers(for count: Int) -> [Double] {
+        let need = max(0, count - 1)
+        guard need > 0 else { return [] }
+        if dualSplitPositions.count == need { return dualSplitPositions }
+        // 长度不匹配：重建为均分
+        return (1...need).map { Double($0) / Double(count) }
+    }
 
     // 三个副图（跨周期共享实例，但选择按周期记忆）
     let subTop = SubChartModel()
@@ -241,9 +257,14 @@ final class ChartConfigStore: ObservableObject {
         subTop.kind = "CDJ"
         subBottom.kind = "COL"
         subThird.kind = "MACD"
-        // 恢复双联动左右视图占比记忆（UserDefaults 里没有时用默认 0.5）
-        let saved = UserDefaults.standard.double(forKey: Self.splitRatioKey)
-        if saved > 0 { dualSplitRatio = saved }
+        // 恢复双联动分隔线位置记忆（优先新数组 key；旧单一占比 key 迁移为 [ratio]）
+        if let data = UserDefaults.standard.data(forKey: Self.splitPositionsKey),
+           let arr = try? JSONDecoder().decode([Double].self, from: data), !arr.isEmpty {
+            dualSplitPositions = arr
+        } else {
+            let legacy = UserDefaults.standard.double(forKey: Self.legacySplitRatioKey)
+            if legacy > 0 { dualSplitPositions = [legacy] }
+        }
     }
 }
 

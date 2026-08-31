@@ -16,17 +16,17 @@ import UIKit
 struct DualSplitDivider: View {
     /// 左右总宽
     let totalWidth: CGFloat
-    /// 当前已提交的左视图占比（手势开始基准）
+    /// 当前已提交的该分隔线位置（手势开始基准）
     let committed: Double
-    /// 松手回调：把最终占比写回持久状态
+    /// 该分隔线允许的最小/最大位置（由相邻分隔线约束，避免越界翻转）
+    let minLimit: Double
+    let maxLimit: Double
+    /// 松手回调：把最终位置写回持久状态
     let onCommit: (Double) -> Void
 
-    /// 占比调节范围
-    private let minRatio = 0.2
-    private let maxRatio = 0.8
     /// 分界线宽度
     private let handleWidth: CGFloat = 14
-    /// 拖动中实时显示的比例（持久提交前的临时值）；非拖动时保持 committed
+    /// 拖动中实时显示的位置（持久提交前的临时值）；非拖动时保持 committed
     @State private var dragRatio: Double?
 
     var body: some View {
@@ -47,12 +47,12 @@ struct DualSplitDivider: View {
                         .onChanged { value in
                             let usable = max(totalWidth - handleWidth, 1.0)
                             let delta = Double(value.translation.width / usable)
-                            dragRatio = clamp(committed + delta, minRatio, maxRatio)
+                            dragRatio = clamp(committed + delta, minLimit, maxLimit)
                         }
                         .onEnded { value in
                             let usable = max(totalWidth - handleWidth, 1.0)
                             let delta = Double(value.translation.width / usable)
-                            onCommit(clamp(committed + delta, minRatio, maxRatio))
+                            onCommit(clamp(committed + delta, minLimit, maxLimit))
                             dragRatio = nil
                         }
                 )
@@ -339,14 +339,13 @@ struct KlineDetailView: View {
         )
     }
 
-    /// 联动信息栏：按视图数等宽分格（与主图多视图边界对齐；2视图用已占比，3/4等分）
+    /// 联动信息栏：按视图数分格（与主图分隔线位置对齐，2/3/4视图均跟随 dualSplitPositions）
     private func infoLinkedRow(width: CGFloat) -> some View {
         let views = linkedViews
         let count = views.count
-        let isTwo = count == 2
-        // 各视图左边界：2视图 [0, committed]，3/4视图等分；追加右边界 width
-        let bounds: [Double] = isTwo ? [0.0, config.dualSplitRatio, 1.0]
-                                     : (0...(count)).map { Double($0) / Double(count) }
+        // 各视图左边界与主图一致：2视图用已占比，3/4视图同理
+        let dividers = config.dualDividers(for: count)
+        let bounds = [0.0] + dividers + [1.0]
         return ZStack(alignment: .topLeading) {
             // 各视图的标的信息（位于各自格子中央）
             ForEach(views.indices, id: \.self) { i in
@@ -355,12 +354,12 @@ struct KlineDetailView: View {
                 infoPill(code: views[i].displayCode, period: views[i].period.rawValue)
                     .frame(width: right - left, alignment: .center)
             }
-            // 视图之间的竖直分隔线（去掉首尾边界线，与主图视图边界对齐）
+            // 视图之间的竖直分隔线（样式与主图一致）
             ForEach(1..<count, id: \.self) { i in
                 let x = CGFloat(bounds[i]) * width
                 Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: 0.5)
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 1)
                     .position(x: x, y: 11)
             }
         }
@@ -401,7 +400,7 @@ struct KlineDetailView: View {
 
     /// 双联动：左日线、右周线，十字光标按日期联动。
     /// 左右各用独立的副图模型（isolatedSubs），避免共享副图模型被不同数据长度的曲线互相覆盖。
-    /// 中间分界线可按住左右拖动，调整左右视图的屏幕占比；占比持久记忆（config.dualSplitRatio）。
+    /// 中间分界线可分条按住拖动，调整对应两视图的宽度；占比持久记忆（config.dualSplitPositions）。
     /// 分界线是独立子视图，拖动时只重画分隔线本身（实时跟随、不重渲染左右图表，也不干扰图表手势），
     /// 松手才一次性把最终比例写入 config，图表随之调整。
     /// 双联动：按 LinkedViewStore 的配置横向排布 2/3/4 个视图（每个视图独立标的+周期）。
@@ -412,44 +411,54 @@ struct KlineDetailView: View {
             let totalWidth = geo.size.width
             let views = linkedStore.configs(for: item.id)
             let count = views.count
-            let committed = config.dualSplitRatio
+            // 各分隔线位置（归一化）；2视图=[x]，3=[x1,x2]，4=[x1,x2,x3]
+            let dividers = config.dualDividers(for: count)
+            // 各视图左边界 = [0, d0, d1, ..., 1]
+            let bounds = [0.0] + dividers + [1.0]
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 0) {
                     ForEach(Array(views.enumerated()), id: \.element.index) { i, v in
+                        let left = CGFloat(bounds[i]) * totalWidth
+                        let right = CGFloat(bounds[i + 1]) * totalWidth
                         tile(v)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                            // 2 视图：左视图按已记忆占比定宽；3/4 视图等宽
-                            .frame(width: count == 2 ? (i == 0 ? totalWidth * committed : nil) : nil)
+                            .frame(width: right - left, alignment: .leading)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 2 视图默认：细分界线（不可拖动）
-                if count == 2 {
+                // 视图之间的竖直分隔线（样式一致）
+                ForEach(dividers.indices, id: \.self) { i in
                     Rectangle()
                         .fill(Color.gray.opacity(0.5))
                         .frame(width: 1, height: geo.size.height)
-                        .position(x: totalWidth * committed, y: geo.size.height / 2)
+                        .position(x: totalWidth * CGFloat(dividers[i]), y: geo.size.height / 2)
                         .allowsHitTesting(false)
-                    // 「边」开启时：可拖动分界线覆盖层
-                    if edgeAdjust {
+                }
+                // 「边」开启时：可拖动分隔线覆盖层（每条独立可拖）
+                if edgeAdjust {
+                    ForEach(dividers.indices, id: \.self) { i in
                         DualSplitDivider(totalWidth: totalWidth,
-                                         committed: committed) { newRatio in
-                            config.dualSplitRatio = newRatio
-                        }
-                    }
-                } else {
-                    // 3/4 视图：等宽，视图间画细分界线（每段之间）
-                    ForEach(1..<count, id: \.self) { i in
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.5))
-                            .frame(width: 1, height: geo.size.height)
-                            .position(x: totalWidth * CGFloat(i) / CGFloat(count), y: geo.size.height / 2)
-                            .allowsHitTesting(false)
+                                         committed: dividers[i],
+                                         minLimit: i == 0 ? 0.12 : (bounds[i] + 0.06),
+                                         maxLimit: i == dividers.count - 1 ? 0.88 : (bounds[i + 2] - 0.06),
+                                         onCommit: { newPos in
+                                             updateDivider(at: i, count: count, to: newPos)
+                                         })
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 更新某视图数下第 i 条分隔线的位置，并写回持久化
+    private func updateDivider(at index: Int, count: Int, to newPos: Double) {
+        var dividers = config.dualDividers(for: count)
+        guard index < dividers.count else { return }
+        // 用相邻分隔线约束，避免越界翻转
+        let lo = index == 0 ? 0.0 : (dividers[index - 1] + 0.02)
+        let hi = index == dividers.count - 1 ? 1.0 : (dividers[index + 1] - 0.02)
+        dividers[index] = min(hi, max(lo, newPos))
+        config.dualSplitPositions = dividers
     }
 
     /// 单个联动视图块
