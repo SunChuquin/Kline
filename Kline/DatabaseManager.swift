@@ -163,6 +163,17 @@ class DatabaseManager: ObservableObject {
         fetchPeriodTable(metaId: metaId, table: "yearly")
     }
 
+    /// 按周期读取指定标的的全量数据（联动多视图每个视图可独立(标的,周期)）
+    func fetchBars(metaId: Int, period: KlinePeriod) -> [KlineItem] {
+        switch period {
+        case .daily: return fetchPeriodTable(metaId: metaId, table: "daily")
+        case .weekly: return fetchPeriodTable(metaId: metaId, table: "weekly")
+        case .monthly: return fetchPeriodTable(metaId: metaId, table: "monthly")
+        case .quarterly: return fetchPeriodTable(metaId: metaId, table: "quarterly")
+        case .yearly: return fetchPeriodTable(metaId: metaId, table: "yearly")
+        }
+    }
+
     /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空
     private func fetchPeriodTable(metaId: Int, table: String) -> [KlineItem] {
         dbQueue.sync {

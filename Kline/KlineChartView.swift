@@ -527,6 +527,12 @@ struct KlineChartView: View {
     let onHasCursorChange: ((Bool) -> Void)?
     /// 禁止产生十字光标（「边」调节分割线状态开启时置 true）：点击/拖动/联动都不生成光标
     let suppressCrosshair: Bool
+    /// 联动态交换副图滑动角色：副图一(上)切标的、副图二(下)切周期（常规模式相反）
+    let swapSubSwipeRoles: Bool
+    /// 副图二指标栏最右侧是否显示 🔍 搜索按钮（点击由外层接管，用于覆盖式搜索栏）
+    let showSubTwoSearchButton: Bool
+    /// 副图二 🔍 按钮点击回调
+    let onSubTwoSearch: (() -> Void)?
     /// 双视图联动同步（左日线/右周线共用；单视图时传入独立空对象，cursorDate 不变化、无副作用）。
     /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
     @ObservedObject var linkSync: DualLinkSync
@@ -627,6 +633,9 @@ struct KlineChartView: View {
          pinEnabled: Binding<Bool> = .constant(false),
          onHasCursorChange: ((Bool) -> Void)? = nil,
          suppressCrosshair: Bool = false,
+         swapSubSwipeRoles: Bool = false,
+         showSubTwoSearchButton: Bool = false,
+         onSubTwoSearch: (() -> Void)? = nil,
          linkSync: DualLinkSync? = nil) {
         self.series = series
         self.metaId = metaId
@@ -640,6 +649,9 @@ struct KlineChartView: View {
         self._pinEnabled = pinEnabled
         self.onHasCursorChange = onHasCursorChange
         self.suppressCrosshair = suppressCrosshair
+        self.swapSubSwipeRoles = swapSubSwipeRoles
+        self.showSubTwoSearchButton = showSubTwoSearchButton
+        self.onSubTwoSearch = onSubTwoSearch
         self.linkSync = linkSync ?? DualLinkSync()
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
@@ -1305,9 +1317,9 @@ struct KlineChartView: View {
                 // 副图左右滑动切换：起点在副图且无光标时实时更新拖动反馈动画（显示方向提示/滑轨/阈值）
                 if (startInS1 || startInS2) && selectedIndex == nil {
                     let slot: SubSlot = startInS1 ? .top : .bottom
+                    let (canL, canR) = subSwipeCanLeftRight(slot: slot)
                     swipeFeedback = SwipeFeedback(slot: slot, offset: value.translation.width,
-                                                  canLeft: slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(-1) ?? false),
-                                                  canRight: slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(1) ?? false))
+                                                  canLeft: canL, canRight: canR)
                     return
                 }
 
@@ -1380,7 +1392,14 @@ struct KlineChartView: View {
                     let dir = fb.offset > 0 ? -1 : 1   // 右滑=更小周期/上一个标的，左滑=更大周期/下一个标的
                     if abs(fb.offset) > threshold {
                         selectedIndex = nil; crosshairY = nil
-                        if fb.slot == .top {
+                        // 联动态：副图一切标的、副图二切周期（与常规模式交换角色的作用域）
+                        if swapSubSwipeRoles {
+                            if fb.slot == .top {
+                                onSwitchItem?(dir)
+                            } else {
+                                switchPeriod(direction: dir)
+                            }
+                        } else if fb.slot == .top {
                             switchPeriod(direction: dir)
                         } else {
                             onSwitchItem?(dir)
@@ -1425,6 +1444,24 @@ struct KlineChartView: View {
         guard let cur = cases.firstIndex(of: period) else { return false }
         let target = cur + dir
         return target >= 0 && target < cases.count
+    }
+
+    /// 副图滑动方向可切换提示：尊重 swapSubSwipeRoles（联动态副图一切标的、副图二切周期）
+    private func subSwipeCanLeftRight(slot: SubSlot) -> (Bool, Bool) {
+        if swapSubSwipeRoles {
+            // 副图一(上)切标的，副图二(下)切周期
+            if slot == .top {
+                return (canSwitchItem?(-1) ?? false, canSwitchItem?(1) ?? false)
+            } else {
+                return (canSwitchPeriod(-1), canSwitchPeriod(1))
+            }
+        } else {
+            if slot == .top {
+                return (canSwitchPeriod(-1), canSwitchPeriod(1))
+            } else {
+                return (canSwitchItem?(-1) ?? false, canSwitchItem?(1) ?? false)
+            }
+        }
     }
 
     // MARK: - 双指手势（由 TwoFingerGestureHook 回调驱动）
@@ -2877,6 +2914,19 @@ struct KlineChartView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(atLatest)
+                }
+                // 副图2：最右侧 🔍 搜索按钮（联动态显示；点击由外层接管覆盖式搜索栏）
+                if m === subBottom && showSubTwoSearchButton {
+                    Button {
+                        onSubTwoSearch?()
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .frame(width: 22, height: 22, alignment: .center)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 6)

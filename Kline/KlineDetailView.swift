@@ -116,6 +116,7 @@ struct KlineDetailView: View {
     /// 系统指标公式编辑器是否打开（同样需隐藏顶部栏实现真全屏）
     @State private var showSystemEditor = false
     @ObservedObject private var config = ChartConfigStore.shared
+    @ObservedObject private var linkedStore = LinkedViewStore.shared
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
     @State private var monthlySeries: ChartSeries? = nil
@@ -130,6 +131,8 @@ struct KlineDetailView: View {
     @State private var dualLink = false
     /// 「边」边线调节模式：开启后才显示可拖动的 DualSplitDivider 分界线，且禁止十字光标
     @State private var edgeAdjust = false
+    /// 重置当前标的联动视图配置的确认弹窗
+    @State private var showResetLinkedConfirm = false
     /// 双视图联动同步（日线/周线图共享）
     @State private var linkSync = DualLinkSync()
 
@@ -146,6 +149,11 @@ struct KlineDetailView: View {
         case .quarterly: return quarterlySeries
         case .yearly: return yearlySeries
         }
+    }
+
+    /// 当前标的的联动视图数量（用于设置页下拉勾选；无记录时默认 2 视图）
+    private var linkedViewCount: LinkedViewCount {
+        LinkedViewCount(rawValue: LinkedViewStore.shared.configs(for: item.id).count) ?? .two
     }
 
     var body: some View {
@@ -312,8 +320,8 @@ struct KlineDetailView: View {
             Group {
                 if isLoading {
                     loadingView
-                } else if dualLink, let daily = dailySeries, let weekly = weeklySeries {
-                    dualLinkArea(daily: daily, weekly: weekly)
+                } else if dualLink {
+                    dualLinkArea()
                 } else if currentSeries == nil {
                     emptyDataView
                 } else if let s = currentSeries {
@@ -329,37 +337,66 @@ struct KlineDetailView: View {
     /// 中间分界线可按住左右拖动，调整左右视图的屏幕占比；占比持久记忆（config.dualSplitRatio）。
     /// 分界线是独立子视图，拖动时只重画分隔线本身（实时跟随、不重渲染左右图表，也不干扰图表手势），
     /// 松手才一次性把最终比例写入 config，图表随之调整。
-    private func dualLinkArea(daily: ChartSeries, weekly: ChartSeries) -> some View {
+    /// 双联动：按 LinkedViewStore 的配置横向排布 2/3/4 个视图（每个视图独立标的+周期）。
+    /// 视图之间以细分界线分隔；副图一切标的、副图二切周期（由 LinkedKlineTile 内部接管）。
+    /// 2 个视图时「边」开启可拖动分界线调节左视图占比（保持既有功能）；3/4 视图等宽排列、仅显示划分界线。
+    private func dualLinkArea() -> some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
+            let views = linkedStore.configs(for: item.id)
+            let count = views.count
             let committed = config.dualSplitRatio
             ZStack(alignment: .topLeading) {
-                // 左日线：宽度 = 已记忆占比；右周线占满剩余
                 HStack(spacing: 0) {
-                    chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true,
-                              suppressCrosshair: edgeAdjust)
-                        .frame(width: totalWidth * committed)
-                    chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false,
-                              suppressCrosshair: edgeAdjust)
-                        .frame(maxWidth: .infinity)
+                    ForEach(Array(views.enumerated()), id: \.element.index) { i, v in
+                        tile(v)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            // 2 视图：左视图按已记忆占比定宽；3/4 视图等宽
+                            .frame(width: count == 2 ? (i == 0 ? totalWidth * committed : nil) : nil)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 默认：仅显示一条不可拖动的细分界线（定位在已提交占比处）
-                Rectangle()
-                    .fill(Color.gray.opacity(0.5))
-                    .frame(width: 1, height: geo.size.height)
-                    .position(x: totalWidth * committed, y: geo.size.height / 2)
-                    .allowsHitTesting(false)
-                // 「边」开启时：显示可拖动的 DualSplitDivider 覆盖层（拖动实时预览、松手才提交）
-                if edgeAdjust {
-                    DualSplitDivider(totalWidth: totalWidth,
-                                     committed: committed) { newRatio in
-                        config.dualSplitRatio = newRatio
+                // 2 视图默认：细分界线（不可拖动）
+                if count == 2 {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.5))
+                        .frame(width: 1, height: geo.size.height)
+                        .position(x: totalWidth * committed, y: geo.size.height / 2)
+                        .allowsHitTesting(false)
+                    // 「边」开启时：可拖动分界线覆盖层
+                    if edgeAdjust {
+                        DualSplitDivider(totalWidth: totalWidth,
+                                         committed: committed) { newRatio in
+                            config.dualSplitRatio = newRatio
+                        }
+                    }
+                } else {
+                    // 3/4 视图：等宽，视图间画细分界线（每段之间）
+                    ForEach(1..<count, id: \.self) { i in
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.5))
+                            .frame(width: 1, height: geo.size.height)
+                            .position(x: totalWidth * CGFloat(i) / CGFloat(count), y: geo.size.height / 2)
+                            .allowsHitTesting(false)
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 单个联动视图块
+    @ViewBuilder
+    private func tile(_ v: LinkedViewConfig) -> some View {
+        LinkedKlineTile(view: v,
+                        ownerMetaID: item.id,
+                        linkAutoCenter: v.index == 0,
+                        suppressCrosshair: edgeAdjust,
+                        showCustomEditor: $showCustomEditor,
+                        showSystemEditor: $showSystemEditor,
+                        onCursorChange: { has in
+                            chartHasCursor = has
+                        })
     }
 
     private var loadingView: some View {
@@ -432,6 +469,66 @@ struct KlineDetailView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
+
+                        // 联动视图数量（2/3/4）
+                        settingsSectionTitle("联动视图数量")
+                        Menu {
+                            ForEach(LinkedViewCount.allCases) { count in
+                                Button {
+                                    LinkedViewStore.shared.setViewCount(count, for: item.id)
+                                } label: {
+                                    if linkedViewCount == count {
+                                        Label(count.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(count.label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(linkedViewCount.label)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.black)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.gray.opacity(0.12))
+                            .cornerRadius(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+
+                        // 重置当前标的联动视图配置（需确认）
+                        Button(action: {
+                            showResetLinkedConfirm = true
+                        }) {
+                            HStack {
+                                Text("重置当前标的联动视图配置")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.red)
+                                Spacer()
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.red)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .confirmationDialog("重置当前标的的联动视图配置？", isPresented: $showResetLinkedConfirm,
+                                            titleVisibility: .visible) {
+                            Button("重置", role: .destructive) {
+                                LinkedViewStore.shared.reset(for: item.id)
+                            }
+                            Button("取消", role: .cancel) {}
+                        } message: {
+                            Text("将恢复为默认 2 个视图（左日线、右周线），且各视图标的/周期会被重置。")
+                        }
+                        .padding(.vertical, 2)
 
                         // 1. K线类型（下拉选项，压缩占位）
                         settingsSectionTitle("K线类型")
