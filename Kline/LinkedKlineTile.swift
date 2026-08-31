@@ -98,7 +98,10 @@ struct LinkedKlineTile: View {
     private func kline(series: ChartSeries) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor,
-                       metaId: view.metaID, period: view.period,
+                       // metaId 传 nil：联动多视图不使用共享 ChartCacheStore，
+                       // 避免多个 tile 用相同 metaId 并行预计算互相污染缓存（方向相关的副图空白根因）。
+                       // 每次周期/标的切换，.id 变化触发全新图表状态，前台完整重算主图+副图。
+                       metaId: nil, period: view.period,
                        isolatedSubs: true, linkAutoCenter: linkAutoCenter,
                        onPeriodSwitch: { newPeriod in
                            // 副图二切周期（联动态）：只改本视图周期，持久化到 owner
@@ -138,8 +141,8 @@ struct LinkedKlineTile: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 图表身份：绑定(标的,周期)。周期/标的切换必定创建全新图表状态，
-    /// 避免折返时(如 周→月→周)SwiftUI 按数据内容复用旧视图、残留已清的隔离副图导致空白
+    /// 图表身份：绑定(标的,周期)。配合 metaId=nil，周期/标的切换必定创建全新图表状态
+    /// （全新隔离副图 @StateObject + 前台完整重算），避免折返复用残留或共享缓存串扰。
     private var chartIdentity: String {
         "\(view.metaID)-\(view.period.rawValue)"
     }
