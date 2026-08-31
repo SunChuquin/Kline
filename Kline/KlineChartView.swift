@@ -525,6 +525,8 @@ struct KlineChartView: View {
     @Binding var pinEnabled: Bool
     /// 是否有任意光标在屏幕上（供详情页控制 📌 按钮可点/高亮）
     let onHasCursorChange: ((Bool) -> Void)?
+    /// 禁止产生十字光标（「边」调节分割线状态开启时置 true）：点击/拖动/联动都不生成光标
+    let suppressCrosshair: Bool
     /// 双视图联动同步（左日线/右周线共用；单视图时传入独立空对象，cursorDate 不变化、无副作用）。
     /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
     @ObservedObject var linkSync: DualLinkSync
@@ -624,6 +626,7 @@ struct KlineChartView: View {
          canSwitchItem: ((Int) -> Bool)? = nil,
          pinEnabled: Binding<Bool> = .constant(false),
          onHasCursorChange: ((Bool) -> Void)? = nil,
+         suppressCrosshair: Bool = false,
          linkSync: DualLinkSync? = nil) {
         self.series = series
         self.metaId = metaId
@@ -636,6 +639,7 @@ struct KlineChartView: View {
         self.canSwitchItem = canSwitchItem
         self._pinEnabled = pinEnabled
         self.onHasCursorChange = onHasCursorChange
+        self.suppressCrosshair = suppressCrosshair
         self.linkSync = linkSync ?? DualLinkSync()
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
@@ -1389,6 +1393,8 @@ struct KlineChartView: View {
                 let y = value.location.y
                 let inPanel = isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom) || isInPanel(y, s3Top, s3Bottom)
                 let isTap = abs(value.translation.width) < 6 && abs(value.translation.height) < 6
+                // 「边」调节分割线时禁止产生/清除十字光标
+                if suppressCrosshair { return }
                 if isTap && inPanel {
                     let col = Int((value.location.x / candleSpacing).rounded(.down))
                     let idx = startIndex + col
@@ -1674,6 +1680,14 @@ struct KlineChartView: View {
             klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
             notifyHasCursor()
             publishLinkCursor(index: newIdx)
+        }
+        .onChange(of: suppressCrosshair) { on in
+            // 「边」开启时清除可能残留的十字光标（含固定光标），并同步联动/上报
+            if on {
+                selectedIndex = nil; crosshairY = nil
+                pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
+                notifyHasCursor()
+            }
         }
         .onChange(of: pinnedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(pinnedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] selected:\(String(describing: selectedIndex))")

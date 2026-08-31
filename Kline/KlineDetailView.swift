@@ -128,6 +128,8 @@ struct KlineDetailView: View {
     @State private var chartHasCursor = false
     /// 单视图 / 双联动模式：双联动时左右对半分，左日线、右周线，十字光标按日期联动
     @State private var dualLink = false
+    /// 「边」边线调节模式：开启后才显示可拖动的 DualSplitDivider 分界线，且禁止十字光标
+    @State private var edgeAdjust = false
     /// 双视图联动同步（日线/周线图共享）
     @State private var linkSync = DualLinkSync()
 
@@ -219,25 +221,49 @@ struct KlineDetailView: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-            // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
-            Button(action: {
-                if pinEnabled {
-                    pinEnabled = false
-                } else if chartHasCursor {
-                    pinEnabled = true
+            // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标（现有逻辑）
+            if dualLink && !chartHasCursor {
+                // 「边」：默认关闭不高亮；点击开启高亮，开启后出现可拖动分界线，且禁止十字光标
+                Button(action: {
+                    edgeAdjust.toggle()
+                }) {
+                    Text("边")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(edgeAdjust ? .blue : .gray)
+                        .background(edgeAdjust ? Color.blue.opacity(0.18) : Color.clear)
+                        .padding(.horizontal, 9)
+                        .frame(alignment: .center)
+                        .frame(width: 32, height: 30)
+                        .contentShape(Rectangle())
                 }
-            }) {
-                Image(systemName: pinEnabled ? "pin.fill" : "pin")
-                    .font(.system(size: 15))
-                    .foregroundColor(pinEnabled ? .blue : .gray)
-                    .frame(width: 32, height: 30)
-                    .contentShape(Rectangle())
+                .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
+            } else {
+                // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
+                Button(action: {
+                    if pinEnabled {
+                        pinEnabled = false
+                    } else if chartHasCursor {
+                        pinEnabled = true
+                    }
+                }) {
+                    Image(systemName: pinEnabled ? "pin.fill" : "pin")
+                        .font(.system(size: 15))
+                        .foregroundColor(pinEnabled ? .blue : .gray)
+                        .frame(width: 32, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!pinEnabled && !chartHasCursor)
             }
-            .disabled(!pinEnabled && !chartHasCursor)
 
             // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
             Button(action: {
+                let wasOn = dualLink
                 withAnimation { dualLink.toggle() }
+                // 退出双联动时关闭边线调节，避免残留不可拖动/禁光标状态
+                if wasOn {
+                    edgeAdjust = false
+                    pinEnabled = false
+                }
             }) {
                 Text("联")
                     .font(.system(size: 12, weight: .bold))
@@ -310,19 +336,30 @@ struct KlineDetailView: View {
     private func dualLinkArea(daily: ChartSeries, weekly: ChartSeries) -> some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
+            let committed = config.dualSplitRatio
             ZStack(alignment: .topLeading) {
                 // 左日线：宽度 = 已记忆占比；右周线占满剩余
                 HStack(spacing: 0) {
-                    chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true)
-                        .frame(width: totalWidth * config.dualSplitRatio)
-                    chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false)
+                    chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true,
+                              suppressCrosshair: edgeAdjust)
+                        .frame(width: totalWidth * committed)
+                    chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false,
+                              suppressCrosshair: edgeAdjust)
                         .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 可拖动分界线（覆盖层，独立持有拖动状态）
-                DualSplitDivider(totalWidth: totalWidth,
-                                 committed: config.dualSplitRatio) { newRatio in
-                    config.dualSplitRatio = newRatio
+                // 默认：仅显示一条不可拖动的细分界线（定位在已提交占比处）
+                Rectangle()
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 1, height: geo.size.height)
+                    .position(x: totalWidth * committed, y: geo.size.height / 2)
+                    .allowsHitTesting(false)
+                // 「边」开启时：显示可拖动的 DualSplitDivider 覆盖层（拖动实时预览、松手才提交）
+                if edgeAdjust {
+                    DualSplitDivider(totalWidth: totalWidth,
+                                     committed: committed) { newRatio in
+                        config.dualSplitRatio = newRatio
+                    }
                 }
             }
         }
@@ -508,7 +545,8 @@ struct KlineDetailView: View {
         }
     }
 
-    private func chartView(series: ChartSeries, period: KlinePeriod, linked: Bool, isolated: Bool = false, linkAutoCenter: Bool = false) -> some View {
+    private func chartView(series: ChartSeries, period: KlinePeriod, linked: Bool, isolated: Bool = false,
+                           linkAutoCenter: Bool = false, suppressCrosshair: Bool = false) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: period,
                        isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
@@ -536,6 +574,7 @@ struct KlineDetailView: View {
                        onHasCursorChange: { has in
                            chartHasCursor = has
                        },
+                       suppressCrosshair: suppressCrosshair,
                        linkSync: linked ? linkSync : nil)
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
