@@ -187,6 +187,12 @@ final class ChartConfigStore: ObservableObject {
     }
     // 全局多/空镜像（顶部导航栏按钮控制）：开启后主图与所有副图图形取负镜像（空头）
     @Published var mainMirrored = false
+    /// 双联动时左视图（日线）占左右总宽的比例（不含分隔条）；持久记忆
+    @Published var dualSplitRatio: Double = 0.5 {
+        didSet { UserDefaults.standard.set(dualSplitRatio, forKey: Self.splitRatioKey) }
+    }
+    /// UserDefaults 键：双联动左右视图占比
+    static let splitRatioKey = "kline.dualLink.splitRatio"
 
     // 三个副图（跨周期共享实例，但选择按周期记忆）
     let subTop = SubChartModel()
@@ -235,6 +241,9 @@ final class ChartConfigStore: ObservableObject {
         subTop.kind = "CDJ"
         subBottom.kind = "COL"
         subThird.kind = "MACD"
+        // 恢复双联动左右视图占比记忆（UserDefaults 里没有时用默认 0.5）
+        let saved = UserDefaults.standard.double(forKey: Self.splitRatioKey)
+        if saved > 0 { dualSplitRatio = saved }
     }
 }
 

@@ -74,12 +74,6 @@ struct KlineDetailView: View {
     @State private var chartHasCursor = false
     /// 单视图 / 双联动模式：双联动时左右对半分，左日线、右周线，十字光标按日期联动
     @State private var dualLink = false
-    /// 双联动时左视图（日线）占左右总宽的比例（不含分隔条宽）；0 = 全给右，1 = 全给左
-    @State private var dualSplitRatio: CGFloat = 0.5
-    /// 拖动分界线时记录手势起点比例，作为拖动增量基准
-    @State private var dualDragStartRatio: CGFloat = 0.5
-    /// 是否正在拖动分界线（用于手势基准的首次采样）
-    @State private var isDraggingSplit = false
     /// 双视图联动同步（日线/周线图共享）
     @State private var linkSync = DualLinkSync()
 
@@ -256,19 +250,19 @@ struct KlineDetailView: View {
 
     /// 双联动：左日线、右周线，十字光标按日期联动。
     /// 左右各用独立的副图模型（isolatedSubs），避免共享副图模型被不同数据长度的曲线互相覆盖。
-    /// 中间分界线可按住左右拖动，调整左右视图的屏幕占比。
+    /// 中间分界线可按住左右拖动，调整左右视图的屏幕占比；占比持久记忆（config.dualSplitRatio）。
     private func dualLinkArea(daily: ChartSeries, weekly: ChartSeries) -> some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
-            let handleWidth: CGFloat = 14
-            let minRatio: CGFloat = 0.2
-            let maxRatio: CGFloat = 0.8
-            // 左右两块净宽（扣除分隔条后按比例分配）+ 中间分隔条
-            let usable = totalWidth - handleWidth
+            let minRatio: Double = 0.2
+            let maxRatio: Double = 0.8
+            // 拖动过程同步显示：基础占比 + 本次拖动位移换算（手势结束才写入记忆）
+            let shownRatio = clamp(config.dualSplitRatio + Double(splitDragOffset / max(totalWidth, 1.0)),
+                                   minRatio, maxRatio)
             HStack(spacing: 0) {
                 // 左日线：接收联动光标时把联动K线居中显示
                 chartView(series: daily, period: .daily, linked: true, isolated: true, linkAutoCenter: true)
-                    .frame(width: usable * dualSplitRatio)
+                    .frame(width: totalWidth * shownRatio)
                 dividerHandle(minRatio: minRatio, maxRatio: maxRatio, totalWidth: totalWidth)
                 // 右周线：保持现有联动逻辑（贴右边缘）
                 chartView(series: weekly, period: .weekly, linked: true, isolated: true, linkAutoCenter: false)
@@ -278,8 +272,9 @@ struct KlineDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 可拖动分界线：按住左右拖动，实时改变左视图占比 dualSplitRatio
-    private func dividerHandle(minRatio: CGFloat, maxRatio: CGFloat, totalWidth: CGFloat) -> some View {
+    /// 可拖动分界线：按住左右拖动，实时改变左视图占比并持久记忆。
+    /// 用 @GestureState 记录本次拖动位移（拖动中不写持久状态，避免重建打断手势，也避免影响兄弟图表的手势）
+    private func dividerHandle(minRatio: Double, maxRatio: Double, totalWidth: CGFloat) -> some View {
         Rectangle()
             .fill(Color.gray.opacity(0.35))
             .overlay(
@@ -291,23 +286,24 @@ struct KlineDetailView: View {
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        // 首次开始拖动时，把当前比例记为手势基准
-                        if !isDraggingSplit {
-                            dualDragStartRatio = dualSplitRatio
-                            isDraggingSplit = true
-                        }
-                        // 拖动增量 = 位移 / 左右净宽；若位移让净宽不足 1 像素则按整宽兜底
-                        let usable = max(totalWidth - 14, 1.0)
-                        let raw = dualDragStartRatio + value.translation.width / usable
-                        dualSplitRatio = min(maxRatio, max(minRatio, raw))
+                    .updating($splitDragOffset) { value, state, _ in
+                        // 位移换算为比例增量：左右净宽 = 总宽 - 分隔条宽
+                        let usable = max(totalWidth - 14, 1)
+                        state = Double(value.translation.width / usable)
                     }
-                    .onEnded { _ in
-                        isDraggingSplit = false
-                        dualDragStartRatio = dualSplitRatio
+                    .onEnded { value in
+                        let usable = max(totalWidth - 14, 1)
+                        let delta = Double(value.translation.width / usable)
+                        let raw = config.dualSplitRatio + delta
+                        config.dualSplitRatio = min(maxRatio, max(minRatio, raw))
                     }
             )
     }
+
+    /// 本次拖动分界线已产生的位移（手势期间才非零，结束自动归零）
+    @GestureState private var splitDragOffset: CGFloat = 0
+
+    private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
 
     private var loadingView: some View {
         VStack(spacing: 16) {
