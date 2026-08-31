@@ -46,20 +46,47 @@ struct LinkedKlineTile: View {
     @StateObject private var localLinkSync = DualLinkSync()
 
     var body: some View {
-        Group {
-            if isLoading {
-                Color.white
-                    .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
-            } else if let series = chartSeries {
-                kline(series: series)
-            } else {
-                emptyView
+        ZStack(alignment: .topLeading) {
+            Group {
+                if isLoading {
+                    Color.white
+                        .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
+                } else if let series = chartSeries {
+                    kline(series: series)
+                } else {
+                    emptyView
+                }
             }
+            // 每个联动视图的标的+周期标识（左上角覆盖显示，方便辨认当前视图内容）
+            viewTag
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear(perform: loadData)
         .onChange(of: view.metaID) { _ in loadData() }
         .onChange(of: view.period) { _ in loadData() }
+    }
+
+    /// 左上角标识条：标的代码 + 名称 + 周期（透明底，不拦截图表手势）
+    private var viewTag: some View {
+        HStack(spacing: 4) {
+            Text(view.code.isEmpty ? "\(view.metaID)" : view.displayCode)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.blue)
+            Text(view.name)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.black)
+                .lineLimit(1)
+            Text(view.period.rawValue)
+                .font(.system(size: 10))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.white.opacity(0.85))
+        .cornerRadius(4)
+        .padding(.leading, 4)
+        .padding(.top, 2)
+        .allowsHitTesting(false)
     }
 
     // MARK: - 数据加载
