@@ -172,6 +172,14 @@ struct KlineDetailView: View {
     @State private var showPeriodPicker = false
     @State private var showViewCountPicker = false
     @State private var showChartStylePicker = false
+    /// 从联动信息栏钻取到单图：nil=正常模式（单图 or 联动）；非 nil=正在显示某格子的钻取单图
+    @State private var drillIn: (metaID: Int, period: KlinePeriod, name: String, code: String, type: String)? = nil
+    /// 钻取前联动页面的用户状态快照：cursorLinkEnabled/edgeAdjust/pinEnabled，返回联动时恢复
+    @State private var drillInSnapshot: (cursorLinkEnabled: Bool, edgeAdjust: Bool, pinEnabled: Bool)? = nil
+    /// 钻取模式下的 chartSeries（因为钻取 metaID/周期 可能与主 item 不一致，单独加载）
+    @State private var drillInSeries: ChartSeries? = nil
+    /// 钻取加载中：进入时显示 loading 态，避免空白
+    @State private var drillInLoading = false
     /// 双视图联动同步（日线/周线图共享）
     @State private var linkSync = DualLinkSync()
     /// 顶部第一行工具栏实测高度（用于信息栏起始位置对齐可拖覆盖层）
@@ -209,6 +217,18 @@ struct KlineDetailView: View {
         return linkedStore.configs(for: item.id, nameHint: hint)
     }
 
+    // MARK: 钻取单图：effective* 覆盖计算属性
+
+    /// 真正用于所有显示判断的"是否联动"：钻取模式下即使 dualLink=true，也强制单图布局
+    private var effectiveDual: Bool { dualLink && drillIn == nil }
+    private var effectiveName: String { drillIn?.name ?? item.name }
+    private var effectiveCode: String { drillIn?.code ?? item.displayCode }
+    private var effectiveType: String { drillIn?.type ?? item.type }
+    private var effectiveMetaID: Int { drillIn?.metaID ?? item.id }
+    private var effectivePeriod: KlinePeriod { drillIn?.period ?? config.selectedPeriod }
+    /// 当前实际要显示的 series：钻取时用 drillInSeries，否则仍用 currentSeries
+    private var effectiveSeries: ChartSeries? { drillIn != nil ? drillInSeries : currentSeries }
+
     /// 信息栏顶部相对整页顶部的偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5
     private var infoBarTopOffset: CGFloat {
         (measuredTopBarHeight > 0 ? measuredTopBarHeight : 34) + 2 + 0.5
@@ -230,8 +250,8 @@ struct KlineDetailView: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
                             .frame(height: 0.5)
-                        // 第二行：信息栏仅联动时显示；单图信息已并入工具栏行，此处省略
-                        if dualLink {
+                        // 第二行：信息栏仅联动（非钻取）时显示；单图/钻取信息已并入工具栏行，此处省略
+                        if effectiveDual {
                             infoBarRow(width: geometry.size.width)
                         }
                     }
@@ -244,7 +264,7 @@ struct KlineDetailView: View {
 
                 // 「边」开启时：可拖分隔线覆盖层从信息栏顶部开始
                 // （工具栏已独立，故固定偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5）
-                if dualLink && edgeAdjust {
+                if effectiveDual && edgeAdjust {
                     // 顺序很关键：必须先把覆盖层裁到「信息栏顶→屏幕底」的高度，再 offset 下移。
                     // 若先 offset 再 frame，offset 不改变布局尺寸，frame 的默认居中对齐会把
                     // 整屏高的内容在裁小后的容器里重新居中，实际起点变成 offset/2
@@ -274,8 +294,12 @@ struct KlineDetailView: View {
             }
         }
         .onChange(of: databaseManager.isLoaded) { loaded in
-            if loaded && isLoading {
-                loadData()
+            if loaded {
+                if isLoading { loadData() }
+                if drillInLoading, let d = drillIn {
+                    startDrillIn(metaID: d.metaID, period: d.period,
+                                 name: d.name, code: d.code, type: d.type)
+                }
             }
         }
     }
@@ -305,7 +329,7 @@ struct KlineDetailView: View {
     /// 顶部第一行：工具栏（返回 + 功能按钮）
     /// 联动时整体 + 内部所有按钮高度压缩到 22pt（与信息栏一致），单视图保持原 34pt 尺寸
     private var toolbarRow: some View {
-        let compact = dualLink               // 联动：压缩到 22pt，和信息栏等高
+        let compact = effectiveDual          // 联动（非钻取）：压缩到 22pt，和信息栏等高
         let btnH:    CGFloat = compact ? 22 : 28
         let vPad:    CGFloat = compact ? 0  : 3
         let hPad:    CGFloat = compact ? 6  : 8
@@ -318,16 +342,33 @@ struct KlineDetailView: View {
         let corner:  CGFloat = compact ? 4  : 6
 
         return HStack(spacing: gap) {
-            // 返回按钮：联动状态 = 退出联动回到单图；单图状态 = 关闭详情页
+            // 返回按钮三级语义：
+            //   1. 联动状态（effectiveDual）= 先退联动，回到主标的单图
+            //   2. 钻取单图（drillIn != nil）= 清 drillIn，恢复联动页面快照
+            //   3. 普通单图 = 关闭详情页
             Button(action: {
-                if dualLink {
-                    // 先清理联动态：光标联动开关/边线调节/光标本
+                if effectiveDual {
+                    // 1. 联动状态：先清理联动态，再退 dualLink
                     cursorLinkEnabled = false
                     edgeAdjust = false
                     pinEnabled = false
                     linkSync.cursorDate = nil
                     withAnimation { dualLink = false }
+                } else if drillIn != nil {
+                    // 2. 钻取单图 → 恢复联动页面（dualLink 本身未被清，仍是 true）
+                    drillIn = nil
+                    drillInSeries = nil
+                    drillInLoading = false
+                    cursorClearToken = UUID()
+                    // 恢复快照：用户之前在联动页面打开的 cursorLinkEnabled / edgeAdjust / pinEnabled
+                    if let snap = drillInSnapshot {
+                        cursorLinkEnabled = snap.cursorLinkEnabled
+                        edgeAdjust = snap.edgeAdjust
+                        pinEnabled = snap.pinEnabled
+                    }
+                    drillInSnapshot = nil
                 } else {
+                    // 3. 普通单图：关闭页面
                     onClose()
                 }
             }) {
@@ -339,13 +380,13 @@ struct KlineDetailView: View {
                     .cornerRadius(corner)
             }
 
-            // 单图：在返回按钮右侧直接显示「标的名称 + 标的代码」，替代原先的独立信息栏
+            // 单图（普通单图 or 钻取单图）：在返回按钮右侧直接显示「标的名称 + 标的代码」，替代原先的独立信息栏
             if !compact {
-                Text(item.name)
+                Text(effectiveName)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.black)
                     .lineLimit(1)
-                Text(item.displayCode)
+                Text(effectiveCode)
                     .font(.system(size: 11))
                     .foregroundColor(.gray)
                     .lineLimit(1)
@@ -355,8 +396,8 @@ struct KlineDetailView: View {
 
             // 「边」/📌 按钮：
             //   联动状态：永远显示「边」（不出图钉），限制每个视图最多一个十字光标；
-            //   单图状态：始终显示📌，无光标时灰、不可点；有任意光标后可点→钉住第一个光标。
-            if dualLink {
+            //   单图状态（包括钻取单图）：始终显示📌，无光标时灰、不可点；有任意光标后可点→钉住第一个光标。
+            if effectiveDual {
                 // 联动：永远显示「边」
                 Button(action: {
                     edgeAdjust.toggle()
@@ -369,7 +410,7 @@ struct KlineDetailView: View {
                 }
                 .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
             } else {
-                // 单图：始终显示📌按钮（无光标时 disabled 灰色占位；有光标时可点创建固定双光标）
+                // 单图（含钻取）：始终显示📌按钮
                 Button(action: {
                     if pinEnabled {
                         pinEnabled = false
@@ -387,33 +428,39 @@ struct KlineDetailView: View {
             }
 
             // 「联」字按钮：
-            //   单图 → 进入联动模式（cursorLinkEnabled 默认关闭，灰色）
+            //   普通单图（drillIn == nil）→ 进入联动模式
+            //   钻取单图 → 禁用（此按钮不存在于钻取，因为 !effectiveDual 下仍为普通"进入联动"但意义上不应该操作，
+            //     实际上钻取时 drillIn != nil，按当前需求：此按钮保持原样点击行为（进入联动会清理 drillIn 语义未定），
+            //     简单起见，钻取单图时此按钮点进入联动=直接退出钻取+进入联动，我们先保持与单图一致即可；
             //   联动 → 切换光标联动开关 cursorLinkEnabled；
-            //     关→开：先清除所有视图十字光标，之后任何视图创建/拖动都会按日期同步；
-            //     开→关：清除所有视图十字光标。
             Button(action: {
-                if !dualLink {
-                    // 单图 → 进入联动
+                if !effectiveDual {
+                    // 单图（含钻取） → 进入联动；若是钻取先清钻取状态+快照
+                    if drillIn != nil {
+                        drillIn = nil
+                        drillInSeries = nil
+                        drillInLoading = false
+                        drillInSnapshot = nil
+                    }
                     cursorLinkEnabled = false
                     pinEnabled = false
                     withAnimation { dualLink = true }
                 } else {
                     // 联动 → 切换光标联动开/关
                     cursorLinkEnabled.toggle()
-                    // 无论开/关，先清掉屏幕上所有十字光标
                     cursorClearToken = UUID()
                     linkSync.cursorDate = nil
                 }
             }) {
                 Text("联")
                     .font(.system(size: textSize, weight: .bold))
-                    .foregroundColor(dualLink ? (cursorLinkEnabled ? .blue : .gray) : .gray)
+                    .foregroundColor(effectiveDual ? (cursorLinkEnabled ? .blue : .gray) : .gray)
                     .frame(width: normW, height: btnH)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel(
-                !dualLink ? "进入联动模式"
-                          : (cursorLinkEnabled ? "关闭光标联动（清除所有光标）" : "开启光标联动（所有视图按日期同步）"))
+                !effectiveDual ? "进入联动模式"
+                               : (cursorLinkEnabled ? "关闭光标联动（清除所有光标）" : "开启光标联动（所有视图按日期同步）"))
 
             // 多/空 全局镜像
             Button(action: {
@@ -503,7 +550,14 @@ struct KlineDetailView: View {
                 let cellW = (bounds[i + 1] - bounds[i]) * Double(width)
                 LinkedInfoCell(portal: tilePortal(at: i),
                                name: views[i].name,
-                               code: views[i].displayCode)
+                               code: views[i].displayCode,
+                               onDrillIn: {
+                    startDrillIn(metaID: views[i].metaID,
+                                 period: views[i].period,
+                                 name: views[i].name,
+                                 code: views[i].displayCode,
+                                 type: views[i].type)
+                })
                     .frame(width: CGFloat(cellW), height: 22, alignment: .leading)
             }
         }
@@ -533,14 +587,22 @@ struct KlineDetailView: View {
             Color.white
 
             Group {
-                if isLoading {
+                if drillInLoading || (drillIn != nil && drillInSeries == nil && !isLoading) {
+                    // 钻取加载中：显示转圈（避免钻取到空白时看起来卡住）
                     loadingView
-                } else if dualLink {
+                } else if isLoading {
+                    loadingView
+                } else if effectiveDual {
                     dualLinkArea()
-                } else if currentSeries == nil {
+                } else if effectiveSeries == nil {
                     emptyDataView
-                } else if let s = currentSeries {
-                    chartView(series: s, period: config.selectedPeriod, linked: false,
+                } else if let s = effectiveSeries {
+                    // metaID：钻取时 = drillIn.metaID（避免主图缓存被错误复用）；普通单图 = item.id
+                    // period：钻取时 = drillIn.period；普通单图 = config.selectedPeriod
+                    chartView(series: s,
+                              period: effectivePeriod,
+                              linked: false,
+                              metaID: effectiveMetaID,
                               mainLegendPortal: mainLegendPortal)
                 }
             }
@@ -869,9 +931,11 @@ struct KlineDetailView: View {
 
     private func chartView(series: ChartSeries, period: KlinePeriod, linked: Bool, isolated: Bool = false,
                            linkAutoCenter: Bool = false, suppressCrosshair: Bool = false,
+                           metaID: Int? = nil,   // nil = 用默认 item.id；钻取时传目标 metaID
                            mainLegendPortal: MainLegendPortal? = nil) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
-                       showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: period,
+                       showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor,
+                       metaId: metaID ?? item.id, period: period,
                        isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
                        // 单视图：cursorLinkEnabled 无意义，传 false（不传也有默认值）；
                        // 联动：此处 helper 仅单图分支在使用 → 传 false；tile 分支自己传 cursorLinkEnabled
@@ -981,17 +1045,55 @@ struct KlineDetailView: View {
             KlineChartView.prefetchOtherPeriod(metaId: metaId, period: period, data: data)
         }
     }
+
+    /// 钻取单图：为任意 (metaID, period) 后台查询 K 线，结果写入 drillInSeries；
+    /// 若 DB 未就绪则立即返回（isLoaded 变化后会由上层 retry 触发）。
+    private func startDrillIn(metaID: Int, period: KlinePeriod,
+                              name: String, code: String, type: String) {
+        // 1. 立即设置钻取状态：触发 effectiveDual=false，整页立刻切到单图布局（工具栏显示该标的信息）
+        //    先 snapshot 再清，保证 snapshot 记录的是进入前的真实联动状态
+        drillInSnapshot = (cursorLinkEnabled: cursorLinkEnabled,
+                           edgeAdjust: edgeAdjust,
+                           pinEnabled: pinEnabled)
+        drillIn = (metaID, period, name, code, type)
+        drillInLoading = true
+        drillInSeries = nil
+        // 2. 清联动残留状态（光标、边调、禁止的 pin）；dualLink 本身保留（用于返回联动时恢复）
+        edgeAdjust = false
+        pinEnabled = false
+        linkSync.cursorDate = nil
+        cursorClearToken = UUID()
+
+        guard databaseManager.isLoaded else { return }   // DB 就绪后 onChange 会重试
+        DispatchQueue.global(qos: .userInitiated).async {
+            let data: [KlineItem]
+            switch period {
+            case .daily:   data = self.databaseManager.fetchDailyData(metaId: metaID)
+            case .weekly:  data = self.databaseManager.fetchWeeklyData(metaId: metaID)
+            case .monthly: data = self.databaseManager.fetchMonthlyData(metaId: metaID)
+            case .quarterly: data = self.databaseManager.fetchquarterlyData(metaId: metaID)
+            case .yearly:  data = self.databaseManager.fetchYearlyData(metaId: metaID)
+            }
+            DispatchQueue.main.async {
+                self.drillInSeries = data.isEmpty ? nil : ChartSeries(data: data)
+                self.drillInLoading = false
+            }
+        }
+    }
 }
 
-/// 联动信息栏单个格子：主图指标名称按钮（最左侧）+ 标的名称 + 标的代码。
-/// 独立观察 portal，指标标题变化时只刷新本格子，不影响其它视图。
+/// 联动信息栏单个格子：主图指标名称按钮（最左侧）+ 标的名称 + 标的代码 + 最右"钻取单图"按钮。
+/// 独立观察 portal，指标标题变化只刷新本格子，不影响其它视图。
 /// layoutPriority: 按钮（不截断，保持完整显示）> 名称（允许缩小）> 代码（允许缩小）；
 /// name/code 加 minimumScaleFactor：宽度不足时先缩小字号，最后万不得已才尾部截断，
-/// 按钮不缩放不截断、标题"日线: MA/CMK/BOLL"多长都完整显示。
+/// 按钮不缩放不截断、标题"日线"多长都完整显示。
+/// onDrillIn 非 nil 时在最右侧显示 22×22 chevron.right 灰色按钮：点击进入该格子的单图模式。
 private struct LinkedInfoCell: View {
     @ObservedObject var portal: MainLegendPortal
     let name: String
     let code: String
+    /// 点击最右侧 chevron 按钮时触发；nil 时不显示钻取按钮
+    var onDrillIn: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 4) {
@@ -1010,7 +1112,18 @@ private struct LinkedInfoCell: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
                 .layoutPriority(0.5)
+            Spacer(minLength: 6)
+            if let onDrillIn {
+                Button(action: onDrillIn) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.gray.opacity(0.7))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .padding(.leading, 4)
+        .padding(.horizontal, 4)
     }
 }
