@@ -129,8 +129,6 @@ enum KlinePeriod: String, CaseIterable, Identifiable, Codable {
 
 /// 图表图层显示设置（由设置面板控制，绑定传入 K 线图）
 struct ChartDisplaySettings: Equatable {
-    /// 区间统计：在图表中显示可见区间统计面板
-    var showRangeStats = false
     /// 图层显示：跳空缺口
     var showGap = false
     /// 图层显示：最新价线

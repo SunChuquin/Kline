@@ -19,12 +19,18 @@ struct LinkedKlineTile: View {
     var view: LinkedViewConfig
     /// 所属主标的（用于把本视图的周期/标的变更持久化到该标的名下）
     let ownerMetaID: Int
-    /// 是否第一个视图（左游标居中）
+    /// 是否第一个视图，仅保留用作身份标记（光标联动新语义下所有视图一律居中，不再依赖左右不对称）
     let linkAutoCenter: Bool
     /// 当前是否处于「边」边线调节（禁止十字光标）
     let suppressCrosshair: Bool
+    /// 光标联动总开关：true → 本视图 publish/applyLink；false → 各视图光标独立
+    let cursorLinkEnabled: Bool
+    /// 清光标广播令牌（外层切换光标联动开关/退出联动时更新）
+    let cursorClearToken: UUID
     /// 信息栏「主图指标按钮」桥接（由详情页持有并渲染，本视图转交给图表同步标题/点击行为）
     let mainLegendPortal: MainLegendPortal
+    /// 多视图共享的 DualLinkSync 联动同步对象：所有 tile 共用同一个，光标 publish/apply 才能真正互通
+    let sharedLinkSync: DualLinkSync
 
     @Binding var showCustomEditor: Bool
     @Binding var showSystemEditor: Bool
@@ -45,9 +51,6 @@ struct LinkedKlineTile: View {
     @State private var showSearch = false
     @State private var searchText = ""
     @FocusState private var searchFocused: Bool
-
-    /// 副图二滑动切周期用到的联动同步对象（本视图自持）
-    @StateObject private var localLinkSync = DualLinkSync()
 
     var body: some View {
         Group {
@@ -109,10 +112,14 @@ struct LinkedKlineTile: View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor,
                        // metaId 传 nil：联动多视图不使用共享 ChartCacheStore，
-                       // 避免多个 tile 用相同 metaId 并行预计算互相污染缓存（方向相关的副图空白根因）。
+                       // 避免多个 tile 用相同 metaID 并行预计算互相污染缓存（方向相关的副图空白根因）。
                        // 每次周期/标的切换，.id 变化触发全新图表状态，前台完整重算主图+副图。
                        metaId: nil, period: view.period,
                        isolatedSubs: true, linkAutoCenter: linkAutoCenter,
+                       cursorLinkEnabled: cursorLinkEnabled,
+                       cursorClearToken: cursorClearToken,
+                       // 联动：时间轴上一行 + 时间轴 pinned 覆盖 都不显示"额"（成交额）
+                       hideQuoteTurnover: true,
                        onPeriodSwitch: { newPeriod in
                            // 副图二切周期（联动态）：只改本视图周期，持久化到 owner
                            pinReservedHelper()
@@ -142,7 +149,7 @@ struct LinkedKlineTile: View {
                            }
                        },
                        mainLegendPortal: mainLegendPortal,
-                       linkSync: localLinkSync)
+                       linkSync: sharedLinkSync)
             .overlay {
                 if showSearch {
                     chartSearchBar

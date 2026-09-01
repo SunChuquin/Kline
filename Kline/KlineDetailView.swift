@@ -153,12 +153,17 @@ struct KlineDetailView: View {
     @State private var quarterlySeries: ChartSeries? = nil
     @State private var yearlySeries: ChartSeries? = nil
     @State private var isLoading = true
-    /// 📌 固定光标模式开关（高亮表示已开启）
+    /// 📌 固定光标模式开关（高亮表示已开启）。联动状态下固定光标完全禁用（只允许单光标）
     @State private var pinEnabled = false
-    /// 图表当前是否已有任意十字光标（控制 📌 按钮是否可开启）
+    /// 图表当前是否已有任意十字光标（单视图下控制 📌 按钮可用性）
     @State private var chartHasCursor = false
-    /// 单视图 / 双联动模式：双联动时左右对半分，左日线、右周线，十字光标按日期联动
+    /// 单视图 / 双联动模式：双联动时多视图并排，可按日期同步光标
     @State private var dualLink = false
+    /// 联动模式下的「光标联动开关」：关闭(灰)→ 各视图光标独立；开启(蓝)→ 任一视图的光标
+    /// 按日期同步到所有视图；切换时自动清除屏幕上所有十字光标。
+    @State private var cursorLinkEnabled = false
+    /// 广播清所有视图的十字光标：token 变化时每个 KlineChartView 在 onChange 内清空自身光标
+    @State private var cursorClearToken = UUID()
     /// 「边」边线调节模式：开启后才显示可拖动的 DualSplitDivider 分界线，且禁止十字光标
     @State private var edgeAdjust = false
     /// 重置当前标的联动视图配置的确认弹窗
@@ -309,9 +314,18 @@ struct KlineDetailView: View {
         let corner:  CGFloat = compact ? 4  : 6
 
         return HStack(spacing: gap) {
-            // 返回
+            // 返回按钮：联动状态 = 退出联动回到单图；单图状态 = 关闭详情页
             Button(action: {
-                onClose()
+                if dualLink {
+                    // 先清理联动态：光标联动开关/边线调节/光标本
+                    cursorLinkEnabled = false
+                    edgeAdjust = false
+                    pinEnabled = false
+                    linkSync.cursorDate = nil
+                    withAnimation { dualLink = false }
+                } else {
+                    onClose()
+                }
             }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: compact ? 13 : 16, weight: .semibold))
@@ -335,8 +349,11 @@ struct KlineDetailView: View {
 
             Spacer()
 
-            // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标
-            if dualLink && !chartHasCursor {
+            // 「边」/📌 按钮：
+            //   联动状态：永远显示「边」（不出图钉），限制每个视图最多一个十字光标；
+            //   单图状态：始终显示📌，无光标时灰、不可点；有任意光标后可点→钉住第一个光标。
+            if dualLink {
+                // 联动：永远显示「边」
                 Button(action: {
                     edgeAdjust.toggle()
                 }) {
@@ -348,6 +365,7 @@ struct KlineDetailView: View {
                 }
                 .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
             } else {
+                // 单图：始终显示📌按钮（无光标时 disabled 灰色占位；有光标时可点创建固定双光标）
                 Button(action: {
                     if pinEnabled {
                         pinEnabled = false
@@ -364,22 +382,34 @@ struct KlineDetailView: View {
                 .disabled(!pinEnabled && !chartHasCursor)
             }
 
-            // 单视图 / 双联动
+            // 「联」字按钮：
+            //   单图 → 进入联动模式（cursorLinkEnabled 默认关闭，灰色）
+            //   联动 → 切换光标联动开关 cursorLinkEnabled；
+            //     关→开：先清除所有视图十字光标，之后任何视图创建/拖动都会按日期同步；
+            //     开→关：清除所有视图十字光标。
             Button(action: {
-                let wasOn = dualLink
-                withAnimation { dualLink.toggle() }
-                if wasOn {
-                    edgeAdjust = false
+                if !dualLink {
+                    // 单图 → 进入联动
+                    cursorLinkEnabled = false
                     pinEnabled = false
+                    withAnimation { dualLink = true }
+                } else {
+                    // 联动 → 切换光标联动开/关
+                    cursorLinkEnabled.toggle()
+                    // 无论开/关，先清掉屏幕上所有十字光标
+                    cursorClearToken = UUID()
+                    linkSync.cursorDate = nil
                 }
             }) {
                 Text("联")
                     .font(.system(size: textSize, weight: .bold))
-                    .foregroundColor(dualLink ? .blue : .gray)
+                    .foregroundColor(dualLink ? (cursorLinkEnabled ? .blue : .gray) : .gray)
                     .frame(width: normW, height: btnH)
                     .contentShape(Rectangle())
             }
-            .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
+            .accessibilityLabel(
+                !dualLink ? "进入联动模式"
+                          : (cursorLinkEnabled ? "关闭光标联动（清除所有光标）" : "开启光标联动（所有视图按日期同步）"))
 
             // 多/空 全局镜像
             Button(action: {
@@ -574,7 +604,12 @@ struct KlineDetailView: View {
                         ownerMetaID: item.id,
                         linkAutoCenter: v.index == 0,
                         suppressCrosshair: edgeAdjust,
+                        // 所有 tile 共享同一个 cursorLinkEnabled / cursorClearToken / linkSync：
+                        // 外层「联」字按钮统一控制光标联动开关、统一广播清光标
+                        cursorLinkEnabled: cursorLinkEnabled,
+                        cursorClearToken: cursorClearToken,
                         mainLegendPortal: tilePortal(at: v.index),
+                        sharedLinkSync: linkSync,
                         showCustomEditor: $showCustomEditor,
                         showSystemEditor: $showSystemEditor,
                         onCursorChange: { has in
@@ -748,15 +783,7 @@ struct KlineDetailView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
 
-                        // 2. 区间统计
-                        settingsSectionTitle("区间统计")
-                        toggleRow(title: "显示区间统计", isOn: $config.displaySettings.showRangeStats) {
-                            Text("在图表右上角显示可见区间的涨跌幅、高低、量额统计")
-                                .font(.system(size: 11))
-                                .foregroundColor(.gray)
-                        }
-
-                        // 3. 图层显示
+                        // 2. 图层显示
                         settingsSectionTitle("图层显示")
                         toggleRow(title: "跳空缺口", isOn: $config.displaySettings.showGap) {
                             Text("在 K 线之间标出跳空缺口区域")
@@ -830,6 +857,12 @@ struct KlineDetailView: View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor, metaId: item.id, period: period,
                        isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
+                       // 单视图：cursorLinkEnabled 无意义，传 false（不传也有默认值）；
+                       // 联动：此处 helper 仅单图分支在使用 → 传 false；tile 分支自己传 cursorLinkEnabled
+                       cursorLinkEnabled: linked && cursorLinkEnabled,
+                       cursorClearToken: cursorClearToken,
+                       // 单图：保留"额"字段显示；联动 tile 分支传入 true 隐藏
+                       hideQuoteTurnover: false,
                        onPeriodSwitch: linked ? { _ in } : { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
                            DebugLogger.shared.log("图表滑动切换周期: \(newPeriod.rawValue)")

@@ -126,11 +126,6 @@ struct SwipeFeedback: Equatable {
     let canRight: Bool       // 右滑方向是否可切换
 }
 
-/// 区间统计可拖动的边界（起点/终点）
-enum StatsEdge: Equatable {
-    case start, end
-}
-
 /// 公式编辑器针对的目标图表
 enum EditorTarget {
     case main, sub
@@ -532,8 +527,18 @@ struct KlineChartView: View {
     let period: KlinePeriod
     /// 是否使用独立的副图模型实例（双联动左右视图各用一套，避免共享模型被不同数据长度的曲线互相覆盖）
     private let isolatedSubs: Bool
-    /// 接收联动光标并自动滚动到窗口外K线时，是否把该K线居中显示（左日线视图传 true，右周线视图保持贴右边缘的现有逻辑）
+    /// 接收联动光标并自动滚动到窗口外K线时，是否把该K线居中显示。
+    /// 在联动模式 cursorLinkEnabled 开启且对称联动下，所有视图联动一律居中，本字段仅用于光标来源标记。
     private let linkAutoCenter: Bool
+    /// 光标联动开关（详情页顶部「联」字按钮的联动态）：
+    ///   true  → 本视图光标主动 publish 到 linkSync，并 apply 其它视图的联动
+    ///   false → 视图光标完全独立，不参与发布与接收
+    let cursorLinkEnabled: Bool
+    /// 清光标广播令牌（外层切换 cursorLinkEnabled 或整体退出联动时更新 UUID，
+    /// 本视图 onChange 清空自身 selectedIndex/pinnedIndex 等所有光标状态）
+    let cursorClearToken: UUID
+    /// 联动模式下隐藏行情行里的"额"（成交额）字段：时间轴上一行 与 时间轴内 pinned 覆盖 均隐藏
+    let hideQuoteTurnover: Bool
     /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
     let onPeriodSwitch: ((KlinePeriod) -> Void)?
     /// 当前周期后台预计算全部完成后的回调（用于外层继续预计算其它未计算周期）
@@ -589,10 +594,6 @@ struct KlineChartView: View {
     /// 副图左右滑动切换的拖动反馈动画状态（nil = 未在拖动副图）
     @State private var swipeFeedback: SwipeFeedback? = nil
     @State private var crosshairY: CGFloat? = nil
-    // 区间统计自定义边界（nil = 跟随屏幕可见区间）
-    @State private var statsStartIndex: Int? = nil
-    @State private var statsEndIndex: Int? = nil
-    @State private var statsDragEdge: StatsEdge? = nil
     /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
     @State private var gaps: [GapInfo] = []
     @ObservedObject private var customStore = CustomIndicatorStore.shared
@@ -650,6 +651,9 @@ struct KlineChartView: View {
          period: KlinePeriod = .daily,
          isolatedSubs: Bool = false,
          linkAutoCenter: Bool = false,
+         cursorLinkEnabled: Bool = false,
+         cursorClearToken: UUID = UUID(),
+         hideQuoteTurnover: Bool = false,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
          onPeriodPrefetched: ((KlinePeriod) -> Void)? = nil,
          onSwitchItem: ((Int) -> Void)? = nil,
@@ -667,6 +671,9 @@ struct KlineChartView: View {
         self.period = period
         self.isolatedSubs = isolatedSubs
         self.linkAutoCenter = linkAutoCenter
+        self.cursorLinkEnabled = cursorLinkEnabled
+        self.cursorClearToken = cursorClearToken
+        self.hideQuoteTurnover = hideQuoteTurnover
         self.onPeriodSwitch = onPeriodSwitch
         self.onPeriodPrefetched = onPeriodPrefetched
         self.onSwitchItem = onSwitchItem
@@ -1325,20 +1332,6 @@ struct KlineChartView: View {
                 drag.isDragging = true
                 // 记录最近触摸位置，作为双指缩放时的锚点（双指质心）
                 drag.lastTouchX = value.location.x
-                // 区间统计边界拖动：命中边界线附近（或已处于边界拖动中）且起点在主图区域时，优先调整统计区间
-                if startInMain && displaySettings.showRangeStats {
-                    let edge = statsDragEdge ?? statsEdge(atX: value.location.x, candleSpacing: candleSpacing)
-                    if let edge {
-                        statsDragEdge = edge
-                        let col = Int((value.location.x / candleSpacing).rounded())
-                        let idx = clamp(startIndex + col, 0, sortedData.count - 1)
-                        switch edge {
-                        case .start: statsStartIndex = min(idx, statsRangeIndices.end - 1)
-                        case .end: statsEndIndex = max(idx, statsRangeIndices.start + 1)
-                        }
-                        return
-                    }
-                }
 
                 // 副图左右滑动切换：起点在副图且无光标时实时更新拖动反馈动画（显示方向提示/滑轨/阈值）
                 if (startInS1 || startInS2) && selectedIndex == nil {
@@ -1397,7 +1390,6 @@ struct KlineChartView: View {
             .onEnded { value in
                 drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
                 panOffset = 0
-                statsDragEdge = nil
                 // 兜底：无论手势如何结束（含双指手势被中断），都清除双指状态，避免残留拦截后续单指拖动
                 drag.twoFingerActive = false
                 // 关键：无论手势如何结束（含提前 return 的分支），都必须重置拖拽状态，
@@ -1763,6 +1755,15 @@ struct KlineChartView: View {
             notifyHasCursor()
             publishLinkCursor(index: newIdx)
         }
+        .onChange(of: cursorClearToken) { _ in
+            // 外层广播：清掉本视图所有十字光标（切换光标联动开/关、退出联动等场景）
+            selectedIndex = nil; crosshairY = nil
+            pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
+            notifyHasCursor()
+        }
+        .onChange(of: linkSync.cursorDate) { date in
+            applyLinkCursor(date)
+        }
         .onChange(of: suppressCrosshair) { on in
             // 「边」开启时清除可能残留的十字光标（含固定光标），并同步联动/上报
             if on {
@@ -1818,49 +1819,43 @@ struct KlineChartView: View {
         onHasCursorChange?(selectedIndex != nil || pinnedIndex != nil)
     }
 
-    /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象（双联动时同步到另一视图）。
-    /// 记录本次发布是否由「右侧视图用户直接操作」产生（左视图据此决定是否居中；自身回声不算）
+    /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象。
+    /// 仅当 cursorLinkEnabled 为 true（用户显式开启了联动态的光标联动）才真正发布。
+    /// lastCursorFromRightUser 在新的对称联动下仅保留历史兼容语义：
+    /// 只要 linkUserDragging=true（任一视图的用户直接操作）就视为来源端，用于所有被联动视图统一做居中显示。
     private func publishLinkCursor(index: Int?) {
-        linkSync.lastCursorFromRightUser = !linkAutoCenter && linkUserDragging
+        guard cursorLinkEnabled else { return }
+        // 新语义：只要是用户直接操作的视图在拖动/点击产生了光标，就标记为"来源"，
+        // 所有其它视图接收到后一律居中显示。linkAutoCenter 仅保留作标记，不再影响居中逻辑。
+        linkSync.lastCursorFromRightUser = linkUserDragging
         // 消费后立即复位，防止来源标记因手势中断/多次发布而粘滞
         linkUserDragging = false
         let date: Int?
         if let index, index < sortedData.count { date = sortedData[index].date } else { date = nil }
-        klineDebug("[DualLink] publish \(period.rawValue) idx=\(String(describing: index)) date=\(String(describing: date)) fromRight=\(linkSync.lastCursorFromRightUser) dragging=\(linkUserDragging)")
         if linkSync.cursorDate != date { linkSync.cursorDate = date }
     }
 
-    /// 应用另一视图发布的联动光标：把本视图光标移动到对应日期最近的 K 线
+    /// 应用另一视图发布的联动光标：把本视图光标移动到对应日期最近的 K 线。
+    /// 仅当 cursorLinkEnabled=true 才响应；拖动中/同日期防回声守卫保持不变；
+    /// 所有被联动视图一律居中显示联动光标（不再区分左/右视图贴边行为）。
     private func applyLinkCursor(_ date: Int?) {
-        klineDebug("[DualLink] applyLink \(period.rawValue) 进入 date=\(String(describing: date)) dragCursor=\(drag.cursorDragging) fromRight=\(linkSync.lastCursorFromRightUser) win=[\(startIndex)...\(endIndex)] sel=\(String(describing: selectedIndex))")
+        // 总开关：未开启光标联动时直接忽略
+        guard cursorLinkEnabled else { return }
         // 本视图正在被用户直接拖动光标（手势进行中）：忽略联动。
-        // 否则回声会把光标拽到别的K线，下一帧手指又拉回，产生"先出现在蜡烛图位置再闪到手指位置"的闪烁
-        if drag.cursorDragging { klineDebug("[DualLink] \(period.rawValue) 守卫1拖动中忽略"); return }
+        // 否则回声会把光标拽到别的K线，下一帧手指又拉回，产生闪烁
+        if drag.cursorDragging { return }
         // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
         linkUserDragging = false
         // 该日期正是本视图当前光标所在日期 → 自己发布的，忽略，避免回环
-        if let idx = selectedIndex, idx < sortedData.count, sortedData[idx].date == date { klineDebug("[DualLink] \(period.rawValue) 守卫同日期忽略"); return }
-        // 左视图只响应「右侧用户直接操作」产生的位置光标；自身回声不响应。
-        // date == nil（取消）必须放行，否则右侧取消时左视图收不到、光标无法清除
-        if linkAutoCenter && date != nil && !linkSync.lastCursorFromRightUser { klineDebug("[DualLink] \(period.rawValue) 守卫2非右用户忽略"); return }
-        klineDebug("[DualLink] applyLink 进入 date=\(String(describing: date)) win=[\(startIndex)...\(endIndex)] n=\(sortedData.count) subs=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)] bgEnd=\(bgCoverageEnd)")
+        if let idx = selectedIndex, idx < sortedData.count, sortedData[idx].date == date { return }
         if let date {
             if let idx = nearestIndex(to: date) {
-                // 仅当联动光标由「右侧用户直接操作」产生时才居中（避免左侧自身拖动被回声触发居中）
-                if linkAutoCenter && linkSync.lastCursorFromRightUser {
-                    // 始终居中：无论联动K线是否已在窗口内，都把窗口滚到使其居中显示
-                    let half = count / 2
-                    let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
-                    let newOffset = max(0, (sortedData.count - 1) - targetEnd)
-                    if newOffset != endOffset {
-                        endOffset = newOffset
-                        refreshCurves()
-                        startPrefetch()
-                    }
-                } else if idx < startIndex || idx > endIndex {
-                    // 非居中（右周线，或左侧回声）：仅当联动K线在窗口外才滚动，贴右边缘
-                    let targetEnd = min(sortedData.count - 1, max(idx, count - 1))
-                    endOffset = max(0, (sortedData.count - 1) - targetEnd)
+                // 对称联动：所有被联动触发的视图，一律居中显示该K线（让其他视图用户看到联动位置）
+                let half = count / 2
+                let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
+                let newOffset = max(0, (sortedData.count - 1) - targetEnd)
+                if newOffset != endOffset {
+                    endOffset = newOffset
                     refreshCurves()
                     startPrefetch()
                 }
@@ -1871,7 +1866,6 @@ struct KlineChartView: View {
             selectedIndex = nil
             crosshairY = nil
         }
-        klineDebug("[DualLink] applyLink 结束 sel=\(String(describing: selectedIndex)) subs=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)]")
         notifyHasCursor()
     }
 
@@ -2552,23 +2546,6 @@ struct KlineChartView: View {
             // 可交互光标（pin 开启时即第二个光标）与固定光标的竖线/标签都绘制
             mainCursorVLine(index: selectedIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
             mainCursorVLine(index: pinnedIndex, compare: nil, width: width, candleSpacing: candleSpacing, height: height)
-            // 区间统计：绘制可拖动的统计区间边界线（起点/终点）
-            if displaySettings.showRangeStats {
-                let s = statsRangeIndices.start
-                let e = statsRangeIndices.end
-                let sx = min(max((CGFloat(s - startIndex) + 0.5) * candleSpacing, 0), width)
-                let ex = min(max((CGFloat(e - startIndex) + 0.5) * candleSpacing, 0), width)
-                Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: height).position(x: sx, y: height / 2)
-                Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: height).position(x: ex, y: height / 2)
-            }
-            if displaySettings.showRangeStats, let stats = rangeStats {
-                rangeStatsView(stats) {
-                    // 重置为跟随屏幕可见区间
-                    statsStartIndex = nil
-                    statsEndIndex = nil
-                }
-                .padding(.trailing, 6).padding(.top, 2)
-            }
         }
         .frame(width: width, height: height)
         .clipped()
@@ -2652,45 +2629,6 @@ struct KlineChartView: View {
         }
     }
 
-    /// 实际统计区间：自定义边界未设置时跟随屏幕可见区间，设置了则用手动拖动的边界
-    private var statsRangeIndices: (start: Int, end: Int) {
-        let lo = statsStartIndex ?? startIndex
-        let hi = statsEndIndex ?? endIndex
-        let minIdx = 0
-        let maxIdx = max(0, sortedData.count - 1)
-        return (clamp(min(lo, hi), minIdx, maxIdx), clamp(max(lo, hi), minIdx, maxIdx))
-    }
-
-    /// 判断某个横向位置是否命中统计区间的起点/终点边界线（用于拖动调整）
-    private func statsEdge(atX x: CGFloat, candleSpacing: CGFloat) -> StatsEdge? {
-        let s = statsRangeIndices.start
-        let e = statsRangeIndices.end
-        guard s <= e else { return nil }
-        let sx = (CGFloat(s - startIndex) + 0.5) * candleSpacing
-        let ex = (CGFloat(e - startIndex) + 0.5) * candleSpacing
-        let tol: CGFloat = 16
-        if abs(x - sx) <= tol { return .start }
-        if abs(x - ex) <= tol { return .end }
-        return nil
-    }
-
-    /// 区间统计（通达信风格）：按统计区间计算涨跌幅、高低、量额
-    private var rangeStats: (start: String, end: String, change: Double, high: Double, low: Double, vol: Double, amo: Double)? {
-        let s = statsRangeIndices.start
-        let e = statsRangeIndices.end
-        guard s <= e, s >= 0, e < sortedData.count else { return nil }
-        let statSlice = sortedData[s...e]
-        guard let first = statSlice.first, let last = statSlice.last else { return nil }
-        let prevClose = s > 0 ? sortedData[s - 1].close : first.open
-        let change = prevClose > 0 ? (last.close - prevClose) / prevClose * 100 : 0
-        let high = statSlice.map(\.high).max() ?? 0
-        let low = statSlice.map(\.low).min() ?? 0
-        let vol = statSlice.reduce(0.0) { $0 + $1.volume }
-        let amo = statSlice.reduce(0.0) { $0 + $1.turnover }
-        // 空头镜像：高/低取负
-        return (first.formattedDate, last.formattedDate, change, mir(high), mir(low), vol, amo)
-    }
-
     /// 第二个光标相对第一个固定光标的区间统计（区间为两光标之间；基准为固定光标的收盘价）
     /// change=两光标间涨幅、amplitude=振幅(区间最高-最低相对基准)、drawdown=最大回撤(相对基准,通常负)、
     /// rally=最大上涨(相对基准,通常正)、volSum=成交量之和、amoSum=成交额之和、periodCount=两光标间K线周期个数
@@ -2750,41 +2688,6 @@ struct KlineChartView: View {
               let p2 = priceAtY(y, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight),
               p1 > 0 else { return nil }
         return (p2 - p1) / p1 * 100
-    }
-
-    private func rangeStatsView(_ s: (start: String, end: String, change: Double, high: Double, low: Double, vol: Double, amo: Double),
-                                onReset: @escaping () -> Void) -> some View {
-        let changeColor: Color = s.change >= 0 ? upColor : downColor
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text("区间统计").font(.system(size: 9, weight: .semibold)).foregroundColor(.black)
-                Spacer()
-                Button(action: onReset) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 10))
-                        .foregroundColor(.gray)
-                }
-            }
-            Text("\(s.start) ~ \(s.end)").font(.system(size: 9)).foregroundColor(.gray)
-            HStack(spacing: 8) {
-                Text("涨跌幅").font(.system(size: 9)).foregroundColor(.gray)
-                Text(String(format: "%+.2f%%", s.change)).font(.system(size: 9)).foregroundColor(changeColor)
-            }
-            HStack(spacing: 8) {
-                kv("高", s.high, upColor)
-                kv("低", s.low, downColor)
-            }
-            HStack(spacing: 8) {
-                Text("量").font(.system(size: 9)).foregroundColor(.gray)
-                Text(formatVolume(s.vol)).font(.system(size: 9)).foregroundColor(.black)
-                Text("额").font(.system(size: 9)).foregroundColor(.gray)
-                Text(formatVolume(s.amo)).font(.system(size: 9)).foregroundColor(.black)
-            }
-        }
-        .padding(6)
-        .frame(maxWidth: .infinity, alignment: .topTrailing)
-        .background(Color.white.opacity(0.9)).cornerRadius(4)
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.4), lineWidth: 0.5))
     }
 
     private func mainCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
@@ -3076,10 +2979,12 @@ struct KlineChartView: View {
         return "\(period.rawValue): \(parts.joined(separator: "/"))"
     }
 
-    /// 把主图指标按钮的标题/点击行为同步给外层信息栏（提供 portal 时）
+    /// 把主图指标按钮的标题/点击行为同步给外层信息栏（提供 portal 时）。
+    /// - 单图：portal.hideInChart == false（按钮渲染在图内主图指标栏）→ 完整标题 "日线: MA/CMK"
+    /// - 联动：portal.hideInChart == true（按钮渲染在信息栏格子里）→ 只显示周期 "日线"
     private func syncMainLegendPortal() {
         guard let portal = mainLegendPortal else { return }
-        portal.title = mainLegendTitle
+        portal.title = portal.hideInChart ? period.rawValue : mainLegendTitle
         portal.onTap = {
             self.showSubSheet = false
             withAnimation { self.showMainSheet.toggle() }
@@ -3264,7 +3169,9 @@ struct KlineChartView: View {
                     axisKV("高", String(format: "%.2f", item.high), upColor)
                     axisKV("低", String(format: "%.2f", item.low), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
-                    axisKV("额", item.formattedTurnover, .black)
+                    if !hideQuoteTurnover {
+                        axisKV("额", item.formattedTurnover, .black)
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
@@ -3319,7 +3226,9 @@ struct KlineChartView: View {
                     axisKV("高", String(format: "%.2f", h), upColor)
                     axisKV("低", String(format: "%.2f", l), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
-                    axisKV("额", item.formattedTurnover, .black)
+                    if !hideQuoteTurnover {
+                        axisKV("额", item.formattedTurnover, .black)
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
