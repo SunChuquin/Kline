@@ -78,6 +78,9 @@ struct LinkedKlineTile: View {
         }
         let ticket = loadTicket + 1
         loadTicket = ticket
+        // 先清空旧数据：避免「新标的metaID已变但异步未返回」期间，SwiftUI 因短暂的渲染时机
+        // 问题（比如 isLoading 分支白屏未覆盖）而继续显示旧标的 K 线/副图，造成"数据不对"观感。
+        chartSeries = nil
         isLoading = true
         // 图表将重建，先清空信息栏按钮标题，避免短暂显示旧周期/旧标的指标
         mainLegendPortal.title = ""

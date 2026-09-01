@@ -968,10 +968,20 @@ struct KlineChartView: View {
         if !config.showBareK {
             let store = SystemIndicatorStore.shared
             let custom = activeCustomIndicator
-            // 计算区间：后台已覆盖窗口时用后台正确覆盖 [0...bgCoverageEnd]，否则前台近似（窗口+预热，合并已算区间）
-            let (calcStart, calcEnd) = bgCovered
-                ? (0, bgCoverageEnd)
-                : mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
+            // 计算区间选择（同 recomputeSub）：
+            // - 联动隔离 + force（搜索切标首次 onAppear）：全量 [0..<count]，保证 warmup 完整、
+            //   指标曲线与 K 线数据一一对应，避免短窗口前台近似造成主图指标缺失/错位，用户观感"数据不对"。
+            // - 否则：正确覆盖用 bgCovered 全量；否则 mergedCalcRange 近似前台。
+            let (calcStart, calcEnd): (Int, Int)
+            if force && isolatedSubs && !sortedData.isEmpty {
+                calcStart = 0
+                calcEnd = sortedData.count - 1
+            } else if bgCovered {
+                calcStart = 0
+                calcEnd = bgCoverageEnd
+            } else {
+                (calcStart, calcEnd) = mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
+            }
 
             // 数据驱动：主图指标集合来自 .tdx（SCOPE=main），只计算已启用的，按输出行缓存
             let entries = mainIndicatorEntries(store: store, customStore: customStore,
@@ -1123,10 +1133,24 @@ struct KlineChartView: View {
         }
         klineDebug("[KlineDebug] 进入计算 \(m.kind) 旧curves=\(m.curves.count) bgCovered=\(bgCovered) 匹配=\(curvesMatchCurrentData) force=\(force)")
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
-        // 计算区间：后台已覆盖窗口时用后台正确覆盖 [0...bgCoverageEnd]，否则前台近似（合并已算区间）
-        let (calcStart, calcEnd) = bgCovered
-            ? (0, bgCoverageEnd)
-            : mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
+        // 计算区间选择：
+        // - 联动隔离模式 + 强制重算（搜索切标后的首次 onAppear refreshCurves(force:true)）：
+        //   直接用全量数据 [0...count-1] 计算，既保证指标 warmup 完整（MACD/EMA 等递归指标
+        //   从首根 K 线开始累积，数值最准），又绕开 mergedCalcRange 的有限窗口 + 覆盖率推进
+        //   机制，避免数据量 < warmup 时 merged 区间只覆盖可见部分导致公式求值全 NaN、
+        //   副图最终显示为空。该场景只在切换标的时触发一次，是可接受的一次性开销。
+        // - 否则：优先走正确覆盖区间（bgCovered），否则用 mergedCalcRange 合并已覆盖区间
+        //   的近似前台计算，后台 prefetch 随后补齐。
+        let (calcStart, calcEnd): (Int, Int)
+        if force && isolatedSubs && !sortedData.isEmpty {
+            calcStart = 0
+            calcEnd = sortedData.count - 1
+        } else if bgCovered {
+            calcStart = 0
+            calcEnd = bgCoverageEnd
+        } else {
+            (calcStart, calcEnd) = mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
+        }
         let calcData = calcData(from: calcStart, to: calcEnd)
         var curves: [IndicatorLine] = []
         if m.activeCustomID != nil, let custom,
@@ -1735,7 +1759,10 @@ struct KlineChartView: View {
             // 把主图指标按钮标题/点击行为同步给外层信息栏
             syncMainLegendPortal()
             // 副图配置已持久化在共享仓库，无需重置
-            refreshCurves()
+            // 联动隔离视图（isolatedSubs=metaId=nil）：强制前台同步重算，
+            // 不依赖共享缓存/后台预计算推进，保证搜索切标后新标的副图第一时间完整显示。
+            // 普通单图（有缓存可用）：先走不强制路径，命中缓存恢复/短可见窗口近似后由后台补齐。
+            refreshCurves(force: isolatedSubs)
             // 先显示当前可见窗口（不卡），随后分块预计算更久远历史指标
             startPrefetch()
             notifyHasCursor()
