@@ -13,7 +13,6 @@ struct KlineApp: App {
     static let appVersion = "1.0.1"
 
     init() {
-        print("[Kline] 启动构建版本: \(KlineApp.appVersion)")
         // 每次启动重置沙盒日志，保证 debug_log.txt 只含本次启动到现在的记录
         DebugLogger.shared.clear()
         DebugLogger.shared.log("== App 启动 == 版本:\(KlineApp.appVersion)")

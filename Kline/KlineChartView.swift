@@ -11,11 +11,11 @@ import UIKit
 
 // MARK: - K线调试日志（可用开关控制）
 /// 是否输出 [KlineDebug] 调试日志。排查副图曲线/后台预计算问题时改为 `true`，定位完成后改回 `false`。
-/// 仅在 DEBUG 构建生效；发布构建（Release）完全不输出，无性能影响。
-private let klineDebugLoggingEnabled = true
+/// 调试日志总开关：false = 关闭所有调试控制台输出（联动/副图/光标/预计算等）。
+/// private let 常量在 Release 下由编译器做死代码消除，无任何运行时开销。
+private let klineDebugLoggingEnabled = false
 
-/// 统一调试日志入口：关闭时（或非 DEBUG 构建）不产生任何输出。
-/// 用 @autoclosure 延迟字符串拼接，关闭时零开销。
+/// 统一调试日志入口：总开关为 false 时直接空实现；@autoclosure 保证字符串拼接零开销。
 private func klineDebug(_ message: @autoclosure () -> String) {
     #if DEBUG
     if klineDebugLoggingEnabled { print(message()) }
@@ -2919,15 +2919,6 @@ struct KlineChartView: View {
     }
 
     private func subLegendRow(model m: SubChartModel, height: CGFloat) -> some View {
-        if klineDebugLoggingEnabled {
-            for (i, line) in m.curves.enumerated() {
-                let endV = endIndex < line.values.count ? line.values[endIndex] : Double.nan
-                let nanCount = line.values.filter { $0.isNaN }.count
-                let firstNonNaN = line.values.firstIndex { !$0.isNaN }.map { "startIdx=\($0)" } ?? "全NaN"
-                let selV = (selectedIndex.flatMap { $0 < line.values.count ? line.values[$0] : nil }).map { "\($0)" } ?? "nil/越界"
-                klineDebug("[KlineDebug] 副图legend \(m.kind) [\(i)]\(line.name) endIdx=\(endIndex) endV=\(endV) sel=\(String(describing: selectedIndex)) selV=\(selV) nan=\(nanCount)/\(line.values.count) \(firstNonNaN)")
-            }
-        }
         return ZStack {
             HStack(spacing: 8) {
                 IndicatorNameButton(title: m.titleName, onTap: {
@@ -2987,9 +2978,10 @@ struct KlineChartView: View {
     private func mainLegendRow(height: CGFloat) -> some View {
         ZStack {
             HStack(spacing: 8) {
-                // 指标名称按钮已挪到外层信息栏最左侧（经 mainLegendPortal 同步）；
-                // 未提供 portal 的旧用法仍在图表内渲染按钮
-                if mainLegendPortal == nil {
+                // 若提供 portal 且 hideInChart=true（联动 tile 场景）：按钮挪到外层信息栏格子左侧，
+                // 图内不重复渲染；若 portal 未提供或 hideInChart=false（单图）：按钮保持在图内指标栏
+                let shouldHideButtonInChart = (mainLegendPortal?.hideInChart ?? false)
+                if !shouldHideButtonInChart {
                     IndicatorNameButton(title: mainLegendTitle, onTap: {
                         showSubSheet = false
                         withAnimation { showMainSheet.toggle() }

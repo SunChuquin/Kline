@@ -40,6 +40,7 @@ struct DualSplitDivider: View {
     var body: some View {
         let shownRatio = dragRatio ?? committed
         GeometryReader { geo in
+            let posY = geo.size.height / 2
             Rectangle()
                 .fill(Color.gray.opacity(0.35))
                 .overlay(
@@ -47,9 +48,11 @@ struct DualSplitDivider: View {
                         .font(.system(size: 5))
                         .foregroundColor(.gray.opacity(0.7))
                 )
-                .frame(width: handleWidth)
-                .position(x: totalWidth * CGFloat(shownRatio), y: geo.size.height / 2)
+                // 关键顺序：先固定手柄条 14pt 宽（高填满父）
+                .frame(width: handleWidth, height: geo.size.height)
+                // 命中区 = 这个 14pt × fullHeight 的手柄条本身（精确、不越界）
                 .contentShape(Rectangle())
+                // 手势绑定在手柄条上：每条分隔线只响应自己手柄区域的拖动
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
@@ -64,6 +67,8 @@ struct DualSplitDivider: View {
                             dragRatio = nil
                         }
                 )
+                // 最后再定位：把上面那块 14pt 手柄条（带着它自己的手势）平移到对应 x
+                .position(x: totalWidth * CGFloat(shownRatio), y: posY)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -113,12 +118,19 @@ final class DualLinkSync: ObservableObject {
 
 /// 信息栏「主图指标名称按钮」桥接：图表把按钮标题（如"日线: MA"）与点击行为
 /// （打开主图指标选择面板）同步给外层，外层在信息栏最左侧渲染按钮，
-/// 无需了解图表内部状态即可保证两处显示与交互一致
+/// 无需了解图表内部状态即可保证两处显示与交互一致。
+///
+/// hideInChart 控制图内是否隐藏该按钮：
+///   - true：联动 tile 场景，按钮在信息栏格子里显示，图表内部不重复渲染；
+///   - false：单图场景，按钮保持在图表主图指标栏左侧，信息栏不重复显示。
 final class MainLegendPortal: ObservableObject {
     /// 按钮标题；图表未就绪/加载中时为空串
     @Published var title: String = ""
     /// 点击行为（打开主图指标选择面板）；由图表同步注入
     var onTap: (() -> Void)? = nil
+    /// true=按钮在信息栏显示、图内跳过；false=按钮在图内指标栏显示、信息栏跳过
+    let hideInChart: Bool
+    init(hideInChart: Bool) { self.hideInChart = hideInChart }
 }
 
 struct KlineDetailView: View {
@@ -155,10 +167,10 @@ struct KlineDetailView: View {
     @State private var linkSync = DualLinkSync()
     /// 顶部第一行工具栏实测高度（用于信息栏起始位置对齐可拖覆盖层）
     @State private var measuredTopBarHeight: CGFloat = 0
-    /// 单视图：信息栏最左侧主图指标按钮的桥接（图表同步标题/点击行为）
-    @StateObject private var mainLegendPortal = MainLegendPortal()
-    /// 联动：各视图信息栏格子的按钮桥接（按视图 index 取用；最多支持 4 视图）
-    @State private var tilePortals: [MainLegendPortal] = (0..<4).map { _ in MainLegendPortal() }
+    /// 单视图：hideInChart=false → 按钮保持在图表主图指标栏，信息栏不重复显示
+    @StateObject private var mainLegendPortal = MainLegendPortal(hideInChart: false)
+    /// 联动：hideInChart=true → 各 tile 图内跳过按钮，按钮统一显示在信息栏每格左侧
+    @State private var tilePortals: [MainLegendPortal] = (0..<4).map { _ in MainLegendPortal(hideInChart: true) }
 
     init(item: MetaItem, onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
@@ -203,14 +215,16 @@ struct KlineDetailView: View {
                         Color.clear
                             .frame(height: 2)
 
-                        // 第一行：工具栏
+                        // 第一行：工具栏（单图：含返回+名称+代码+功能按钮；联动：仅返回+功能按钮）
                         toolbarRow
-                        // 工具栏与信息栏之间的分界线
+                        // 工具栏与下方（信息栏或图表）之间的分界线
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
                             .frame(height: 0.5)
-                        // 第二行：信息栏（传整屏宽度，避免内嵌 GeometryReader 导致的高度/溢出问题）
-                        infoBarRow(width: geometry.size.width)
+                        // 第二行：信息栏仅联动时显示；单图信息已并入工具栏行，此处省略
+                        if dualLink {
+                            infoBarRow(width: geometry.size.width)
+                        }
                     }
 
                     // 图表区域：始终占满剩余空间，内部显示加载/空/图表
@@ -307,6 +321,18 @@ struct KlineDetailView: View {
                     .cornerRadius(corner)
             }
 
+            // 单图：在返回按钮右侧直接显示「标的名称 + 标的代码」，替代原先的独立信息栏
+            if !compact {
+                Text(item.name)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                Text(item.displayCode)
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+
             Spacer()
 
             // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标
@@ -401,10 +427,8 @@ struct KlineDetailView: View {
                 infoLinkedRow(width: width)
                     .frame(height: 22)
             } else {
+                // 单图：主图指标名称按钮保持在图表主图指标栏左侧，此处不重复显示
                 HStack(spacing: 6) {
-                    // 主图指标名称按钮（从图表内指标栏挪到信息栏最左侧）
-                    IndicatorNameButton(title: mainLegendPortal.title,
-                                        onTap: { mainLegendPortal.onTap?() })
                     Text(item.name)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.black)
@@ -912,8 +936,9 @@ struct KlineDetailView: View {
 
 /// 联动信息栏单个格子：主图指标名称按钮（最左侧）+ 标的名称 + 标的代码。
 /// 独立观察 portal，指标标题变化时只刷新本格子，不影响其它视图。
-/// layoutPriority: name > code > 按钮（优先级数字越大布局越优先保留完整宽度）；
-/// 按钮文字过长时自动截断，不影响 name 与 code。
+/// layoutPriority: 按钮（不截断，保持完整显示）> 名称（允许缩小）> 代码（允许缩小）；
+/// name/code 加 minimumScaleFactor：宽度不足时先缩小字号，最后万不得已才尾部截断，
+/// 按钮不缩放不截断、标题"日线: MA/CMK/BOLL"多长都完整显示。
 private struct LinkedInfoCell: View {
     @ObservedObject var portal: MainLegendPortal
     let name: String
@@ -923,18 +948,19 @@ private struct LinkedInfoCell: View {
         HStack(spacing: 4) {
             IndicatorNameButton(title: portal.title,
                                 onTap: { portal.onTap?() })
-                .lineLimit(1)
-                .layoutPriority(0)
+                .layoutPriority(2)
             Text(name)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.black)
                 .lineLimit(1)
-                .layoutPriority(2)
+                .minimumScaleFactor(0.55)
+                .layoutPriority(1)
             Text(code)
                 .font(.system(size: 10))
                 .foregroundColor(.gray)
                 .lineLimit(1)
-                .layoutPriority(1)
+                .minimumScaleFactor(0.55)
+                .layoutPriority(0.5)
         }
         .padding(.leading, 4)
     }
