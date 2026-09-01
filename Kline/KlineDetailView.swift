@@ -540,24 +540,31 @@ struct KlineDetailView: View {
     }
 
     /// 联动信息栏：按视图数分格（与主图分隔线位置对齐，2/3/4视图均跟随 dualSplitPositions）
+    ///
+    /// ⚠️ 必须与 dualLinkArea 的 ForEach 完全对齐：两边都按 (offset → 第 N 格 → views[N] → views[N].index)
+    /// 的顺序，然后「portal / 数据 / 渲染」全部用 views[N].index 访问。现在 LinkedViewStore 已在
+    /// configs(for:) / setConfigs 强制按 element.index 升序排序，所以 offset == element.index 恒成立；
+    /// 即便将来出现疏漏未排序，信息栏和 dualLinkArea 读同一个 views 数组的同一 offset，仍能保证
+    /// 「显示名=该视图名」「显示周期=该视图 period」「chartSeries=该 tile identity 下的 series」
+    /// 三者严格对齐，彻底消除「日线标签实际是周线数据」的错位观感。
     private func infoLinkedRow(width: CGFloat) -> some View {
         let views = linkedViews
         let count = max(views.count, 1)
         let dividers = config.dualDividers(for: count)
         let bounds = [0.0] + dividers + [1.0]
         return HStack(spacing: 0) {
-            ForEach(views.indices, id: \.self) { i in
+            ForEach(Array(views.enumerated()), id: \.element.index) { i, v in
                 let cellW = (bounds[i + 1] - bounds[i]) * Double(width)
-                LinkedInfoCell(portal: tilePortal(at: i),
-                               name: views[i].name,
-                               code: views[i].displayCode,
+                LinkedInfoCell(portal: tilePortal(at: v.index),
+                               name: v.name,
+                               code: v.displayCode,
                                onDrillIn: {
-                    startDrillIn(metaID: views[i].metaID,
-                                 period: views[i].period,
-                                 name: views[i].name,
-                                 code: views[i].displayCode,
-                                 type: views[i].type)
-                })
+                                    startDrillIn(metaID: v.metaID,
+                                                 period: v.period,
+                                                 name: v.name,
+                                                 code: v.displayCode,
+                                                 type: v.type)
+                               })
                     .frame(width: CGFloat(cellW), height: 22, alignment: .leading)
             }
         }

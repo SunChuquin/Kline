@@ -593,6 +593,21 @@ struct KlineChartView: View {
     @State private var panOffset: CGFloat = 0
     /// 副图左右滑动切换的拖动反馈动画状态（nil = 未在拖动副图）
     @State private var swipeFeedback: SwipeFeedback? = nil
+    /// 「副图滑动回调外层 onPeriodSwitch / onSwitchItem」的一次性触发守卫。
+    ///
+    /// 解决联动态的致命双触发问题：用户在副图二上完成一次阈值滑动后，onEnded 回调会触发一次
+    /// 外层 onPeriodSwitch(newPeriod) → 外层把 view.period 从 A 改到 B → 本 tile 的
+    /// .id(chartIdentity = meta-period) 变值 → SwiftUI 立刻销毁本 KlineChartView 旧实例、
+    /// 创建新实例。销毁发生在同一个 runloop 的稍晚时刻，如果老实例的 swipeFeedback @State
+    /// 还没被 nil'd （或者 onEnded 又因手势状态机对已销毁 view 重入一次），老实例会再回调
+    /// 一次外层 onPeriodSwitch(old_period 的方向推算) → 把 B 拉回 A → 于是日志里出现：
+    /// 「loadData⤴️B ✅ rows=...」 → 0.x 秒后「loadData⤴️A ✅ rows=...」，最终屏幕显示
+    /// A 数据 + 信息栏周期 = B，经典"日线显示周线数据"观感。
+    ///
+    /// 修复：同一次 swipeFeedback 设置 → onEnded 结算 的手势生命周期内，外层回调（切换
+    /// 周期/切换标的）**最多执行一次**；执行完毕后把此锁置 true，直到下一次新的
+    /// swipeFeedback 被创建（nil→非nil）才解锁。
+    @State private var swipeSubSlotTriggered = false
     @State private var crosshairY: CGFloat? = nil
     /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
     @State private var gaps: [GapInfo] = []
@@ -738,6 +753,9 @@ struct KlineChartView: View {
             // 时把未切换副图的现有曲线清空（切指标后后台未完成时尤其明显）。
             // 副图曲线的正确性由 recomputeSub（其内部已含 bgCovered 时的缓存恢复路径）统一负责。
         }
+        // 周期签名校验（声明周期 vs K 线尾部日期间距推断周期）放在 onAppear 执行，
+        // 不在 init 阶段跑：避免 Xcode Debug 模式在 init 阶段执行 Calendar/日期相关代码
+        // 或 Main Thread Checker / Swift Concurrency 检查时触发断言，出现详情页崩溃。
     }
 
     /// 当前主图自定义指标（从共享仓库中按当前周期激活的 ID 派生）
@@ -1361,8 +1379,12 @@ struct KlineChartView: View {
                 if (startInS1 || startInS2) && selectedIndex == nil {
                     let slot: SubSlot = startInS1 ? .top : .bottom
                     let (canL, canR) = subSwipeCanLeftRight(slot: slot)
+                    let wasNil = swipeFeedback == nil
                     swipeFeedback = SwipeFeedback(slot: slot, offset: value.translation.width,
                                                   canLeft: canL, canRight: canR)
+                    // 一次新手势开始（nil → 非 nil）解锁「一次切换只允许回调外层一次」的锁。
+                    // 见 swipeSubSlotTriggered 注释。
+                    if wasNil { swipeSubSlotTriggered = false }
                     return
                 }
 
@@ -1432,22 +1454,37 @@ struct KlineChartView: View {
                 if let fb = swipeFeedback {
                     let threshold: CGFloat = 70
                     let dir = fb.offset > 0 ? -1 : 1   // 右滑=更小周期/上一个标的，左滑=更大周期/下一个标的
+                    let triggeredSwitch: Bool
                     if abs(fb.offset) > threshold {
-                        selectedIndex = nil; crosshairY = nil
-                        // 联动态：副图一切标的、副图二切周期（与常规模式交换角色的作用域）
-                        if swapSubSwipeRoles {
-                            if fb.slot == .top {
-                                onSwitchItem?(dir)
-                            } else {
+                        // 一次性锁：同一次 swipeFeedback 手势生命周期，外层回调只许一次
+                        if !swipeSubSlotTriggered {
+                            swipeSubSlotTriggered = true
+                            selectedIndex = nil; crosshairY = nil
+                            // 联动态：副图一切标的、副图二切周期（与常规模式交换角色的作用域）
+                            if swapSubSwipeRoles {
+                                if fb.slot == .top {
+                                    onSwitchItem?(dir)
+                                } else {
+                                    switchPeriod(direction: dir)
+                                }
+                            } else if fb.slot == .top {
                                 switchPeriod(direction: dir)
+                            } else {
+                                onSwitchItem?(dir)
                             }
-                        } else if fb.slot == .top {
-                            switchPeriod(direction: dir)
+                            triggeredSwitch = true
                         } else {
-                            onSwitchItem?(dir)
+                            DebugLogger.shared.log("[副图滑动] 一次性锁生效，屏蔽重复回调 slot=\(fb.slot) dir=\(dir) offset=\(fb.offset) period=\(self.period.rawValue)")
+                            triggeredSwitch = false
                         }
+                    } else {
+                        triggeredSwitch = false
                     }
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { swipeFeedback = nil }
+                    // 若发生了真正的周期/标的切换，外层会立刻改 view.period → chartIdentity 变化 →
+                    // 本 SwiftUI KlineChartView 实例即将被销毁。此时再清锁已经没有意义。
+                    // 如果没有触发切换，仍然解锁下一次"新的 swipeFeedback 创建"时再清（见 onChanged）。
+                    _ = triggeredSwitch
                     return
                 }
                 if drag.cursorDragging { drag.cursorDragging = false; return }
@@ -1756,6 +1793,12 @@ struct KlineChartView: View {
         .onAppear {
             // 记录当前图表配置状态（周期/主图/副图/自定义），供外部读取 debug_log.txt 做自动化校验
             logChartState()
+            // 周期一致性校验（单图模式）：联动态下真正的校验在 LinkedKlineTile.loadData 的
+            // chartSeries 赋值那一瞬间做（避免 "view.period 已切换但 series 还是旧值" 的
+            // 假阳性）。单图模式这里安全，因为构造参数 series/period/metaId 来自同步
+            // cache，天然对齐。isolatedSubs (metaId==nil, 联动态 tile) 跳过本次校验，
+            // 改由 loadData 侧调用 static 版本。
+            if metaId != nil { verifyPeriodSignature() }
             // 把主图指标按钮标题/点击行为同步给外层信息栏
             syncMainLegendPortal()
             // 副图配置已持久化在共享仓库，无需重置
@@ -3595,6 +3638,65 @@ struct KlineChartView: View {
         let range = maxValue - minValue
         guard range > 0 else { return height }
         return height * CGFloat(1 - (value - minValue) / range)
+    }
+
+    // MARK: - 周期签名校验（诊断用）
+
+    /// 依据数据尾部 K 线日期间距推断实际周期签名；与声明周期不一致时记录日志
+    /// （static 版本，供外部在"数据刚加载完成"这一刻调用——联动态 tile 的 loadData、
+    /// 单图模式 onAppear 都能使用。static 版本的好处：调用者有完整上下文，
+    /// 不必依赖调用时 KlineChartView 的 self.series / self.period 是否和当时的
+    /// 数据同步，避免假阳性。）
+    static func verifyPeriodSignature(series: ChartSeries, declared: KlinePeriod, metaId: Int?) {
+        let all = series.sorted
+        guard all.count >= 3 else { return }
+        // ⚠️ 必须 Array(...) 转成新数组：all.suffix(6) 返回的是 ArraySlice，
+        // 保留了原数组的原始索引（如 994...999），直接用 tail[0]/tail[1] 会因
+        // SliceBuffer 越界触发 Fatal error: Index out of bounds。
+        let tail = Array(all.suffix(6))
+        var gaps: [Int] = []
+        for i in 1..<tail.count {
+            let prev = tail[i - 1].date
+            let curr = tail[i].date
+            let days = dateDiffDays(yymmdd1: prev, yymmdd2: curr)
+            if days > 0 { gaps.append(days) }
+        }
+        guard !gaps.isEmpty else { return }
+        let avgGap = Double(gaps.reduce(0, +)) / Double(gaps.count)
+        let inferred: KlinePeriod
+        switch avgGap {
+        case 0..<4:     inferred = .daily
+        case 4..<14:    inferred = .weekly
+        case 14..<60:   inferred = .monthly
+        case 60..<150:  inferred = .quarterly
+        default:        inferred = .yearly
+        }
+        if inferred != declared {
+            let mid = metaId.map(String.init) ?? "nil"
+            DebugLogger.shared.log("⚠️ [周期签名不匹配] 标的:\(mid) 声明周期:\(declared.rawValue) 推断周期:\(inferred.rawValue) 尾间距(天)=\(gaps) 均值≈\(String(format:"%.1f",avgGap)) K数=\(all.count)")
+        }
+    }
+
+    /// 实例方法（单图 onAppear 入口）：self.series 和 self.period 是本视图真正渲染时
+    /// 的构造参数，在单图模式下它们在 init 时就已经「对齐」——单图是一次性加载所有
+    /// 周期并从 (metaID,period) cache 直接取当前，没有联动态那种 view.period 先变、
+    /// series 异步后才更新的时间差。所以这里直接调用 static 版本即可。
+    private func verifyPeriodSignature() {
+        Self.verifyPeriodSignature(series: series, declared: period, metaId: metaId)
+    }
+
+    /// 两个 YYYYMMDD 整数日期之间的天数差（d2 - d1）。用于周期签名推断。
+    private static func dateDiffDays(yymmdd1 d1: Int, yymmdd2 d2: Int) -> Int {
+        func toComps(_ d: Int) -> DateComponents {
+            DateComponents(year: d / 10000, month: (d / 100) % 100, day: d % 100)
+        }
+        // Calendar(identifier:) 为 failable init（返回 Calendar?），这里显式解包
+        // 并额外提供一个 POSIX 回退时区宽松解析，避免 edge case 下强制解包崩溃。
+        var cal = Calendar(identifier: .gregorian) ?? Calendar.current
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        guard let a = cal.date(from: toComps(d1)),
+              let b = cal.date(from: toComps(d2)) else { return 0 }
+        return cal.dateComponents([.day], from: a, to: b).day ?? 0
     }
 }
 
