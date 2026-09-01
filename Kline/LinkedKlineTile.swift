@@ -163,7 +163,8 @@ struct LinkedKlineTile: View {
 
     /// 在本 owner 的配置里替换第 view.index 个视图
     private func replace(_ newView: LinkedViewConfig, in metaID: Int) -> [LinkedViewConfig] {
-        var list = linkedStore.configs(for: metaID)
+        let hint = (name: view.name, code: view.code, type: view.type)
+        var list = linkedStore.configs(for: metaID, nameHint: hint)
         if newView.index < list.count {
             list[newView.index] = newView
         } else {

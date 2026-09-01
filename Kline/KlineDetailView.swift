@@ -175,14 +175,17 @@ struct KlineDetailView: View {
         }
     }
 
-    /// 当前标的的联动视图数量（用于设置页下拉勾选；无记录时默认 2 视图）
+    /// 当前标的的联动视图数量（用于设置页下拉勾选；无记录时默认 2 视图）。
+    /// 传 nameHint：首次初始化/修复旧数据时，把主标的 name/code/type 同步写入 2 个默认视图
     private var linkedViewCount: LinkedViewCount {
-        LinkedViewCount(rawValue: LinkedViewStore.shared.configs(for: item.id).count) ?? .two
+        let hint = (name: item.name, code: item.code, type: item.type)
+        return LinkedViewCount(rawValue: linkedStore.configs(for: item.id, nameHint: hint).count) ?? .two
     }
 
     /// 当前标的的联动视图配置（用于信息栏列出各视图代码+周期）
     private var linkedViews: [LinkedViewConfig] {
-        LinkedViewStore.shared.configs(for: item.id)
+        let hint = (name: item.name, code: item.code, type: item.type)
+        return linkedStore.configs(for: item.id, nameHint: hint)
     }
 
     /// 信息栏顶部相对整页顶部的偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5
@@ -206,8 +209,8 @@ struct KlineDetailView: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
                             .frame(height: 0.5)
-                        // 第二行：信息栏
-                        infoBarRow
+                        // 第二行：信息栏（传整屏宽度，避免内嵌 GeometryReader 导致的高度/溢出问题）
+                        infoBarRow(width: geometry.size.width)
                     }
 
                     // 图表区域：始终占满剩余空间，内部显示加载/空/图表
@@ -277,37 +280,48 @@ struct KlineDetailView: View {
     }
 
     /// 顶部第一行：工具栏（返回 + 功能按钮）
+    /// 联动时整体 + 内部所有按钮高度压缩到 22pt（与信息栏一致），单视图保持原 34pt 尺寸
     private var toolbarRow: some View {
-        HStack(spacing: 6) {
+        let compact = dualLink               // 联动：压缩到 22pt，和信息栏等高
+        let btnH:    CGFloat = compact ? 22 : 28
+        let vPad:    CGFloat = compact ? 0  : 3
+        let hPad:    CGFloat = compact ? 6  : 8
+        let gap:     CGFloat = compact ? 4  : 6
+        let textSize:CGFloat = compact ? 10 : 12
+        let iconSize:CGFloat = compact ? 12 : 15
+        let backSize:CGFloat = compact ? 24 : 30
+        let smallW:  CGFloat = compact ? 24 : 28   // 多/空
+        let normW:   CGFloat = compact ? 26 : 32   // 边、📌、联、⚙
+        let corner:  CGFloat = compact ? 4  : 6
+
+        return HStack(spacing: gap) {
             // 返回
             Button(action: {
                 onClose()
             }) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: compact ? 13 : 16, weight: .semibold))
                     .foregroundColor(.black)
-                    .frame(width: 30, height: 28)
+                    .frame(width: backSize, height: btnH)
                     .background(Color.gray.opacity(0.12))
-                    .cornerRadius(6)
+                    .cornerRadius(corner)
             }
 
             Spacer()
 
-            // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标（现有逻辑）
+            // 📌 / 边：无十字光标时显示「边」按钮（开启边线调节并禁止光标）；有光标时显示 📌 固定光标
             if dualLink && !chartHasCursor {
-                // 「边」：默认关闭不高亮；点击开启高亮，开启后出现可拖动分界线，且禁止十字光标
                 Button(action: {
                     edgeAdjust.toggle()
                 }) {
                     Text("边")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: textSize, weight: .bold))
                         .foregroundColor(edgeAdjust ? .blue : .gray)
-                        .frame(width: 32, height: 28)
+                        .frame(width: normW, height: btnH)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel(edgeAdjust ? "关闭边线调节" : "开启边线调节")
             } else {
-                // 📌 固定光标：关闭时只允许单光标；有光标时才能开启，开启后固定第一个光标并可点击产生第二个
                 Button(action: {
                     if pinEnabled {
                         pinEnabled = false
@@ -316,40 +330,39 @@ struct KlineDetailView: View {
                     }
                 }) {
                     Image(systemName: pinEnabled ? "pin.fill" : "pin")
-                        .font(.system(size: 15))
+                        .font(.system(size: iconSize))
                         .foregroundColor(pinEnabled ? .blue : .gray)
-                        .frame(width: 32, height: 28)
+                        .frame(width: normW, height: btnH)
                         .contentShape(Rectangle())
                 }
                 .disabled(!pinEnabled && !chartHasCursor)
             }
 
-            // 单视图 / 双联动：双联动时左右对半分（左日线/右周线），十字光标联动
+            // 单视图 / 双联动
             Button(action: {
                 let wasOn = dualLink
                 withAnimation { dualLink.toggle() }
-                // 退出双联动时关闭边线调节，避免残留不可拖动/禁光标状态
                 if wasOn {
                     edgeAdjust = false
                     pinEnabled = false
                 }
             }) {
                 Text("联")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: textSize, weight: .bold))
                     .foregroundColor(dualLink ? .blue : .gray)
-                    .frame(width: 32, height: 28)
+                    .frame(width: normW, height: btnH)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel(dualLink ? "切换为单视图" : "切换为双联动")
 
-            // 多/空 全局镜像：开启后主图与所有副图数值取负镜像（空头）
+            // 多/空 全局镜像
             Button(action: {
                 config.mainMirrored.toggle()
             }) {
                 Text(config.mainMirrored ? "空" : "多")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: textSize, weight: .bold))
                     .foregroundColor(config.mainMirrored ? .blue : .gray)
-                    .frame(width: 28, height: 28)
+                    .frame(width: smallW, height: btnH)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel(config.mainMirrored ? "关闭空头镜像" : "开启空头镜像")
@@ -359,15 +372,15 @@ struct KlineDetailView: View {
                 withAnimation { showSettings = true }
             }) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 15))
+                    .font(.system(size: iconSize))
                     .foregroundColor(.gray)
-                    .frame(width: 32, height: 28)
+                    .frame(width: normW, height: btnH)
                     .contentShape(Rectangle())
             }
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 8)
-        .padding(.vertical, 3)
+        .padding(.leading, hPad)
+        .padding(.trailing, hPad)
+        .padding(.vertical, vPad)
         .background(Color.white)
         // 测量工具栏行高度（供 infoBarTopOffset 对齐）
         .background(
@@ -379,14 +392,14 @@ struct KlineDetailView: View {
     }
 
     /// 顶部第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型）
-    private var infoBarRow: some View {
+    /// width：整屏宽度（由最外层 GeometryReader 传入，避免在此函数内嵌 GeometryReader 导致布局溢出/错位）
+    private func infoBarRow(width: CGFloat) -> some View {
         Group {
             if dualLink {
-                // 联动：按视图数量分格，每格显示对应视图的(代码+周期)，格子间用竖线分隔
-                GeometryReader { geo in
-                    infoLinkedRow(width: geo.size.width)
-                }
-                .frame(height: 22)
+                // 联动：HStack(spacing:0) 按顺序排布各视图格子，每格宽度 = (right - left) 比例 × 整屏宽
+                // 格子间竖线通过 overlay 在 exact x 位置绘制，与主图 dualSplitPositions 严格对齐
+                infoLinkedRow(width: width)
+                    .frame(height: 22)
             } else {
                 HStack(spacing: 6) {
                     // 主图指标名称按钮（从图表内指标栏挪到信息栏最左侧）
@@ -410,6 +423,7 @@ struct KlineDetailView: View {
                 .padding(.vertical, 3)
             }
         }
+        .frame(width: width, height: dualLink ? 22 : nil, alignment: .leading)
         .background(Color.white)
         .overlay(
             // 信息栏与主图之间的分界线
@@ -423,30 +437,32 @@ struct KlineDetailView: View {
     /// 联动信息栏：按视图数分格（与主图分隔线位置对齐，2/3/4视图均跟随 dualSplitPositions）
     private func infoLinkedRow(width: CGFloat) -> some View {
         let views = linkedViews
-        let count = views.count
-        // 各视图左边界与主图一致：2视图用已占比，3/4视图同理
+        let count = max(views.count, 1)
         let dividers = config.dualDividers(for: count)
         let bounds = [0.0] + dividers + [1.0]
-        return ZStack(alignment: .topLeading) {
-            // 各视图格子：主图指标按钮（最左侧）+ 代码周期
+        return HStack(spacing: 0) {
             ForEach(views.indices, id: \.self) { i in
-                let left = CGFloat(bounds[i]) * width
-                let right = CGFloat(bounds[i + 1]) * width
+                let cellW = (bounds[i + 1] - bounds[i]) * Double(width)
                 LinkedInfoCell(portal: tilePortal(at: i),
-                               code: views[i].displayCode,
-                               period: views[i].period.rawValue)
-                    .frame(width: right - left, height: 22, alignment: .leading)
-            }
-            // 视图之间的竖直分隔线（样式与主图一致）
-            ForEach(1..<count, id: \.self) { i in
-                let x = CGFloat(bounds[i]) * width
-                Rectangle()
-                    .fill(Color.gray.opacity(0.5))
-                    .frame(width: 1)
-                    .position(x: x, y: 11)
+                               name: views[i].name,
+                               code: views[i].displayCode)
+                    .frame(width: CGFloat(cellW), height: 22, alignment: .leading)
             }
         }
-        .frame(width: width, height: 22)
+        .frame(width: width, height: 22, alignment: .leading)
+        // 格子间竖线：在 overlay 里按 bounds 比例精确定位 x，与主图分隔线一致
+        .overlay(alignment: .topLeading) {
+            if count >= 2 {
+                ForEach(1..<count, id: \.self) { i in
+                    let x = CGFloat(bounds[i]) * width
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.5))
+                        .frame(width: 1, height: 22)
+                        .position(x: x, y: 11)
+                }
+            }
+        }
+        .clipped()
     }
 
     /// 联动第 index 个视图的信息栏按钮桥接（越界兜底取最后一个，避免偶发崩溃）
@@ -485,7 +501,8 @@ struct KlineDetailView: View {
     private func dualLinkArea() -> some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
-            let views = linkedStore.configs(for: item.id)
+            let hint = (name: item.name, code: item.code, type: item.type)
+            let views = linkedStore.configs(for: item.id, nameHint: hint)
             let count = views.count
             // 各分隔线位置（归一化）；2视图=[x]，3=[x1,x2]，4=[x1,x2,x3]
             let dividers = config.dualDividers(for: count)
@@ -618,7 +635,8 @@ struct KlineDetailView: View {
                         Menu {
                             ForEach(LinkedViewCount.allCases) { count in
                                 Button {
-                                    LinkedViewStore.shared.setViewCount(count, for: item.id)
+                                    let hint = (name: item.name, code: item.code, type: item.type)
+                                    LinkedViewStore.shared.setViewCount(count, for: item.id, nameHint: hint)
                                 } label: {
                                     if linkedViewCount == count {
                                         Label(count.label, systemImage: "checkmark")
@@ -665,7 +683,8 @@ struct KlineDetailView: View {
                         .confirmationDialog("重置当前标的的联动视图配置？", isPresented: $showResetLinkedConfirm,
                                             titleVisibility: .visible) {
                             Button("重置", role: .destructive) {
-                                LinkedViewStore.shared.reset(for: item.id)
+                                let hint = (name: item.name, code: item.code, type: item.type)
+                                LinkedViewStore.shared.reset(for: item.id, nameHint: hint)
                             }
                             Button("取消", role: .cancel) {}
                         } message: {
@@ -891,25 +910,32 @@ struct KlineDetailView: View {
     }
 }
 
-/// 联动信息栏单个格子：主图指标名称按钮（最左侧）+ 代码周期标签。
-/// 独立观察 portal，指标标题变化时只刷新本格子，不影响其它视图
+/// 联动信息栏单个格子：主图指标名称按钮（最左侧）+ 标的名称 + 标的代码。
+/// 独立观察 portal，指标标题变化时只刷新本格子，不影响其它视图。
+/// layoutPriority: name > code > 按钮（优先级数字越大布局越优先保留完整宽度）；
+/// 按钮文字过长时自动截断，不影响 name 与 code。
 private struct LinkedInfoCell: View {
     @ObservedObject var portal: MainLegendPortal
+    let name: String
     let code: String
-    let period: String
 
     var body: some View {
         HStack(spacing: 4) {
             IndicatorNameButton(title: portal.title,
                                 onTap: { portal.onTap?() })
+                .lineLimit(1)
+                .layoutPriority(0)
+            Text(name)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.black)
+                .lineLimit(1)
+                .layoutPriority(2)
             Text(code)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.blue)
-            Text(period)
                 .font(.system(size: 10))
                 .foregroundColor(.gray)
+                .lineLimit(1)
+                .layoutPriority(1)
         }
-        .lineLimit(1)
         .padding(.leading, 4)
     }
 }

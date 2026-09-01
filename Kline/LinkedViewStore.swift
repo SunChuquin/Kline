@@ -80,12 +80,31 @@ final class LinkedViewStore: ObservableObject {
     }
 
     /// 取某主标的当前的联动视图配置。无记录时创建默认：2 个视图（日线/周线，标的=该主标的），并立即落盘。
-    func configs(for metaID: Int) -> [LinkedViewConfig] {
-        if let existing = configs[metaID], !existing.isEmpty { return existing }
-        let name = currentName(for: metaID)
+    ///
+    /// - Parameters:
+    ///   - metaID: 主标的 ID
+    ///   - nameHint: 主标的 (name, code, type) 信息，由调用方（当前详情页/当前 tile 视图）传入；
+    ///     用于首次初始化时填充默认视图，以及**修复旧版遗留空数据**（旧版 currentName 有自引用 bug，
+    ///     生成的默认视图 name/code/type 全空，导致信息栏代码永远不显示）
+    func configs(for metaID: Int,
+                 nameHint: (name: String, code: String, type: String)? = nil) -> [LinkedViewConfig] {
+        if var existing = configs[metaID], !existing.isEmpty {
+            // 旧数据补丁：任意元素 name/code 为空时用 hint 补齐，并立即回写磁盘
+            if let hint = nameHint, existing.contains(where: { $0.name.isEmpty || $0.code.isEmpty || $0.type.isEmpty }) {
+                for i in existing.indices {
+                    if existing[i].name.isEmpty { existing[i].name = hint.name }
+                    if existing[i].code.isEmpty { existing[i].code = hint.code }
+                    if existing[i].type.isEmpty { existing[i].type = hint.type }
+                }
+                configs[metaID] = existing
+                saveToDisk()
+            }
+            return existing
+        }
+        let n = nameHint ?? currentName(for: metaID)
         let def: [LinkedViewConfig] = [
-            LinkedViewConfig(index: 0, metaID: metaID, name: name.0, code: name.1, type: name.2, period: .daily),
-            LinkedViewConfig(index: 1, metaID: metaID, name: name.0, code: name.1, type: name.2, period: .weekly),
+            LinkedViewConfig(index: 0, metaID: metaID, name: n.0, code: n.1, type: n.2, period: .daily),
+            LinkedViewConfig(index: 1, metaID: metaID, name: n.0, code: n.1, type: n.2, period: .weekly),
         ]
         configs[metaID] = def
         saveToDisk()
@@ -111,14 +130,16 @@ final class LinkedViewStore: ObservableObject {
     }
 
     /// 清空某主标的的联动视图配置（重置：恢复默认 2 视图）
-    func reset(for metaID: Int) {
+    func reset(for metaID: Int,
+               nameHint: (name: String, code: String, type: String)? = nil) {
         configs[metaID] = nil
-        _ = configs(for: metaID)   // 触发默认重建并落盘
+        _ = configs(for: metaID, nameHint: nameHint)   // 触发默认重建并落盘
     }
 
     /// 删除一个视图（数量 2→1 时保留最小为 2，因最少 2 个视图）
-    func removeView(at index: Int, for metaID: Int) {
-        var cur = configs(for: metaID)
+    func removeView(at index: Int, for metaID: Int,
+                    nameHint: (name: String, code: String, type: String)? = nil) {
+        var cur = configs(for: metaID, nameHint: nameHint)
         guard index < cur.count, cur.count > 2 else { return }
         cur.remove(at: index)
         // 重排 index
@@ -127,16 +148,18 @@ final class LinkedViewStore: ObservableObject {
         saveToDisk()
     }
 
-    /// 数量控制：把某主标的强制为指定视图数量（不足补默认、多余裁剪）
-    func setViewCount(_ count: LinkedViewCount, for metaID: Int) {
-        var cur = configs(for: metaID)
+    /// 数量控制：把某主标的强制为指定视图数量（不足补默认、多余裁剪）。
+    /// 新增视图继承 nameHint（优先）或 cur.first（次优先）的 name/code/type，保证新视图代码非空
+    func setViewCount(_ count: LinkedViewCount, for metaID: Int,
+                      nameHint: (name: String, code: String, type: String)? = nil) {
+        var cur = configs(for: metaID, nameHint: nameHint)
         if cur.count < count.rawValue {
             // 补到目标数量的默认视图（后面补齐的用未占用周期）
             let periods = KlinePeriod.allCases
             while cur.count < count.rawValue {
                 let idx = cur.count
                 let p = periods.indices.contains(idx) ? periods[idx] : .daily
-                let name = displayInfo(of: cur.first)
+                let name = nameHint.map { ($0.name, $0.code, $0.type) } ?? displayInfo(of: cur.first)
                 cur.append(LinkedViewConfig(index: idx, metaID: metaID, name: name.0, code: name.1, type: name.2, period: p))
             }
         } else if cur.count > count.rawValue {
