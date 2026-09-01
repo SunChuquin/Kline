@@ -211,6 +211,33 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// 取某标的某周期表最近 limit 根（ORDER BY date DESC → 结果从新→旧）。
+    /// 用于行情/自选列表表单只需要最近 80 根，避免全量读（一次 1K+ 只的话全量读会卡死）。
+    func fetchPeriodLimited(metaId: Int, table: String, limit: Int) -> [KlineItem] {
+        dbQueue.sync {
+            guard let db = self.db else { return [] }
+            let query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? ORDER BY date DESC LIMIT ?;"
+            var statement: OpaquePointer?
+            var results: [KlineItem] = []
+            guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else { return results }
+            sqlite3_bind_int64(statement, 1, Int64(metaId))
+            sqlite3_bind_int64(statement, 2, Int64(Swift.max(1, limit)))
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let date = Int(sqlite3_column_int64(statement, 0))
+                let open = sqlite3_column_double(statement, 1)
+                let high = sqlite3_column_double(statement, 2)
+                let low = sqlite3_column_double(statement, 3)
+                let close = sqlite3_column_double(statement, 4)
+                let vol = sqlite3_column_type(statement, 5) == SQLITE_FLOAT ? sqlite3_column_double(statement, 5) : 0
+                let amo = sqlite3_column_type(statement, 6) == SQLITE_FLOAT ? sqlite3_column_double(statement, 6) : 0
+                results.append(KlineItem(date: date, open: open, high: high, low: low,
+                                         close: close, volume: vol, turnover: amo))
+            }
+            sqlite3_finalize(statement)
+            return results
+        }
+    }
+
     func searchMetaAsync(keyword: String, completion: @escaping ([MetaItem]) -> Void) {
         dbQueue.async { [weak self] in
             guard let self = self else { return }
