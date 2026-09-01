@@ -168,6 +168,10 @@ struct KlineDetailView: View {
     @State private var edgeAdjust = false
     /// 重置当前标的联动视图配置的确认弹窗
     @State private var showResetLinkedConfirm = false
+    // 设置面板内的三个统一选择器（confirmationDialog 风格，全部从底部弹出）
+    @State private var showPeriodPicker = false
+    @State private var showViewCountPicker = false
+    @State private var showChartStylePicker = false
     /// 双视图联动同步（日线/周线图共享）
     @State private var linkSync = DualLinkSync()
     /// 顶部第一行工具栏实测高度（用于信息栏起始位置对齐可拖覆盖层）
@@ -630,6 +634,7 @@ struct KlineDetailView: View {
     }
 
     /// 设置面板：底部 3/4 高度，点击顶部 1/4 区域关闭
+    /// 布局：iOS 设置 App 风格 —— section 标题 + 浅灰圆角分组卡片；所有下拉统一改为整行可点 → confirmationDialog 底部弹出
     private func settingsOverlay(geometry: GeometryProxy) -> some View {
         ZStack(alignment: .bottom) {
             // 顶部非面板区域，点击关闭
@@ -643,103 +648,34 @@ struct KlineDetailView: View {
 
             // 底部设置面板
             VStack(spacing: 0) {
-                HStack {
-                    Text("K线设置")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.black)
-                    Spacer()
+                settingsHeader(title: "K线设置") {
+                    withAnimation { showSettings = false }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-
-                Divider()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        // 0. 行情周期（日线/周线）
-                        settingsSectionTitle("行情周期")
-                        Menu {
-                            ForEach(KlinePeriod.allCases) { period in
-                                Button {
-                                    DebugLogger.shared.log("设置面板切换周期: \(period.rawValue)")
-                                    withAnimation { config.selectedPeriod = period }
-                                } label: {
-                                    if config.selectedPeriod == period {
-                                        Label(period.rawValue, systemImage: "checkmark")
-                                    } else {
-                                        Text(period.rawValue)
-                                    }
-                                }
+                        // 1. 通用分组：行情周期 + 联动视图数量
+                        stSectionTitle("通用")
+                        stGroupedCard {
+                            stSelectionRow(title: "行情周期",
+                                           value: config.selectedPeriod.rawValue) {
+                                showPeriodPicker = true
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(config.selectedPeriod.rawValue)
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.black)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.gray)
+                            stDivider()
+                            stSelectionRow(title: "联动视图数量",
+                                           value: linkedViewCount.label) {
+                                showViewCountPicker = true
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Color.gray.opacity(0.12))
-                            .cornerRadius(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
 
-                        // 联动视图数量（2/3/4）
-                        settingsSectionTitle("联动视图数量")
-                        Menu {
-                            ForEach(LinkedViewCount.allCases) { count in
-                                Button {
-                                    let hint = (name: item.name, code: item.code, type: item.type)
-                                    LinkedViewStore.shared.setViewCount(count, for: item.id, nameHint: hint)
-                                } label: {
-                                    if linkedViewCount == count {
-                                        Label(count.label, systemImage: "checkmark")
-                                    } else {
-                                        Text(count.label)
-                                    }
-                                }
+                        // 1b. 重置分组：单独的红色分组
+                        stGroupedCard {
+                            stDestructiveRow(title: "重置当前标的联动视图配置") {
+                                showResetLinkedConfirm = true
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(linkedViewCount.label)
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.black)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Color.gray.opacity(0.12))
-                            .cornerRadius(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-
-                        // 重置当前标的联动视图配置（需确认）
-                        Button(action: {
-                            showResetLinkedConfirm = true
-                        }) {
-                            HStack {
-                                Text("重置当前标的联动视图配置")
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.red)
-                                Spacer()
-                                Image(systemName: "arrow.counterclockwise")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.red)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                        }
-                        .confirmationDialog("重置当前标的的联动视图配置？", isPresented: $showResetLinkedConfirm,
+                        .confirmationDialog("重置当前标的的联动视图配置？",
+                                            isPresented: $showResetLinkedConfirm,
                                             titleVisibility: .visible) {
                             Button("重置", role: .destructive) {
                                 let hint = (name: item.name, code: item.code, type: item.type)
@@ -749,106 +685,186 @@ struct KlineDetailView: View {
                         } message: {
                             Text("将恢复为默认 2 个视图（左日线、右周线），且各视图标的/周期会被重置。")
                         }
-                        .padding(.vertical, 2)
 
-                        // 1. K线类型（下拉选项，压缩占位）
-                        settingsSectionTitle("K线类型")
-                        Menu {
-                            ForEach(ChartStyle.allCases) { style in
-                                Button {
-                                    withAnimation { config.chartStyle = style }
-                                } label: {
-                                    if config.chartStyle == style {
-                                        Label(style.rawValue, systemImage: "checkmark")
-                                    } else {
-                                        Text(style.rawValue)
-                                    }
-                                }
+                        // 2. 显示分组：K线类型 + 图层显示开关
+                        stSectionTitle("显示")
+                        stGroupedCard {
+                            stSelectionRow(title: "K线类型",
+                                           value: config.chartStyle.rawValue) {
+                                showChartStylePicker = true
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(config.chartStyle.rawValue)
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.black)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Color.gray.opacity(0.12))
-                            .cornerRadius(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            stDivider()
+                            stToggleRow(title: "跳空缺口",
+                                        subtitle: "在 K 线之间标出跳空缺口区域",
+                                        isOn: $config.displaySettings.showGap)
+                            stDivider()
+                            stToggleRow(title: "缺口回补后消失",
+                                        subtitle: "开启时缺口被回补后整体隐藏；关闭时仅截止，保留形成区",
+                                        isOn: $config.displaySettings.gapDisappearAfterFill)
+                            stDivider()
+                            stToggleRow(title: "最新价线",
+                                        subtitle: "在最新收盘价位置绘制水平虚线",
+                                        isOn: $config.displaySettings.showLatestPriceLine)
+                            stDivider()
+                            stToggleRow(title: "指标不挤压K线",
+                                        subtitle: "主图价格范围仅按 K 线计算；关闭后指标线会撑大范围",
+                                        isOn: $config.displaySettings.indicatorNotSqueezeKline)
+                            stDivider()
+                            stToggleRow(title: "裸 K",
+                                        subtitle: "开启后只显示 K 线、隐藏全部主图指标",
+                                        isOn: $config.showBareK)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
 
-                        // 2. 图层显示
-                        settingsSectionTitle("图层显示")
-                        toggleRow(title: "跳空缺口", isOn: $config.displaySettings.showGap) {
-                            Text("在 K 线之间标出跳空缺口区域")
-                                .font(.system(size: 11))
-                                .foregroundColor(.gray)
-                        }
-                        toggleRow(title: "缺口回补后消失", isOn: $config.displaySettings.gapDisappearAfterFill) {
-                            Text("开启时缺口被回补后整体隐藏；关闭时仅截止到回补位置、保留形成到截止区域")
-                                .font(.system(size: 11))
-                                .foregroundColor(.gray)
-                        }
-                        toggleRow(title: "最新价线", isOn: $config.displaySettings.showLatestPriceLine) {
-                            Text("在最新收盘价位置绘制虚线")
-                                .font(.system(size: 11))
-                                .foregroundColor(.gray)
-                        }
-                        toggleRow(title: "指标不挤压K线", isOn: $config.displaySettings.indicatorNotSqueezeKline) {
-                            Text("开启时主图价格范围仅按K线计算，指标线超出部分被裁剪；关闭后指标线会撑大价格范围")
-                                .font(.system(size: 11))
-                                .foregroundColor(.gray)
-                        }
-                        toggleRow(title: "裸K", isOn: $config.showBareK) {
-                            Text("开启后只显示K线、隐藏主图指标")
-                                .font(.system(size: 11))
-                                .foregroundColor(.gray)
-                        }
+                        Color.clear.frame(height: 16)
                     }
                 }
-
-                Spacer(minLength: 8)
+                // 统一 3 个 confirmationDialog 选择器（全部从底部弹出，带当前选中项 checkmark）
+                .confirmationDialog("选择行情周期", isPresented: $showPeriodPicker,
+                                    titleVisibility: .visible) {
+                    ForEach(KlinePeriod.allCases) { period in
+                        Button(period.rawValue) {
+                            DebugLogger.shared.log("设置面板切换周期: \(period.rawValue)")
+                            withAnimation { config.selectedPeriod = period }
+                        }
+                    }
+                    Button("取消", role: .cancel) {}
+                }
+                .confirmationDialog("选择联动视图数量", isPresented: $showViewCountPicker,
+                                    titleVisibility: .visible) {
+                    ForEach(LinkedViewCount.allCases) { count in
+                        Button(count.label) {
+                            let hint = (name: item.name, code: item.code, type: item.type)
+                            LinkedViewStore.shared.setViewCount(count, for: item.id, nameHint: hint)
+                        }
+                    }
+                    Button("取消", role: .cancel) {}
+                }
+                .confirmationDialog("选择 K 线类型", isPresented: $showChartStylePicker,
+                                    titleVisibility: .visible) {
+                    ForEach(ChartStyle.allCases) { style in
+                        Button(style.rawValue) {
+                            withAnimation { config.chartStyle = style }
+                        }
+                    }
+                    Button("取消", role: .cancel) {}
+                }
             }
             .frame(maxWidth: .infinity, alignment: .top)
             .frame(height: geometry.size.height * 0.75)
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func settingsSectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(.gray)
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 4)
+    // MARK: - 设置面板构建块（统一尺寸 / 内边距 / 圆角）
+
+    /// 面板标题栏（左大标题 + 右关闭「完成」）
+    private func settingsHeader(title: String, onClose: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.black)
+                Spacer()
+                Button(action: onClose) {
+                    Text("完成")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.blue)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            Divider()
+        }
     }
 
-    private func toggleRow(title: String, isOn: Binding<Bool>, @ViewBuilder subtitle: () -> some View) -> some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: isOn.animation()) {
-                    Text(title)
-                        .font(.system(size: 15))
-                        .foregroundColor(.black)
-                }
-                .tint(.blue)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                subtitle()
-                    .padding(.horizontal, 16)
-            }
-            .padding(.vertical, 2)
-            Divider().padding(.leading, 16)
+    /// 分组标题（iOS 设置样式：左对齐、小号灰字）
+    private func stSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(Color.gray.opacity(0.85))
+            .padding(.horizontal, 32)
+            .padding(.top, 18)
+            .padding(.bottom, 6)
+    }
+
+    /// 分组卡片：统一浅灰底 + 大圆角，内容垂直排列
+    private func stGroupedCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
         }
+        .background(Color(red: 0.95, green: 0.95, blue: 0.97))
+        .cornerRadius(10)
+        .padding(.horizontal, 16)
+    }
+
+    /// 分组卡片内部的分隔线：从左侧 16 开始，避免左边被裁掉半像素
+    private func stDivider() -> some View {
+        Divider().padding(.leading, 16)
+    }
+
+    /// 下拉选择行：左标签 + 右选中值 + 右箭头，整行可点（统一 44 高）
+    private func stSelectionRow(title: String, value: String, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 16))
+                    .foregroundColor(.black)
+                Spacer(minLength: 12)
+                Text(value)
+                    .font(.system(size: 15))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.gray.opacity(0.6))
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 开关行：左两行（主标题 + 说明小字） + 右 Toggle
+    private func stToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 16))
+                    .foregroundColor(.black)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Toggle("", isOn: isOn.animation())
+                .labelsHidden()
+                .tint(.blue)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    /// 危险操作行：居中红体（重置）
+    private func stDestructiveRow(title: String, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            HStack {
+                Spacer()
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 14, weight: .medium))
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                Spacer()
+            }
+            .foregroundColor(.red)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func chartView(series: ChartSeries, period: KlinePeriod, linked: Bool, isolated: Bool = false,
