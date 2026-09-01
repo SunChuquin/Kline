@@ -3895,8 +3895,8 @@ func decimatedIndices(count: Int, step: Int) -> [Int] {
     return res
 }
 
-/// 指标名称按钮：单击立即切换选择面板；参数编辑入口在面板内
-/// （信息栏也用它渲染主图指标按钮，故不对本文件私有）
+/// 指标名称按钮：单击立即切换选择面板；参数编辑入口在面板内。
+/// （信息栏也用它渲染主图指标按钮，故不对本文件私有；图标已移除，只留标题。）
 struct IndicatorNameButton: View {
     let title: String
     let onTap: () -> Void
@@ -3905,13 +3905,11 @@ struct IndicatorNameButton: View {
         Button {
             onTap()
         } label: {
-            HStack(spacing: 3) {
-                Text(title).font(.system(size: 10, weight: .medium))
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
-            }
-            .foregroundColor(.black)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(Color.gray.opacity(0.12)).cornerRadius(4)
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.black)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color.gray.opacity(0.12)).cornerRadius(4)
         }
     }
 }
