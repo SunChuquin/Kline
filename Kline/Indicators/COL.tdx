@@ -1,6 +1,7 @@
 NAME=COL
 SCOPE=sub
 GROUP=量能
+COORD=0
 FORMULA:
 N:=20;
 M:=3;

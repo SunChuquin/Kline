@@ -20,7 +20,11 @@ struct SystemIndicatorDef {
     let name: String
     let scope: IndicatorScope
     let group: String              // 副图分组（如 量能/趋向/超买超卖；主图或未定义时为空）
+    let coord: Int?                // COORD= 可选字段：nil=未声明（显示坐标值）；0=隐藏图左侧顶底坐标值；其他值=显示
     let formulaTemplate: String    // 公式模板（固定值，不含占位符）
+
+    /// 该指标所在图是否隐藏左侧顶底坐标值（仅 COORD=0 隐藏）
+    var hideCoord: Bool { coord == 0 }
 }
 
 /// 系统指标仓库：按周期分目录加载并解析 .tdx 定义文件
@@ -50,11 +54,12 @@ final class SystemIndicatorStore: ObservableObject {
         loadAllPeriods()
     }
 
-    /// 解析 .tdx 内容（NAME= / SCOPE= / GROUP= / FORMULA: 后为多行模板）
+    /// 解析 .tdx 内容（NAME= / SCOPE= / GROUP= / COORD= / FORMULA: 后为多行模板）
     private func parse(content: String, id: String) -> SystemIndicatorDef? {
         var name = id
         var scope = IndicatorScope.sub
         var group = ""
+        var coord: Int? = nil
         var template: [String] = []
         var inFormula = false
         for raw in content.components(separatedBy: .newlines) {
@@ -70,6 +75,8 @@ final class SystemIndicatorStore: ObservableObject {
                 scope = (v == "MAIN" || v == "主图") ? .main : .sub
             } else if line.hasPrefix("GROUP=") {
                 group = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("COORD=") {
+                coord = Int(line.dropFirst(6).trimmingCharacters(in: .whitespaces))
             } else if line == "FORMULA:" || line == "FORMULA" {
                 inFormula = true
             } else if line.hasPrefix("FORMULA=") {
@@ -80,6 +87,7 @@ final class SystemIndicatorStore: ObservableObject {
         }
         guard !template.isEmpty else { return nil }
         return SystemIndicatorDef(id: id, name: name, scope: scope, group: group,
+                                  coord: coord,
                                   formulaTemplate: template.joined(separator: "\n"))
     }
 
@@ -122,10 +130,43 @@ final class SystemIndicatorStore: ObservableObject {
         }
         for src in urls {
             let dst = dir + "/" + src.lastPathComponent
-            if !fm.fileExists(atPath: dst) {
+            if fm.fileExists(atPath: dst) {
+                // 已存在的可写副本不覆盖（保留用户改过的公式参数），
+                // 但要同步内置模板新增的 COORD 字段（老副本缺该行时插入）
+                if let builtin = try? String(contentsOf: src, encoding: .utf8) {
+                    syncCoordFieldIfNeeded(dst: dst, builtinContent: builtin)
+                }
+            } else {
                 try? fm.copyItem(at: src, to: URL(fileURLWithPath: dst))
             }
         }
+    }
+
+    /// 同步 COORD 字段到既有可写副本：副本没有 COORD 行而内置模板有 →
+    /// 把内置的 COORD 行插到 FORMULA: 之前（不动用户改过的公式参数）；
+    /// 副本已有 COORD 行（用户自己加的）则完全不动。
+    private func syncCoordFieldIfNeeded(dst: String, builtinContent: String) {
+        guard let existing = try? String(contentsOfFile: dst, encoding: .utf8) else { return }
+        let existingLines = existing.components(separatedBy: .newlines)
+        let hasCoord = existingLines.contains {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("COORD=")
+        }
+        guard !hasCoord,
+              let coordLine = builtinContent.components(separatedBy: .newlines)
+                .compactMap({ $0.trimmingCharacters(in: .whitespaces) })
+                .first(where: { $0.hasPrefix("COORD=") }) else { return }
+        var patched: [String] = []
+        var inserted = false
+        for line in existingLines {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if !inserted && (t == "FORMULA:" || t == "FORMULA" || t.hasPrefix("FORMULA=")) {
+                patched.append(coordLine)
+                inserted = true
+            }
+            patched.append(line)
+        }
+        guard inserted else { return }
+        try? patched.joined(separator: "\n").write(toFile: dst, atomically: true, encoding: .utf8)
     }
 
     /// 读取 bundle 内内置模板内容（用于恢复编译时内容）
@@ -186,12 +227,14 @@ final class SystemIndicatorStore: ObservableObject {
     }
 
     /// 把新公式模板写回该周期的 Documents/indicator/<周期目录>/<id>.tdx，并重载。
+    /// COORD 行原样保留（否则公式编辑保存会丢失坐标值显隐配置）。
     @discardableResult
     func saveTemplate(_ template: String, for id: String, period: KlinePeriod) -> Bool {
         guard let def = defs(for: period)[id] else { return false }
         let scopeStr = def.scope == .main ? "main" : "sub"
         let groupLine = def.group.isEmpty ? "" : "GROUP=\(def.group)\n"
-        let content = "NAME=\(def.name)\nSCOPE=\(scopeStr)\n\(groupLine)FORMULA:\n\(template)"
+        let coordLine = def.coord.map { "COORD=\($0)\n" } ?? ""
+        let content = "NAME=\(def.name)\nSCOPE=\(scopeStr)\n\(groupLine)\(coordLine)FORMULA:\n\(template)"
         return write(content, for: id, period: period)
     }
 

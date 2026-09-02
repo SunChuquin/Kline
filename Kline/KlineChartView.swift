@@ -2609,9 +2609,10 @@ struct KlineChartView: View {
             Color.white
             mainCanvas(width: width, candleSpacing: candleSpacing, height: height)
                 .offset(x: panOffset)
-            // 主图价格坐标：网格线仍为5条，数值只显示顶底两个（中间三个不显示）
+            // 主图价格坐标：网格线仍为5条，数值只显示顶底两个（中间三个不显示）；
+            // 已启用的主图 .tdx 指标全部声明 COORD=0（且无激活自定义主图指标）时不显示
             overlayPriceLabels(width: width, height: height, min: priceRange.lowerBound, max: priceRange.upperBound,
-                               ratios: [0, 1], formatter: { String(format: "%.2f", $0) })
+                               ratios: mainCoordHidden ? [] : [0, 1], formatter: { String(format: "%.2f", $0) })
             // 最新价：只保留虚线（在 Canvas 中绘制），不显示数值，避免与虚线重叠
             // 可交互光标（pin 开启时即第二个光标）与固定光标的竖线/标签都绘制
             mainCursorVLine(index: selectedIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
@@ -2619,6 +2620,16 @@ struct KlineChartView: View {
         }
         .frame(width: width, height: height)
         .clipped()
+    }
+
+    /// 主图顶底价格坐标是否隐藏：已启用的主图 .tdx 指标全部声明 COORD=0
+    /// （且无激活的自定义主图指标）时隐藏；任一指标未声明 COORD 或值非 0 则显示
+    private var mainCoordHidden: Bool {
+        let enabled = config.mainIndicators(for: period)
+        let mains = SystemIndicatorStore.shared.mainIndicatorDefs(period: period)
+            .filter { enabled.contains($0.id) }
+        guard !mains.isEmpty, activeCustomIndicator == nil else { return false }
+        return mains.allSatisfy { $0.hideCoord }
     }
 
     /// 主图单个光标的竖线 + 顶部日期标签 + 底部涨幅标签（可交互光标与固定光标共用；
@@ -2788,8 +2799,17 @@ struct KlineChartView: View {
                            upColor: upColor, downColor: downColor, gridColor: gridColor)
                 .equatable()
                 .offset(x: panOffset)
-            // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；其他指标保留顶底两个值
-            let labelRatios: [CGFloat] = (m.kind == "VOL" || m.kind == "AMO") ? [0] : [0, 1]
+            // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；
+            // .tdx 声明 COORD=0 的指标不显示坐标值；其他指标保留顶底两个值
+            let labelRatios: [CGFloat]
+            if m.kind == "VOL" || m.kind == "AMO" {
+                labelRatios = [0]
+            } else if !m.isCustom,
+                      SystemIndicatorStore.shared.defs(for: self.period)[m.kind]?.hideCoord == true {
+                labelRatios = []
+            } else {
+                labelRatios = [0, 1]
+            }
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
                                ratios: labelRatios, formatter: subFmt)
 

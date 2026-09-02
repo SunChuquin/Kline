@@ -1,6 +1,7 @@
 NAME=CDJ
 SCOPE=sub
 GROUP=超买超卖
+COORD=0
 FORMULA:
 N:=3;
 M:=3;
