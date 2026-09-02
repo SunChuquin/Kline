@@ -2789,6 +2789,17 @@ struct KlineChartView: View {
                           height: CGFloat, slot: SubSlot) -> some View {
         let range = subRange(m)
         let subFmt: (Double) -> String = subFormatter(for: m.kind)
+        // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；
+        // .tdx 声明 COORD=0 的指标不显示坐标值；其他指标保留顶底两个值
+        let labelRatios: [CGFloat]
+        if m.kind == "VOL" || m.kind == "AMO" {
+            labelRatios = [0]
+        } else if !m.isCustom,
+                  SystemIndicatorStore.shared.defs(for: self.period)[m.kind]?.hideCoord == true {
+            labelRatios = []
+        } else {
+            labelRatios = [0, 1]
+        }
         return ZStack(alignment: .topLeading) {
             Color.white
             SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
@@ -2799,17 +2810,7 @@ struct KlineChartView: View {
                            upColor: upColor, downColor: downColor, gridColor: gridColor)
                 .equatable()
                 .offset(x: panOffset)
-            // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；
-            // .tdx 声明 COORD=0 的指标不显示坐标值；其他指标保留顶底两个值
-            let labelRatios: [CGFloat]
-            if m.kind == "VOL" || m.kind == "AMO" {
-                labelRatios = [0]
-            } else if !m.isCustom,
-                      SystemIndicatorStore.shared.defs(for: self.period)[m.kind]?.hideCoord == true {
-                labelRatios = []
-            } else {
-                labelRatios = [0, 1]
-            }
+            // 顶底坐标值（是否显示由上方 labelRatios 决定）
             overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
                                ratios: labelRatios, formatter: subFmt)
 
