@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var selectedTab = 0
+    @State private var selectedTab = 5
     @State private var isSearching = false
     @State private var isProfilePresented = false
     @State private var isTestPresented = false

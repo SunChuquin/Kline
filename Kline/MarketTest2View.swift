@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - 表头列定义（宽表，横滑）
 
@@ -376,60 +377,73 @@ struct MarketTest2View: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBrandBar
-            aSegBarIfNeeded
-            tableHeaderSticky   // 冻结表头：不随垂直滚动隐藏，横向跟随数据列联动
-            tableScroll         // 数据区：垂直 + 横向滚动
+            topBrandBar.frame(width: UIScreen.main.bounds.width, alignment: .topLeading).clipped()
+            aSegBarIfNeeded.frame(width: UIScreen.main.bounds.width, alignment: .topLeading).clipped()
+            tableHeaderSticky.frame(width: UIScreen.main.bounds.width, alignment: .topLeading).clipped()
+            tableScroll.frame(width: UIScreen.main.bounds.width).clipped()
         }
-        // 占满全高并顶部对齐：避免父级 .infinity 高度把内容垂直居中（否则顶栏上下出现大段空白）
+        // 占满全屏高度并顶部对齐：避免父级 .infinity 高度把内容垂直居中（否则顶栏上下出现大段空白）
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // 背景延伸到状态栏/安全区，顶栏视觉贴合屏幕顶部（内容仍保持在安全区内不被遮挡）
         .background(Color(.systemBackground).ignoresSafeArea())
+        // 关键：固定逻辑宽 + 左对齐 + 裁剪，彻底钳制整页布局宽度。
+        // 否则表格滚动余量(viewW+maxHOffset=1186)会作为最宽子视图把 VStack 布局宽撑到1186而溢出屏幕右缘。
+        .frame(width: UIScreen.main.bounds.width, alignment: .leading)
+        .clipped()
     }
 
     // MARK: - 顶部 LOGO + 一级 Tab + 搜索
 
     private var topBrandBar: some View {
-        HStack(spacing: 0) {
-            // 同花顺 LOGO（占位，用 red ♣️ + 字代替）
-            HStack(spacing: 4) {
-                Image(systemName: "suit.club.fill")
-                    .font(.system(size: 18)).foregroundColor(.red)
-                Text("同花顺")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.primary)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 38)
-
-            // 一级 Tab（横滑）
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 18) {
-                    ForEach(TopTab.allCases) { t in
-                        Button(action: { topTab = t }) {
-                            Text(t.rawValue)
-                                .font(.system(size: 15, weight: topTab == t ? .bold : .regular))
-                                .foregroundColor(topTab == t ? .red : .primary)
-                        }
-                        .buttonStyle(.plain)
+        // 三区布局（同花顺式）：Logo 贴左、Tab 真正居中、搜索贴右
+        // 直接 ZStack 取内容高度（无外层 GeometryReader 撑 56，二级因此紧贴一级）
+        ZStack(alignment: .center) {
+            // Tab 组放在几何中心（几何中心：居中区占满 -> alignment 使 HStack 子项相对整行居中）
+            HStack(spacing: 24) {
+                ForEach(TopTab.allCases) { t in
+                    Button(action: { topTab = t }) {
+                        Text(t.rawValue)
+                            .font(.system(size: 16, weight: topTab == t ? .bold : .regular))
+                            .foregroundColor(topTab == t ? .red : .primary)
+                            .padding(.vertical, 4)
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 6)
             }
 
-            Spacer(minLength: 8)
-
-            // 🔍 搜索（右对齐）
-            Button {} label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16))
+            // 同花顺 LOGO —— 贴左
+            HStack(spacing: 6) {
+                Image(systemName: "suit.club.fill")
+                    .font(.system(size: 19)).foregroundColor(.red)
+                Text("同花顺")
+                    .font(.system(size: 19, weight: .bold))
                     .foregroundColor(.primary)
+                    .padding(.vertical, 4)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 6)
+
+            // 搜索 + 配置 —— 贴右
+            HStack(spacing: 14) {
+                Button {} label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 19))
+                        .foregroundColor(.primary)
+                }
+                .buttonStyle(.plain)
+
+                Button {} label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 19))
+                        .foregroundColor(.primary)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 14)
-            .frame(height: 38)
         }
-        .frame(height: 44)
+        // 整行占满宽、内容高度
+        .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
     }
 
@@ -438,23 +452,23 @@ struct MarketTest2View: View {
     @ViewBuilder
     private var aSegBarIfNeeded: some View {
         if topTab == .AShare {
-            HStack(spacing: 4) {
+            // 分段胶囊居中显示
+            HStack(spacing: 0) {
                 ForEach(ASeg.allCases) { s in
                     Button(action: { aSeg = s }) {
                         Text(s.rawValue)
                             .font(.system(size: 13, weight: aSeg == s ? .bold : .regular))
                             .foregroundColor(aSeg == s ? .red : .primary)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, 14)
                             .padding(.vertical, 6)
                             .background(aSeg == s ? Color.red.opacity(0.08) : Color.clear)
                             .cornerRadius(14)
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
             .background(Color(.systemGray6).opacity(0.4))
         }
     }
