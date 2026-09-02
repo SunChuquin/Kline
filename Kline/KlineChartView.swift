@@ -2815,7 +2815,7 @@ struct KlineChartView: View {
         }
     }
 
-    /// 副图左右滑动切换反馈：常驻方向箭头 + 拖动时的滑轨/滑块/阈值动画
+    /// 副图左右滑动切换反馈：拖动时才显示方向箭头 + 滑轨/滑块/阈值动画
     /// 副图三不参与左右滑动切换，不显示任何切换提示
     @ViewBuilder
     private func swipeOverlay(slot: SubSlot, width: CGFloat, height: CGFloat) -> some View {
@@ -2827,15 +2827,17 @@ struct KlineChartView: View {
             let canR = slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(-1) ?? false)
             let threshold: CGFloat = 70
             ZStack {
-            // 常驻方向箭头提示：可切换方向高亮，边界方向灰显
-            HStack {
-                swipeDirectionArrow(system: "chevron.left", can: canL,
-                                    active: isDragging && off < 0)
-                Spacer()
-                swipeDirectionArrow(system: "chevron.right", can: canR,
-                                    active: isDragging && off > 0)
+            // 方向箭头提示：仅拖动中显示（滑动条出现前不显示），可切换方向高亮，边界方向灰显
+            if isDragging {
+                HStack {
+                    swipeDirectionArrow(system: "chevron.left", can: canL,
+                                        active: off < 0)
+                    Spacer()
+                    swipeDirectionArrow(system: "chevron.right", can: canR,
+                                        active: off > 0)
+                }
+                .padding(.horizontal, 8)
             }
-            .padding(.horizontal, 8)
 
             // 拖动中的滑轨动画
             if isDragging {
