@@ -376,20 +376,27 @@ struct MarketTest2View: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBrandBar.frame(width: UIScreen.main.bounds.width, alignment: .topLeading).clipped()
-            aSegBarIfNeeded.frame(width: UIScreen.main.bounds.width, alignment: .topLeading).clipped()
-            tableHeaderSticky.frame(width: UIScreen.main.bounds.width, alignment: .topLeading).clipped()
-            tableScroll.frame(width: UIScreen.main.bounds.width).clipped()
+        // 用 GeometryReader 读取容器实际宽度：横竖屏切换时会自动重新测量并驱动布局，
+        // 避免用 UIScreen.main.bounds.width 固定宽度导致旋转后宽度不更新。
+        GeometryReader { geo in
+            let w = geo.size.width
+            VStack(spacing: 0) {
+                topBrandBar.frame(width: w, alignment: .topLeading).clipped()
+                aSegBarIfNeeded.frame(width: w, alignment: .topLeading).clipped()
+                tableHeaderSticky.frame(width: w, alignment: .topLeading).clipped()
+                tableScroll.frame(width: w).clipped()
+            }
+            // 占满全屏高度并顶部对齐：避免父级 .infinity 高度把内容垂直居中（否则顶栏上下出现大段空白）
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // 背景延伸到状态栏/安全区，顶栏视觉贴合屏幕顶部（内容仍保持在安全区内不被遮挡）
+            .background(Color(.systemBackground).ignoresSafeArea())
+            // 关键：固定逻辑宽 + 左对齐 + 裁剪，彻底钳制整页布局宽度。
+            // 否则表格滚动余量(viewW+maxHOffset=1186)会作为最宽子视图把 VStack 布局宽撑到1186而溢出屏幕右缘。
+            .frame(width: w, alignment: .leading)
+            .clipped()
         }
-        // 占满全屏高度并顶部对齐：避免父级 .infinity 高度把内容垂直居中（否则顶栏上下出现大段空白）
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // 背景延伸到状态栏/安全区，顶栏视觉贴合屏幕顶部（内容仍保持在安全区内不被遮挡）
-        .background(Color(.systemBackground).ignoresSafeArea())
-        // 关键：固定逻辑宽 + 左对齐 + 裁剪，彻底钳制整页布局宽度。
-        // 否则表格滚动余量(viewW+maxHOffset=1186)会作为最宽子视图把 VStack 布局宽撑到1186而溢出屏幕右缘。
-        .frame(width: UIScreen.main.bounds.width, alignment: .leading)
-        .clipped()
+        // 不在此处 ignoresSafeArea()：让 GeometryReader 从安全区开始，内容(顶栏)保持在状态栏下方。
+        // 背景铺满状态栏由内部 .background(.ignoresSafeArea()) 完成。
     }
 
     // MARK: - 顶部 LOGO + 一级 Tab + 搜索
