@@ -22,7 +22,9 @@ struct ContentView: View {
         (icon: "house", title: "首页"),
         (icon: "folder", title: "自选"),
         (icon: "chart.bar", title: "行情"),
-        (icon: "gamecontroller", title: "模拟")
+        (icon: "gamecontroller", title: "模拟"),
+        (icon: "flask", title: "测试"),
+        (icon: "eyedropper", title: "测试2")
     ]
 
     private var detailItem: MetaItem? { detailRouter.item }
@@ -145,6 +147,10 @@ struct ContentView: View {
             MarketView()
         case 3:
             SimulationView()
+        case 4:
+            MarketTestView()
+        case 5:
+            MarketTest2View()
         default:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
         }
