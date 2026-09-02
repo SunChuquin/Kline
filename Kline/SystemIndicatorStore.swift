@@ -130,43 +130,10 @@ final class SystemIndicatorStore: ObservableObject {
         }
         for src in urls {
             let dst = dir + "/" + src.lastPathComponent
-            if fm.fileExists(atPath: dst) {
-                // 已存在的可写副本不覆盖（保留用户改过的公式参数），
-                // 但要同步内置模板新增的 COORD 字段（老副本缺该行时插入）
-                if let builtin = try? String(contentsOf: src, encoding: .utf8) {
-                    syncCoordFieldIfNeeded(dst: dst, builtinContent: builtin)
-                }
-            } else {
+            if !fm.fileExists(atPath: dst) {
                 try? fm.copyItem(at: src, to: URL(fileURLWithPath: dst))
             }
         }
-    }
-
-    /// 同步 COORD 字段到既有可写副本：副本没有 COORD 行而内置模板有 →
-    /// 把内置的 COORD 行插到 FORMULA: 之前（不动用户改过的公式参数）；
-    /// 副本已有 COORD 行（用户自己加的）则完全不动。
-    private func syncCoordFieldIfNeeded(dst: String, builtinContent: String) {
-        guard let existing = try? String(contentsOfFile: dst, encoding: .utf8) else { return }
-        let existingLines = existing.components(separatedBy: .newlines)
-        let hasCoord = existingLines.contains {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("COORD=")
-        }
-        guard !hasCoord,
-              let coordLine = builtinContent.components(separatedBy: .newlines)
-                .compactMap({ $0.trimmingCharacters(in: .whitespaces) })
-                .first(where: { $0.hasPrefix("COORD=") }) else { return }
-        var patched: [String] = []
-        var inserted = false
-        for line in existingLines {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if !inserted && (t == "FORMULA:" || t == "FORMULA" || t.hasPrefix("FORMULA=")) {
-                patched.append(coordLine)
-                inserted = true
-            }
-            patched.append(line)
-        }
-        guard inserted else { return }
-        try? patched.joined(separator: "\n").write(toFile: dst, atomically: true, encoding: .utf8)
     }
 
     /// 读取 bundle 内内置模板内容（用于恢复编译时内容）
