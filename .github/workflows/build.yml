@@ -58,7 +58,7 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$IDENTITY" \
             PROVISIONING_PROFILE="${{ env.PROFILE_UUID }}" \
-            DEVELOPMENT_TEAM="4G3V8W86TN"
+            DEVELOPMENT_TEAM="ZKHA73R2HB"
 
       - name: Export IPA
         run: |
@@ -70,7 +70,7 @@ jobs:
               <key>method</key>
               <string>development</string>
               <key>teamID</key>
-              <string>4G3V8W86TN</string>
+              <string>ZKHA73R2HB</string>
               <key>signingStyle</key>
               <string>manual</string>
               <key>provisioningProfiles</key>
