@@ -1,4 +1,4 @@
-name: Build iOS IPA
+name: CI Build Check
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    name: Compile Check (unsigned)
     runs-on: macos-latest
 
     steps:
@@ -17,71 +18,11 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Import Certificate
+      - name: Build project (code signing disabled)
         run: |
-          echo "${{ secrets.CERTIFICATE_BASE64 }}" | base64 -d > cert.p12
-
-          security create-keychain -p "" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security import cert.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
-
-      - name: Install Profile
-        run: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          echo "${{ secrets.PROVISION_PROFILE_BASE64 }}" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/Kline.mobileprovision
-
-          # 自动提取UUID
-          security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/Kline.mobileprovision -o profile.plist
-          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" profile.plist)
-          echo "✅ Profile UUID: $UUID"
-          echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
-
-      - name: Build Archive
-        run: |
-          IDENTITY=$(security find-identity -v -p codesigning | grep -E "iPhone Developer|Apple Development" | head -1 | awk -F '"' '{print $2}')
-
-          if [ -z "$IDENTITY" ]; then
-            echo "❌ No signing identity found!"
-            exit 1
-          fi
-
-          echo "✅ Using: $IDENTITY"
-
-          xcodebuild archive \
-            -project Kline.xcodeproj \
+          xcodebuild -project Kline.xcodeproj \
             -scheme Kline \
-            -configuration Release \
-            -sdk iphoneos \
-            -archivePath build/Kline.xcarchive \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="ZKHA73R2HB"
-
-      - name: Export IPA
-        run: |
-          cat > ExportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>teamID</key>
-              <string>ZKHA73R2HB</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-          </dict>
-          </plist>
-          EOF
-
-          xcodebuild -exportArchive \
-            -archivePath build/Kline.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath build/
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kline
-          path: build/*.ipa
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
