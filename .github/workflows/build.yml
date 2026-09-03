@@ -55,9 +55,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -archivePath build/Kline.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$IDENTITY" \
-            PROVISIONING_PROFILE="${{ env.PROFILE_UUID }}" \
+            CODE_SIGN_STYLE=Automatic \
             DEVELOPMENT_TEAM="ZKHA73R2HB"
 
       - name: Export IPA
@@ -72,12 +70,7 @@ jobs:
               <key>teamID</key>
               <string>ZKHA73R2HB</string>
               <key>signingStyle</key>
-              <string>manual</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>com.sunck.Kline</key>
-                  <string>${{ env.PROFILE_UUID }}</string>
-              </dict>
+              <string>automatic</string>
           </dict>
           </plist>
           EOF
