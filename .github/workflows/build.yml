@@ -40,7 +40,7 @@ jobs:
 
       - name: Build Archive
         run: |
-          IDENTITY=$(security find-identity -v -p codesigning | grep "iPhone Developer" | head -1 | awk -F '"' '{print $2}')
+          IDENTITY=$(security find-identity -v -p codesigning | grep -E "iPhone Developer|Apple Development" | head -1 | awk -F '"' '{print $2}')
 
           if [ -z "$IDENTITY" ]; then
             echo "❌ No signing identity found!"
