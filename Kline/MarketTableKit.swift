@@ -17,7 +17,9 @@ import SwiftUI
 private struct ColumnLayout: Identifiable {
     let field: MarketField
     let width: CGFloat
-    var id: String { field.rawValue }
+    /// 是否由「名称 + 代码」合并而来（名称在上、代码在下双行）
+    let isNameCode: Bool
+    var id: String { "\(field.rawValue)_\(isNameCode ? "1" : "0")" }
 }
 
 // MARK: - 唯一列网格（表头 / 表内容共用的唯一定义）
@@ -45,102 +47,186 @@ struct MarketTableRow: View {
     /// 表头点击字段排序；默认内部切 config
     var onColumnTapped: ((MarketField) -> Void)? = nil
 
+    // === 整表冻结 + 横向滚动 ===
+    /// 冻结前 N 个可见列（固定不参与横向滚动），其余列横向 offset 平移
+    var frozenCount: Int = 3
+    /// 整表共享的横向滚动偏移（由外层手势驱动）
+    var xOffset: CGFloat = 0
+    /// 是否为自选（置顶）标：高亮整行背景 + 标的文字变红；默认 false
+    var isFaved: Bool = false
+
+    /// 自选高亮背景色：比普通行更深（浅灰底）
+    private var rowBackground: Color {
+        isFaved ? Color(.systemGray5) : Color(.systemBackground)
+    }
+
+    /// 统一列宽（保留当前表格样式：固定 90pt 等宽 + 竖线）
+    private static let colW: CGFloat = 90
+    private static let lineW: CGFloat = 0.5
+
+    /// 把可视列转成渲染列：相邻的「代码 + 名称」合并为一个双行单元格（名称在上、代码在下），宽度=两列之和。
+    private func renderColumns(_ cols: [MarketColumnPref]) -> [ColumnLayout] {
+        Self.renderColumns(cols)
+    }
+
+    /// 静态版 renderColumns（供外层计算横向滚动上限等复用，保证与渲染完全一致）
+    fileprivate static func renderColumns(_ cols: [MarketColumnPref]) -> [ColumnLayout] {
+        var out: [ColumnLayout] = []
+        var i = 0
+        while i < cols.count {
+            let cur = cols[i]
+            // 找到相邻的 name/code 对（顺序任意）
+            if cur.field == .name || cur.field == .code {
+                let next = i + 1 < cols.count ? cols[i + 1] : nil
+                if let n = next, n.field != cur.field, (n.field == .name || n.field == .code) {
+                    out.append(ColumnLayout(field: .name, width: colW * 2, isNameCode: true))
+                    i += 2
+                    continue
+                }
+            }
+            out.append(ColumnLayout(field: cur.field, width: colW, isNameCode: false))
+            i += 1
+        }
+        return out
+    }
+
+    /// 冻结前 N 列后的其余列总宽（供外层算最大横向偏移）；收到冻结区起始分隔线宽
+    static func scrollContentWidth(for page: MarketConfigPage, config: MarketConfigStore, frozenCount: Int) -> CGFloat {
+        let cols = renderColumns(config.visibleColumns(for: page))
+        let frozenCols = Array(cols.prefix(frozenCount))
+        let scrollCols = Array(cols.dropFirst(frozenCount))
+        let frozenW = frozenCols.reduce(lineW) { $0 + $1.width + lineW }
+        let scrollW = scrollCols.reduce(0) { $0 + $1.width + lineW }
+        return frozenW + scrollW
+    }
+
     var body: some View {
-        // 表头 / 数据高度不同，其余网格逻辑完全共用
         let rowHeight: CGFloat = mode.isHeader ? 30 : 36
+        let cols = renderColumns(config.visibleColumns(for: page))
+        let frozenCols = Array(cols.prefix(frozenCount))
+        let scrollCols = Array(cols.dropFirst(frozenCount))
+        let frozenW = frozenCols.reduce(Self.lineW) { $0 + $1.width + Self.lineW }
+        let scrollW = scrollCols.reduce(0) { $0 + $1.width + Self.lineW }
+        // 可视宽度：整表铺满屏幕
+        let visW = UIScreen.main.bounds.width
+        // 最大可左移量：滚动内容总宽 - 可视宽
+        let maxX = max(0, (frozenW + scrollW) - visW)
         let rule = config.sortRule(for: page)
 
-        // 表头加一条顶部分隔线（贴合上一行卡片），数据行不加
-        if mode.isHeader {
-            VStack(spacing: 0) {
-                // 顶部分隔线（贴合上一行卡片），其下 HStack 左侧留 28pt 星标占位对齐内容行
-                Color(.separator).frame(height: 1).offset(y: -2)
-                HStack(spacing: 0) {
-                    // 与内容行左侧星标/减号按钮同宽（28pt）的空占位，保证表头第一列不从 0 开始
-                    Color.clear.frame(width: 28, height: rowHeight)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        MarketColumnGridRow(page: page, config: config,
-                                            alignment: { field in
-                            field.alignRight ? .trailing : .leading
-                        }) { field in
-                            let active = rule?.field == field
-                            Button(action: {
-                                if let cb = onColumnTapped { cb(field) }
-                                else { config.toggleSort(field: field, page: page) }
-                            }) {
-                                HStack(spacing: 3) {
-                                    Text(field.title)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
-                                        .lineLimit(1)
-                                    if active, let r = rule {
-                                        Image(systemName: r.order == .descending ? "chevron.down" : "chevron.up")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(Color.accentColor)
-                                    }
-                                }
-                                .frame(maxHeight: .infinity)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .frame(height: rowHeight)
-                    }
-                    .frame(height: rowHeight)
+        ZStack(alignment: .topLeading) {
+            // 滚动区：其余列（前接与冻结区等宽的占位），横向 offset 平移
+            HStack(spacing: 0) {
+                Color.clear.frame(width: frozenW)
+                ForEach(scrollCols) { col in
+                    content(col, header: mode.isHeader, meta: metaOf, rule: rule)
+                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
+                        .padding(.horizontal, col.isNameCode ? 8 : 6)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                    Color(.black).frame(width: Self.lineW)
+                        .opacity(0.35)
                 }
-                .background(Color(.systemBackground))
             }
-            .background(Color(.systemBackground))
-        } else if case .data(let meta) = mode {
-            Button(action: { onOpen?(meta) }) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    MarketColumnGridRow(page: page, config: config, alignment: { field in
-                        field.alignRight ? .trailing : .leading
-                    }) { field in
-                        Text(rowCache.textFor(meta.id, field))
-                            .font(.system(size: 12))
-                            .foregroundColor(rowCache.colorFor(meta.id, field))
+            .frame(width: max(visW, frozenW + scrollW), height: rowHeight, alignment: .leading)
+            .padding(.top, mode.isHeader ? 1 : 0)
+            .background(rowBackground)
+            .offset(x: xOffset)
+            .zIndex(0)
+            .clipped()
+
+            // 冻结区：前 N 列固定，盖在滚动区上方，右侧竖分割线
+            HStack(spacing: 0) {
+                Color(.black).frame(width: Self.lineW).opacity(0.35)
+                ForEach(frozenCols) { col in
+                    content(col, header: mode.isHeader, meta: metaOf, rule: rule)
+                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
+                        .padding(.horizontal, col.isNameCode ? 8 : 6)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                    Color(.black).frame(width: Self.lineW).opacity(0.35)
+                }
+            }
+            .frame(width: frozenW, height: rowHeight, alignment: .leading)
+            .padding(.top, mode.isHeader ? 1 : 0)
+            .background(rowBackground)
+            .overlay(alignment: .trailing) { Color(.separator).frame(width: 0.5) }
+            .zIndex(2)
+            .clipped()
+        }
+        .frame(width: visW, height: rowHeight, alignment: .leading)
+        .clipped()
+    }
+
+    /// 当前行的 meta（数据行才有；表头为占位 nil）
+    private var metaOf: MetaItem? {
+        if case .data(let meta) = mode { return meta }
+        return nil
+    }
+
+    /// 单元格内容：表头 = 字段名(+排序箭头)；数据 = 字段文本(红涨绿跌)。
+    /// 合并列（代码+名称）渲染为双行：名称在上、代码在下。
+    @ViewBuilder
+    private func content(_ col: ColumnLayout, header: Bool, meta: MetaItem?, rule: MarketSortRule?) -> some View {
+        if header {
+            // 合并列表头：显示「名称/代码」
+            let active = rule?.field == col.field
+            Button(action: {
+                if let cb = onColumnTapped { cb(col.field) }
+                else { config.toggleSort(field: col.field, page: page) }
+            }) {
+                if col.isNameCode {
+                    HStack(spacing: 3) {
+                        Text("名称/代码")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .frame(maxHeight: .infinity)
+                        if active, let r = rule {
+                            Image(systemName: r.order == .descending ? "chevron.down" : "chevron.up")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(Color.accentColor)
+                        }
                     }
-                    .frame(height: rowHeight)
-                    .contentShape(Rectangle())
+                    .frame(maxHeight: .infinity)
+                } else {
+                    HStack(spacing: 3) {
+                        Text(col.field.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
+                            .lineLimit(1)
+                        if active, let r = rule {
+                            Image(systemName: r.order == .descending ? "chevron.down" : "chevron.up")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(Color.accentColor)
+                        }
+                    }
+                    .frame(maxHeight: .infinity)
                 }
             }
             .buttonStyle(.plain)
-        }
-    }
-}
-
-// 网格行渲染器（内部实现，两形态共用）
-private struct MarketColumnGridRow<Content: View>: View {
-    let page: MarketConfigPage
-    @ObservedObject var config: MarketConfigStore
-    var alignment: ((MarketField) -> Alignment)? = nil
-    @ViewBuilder var content: (MarketField) -> Content
-
-    var body: some View {
-        // 所有列统一固定像素宽度（表头/表内容共用同一常量，天然同列）
-        let fixedColumnWidth: CGFloat = 90
-        let cols = config.visibleColumns(for: page)
-        HStack(spacing: 0) {
-            // 起始竖线：与每一列右边界竖线同工艺，保证表头/内容的第一列左侧也有分界线
-            Color(.black)
-                .frame(width: 0.5)
-                .frame(maxHeight: .infinity)
-                .opacity(0.35)
-            ForEach(cols) { col in
-                let align = alignment?(col.field) ?? .center
-                content(col.field)
-                    .frame(width: fixedColumnWidth, alignment: align)
-                    .padding(.horizontal, 6)
+        } else if let meta = meta {
+            // 自选高亮：名称/代码/板块等「标的」列文字变红（指标数值仍红涨绿跌）
+            if col.isNameCode {
+                let fg: Color = isFaved ? .red : .primary
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(meta.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(fg)
+                        .lineLimit(1)
+                    Text(meta.displayCode)
+                        .font(.system(size: 10))
+                        .foregroundColor(isFaved ? fg : Color(.secondaryLabel))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            } else {
+                let isLabel = col.field == .name || col.field == .code || col.field == .type
+                let cellFg: Color = isFaved && isLabel ? Color.red : rowCache.colorFor(meta.id, col.field)
+                Text(rowCache.textFor(meta.id, col.field))
+                    .font(.system(size: 12))
+                    .foregroundColor(cellFg)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                // 列宽分界线：画在格子右边界，X 坐标 = 前一格宽度累加（唯一来源）
-                Color(.black)
-                    .frame(width: 0.5)
-                    .frame(maxHeight: .infinity)
-                    .opacity(0.35)
             }
         }
     }

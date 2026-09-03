@@ -9,11 +9,35 @@
 import SwiftUI
 import Combine
 
-/// 行情页顶部 Tab 分类（对应 tdx_parser.py 生成的 meta.type 三个取值）
+/// 行情页顶部一级菜单（参考测试页2：居中 Tab）
+enum TopField: String, CaseIterable, Identifiable {
+    case market = "市场"
+    case picker = "选股"
+    case fav = "自选"
+    var id: String { rawValue }
+}
+
+/// 选股 → 二级
+enum PickerField: String, CaseIterable, Identifiable {
+    case trend = "趋势"
+    case oscillation = "震荡"
+    case reversal = "反转"
+    case sentiment = "情绪"
+    var id: String { rawValue }
+}
+
+/// 自选 → 二级
+enum FavField: String, CaseIterable, Identifiable {
+    case holdings = "持仓"
+    case pool = "股池"
+    var id: String { rawValue }
+}
+
+/// 行情页「市场」二级分类（对应 tdx_parser.py 生成的 meta.type 三个取值）
 enum MarketTab: String, CaseIterable, Identifiable {
-    case mainBoard = "沪深主板"
-    case index = "沪深京指数"
-    case extIndex = "扩展指数"
+    case mainBoard = "主板"
+    case index = "指数"
+    case etf = "ETF"
     var id: String { rawValue }
 }
 
@@ -26,24 +50,36 @@ struct MarketView: View {
 
     @State private var searchText = ""
     @State private var searchResults: [MetaItem] = []
+    @State private var showSearchField = false
     @FocusState private var isSearchFocused: Bool
     @State private var selectedTab: MarketTab = .mainBoard
     @State private var showColumnPanel = false
     @State private var addGroupTarget: MetaItem? = nil
 
+    // 顶部一级/二级菜单（参考测试页2 居中 Tab + 分段胶囊样式）
+    @State private var topMenu: TopField = .market
+    // 市场 → 二级：主板/指数/ETF（即 MarketTab）
+    @State private var pickerSeg: PickerField = .trend
+    @State private var favSeg: FavField = .holdings
+
+    // === 整表横向滚动（冻结前 3 列）===
+    @State private var hScrollOffset: CGFloat = 0
+    @State private var hDragStart: CGFloat = 0
+    @State private var panAxisIsH: Bool? = nil
+
     /// **渲染用的行快照**：由 `scheduleRefresh()` 写入，避免在计算属性里做预取副作用（否则会死循环触发重绘）。
     @State private var displayRows: [MarketRow] = []
 
-    /// 当前 Tab 对应的 meta.type 值
+    /// 当前「市场」二级分类对应的 meta.type 值（主板/指数/ETF）
     private var currentType: String {
         switch selectedTab {
         case .mainBoard: return "沪深主板"
         case .index: return "沪深京指数"
-        case .extIndex: return "扩展行情指数"
+        case .etf: return "扩展行情指数"
         }
     }
 
-    /// 当前 Tab 下的全部标的（搜索为空时展示此列表 + 排序）
+    /// 当前「市场」二级分类下的全部标的（搜索为空时展示此列表 + 排序）
     private var tabItems: [MetaItem] {
         databaseManager.metaList.filter { $0.type == currentType }
     }
@@ -102,17 +138,21 @@ struct MarketView: View {
                     MarketEmptyStateView(icon: "magnifyingglass",
                                          message: searchText.isEmpty ? "暂无标的" : "没有找到相关股票")
                 } else {
-                    // 表头（吸顶）
-                    MarketTableRow(page: .marketBoard, mode: .header, config: colCfg, rowCache: rowCache)
-                    // 列表：List 有分隔线和删除/移动支持；这里用 ScrollView+LazyVStack 更贴合通达信卡片观感
+                    // 表头（吸顶，冻结前 3 列，横向跟随整表滚动）。
+                    MarketTableRow(page: .marketBoard, mode: .header, config: colCfg, rowCache: rowCache,
+                                   frozenCount: 3, xOffset: hScrollOffset)
+                    .background(Color(.systemBackground))
+                    // 列表：外层垂直 ScrollView 保留上下滚动/懒加载；
+                    // 横向用手势驱动 hScrollOffset（冻结前3列不动，其余列平移）
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(displayRows) { row in
                                 rowCard(row: row)
-                                Divider().padding(.leading, 60)
+                                Divider()
                             }
                         }
                     }
+                    .simultaneousGesture(horizontalDragGesture)
                     .refreshable {
                         // 重新拉 meta + 刷新 rows（触发重新计算字段值）
                         rowCache.refresh(metas: tabItems)
@@ -121,6 +161,18 @@ struct MarketView: View {
                 }
             } else {
                 loadingView
+            }
+        }
+        // 搜索展开时：覆盖其余区域拦截点击，点击外部即收起搜索框
+        .overlay {
+            if showSearchField {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        searchText = ""
+                        showSearchField = false
+                        isSearchFocused = false
+                    }
             }
         }
         .onAppear { scheduleRefresh() }
@@ -162,152 +214,179 @@ struct MarketView: View {
         }
     }
 
-    // MARK: - 顶部栏（Tab + 搜索 + 快捷按钮）
+    // MARK: - 顶部栏（一级菜单 + 二级胶囊 + 搜索/设置，参考测试页2）
 
     private var headerView: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                // 左侧 Tab 子标签
-                HStack(spacing: 4) {
-                    ForEach(MarketTab.allCases) { tab in
+        VStack(spacing: 0) {
+            // 一级菜单（居中 Tab）+ 搜索/设置（靠右）—— 参考测试页2 topBrandBar
+            ZStack(alignment: .center) {
+                HStack(spacing: 22) {
+                    ForEach(TopField.allCases) { field in
                         Button(action: {
-                            selectedTab = tab
-                            // 切 Tab：交给 onChange(selectedTab) 统一调度（置顶优先预取 + 行快照）
+                            topMenu = field
                             scheduleRefresh()
                         }) {
-                            Text(tab.rawValue)
-                                .font(.system(size: 14,
-                                              weight: selectedTab == tab ? .bold : .regular))
-                                .foregroundColor(selectedTab == tab ? .blue : .secondary)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 7)
-                                .overlay(alignment: .bottom) {
-                                    if selectedTab == tab {
-                                        Rectangle()
-                                            .fill(Color.blue)
-                                            .frame(height: 2)
-                                            .padding(.horizontal, 9)
-                                    }
-                                }
+                            Text(field.rawValue)
+                                .font(.system(size: 17, weight: topMenu == field ? .bold : .regular))
+                                .foregroundColor(topMenu == field ? .red : .primary)
+                                .padding(.vertical, 6)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                // Tab 不抢占剩余空间，让给搜索栏
-                .layoutPriority(1)
+                .frame(maxWidth: .infinity)
 
-                Spacer(minLength: 4)
-
-                // 表头设置按钮（靠右，在搜索栏左侧）
-                Button { showColumnPanel = true } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .foregroundColor(.secondary).font(.system(size: 16))
-                }
-                .buttonStyle(.plain)
-                .frame(width: 30, height: 30)
-                .help("表头设置（字段显隐/排序/宽度）")
-
-                // 搜索栏：固定宽度（贴合提示文字长度），与按钮一起靠右对齐
+                // 搜索 + 表头设置 —— 贴右
                 HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.gray).font(.system(size: 13))
-                    TextField("搜索代码/名称", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .focused($isSearchFocused)
-                        .submitLabel(.search)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-                .padding(EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9))
-                .background(Color(.systemGray5))
-                .cornerRadius(10)
-                .frame(width: 150)
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+                    // 表头设置按钮
+                    Button { showColumnPanel = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundColor(.secondary).font(.system(size: 16))
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 28, height: 28)
+                    .help("表头设置（字段显隐/排序/宽度）")
 
-            // 行情概览小条（当前 Tab 的小指标：上涨/下跌/平盘/停牌个数）
-            if databaseManager.isLoaded, !searchText.isEmpty {
-                // 搜索态不显示概览
-            } else if databaseManager.isLoaded {
-                tabOverviewBar
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 4)
+                    // 搜索：折叠态为图标按钮，点击后展开输入框
+                    if showSearchField {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.gray).font(.system(size: 13))
+                            TextField("搜索代码/名称", text: $searchText)
+                                .textFieldStyle(.plain)
+                                .focused($isSearchFocused)
+                                .submitLabel(.search)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .onSubmit { isSearchFocused = false }
+                        }
+                        .padding(EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9))
+                        .background(Color(.systemGray5))
+                        .cornerRadius(10)
+                        .frame(width: 150)
+                    } else {
+                        Button {
+                            showSearchField = true
+                            DispatchQueue.main.async { isSearchFocused = true }
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.secondary).font(.system(size: 16))
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: 28, height: 28)
+                        .help("搜索代码/名称")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 12)
             }
+            .frame(maxWidth: .infinity)
+            .background(Color(.systemBackground))
+
+            // 二级胶囊（根据一级切换）
+            secondLevelBar
         }
         .background(Color(.systemBackground))
     }
 
-    /// Tab 概览：统计当前 Tab 上涨/下跌/平盘数。
-    /// **不触发预取**（否则会抢占置顶优先的 inFlight 占位，把所有标的塞到低优队尾）。
-    private var tabOverviewBar: some View {
-        let rows = rowCache.rows(for: tabItems, prefetch: false)
-        var up = 0, down = 0, flat = 0, pending = 0
-        for r in rows {
-            guard let pct = r.number(.changePct) else {
-                pending += 1; continue
+    /// 二级胶囊栏：一级=市场→主板/指数/ETF；选股→趋势/震荡/反转/情绪；自选→持仓/股池
+    private var secondLevelBar: some View {
+        HStack(spacing: 0) {
+            switch topMenu {
+            case .market:
+                ForEach(MarketTab.allCases) { s in
+                    Button(action: { selectedTab = s; scheduleRefresh() }) {
+                        Text(s.rawValue)
+                            .font(.system(size: 13, weight: selectedTab == s ? .bold : .regular))
+                            .foregroundColor(selectedTab == s ? .red : .primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(selectedTab == s ? Color.red.opacity(0.08) : Color.clear)
+                            .cornerRadius(14)
+                    }
+                    .buttonStyle(.plain)
+                }
+            case .picker:
+                ForEach(PickerField.allCases) { s in
+                    Text(s.rawValue)
+                        .font(.system(size: 13, weight: pickerSeg == s ? .bold : .regular))
+                        .foregroundColor(pickerSeg == s ? .red : .primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(pickerSeg == s ? Color.red.opacity(0.08) : Color.clear)
+                        .cornerRadius(14)
+                        .onTapGesture { pickerSeg = s }
+                }
+            case .fav:
+                ForEach(FavField.allCases) { s in
+                    Text(s.rawValue)
+                        .font(.system(size: 13, weight: favSeg == s ? .bold : .regular))
+                        .foregroundColor(favSeg == s ? .red : .primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(favSeg == s ? Color.red.opacity(0.08) : Color.clear)
+                        .cornerRadius(14)
+                        .onTapGesture { favSeg = s }
+                }
             }
-            if pct > 0 { up += 1 }
-            else if pct < 0 { down += 1 }
-            else { flat += 1 }
         }
-        let total = up + down + flat
-        func pill(_ label: String, _ count: Int, color: Color) -> some View {
-            HStack(spacing: 3) {
-                Text(label).font(.system(size: 11)).foregroundColor(.secondary)
-                Text("\(count)").font(.system(size: 12, weight: .semibold)).foregroundColor(color)
-            }
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(Color(.systemGray6))
-            .cornerRadius(6)
-        }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                pill("股票", total, color: .primary)
-                pill("上涨", up, color: .red)
-                pill("下跌", down, color: .green)
-                pill("平盘", flat, color: .gray)
-                if pending > 0 { pill("计算中", pending, color: .orange) }
-            }
-        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 38)
+        .background(Color(.systemGray6).opacity(0.4))
     }
 
     // MARK: - 行卡片（主组件）
 
-    private func rowCard(row: MarketRow) -> some View {
-        // 左侧固定：加自选星标 + 表单列（后者内部 ScrollView 横向滚动）
-        let meta = row.meta
-        return HStack(spacing: 0) {
-            // 星标按钮（加自选/取消）
-            Button {
-                fav.toggleFavorite(meta.id)
-            } label: {
-                Image(systemName: fav.isFavorited(meta.id) ? "star.fill" : "star")
-                    .foregroundColor(fav.isFavorited(meta.id) ? .yellow : .gray)
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-            .frame(width: 28, height: 36)
-            .contextMenu {
-                Button(action: { addGroupTarget = meta }) {
-                    Label("加入指定分组", systemImage: "folder.badge.plus")
-                }
-                if fav.isFavorited(meta.id) {
-                    Button(role: .destructive, action: { fav.toggleFavorite(meta.id) }) {
-                        Label("取消自选", systemImage: "star.slash")
-                    }
-                }
-            }
+    /// 可视列里冻结前 3 列后，其余列的最大可左移量（整表横向滚动上限）
+    private var maxHOffset: CGFloat {
+        max(0, MarketTableRow.scrollContentWidth(for: .marketBoard, config: colCfg, frozenCount: 3)
+             - UIScreen.main.bounds.width)
+    }
 
-            MarketTableRow(page: .marketBoard, mode: .data(meta: meta), config: colCfg, rowCache: rowCache) { meta in
+    /// 横向拖拽：侦测主轴向驱动 hScrollOffset（冻结列固定、其余列平移）；
+    /// 用 simultaneousGesture 挂在外层垂直 ScrollView 上，上下滑动不受影响。
+    private var horizontalDragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { v in
+                if panAxisIsH == nil {
+                    panAxisIsH = abs(v.translation.width) > abs(v.translation.height)
+                    if panAxisIsH == true { hDragStart = hScrollOffset }
+                }
+                if panAxisIsH == true {
+                    hScrollOffset = min(0, max(-maxHOffset, hDragStart + v.translation.width))
+                }
+            }
+            .onEnded { _ in
+                if panAxisIsH == true {
+                    hDragStart = hScrollOffset
+                }
+                panAxisIsH = nil
+            }
+    }
+
+    private func rowCard(row: MarketRow) -> some View {
+        let meta = row.meta
+        let isFaved = fav.isFavorited(meta.id)
+        return HStack(spacing: 0) {
+            // 整行单元格（冻结前3列 + 滚动列）；自选高亮由 MarketTableRow.isFaved 呈现
+            MarketTableRow(page: .marketBoard, mode: .data(meta: meta), config: colCfg, rowCache: rowCache,
+                           onOpen: { meta in
                 isSearchFocused = false
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = displayRows.map { $0.meta }
                 DetailRouter.shared.open(meta, in: ctx)
-            }
+            }, frozenCount: 3, xOffset: hScrollOffset, isFaved: isFaved)
         }
         .padding(.trailing, 8)
+        // 长按弹菜单：加自选 / 取消自选 / 加入指定分组
+        .contextMenu {
+            Button(action: { fav.toggleFavorite(meta.id) }) {
+                Label(isFaved ? "取消自选" : "加自选", systemImage: isFaved ? "star.slash" : "star")
+            }
+            Button(action: { addGroupTarget = meta }) {
+                Label("加入指定分组", systemImage: "folder.badge.plus")
+            }
+        }
     }
 
     // MARK: - 占位

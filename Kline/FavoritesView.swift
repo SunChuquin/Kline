@@ -25,6 +25,11 @@ struct FavoritesView: View {
     @State private var refreshProgress: (groupID: UUID, done: Int, total: Int)? = nil
     @State private var showEditingMode = false   // 编辑模式：组内可拖排/删除
 
+    // === 整表横向滚动（冻结前 3 列）===
+    @State private var hScrollOffset: CGFloat = 0
+    @State private var hDragStart: CGFloat = 0
+    @State private var panAxisIsH: Bool? = nil
+
     /// Tab 列表（0 = "全部"虚拟分组，其后 = 各非隐藏真实分组）
     private var tabs: [FavoritesGroup] {
         var out: [FavoritesGroup] = [fav.allGroup]
@@ -67,10 +72,13 @@ struct FavoritesView: View {
                                          message: currentGroup.name == "全部"
                                                 ? "还没有自选股"
                                                 : "此分组暂无股票",
-                                         subtitle: "在行情页面点击 ☆ 星标即可添加，或点击右上角 + 新建分组")
+                                         subtitle: "在行情页面长按股票行即可加自选，或点击右上角 + 新建分组")
                 }
             } else {
-                MarketTableRow(page: .favorites, mode: .header, config: colCfg, rowCache: rowCache)
+                // 表头（吸顶，冻结前3列，横向跟随整表滚动）
+                MarketTableRow(page: .favorites, mode: .header, config: colCfg, rowCache: rowCache,
+                               frozenCount: 3, xOffset: hScrollOffset)
+                .background(Color(.systemBackground))
                 listBody
             }
         }
@@ -260,6 +268,7 @@ struct FavoritesView: View {
                 }
             }
         }
+        .simultaneousGesture(horizontalDragGesture)
         .refreshable {
             if currentGroup.kind == .formula {
                 refreshFormulaGroup(id: currentGroup.id)
@@ -287,16 +296,18 @@ struct FavoritesView: View {
         return List {
             ForEach(currentBinding) { $m in
                 HStack(spacing: 0) {
-                    Button(action: {
-                        fav.removeFromGroup(id: gid, metaID: $m.wrappedValue.id)
-                    }) {
-                        Image(systemName: "minus.circle.fill")
-                            .foregroundColor(.red).font(.system(size: 18))
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 28, height: 36)
-                    MarketTableRow(page: .favorites, mode: .data(meta: $m.wrappedValue), config: colCfg, rowCache: rowCache) { meta in
+                    let mm = $m.wrappedValue
+                    let mFaved = fav.isFavorited(mm.id)
+                    MarketTableRow(page: .favorites, mode: .data(meta: mm), config: colCfg, rowCache: rowCache,
+                                   onOpen: { meta in
                         DetailRouter.shared.open(meta, in: currentItems)
+                    }, frozenCount: 3, xOffset: hScrollOffset, isFaved: mFaved)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            fav.removeFromGroup(id: gid, metaID: mm.id)
+                        } label: {
+                            Label("从该分组移除", systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -323,51 +334,67 @@ struct FavoritesView: View {
         }
     }
 
+    /// 可视列里冻结前 3 列后，其余列的最大可左移量（整表横向滚动上限）
+    private var maxHOffset: CGFloat {
+        max(0, MarketTableRow.scrollContentWidth(for: .favorites, config: colCfg, frozenCount: 3)
+             - UIScreen.main.bounds.width)
+    }
+
+    /// 横向拖拽：按主轴向驱动 hScrollOffset（冻结列固定、其余列平移）；
+    /// 用 simultaneousGesture 挂在外层垂直 ScrollView 上，上下滑动不受影响。
+    private var horizontalDragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { v in
+                if panAxisIsH == nil {
+                    panAxisIsH = abs(v.translation.width) > abs(v.translation.height)
+                    if panAxisIsH == true { hDragStart = hScrollOffset }
+                }
+                if panAxisIsH == true {
+                    hScrollOffset = min(0, max(-maxHOffset, hDragStart + v.translation.width))
+                }
+            }
+            .onEnded { _ in
+                if panAxisIsH == true { hDragStart = hScrollOffset }
+                panAxisIsH = nil
+            }
+    }
+
     /// 行卡片（标准模式）
     private func rowCard(row: MarketRow) -> some View {
         let meta = row.meta
+        let isFaved = fav.isFavorited(meta.id)
         return HStack(spacing: 0) {
-            // 拖拽 / 编辑模式下的手把，这里当删除短入口
-            Button {
-                // 当前只显示星标：切换自选状态（从所有 manual 分组移除 / 加入默认分组）
-                fav.toggleFavorite(meta.id)
-            } label: {
-                Image(systemName: fav.isFavorited(meta.id) ? "star.fill" : "star")
-                    .foregroundColor(fav.isFavorited(meta.id) ? .yellow : .gray)
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-            .frame(width: 28, height: 36)
-            .contextMenu {
-                Button(action: { addGroupTarget = meta }) {
-                    Label("加入其它分组", systemImage: "folder.badge.plus")
-                }
-                Menu(content: {
-                    let manualGroups = fav.groups.filter { $0.kind == .manual }
-                    ForEach(manualGroups) { g in
-                        Button(action: {
-                            if g.manualMetaIDs.contains(meta.id) {
-                                fav.removeFromGroup(id: g.id, metaID: meta.id)
-                            } else {
-                                fav.addToGroup(id: g.id, metaID: meta.id)
-                            }
-                        }) {
-                            let inIt = g.manualMetaIDs.contains(meta.id)
-                            Label(g.name, systemImage: inIt ? "checkmark" : "")
-                        }
-                    }
-                }) { Label("移动到分组", systemImage: "arrow.up.arrow.down.circle") }
-                Button(role: .destructive,
-                       action: { fav.toggleFavorite(meta.id) }) {
-                    Label("取消自选", systemImage: "star.slash")
-                }
-            }
-
-            MarketTableRow(page: .favorites, mode: .data(meta: meta), config: colCfg, rowCache: rowCache) { meta in
+            // 整行单元格（冻结前3列 + 滚动列）；自选高亮由 MarketTableRow.isFaved 呈现
+            MarketTableRow(page: .favorites, mode: .data(meta: meta), config: colCfg, rowCache: rowCache,
+                           onOpen: { meta in
                 DetailRouter.shared.open(meta, in: currentItems)
-            }
+            }, frozenCount: 3, xOffset: hScrollOffset, isFaved: isFaved)
         }
         .padding(.trailing, 8)
+        // 长按弹菜单：取消自选 / 加入其它分组 / 移动分组
+        .contextMenu {
+            Button(role: .destructive, action: { fav.toggleFavorite(meta.id) }) {
+                Label("取消自选", systemImage: "star.slash")
+            }
+            Button(action: { addGroupTarget = meta }) {
+                Label("加入其它分组", systemImage: "folder.badge.plus")
+            }
+            Menu(content: {
+                let manualGroups = fav.groups.filter { $0.kind == .manual }
+                ForEach(manualGroups) { g in
+                    Button(action: {
+                        if g.manualMetaIDs.contains(meta.id) {
+                            fav.removeFromGroup(id: g.id, metaID: meta.id)
+                        } else {
+                            fav.addToGroup(id: g.id, metaID: meta.id)
+                        }
+                    }) {
+                        let inIt = g.manualMetaIDs.contains(meta.id)
+                        Label(g.name, systemImage: inIt ? "checkmark" : "")
+                    }
+                }
+            }) { Label("移动到分组", systemImage: "arrow.up.arrow.down.circle") }
+        }
     }
 
     // MARK: - 公式分组刷新
