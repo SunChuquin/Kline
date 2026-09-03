@@ -1,4 +1,4 @@
-name: CI Build Check
+name: CI Build App (unsigned)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Compile Check (unsigned)
+    name: Build unsigned .app + .ipa
     runs-on: macos-latest
 
     steps:
@@ -18,11 +18,32 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Build project (code signing disabled)
+      - name: Build .app (unsigned)
         run: |
           xcodebuild -project Kline.xcodeproj \
             -scheme Kline \
-            -configuration Debug \
-            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ./build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Package .app to .ipa
+        run: |
+          mkdir -p Payload
+          cp -R ./build/Build/Products/Release-iphoneos/Kline.app Payload/
+          zip -r Kline.ipa Payload
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kline-unsigned-ipa
+          path: Kline.ipa
+
+      - name: Upload .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kline-unsigned-app
+          path: ./build/Build/Products/Release-iphoneos/Kline.app
