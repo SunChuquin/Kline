@@ -155,6 +155,11 @@ struct MarketTableRow: View {
         }
         .frame(width: visW, height: rowHeight, alignment: .leading)
         .clipped()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // 数据行整行可点打开标的详情；表头 metaOf 为 nil 不触发（不拦截排序按钮）
+            if let m = metaOf { onOpen?(m) }
+        }
     }
 
     /// 当前行的 meta（数据行才有；表头为占位 nil）
