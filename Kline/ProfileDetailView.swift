@@ -37,24 +37,29 @@ struct ProfileDetailView: View {
             // 分隔线
             Divider()
 
-            // 主内容区域
-            VStack(spacing: 24) {
-                // 用户头像
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 100))
-                    .foregroundColor(.blue)
+            // 主内容区域 - ScrollView 支持滚动
+            ScrollView {
+                VStack(spacing: 24) {
+                    // 用户头像
+                    Image(systemName: "person.circle.fill")
+                        .font(.system(size: 100))
+                        .foregroundColor(.blue)
 
-                // 用户名称
-                Text("用户名")
-                    .font(.title)
-                    .fontWeight(.bold)
+                    // 用户名称
+                    Text("用户名")
+                        .font(.title)
+                        .fontWeight(.bold)
 
-                // 用户ID
-                Text("ID: 123456")
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
+                    // 用户ID
+                    Text("ID: 123456")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+
+                    // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
+                    LocalUpdateView()
+                }
+                .padding()
             }
-            .frame(maxHeight: .infinity)
         }
         .background(Color(.systemBackground))
     }
