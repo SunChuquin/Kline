@@ -1,27 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  Kline.entitlements — TrollStore 永久版专用权限声明
-  注入方式：GitHub Actions 中 `codesign -f -s - --deep --entitlements Kline.entitlements`
-  不是 Info.plist！是 codesign 的 --entitlements 参数。
-
-  设计原则（对照 iOS 15.8.8 A8（iPad mini4，非 A12+，不涉及 Paired Boot / APRR 锁）：
-  - com.apple.private.security.no-sandbox
-      关闭 sandbox profile，允许 FileManager 读整个文件系统。
-      在 TrollStore + CoreTrust 信任链下可以生效（A12+ iOS 16+ 才会被 PPL 挡住，
-      当前 iPad mini4 = A8，iOS 15.8.8，不会卡）。
-  - com.apple.private.security.container-required
-      防止 no-sandbox 后系统把进程识别为「无容器守护进程」，从而丢失对自身
-      沙盒 /Documents、/Library 的写权限。避免闪退、避免数据目录切换。
-      这是社区给 iOS 15 TrollStore 应用加 no-sandbox 时的「黄金搭档」。
--->
 <plist version="1.0">
 <dict>
-    <!-- 1) 关闭 Sandbox，访问全文件系统（核心诉求） -->
     <key>com.apple.private.security.no-sandbox</key>
     <true/>
-
-    <!-- 2) 保留自己的容器映射，防止丢失自身沙盒写权限 -->
     <key>com.apple.private.security.container-required</key>
     <true/>
 </dict>
