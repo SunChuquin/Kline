@@ -30,13 +30,30 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Ad-hoc sign .app for TrollStore
+      - name: Ad-hoc sign .app for TrollStore (with no-sandbox entitlements)
         run: |
           APP_PATH="./build/Build/Products/Release-iphoneos/Kline.app"
-          echo "Ad-hoc signing $APP_PATH..."
-          codesign -f -s - --deep "$APP_PATH"
-          echo "Verifying signature..."
+          BIN_PATH="$APP_PATH/Kline"
+          ENT="${GITHUB_WORKSPACE}/Kline.entitlements"
+          echo "=== Entitlements source file ==="
+          cat "$ENT"
+          echo ""
+          echo "=== Dump entitlements BEFORE signing (should be empty / missing) ==="
+          codesign -d --entitlements :- "$BIN_PATH" 2>&1 || echo "(no signature yet -> expected)"
+          echo ""
+          echo "=== Ad-hoc signing + inject entitlements into all Mach-O ==="
+          # 先给主二进制注入 entitlements（含 no-sandbox）
+          codesign -f -s - --entitlements "$ENT" "$BIN_PATH"
+          # 再给 .app 下其他 Mach-O（dylib/PlugIns 等）做无 entitlements 的 ad-hoc 签名，
+          # 避免整个 --deep 签给非主程序二进制套上 no-sandbox（可能导致闪退）
+          find "$APP_PATH" -type f ! -name "Kline" -exec sh -c 'file "$1" | grep -qE "^.*: Mach-O" && echo "  signing: $1" && codesign -f -s - "$1"' _ {} \; 2>&1 | head -50
+          echo ""
+          echo "=== Verify signature on .app bundle ==="
           codesign -v "$APP_PATH" 2>&1 || true
+          echo ""
+          echo "=== Dump entitlements AFTER signing on main binary ==="
+          codesign -d --entitlements :- "$BIN_PATH" 2>&1
+          echo ""
           echo "Done."
 
       - name: Package .app to .ipa
