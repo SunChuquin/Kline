@@ -1,4 +1,4 @@
-name: CI Build App (unsigned)
+name: CI Build App (unsigned + ad-hoc for TrollStore)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build unsigned .app + .ipa
+    name: Build .app + .ipa (ad-hoc signed)
     runs-on: macos-latest
 
     steps:
@@ -29,6 +29,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Ad-hoc sign .app for TrollStore
+        run: |
+          APP_PATH="./build/Build/Products/Release-iphoneos/Kline.app"
+          echo "Ad-hoc signing $APP_PATH..."
+          codesign -f -s - --deep "$APP_PATH"
+          echo "Verifying signature..."
+          codesign -v "$APP_PATH" 2>&1 || true
+          echo "Done."
 
       - name: Package .app to .ipa
         run: |
