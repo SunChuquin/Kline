@@ -163,12 +163,22 @@ final class ChartConfigStore: ObservableObject {
         copy[period] = cur
         mainIndicatorsByPeriod = copy
     }
-    @Published var showBareK = false
+    @Published var showBareK = false {
+        didSet { UserDefaults.standard.set(showBareK, forKey: Self.showBareKKey) }
+    }
     // 当前行情周期（跨页面/跨标的持久，返回行情再进入时保持上次选择）
     @Published var selectedPeriod: KlinePeriod = .daily
-    // K线类型与图层显示（设置面板）
-    @Published var chartStyle: ChartStyle = .bare
-    @Published var displaySettings = ChartDisplaySettings()
+    // K线类型与图层显示（设置面板）；显示组配置全标的统一持久记忆
+    @Published var chartStyle: ChartStyle = .bare {
+        didSet { UserDefaults.standard.set(chartStyle.rawValue, forKey: Self.chartStyleKey) }
+    }
+    @Published var displaySettings = ChartDisplaySettings() {
+        didSet {
+            if let data = try? JSONEncoder().encode(displaySettings) {
+                UserDefaults.standard.set(data, forKey: Self.displaySettingsKey)
+            }
+        }
+    }
     // 主图自定义指标（按周期独立）
     @Published var activeCustomByPeriod: [KlinePeriod: UUID] = [:]
     /// 当前周期激活的自定义指标 id
@@ -195,6 +205,11 @@ final class ChartConfigStore: ObservableObject {
     static let splitPositionsKey = "kline.dualLink.splitPositions"
     /// 旧版单一占比键（兼容迁移到新数组模型）
     static let legacySplitRatioKey = "kline.dualLink.splitRatio"
+
+    /// UserDefaults 键：显示组（K线类型 / 图层显示 / 裸K）。全标的统一，persist 于本 store。
+    static let chartStyleKey = "kline.config.chartStyle"
+    static let showBareKKey = "kline.config.showBareK"
+    static let displaySettingsKey = "kline.config.displaySettings"
 
     /// 取 N 个视图的分隔线位置；长度不足时补齐到 N-1 个（默认均分）
     func dualDividers(for count: Int) -> [Double] {
@@ -249,6 +264,17 @@ final class ChartConfigStore: ObservableObject {
     }
 
     private init() {
+        // 恢复显示组配置（K线类型 / 图层显示 / 裸K）：全标的统一记忆，重启保留。
+        // 注意：通用组（行情周期/联动视图数量）由各自 store 负责持久化，本 init 不触碰。
+        if let raw = UserDefaults.standard.string(forKey: Self.chartStyleKey),
+           let style = ChartStyle(rawValue: raw) {
+            chartStyle = style
+        }
+        showBareK = UserDefaults.standard.bool(forKey: Self.showBareKKey)
+        if let data = UserDefaults.standard.data(forKey: Self.displaySettingsKey),
+           let ds = try? JSONDecoder().decode(ChartDisplaySettings.self, from: data) {
+            displaySettings = ds
+        }
         subTop.kind = "CDJ"
         subBottom.kind = "COL"
         subThird.kind = "MACD"
@@ -2821,7 +2847,10 @@ struct KlineChartView: View {
     }
 
     private func mainCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
-        MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: chartStyle, candleSpacing: candleSpacing, height: height,
+        // 注意：K线空实心/类型直接读取 config.chartStyle —— config 已被 @ObservedObject 观察，
+        // 这样「K线设置-显示组-类型」修改（含启动时从 UserDefaults 恢复）都会立即驱动主图重绘实心/空心，
+        // 不依赖外部传入的 @Binding 中间层传播。
+        MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
                         curves: isBareK ? [] : mainCurves.map { CanvasCurve(color: $0.color, values: mirroredSliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
