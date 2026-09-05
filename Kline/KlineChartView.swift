@@ -599,6 +599,14 @@ struct KlineChartView: View {
     @State private var linkUserDragging = false
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
+    /// 联动多图模式：本视图在联动布局里的下标（用于判定「谁是当前激活公式编辑器的视图」）
+    let selfIndex: Int
+    /// 当前正在编辑公式的联动视图下标（detail 持有）；nil = 无编辑器打开。
+    /// 所有联动 tile 共享同一 showCustomEditor，仅 owner（selfIndex == editorOwnerIndex）真正弹出全屏编辑器，
+    /// 避免多个 tile 同时弹出半屏编辑器。
+    @Binding var editorOwnerIndex: Int?
+    /// 编辑器被激活时冒泡（联动 tile 据此把 editorOwnerIndex = 自己下标）。
+    var onEditorActivate: (() -> Void)?
 
     // 交互状态
     @State private var selectedIndex: Int? = nil
@@ -717,7 +725,10 @@ struct KlineChartView: View {
          showSubTwoSearchButton: Bool = false,
          onSubTwoSearch: (() -> Void)? = nil,
          mainLegendPortal: MainLegendPortal? = nil,
-         linkSync: DualLinkSync? = nil) {
+         linkSync: DualLinkSync? = nil,
+         selfIndex: Int = 0,
+         editorOwnerIndex: Binding<Int?> = .constant(nil),
+         onEditorActivate: (() -> Void)? = nil) {
         self.series = series
         self.metaId = metaId
         self.period = period
@@ -740,6 +751,9 @@ struct KlineChartView: View {
         self.onSubTwoSearch = onSubTwoSearch
         self.mainLegendPortal = mainLegendPortal
         self.linkSync = linkSync ?? DualLinkSync()
+        self.selfIndex = selfIndex
+        self._editorOwnerIndex = editorOwnerIndex
+        self.onEditorActivate = onEditorActivate
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -945,6 +959,21 @@ struct KlineChartView: View {
 
     /// 主图是否裸K：用户手动设置 或 主图放大模式（全屏裸K，不计算任何指标）
     private var isBareK: Bool { bareFromSub || config.showBareK || mainFullscreen }
+
+    /// 自定义公式编辑器全屏弹出控制：单图直接挂 showCustomEditor；联动仅「激活者」tile 弹出。
+    private var customEditorBinding: Binding<Bool> {
+        Binding(
+            get: { showCustomEditor && (!isLinkedTile || editorOwnerIndex == selfIndex) },
+            set: { if !$0 { showCustomEditor = false } }
+        )
+    }
+    /// 系统指标编辑器全屏弹出控制：同上。
+    private var systemEditorBinding: Binding<Bool> {
+        Binding(
+            get: { showSystemEditor && (!isLinkedTile || editorOwnerIndex == selfIndex) },
+            set: { if !$0 { showSystemEditor = false } }
+        )
+    }
 
     // MARK: - 指标计算区间（裁剪）
 
@@ -1780,23 +1809,22 @@ struct KlineChartView: View {
                                   s3Top: s3Top, s3Bottom: s3Bottom, s3Height: sub3Height)
                 }
             }
-            .overlay {
-                if showCustomEditor {
-                    FormulaEditorView(data: sortedData) {
-                        showCustomEditor = false
-                    } onSaved: { ind in
-                        switch editorTarget {
-                        case .main: activateCustom(ind)
-                        case .sub:
-                            let m = model(for: editingSlot)
-                            activateSubCustom(m, ind)
-                        }
+            // 公式编辑器：用 fullScreenCover（窗口级、不受联动 tile 半屏 frame 限制）呈现，做到真全屏。
+            // 联动时多 tile 共享 showCustomEditor，只有「激活者」tile（selfIndex == editorOwnerIndex）真正弹出。
+            .fullScreenCover(isPresented: customEditorBinding) {
+                FormulaEditorView(data: sortedData) {
+                    showCustomEditor = false
+                } onSaved: { ind in
+                    switch editorTarget {
+                    case .main: activateCustom(ind)
+                    case .sub:
+                        let m = model(for: editingSlot)
+                        activateSubCustom(m, ind)
                     }
-                    .zIndex(50)
                 }
             }
-            .overlay {
-                if showSystemEditor, let isMain = systemEditorIsMain {
+            .fullScreenCover(isPresented: systemEditorBinding) {
+                if let isMain = systemEditorIsMain {
                     SystemIndicatorEditorContainer(data: sortedData, isMain: isMain, period: self.period, initialSubId: systemEditorSubId) {
                         showSystemEditor = false
                     } onSaved: { _ in
@@ -1806,7 +1834,6 @@ struct KlineChartView: View {
                             recomputeSub(model(for: editingSlot), force: true)
                         }
                     }
-                    .zIndex(55)
                 }
             }
             .overlay {
@@ -1915,6 +1942,10 @@ struct KlineChartView: View {
             pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
             notifyHasCursor()
         }
+        // 编辑器被激活（自定义/系统指标都对第一次置 true 广播一次 owner），
+        // 联动多图时 detail 据此把 editorOwnerIndex 设为本 tile 下标，从而只有本 tile 真正全屏弹出编辑器
+        .onChange(of: showCustomEditor) { v in if v { onEditorActivate?() } }
+        .onChange(of: showSystemEditor) { v in if v { onEditorActivate?() } }
         .onChange(of: customStore.indicators) { _ in
             syncCustomAfterStoreChange()
             // 自定义指标被新增/编辑/删除，必须强制重算；

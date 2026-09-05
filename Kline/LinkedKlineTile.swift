@@ -34,6 +34,8 @@ struct LinkedKlineTile: View {
 
     @Binding var showCustomEditor: Bool
     @Binding var showSystemEditor: Bool
+    /// 当前正在编辑公式的联动视图下标（由详情页持有）；仅 self 下标与之相等时才全屏弹出编辑器
+    @Binding var editorOwnerIndex: Int?
 
     let onCursorChange: (Bool) -> Void
 
@@ -304,7 +306,9 @@ struct LinkedKlineTile: View {
                            }
                        },
                        mainLegendPortal: mainLegendPortal,
-                       linkSync: sharedLinkSync)
+                       linkSync: sharedLinkSync,
+                       selfIndex: view.index, editorOwnerIndex: $editorOwnerIndex,
+                       onEditorActivate: { editorOwnerIndex = view.index })
             .overlay {
                 if showSearch {
                     chartSearchBar

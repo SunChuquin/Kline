@@ -149,6 +149,8 @@ struct KlineDetailView: View {
     @State private var showCustomEditor = false
     /// 系统指标公式编辑器是否打开（同样需隐藏顶部栏实现真全屏）
     @State private var showSystemEditor = false
+    /// 联动多图：当前正在编辑公式的视图下标；仅该 tile 全屏弹出编辑器，其余 tile 不响应
+    @State private var editorOwnerIndex: Int? = nil
     @ObservedObject private var config = ChartConfigStore.shared
     @ObservedObject private var linkedStore = LinkedViewStore.shared
     @State private var dailySeries: ChartSeries? = nil
@@ -747,6 +749,7 @@ struct KlineDetailView: View {
                         sharedLinkSync: linkSync,
                         showCustomEditor: $showCustomEditor,
                         showSystemEditor: $showSystemEditor,
+                        editorOwnerIndex: $editorOwnerIndex,
                         onCursorChange: { has in
                             chartHasCursor = has
                         })
