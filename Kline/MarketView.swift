@@ -67,6 +67,9 @@ struct MarketView: View {
     @State private var hDragStart: CGFloat = 0
     @State private var panAxisIsH: Bool? = nil
 
+    /// 「边」边线调节模式：开启后表头/数据行列边界显示可拖分隔线，左右拖动调整列宽并持久化
+    @State private var edgeAdjust = false
+
     /// **渲染用的行快照**：由 `scheduleRefresh()` 写入，避免在计算属性里做预取副作用（否则会死循环触发重绘）。
     @State private var displayRows: [MarketRow] = []
 
@@ -138,25 +141,40 @@ struct MarketView: View {
                     MarketEmptyStateView(icon: "magnifyingglass",
                                          message: searchText.isEmpty ? "暂无标的" : "没有找到相关股票")
                 } else {
-                    // 表头（吸顶，冻结前 3 列，横向跟随整表滚动）。
-                    MarketTableRow(page: .marketBoard, mode: .header, config: colCfg, rowCache: rowCache,
-                                   frozenCount: 3, xOffset: hScrollOffset)
-                    .background(Color(.systemBackground))
-                    // 列表：外层垂直 ScrollView 保留上下滚动/懒加载；
-                    // 横向用手势驱动 hScrollOffset（冻结前3列不动，其余列平移）
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(displayRows) { row in
-                                rowCard(row: row)
-                                Divider()
+                    // 表头（吸顶，冻结前 3 列）+ 列表（横向手势滚动 / 边线调节覆盖层）
+                    ZStack(alignment: .topLeading) {
+                        VStack(spacing: 0) {
+                            MarketTableRow(page: .marketBoard, mode: .header, config: colCfg, rowCache: rowCache,
+                                           frozenCount: 3, xOffset: hScrollOffset)
+                            .background(Color(.systemBackground))
+                            // 列表：外层垂直 ScrollView 保留上下滚动/懒加载；
+                            // 横向用手势驱动 hScrollOffset（冻结前3列不动，其余列平移）
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 0) {
+                                    ForEach(displayRows) { row in
+                                        rowCard(row: row)
+                                        Divider()
+                                    }
+                                }
+                            }
+                            .simultaneousGesture(edgeAdjust ? nil : horizontalDragGesture)
+                            .refreshable {
+                                // 重新拉 meta + 刷新 rows（触发重新计算字段值）
+                                rowCache.refresh(metas: tabItems)
+                                scheduleRefresh()
                             }
                         }
-                    }
-                    .simultaneousGesture(horizontalDragGesture)
-                    .refreshable {
-                        // 重新拉 meta + 刷新 rows（触发重新计算字段值）
-                        rowCache.refresh(metas: tabItems)
-                        scheduleRefresh()
+
+                        // 边线调节覆盖层：开启时才叠加可拖分隔线
+                        if edgeAdjust {
+                            ColumnResizeOverlay(
+                                cols: MarketTableRow.renderedColumns(for: .marketBoard, config: colCfg),
+                                frozenCount: 3,
+                                xOffset: hScrollOffset,
+                                onResize: onResizeColumn
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
                     }
                 }
             } else {
@@ -227,7 +245,7 @@ struct MarketView: View {
                             scheduleRefresh()
                         }) {
                             Text(field.rawValue)
-                                .font(.system(size: 17, weight: topMenu == field ? .bold : .regular))
+                                .font(.system(size: 20, weight: topMenu == field ? .bold : .regular))
                                 .foregroundColor(topMenu == field ? .red : .primary)
                                 .padding(.vertical, 6)
                         }
@@ -236,8 +254,20 @@ struct MarketView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // 搜索 + 表头设置 —— 贴右
+                // 搜索 + 边线调节 + 表头设置 —— 贴右
                 HStack(spacing: 6) {
+                    // 边线调节按钮：开启后左右拖动列边界调整并持久化列宽
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { edgeAdjust.toggle() }
+                    } label: {
+                        Text("边")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(edgeAdjust ? .blue : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 30, height: 30)
+                    .help("开启后可左右拖动各列分隔线调整列宽")
+
                     // 表头设置按钮
                     Button { showColumnPanel = true } label: {
                         Image(systemName: "slider.horizontal.3")
@@ -247,35 +277,22 @@ struct MarketView: View {
                     .frame(width: 28, height: 28)
                     .help("表头设置（字段显隐/排序/宽度）")
 
-                    // 搜索：折叠态为图标按钮，点击后展开输入框
-                    if showSearchField {
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundColor(.gray).font(.system(size: 13))
-                            TextField("搜索代码/名称", text: $searchText)
-                                .textFieldStyle(.plain)
-                                .focused($isSearchFocused)
-                                .submitLabel(.search)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .onSubmit { isSearchFocused = false }
-                        }
-                        .padding(EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9))
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                        .frame(width: 150)
-                    } else {
-                        Button {
-                            showSearchField = true
-                            DispatchQueue.main.async { isSearchFocused = true }
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundColor(.secondary).font(.system(size: 16))
-                        }
-                        .buttonStyle(.plain)
-                        .frame(width: 28, height: 28)
-                        .help("搜索代码/名称")
+                    // 搜索栏（默认展开，始终显示，不折叠为图标）
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.gray).font(.system(size: 13))
+                        TextField("搜索代码/名称", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .focused($isSearchFocused)
+                            .submitLabel(.search)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onSubmit { isSearchFocused = false }
                     }
+                    .padding(EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9))
+                    .background(Color(.systemGray5))
+                    .cornerRadius(10)
+                    .frame(width: 150)
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 12)
@@ -297,7 +314,7 @@ struct MarketView: View {
                 ForEach(MarketTab.allCases) { s in
                     Button(action: { selectedTab = s; scheduleRefresh() }) {
                         Text(s.rawValue)
-                            .font(.system(size: 13, weight: selectedTab == s ? .bold : .regular))
+                            .font(.system(size: 18, weight: selectedTab == s ? .bold : .regular))
                             .foregroundColor(selectedTab == s ? .red : .primary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
@@ -309,7 +326,7 @@ struct MarketView: View {
             case .picker:
                 ForEach(PickerField.allCases) { s in
                     Text(s.rawValue)
-                        .font(.system(size: 13, weight: pickerSeg == s ? .bold : .regular))
+                        .font(.system(size: 18, weight: pickerSeg == s ? .bold : .regular))
                         .foregroundColor(pickerSeg == s ? .red : .primary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
@@ -320,7 +337,7 @@ struct MarketView: View {
             case .fav:
                 ForEach(FavField.allCases) { s in
                     Text(s.rawValue)
-                        .font(.system(size: 13, weight: favSeg == s ? .bold : .regular))
+                        .font(.system(size: 18, weight: favSeg == s ? .bold : .regular))
                         .foregroundColor(favSeg == s ? .red : .primary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
@@ -389,6 +406,18 @@ struct MarketView: View {
         }
     }
 
+    // MARK: - 列宽（边线拖改）
+
+    /// 拖动某列分隔线：把最新宽度写回该列对应字段的 widthOverride（持久化到沙盒 JSON）。
+    /// 与默认宽一致时清空覆盖值，恢复可跟随默认宽联动。
+    private func onResizeColumn(_ col: ColumnLayout, _ width: CGFloat) {
+        let f = col.overrideField
+        let override = MarketTableRow.shouldClearOverride(width, col: col) ? nil : width
+        colCfg.setWidthOverride(f, width: override, page: .marketBoard)
+        // 收窄可能导致滚动偏移越界：夹回有效范围
+        if hScrollOffset < -maxHOffset { hScrollOffset = -maxHOffset }
+    }
+
     // MARK: - 占位
 
     private var loadingView: some View {
@@ -398,6 +427,78 @@ struct MarketView: View {
                 .foregroundColor(.gray)
         }
         .frame(maxHeight: .infinity)
+    }
+}
+
+// MARK: - 列宽「边线」拖改覆盖层：开启时在每列右边界画一条可拖分隔线
+
+private struct ColumnResizeOverlay: View {
+    let cols: [ColumnLayout]
+    let frozenCount: Int
+    let xOffset: CGFloat
+    /// 拖动某列右边界 → 以 (该列, 新宽度) 回调
+    let onResize: (ColumnLayout, CGFloat) -> Void
+
+    private static let lineW: CGFloat = 0.5
+
+    /// 每个分隔线的锚点 x（屏幕坐标）
+    private var dividerXs: [(x: CGFloat, col: ColumnLayout)] {
+        let frozen = Array(cols.prefix(frozenCount))
+        let scroll = Array(cols.dropFirst(frozenCount))
+        var out: [(x: CGFloat, col: ColumnLayout)] = []
+        var cum: CGFloat = Self.lineW
+        for col in frozen {
+            cum += col.width
+            out.append((cum, col))
+            cum += Self.lineW
+        }
+        let frozenW = cum
+        var scum: CGFloat = 0
+        for col in scroll {
+            scum += col.width
+            out.append((frozenW + scum + xOffset, col))
+            scum += Self.lineW
+        }
+        return out
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ForEach(dividerXs, id: \.col.id) { d in
+                ColumnResizeHandle(col: d.col, onResize: onResize)
+                    .position(x: d.x, y: geo.size.height / 2)
+            }
+        }
+        .clipped()
+    }
+}
+
+private struct ColumnResizeHandle: View {
+    let col: ColumnLayout
+    let onResize: (ColumnLayout, CGFloat) -> Void
+    /// 拖动起点时的列宽（避免拖动中宽度已更新导致的重复累加）
+    @State private var startW: CGFloat? = nil
+
+    private static let hitW: CGFloat = 16
+    private static let minW: CGFloat = 48
+    private static let maxW: CGFloat = 600
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.blue.opacity(0.85))
+            .frame(width: 1.5)
+            .frame(width: Self.hitW)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        let s = startW ?? col.width
+                        startW = s
+                        onResize(col, min(Self.maxW, max(Self.minW, s + v.translation.width)))
+                    }
+                    .onEnded { _ in startW = nil }
+            )
     }
 }
 

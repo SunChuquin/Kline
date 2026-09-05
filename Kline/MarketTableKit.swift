@@ -14,11 +14,14 @@ import SwiftUI
 
 // MARK: - 表格辅助：共享列宽与对齐
 
-private struct ColumnLayout: Identifiable {
+struct ColumnLayout: Identifiable {
     let field: MarketField
     let width: CGFloat
     /// 是否由「名称 + 代码」合并而来（名称在上、代码在下双行）
     let isNameCode: Bool
+    /// 该列宽度对应的字段（边线拖改后写入 config 的 widthOverride 目标）；
+    /// 合并列固定为 name，其余列即自身
+    let overrideField: MarketField
     var id: String { "\(field.rawValue)_\(isNameCode ? "1" : "0")" }
 }
 
@@ -60,8 +63,8 @@ struct MarketTableRow: View {
         isFaved ? Color(.systemGray5) : Color(.systemBackground)
     }
 
-    /// 统一列宽（保留当前表格样式：固定 90pt 等宽 + 竖线）
-    private static let colW: CGFloat = 90
+    /// 统一列宽（保留当前表格样式：固定 108pt 等宽 + 竖线）
+    private static let colW: CGFloat = 108
     private static let lineW: CGFloat = 0.5
 
     /// 把可视列转成渲染列：相邻的「代码 + 名称」合并为一个双行单元格（名称在上、代码在下），宽度=两列之和。
@@ -69,25 +72,43 @@ struct MarketTableRow: View {
         Self.renderColumns(cols)
     }
 
-    /// 静态版 renderColumns（供外层计算横向滚动上限等复用，保证与渲染完全一致）
+    /// 静态版 renderColumns（供外层计算横向滚动上限等复用，保证与渲染完全一致）。
+    /// 列宽取「用户 widthOverride ?? 默认宽」：合并列默认 162pt、普通列默认 colW。
     fileprivate static func renderColumns(_ cols: [MarketColumnPref]) -> [ColumnLayout] {
         var out: [ColumnLayout] = []
         var i = 0
         while i < cols.count {
             let cur = cols[i]
-            // 找到相邻的 name/code 对（顺序任意）
+            // 找到相邻的 name/code 对（顺序任意），合并为一个双行单元格
             if cur.field == .name || cur.field == .code {
                 let next = i + 1 < cols.count ? cols[i + 1] : nil
                 if let n = next, n.field != cur.field, (n.field == .name || n.field == .code) {
-                    out.append(ColumnLayout(field: .name, width: colW * 2, isNameCode: true))
+                    // 合并列宽度以 name 字段的覆盖值为准
+                    let namePref = cur.field == .name ? cur : n
+                    let w = namePref.widthOverride ?? mergedDefaultWidth
+                    out.append(ColumnLayout(field: .name, width: w, isNameCode: true, overrideField: .name))
                     i += 2
                     continue
                 }
             }
-            out.append(ColumnLayout(field: cur.field, width: colW, isNameCode: false))
+            out.append(ColumnLayout(field: cur.field, width: cur.widthOverride ?? colW, isNameCode: false, overrideField: cur.field))
             i += 1
         }
         return out
+    }
+
+    /// 合并列（名称+代码）默认渲染宽：保留当前 0.75×2 列规则
+    private static let mergedDefaultWidth: CGFloat = colW * 2 * 0.75
+
+    /// 默认渲染列布局（供边线拖改覆盖层/外部计算复用），保证与表头、数据行渲染完全一致
+    static func renderedColumns(for page: MarketConfigPage, config: MarketConfigStore) -> [ColumnLayout] {
+        renderColumns(config.visibleColumns(for: page))
+    }
+
+    /// 某列第一次超过「默认宽 ± 阈值」前，不写入覆盖值（保持 widthOverride = nil，可随默认宽联动）
+    static func shouldClearOverride(_ width: CGFloat, col: ColumnLayout) -> Bool {
+        let base = col.isNameCode ? mergedDefaultWidth : colW
+        return abs(width - base) < 0.5
     }
 
     /// 冻结前 N 列后的其余列总宽（供外层算最大横向偏移）；收到冻结区起始分隔线宽
@@ -101,7 +122,7 @@ struct MarketTableRow: View {
     }
 
     var body: some View {
-        let rowHeight: CGFloat = mode.isHeader ? 30 : 36
+        let rowHeight: CGFloat = mode.isHeader ? 38 : 45
         let cols = renderColumns(config.visibleColumns(for: page))
         let frozenCols = Array(cols.prefix(frozenCount))
         let scrollCols = Array(cols.dropFirst(frozenCount))
@@ -119,8 +140,8 @@ struct MarketTableRow: View {
                 Color.clear.frame(width: frozenW)
                 ForEach(scrollCols) { col in
                     content(col, header: mode.isHeader, meta: metaOf, rule: rule)
-                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                         .padding(.horizontal, col.isNameCode ? 8 : 6)
+                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                         .frame(maxHeight: .infinity)
                         .contentShape(Rectangle())
                     Color(.black).frame(width: Self.lineW)
@@ -139,8 +160,8 @@ struct MarketTableRow: View {
                 Color(.black).frame(width: Self.lineW).opacity(0.35)
                 ForEach(frozenCols) { col in
                     content(col, header: mode.isHeader, meta: metaOf, rule: rule)
-                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                         .padding(.horizontal, col.isNameCode ? 8 : 6)
+                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                         .frame(maxHeight: .infinity)
                         .contentShape(Rectangle())
                     Color(.black).frame(width: Self.lineW).opacity(0.35)
@@ -182,7 +203,7 @@ struct MarketTableRow: View {
                 if col.isNameCode {
                     HStack(spacing: 3) {
                         Text("名称/代码")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
                             .lineLimit(1)
                         if active, let r = rule {
@@ -195,7 +216,7 @@ struct MarketTableRow: View {
                 } else {
                     HStack(spacing: 3) {
                         Text(col.field.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
                             .lineLimit(1)
                         if active, let r = rule {
@@ -214,11 +235,11 @@ struct MarketTableRow: View {
                 let fg: Color = isFaved ? .red : .primary
                 VStack(alignment: .leading, spacing: 1) {
                     Text(meta.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundColor(fg)
                         .lineLimit(1)
                     Text(meta.displayCode)
-                        .font(.system(size: 10))
+                        .font(.system(size: 13))
                         .foregroundColor(isFaved ? fg : Color(.secondaryLabel))
                         .lineLimit(1)
                 }
@@ -227,7 +248,7 @@ struct MarketTableRow: View {
                 let isLabel = col.field == .name || col.field == .code || col.field == .type
                 let cellFg: Color = isFaved && isLabel ? Color.red : rowCache.colorFor(meta.id, col.field)
                 Text(rowCache.textFor(meta.id, col.field))
-                    .font(.system(size: 12))
+                    .font(.system(size: 18))
                     .foregroundColor(cellFg)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
