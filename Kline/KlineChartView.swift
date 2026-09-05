@@ -1494,13 +1494,15 @@ struct KlineChartView: View {
                 // 「边」调节分割线时禁止产生/清除十字光标
                 if suppressCrosshair { return }
                 if isTap && inPanel {
+                    // 点击（无论放置还是清除光标）都视为用户直接操作（联动来源），
+                    // 让本次取消/放置都能被联动到其它视图
+                    linkUserDragging = true
                     let col = Int((value.location.x / candleSpacing).rounded(.down))
                     let idx = startIndex + col
                     if selectedIndex != nil {
                         selectedIndex = nil; crosshairY = nil
                     } else if idx >= startIndex && idx <= endIndex {
                         // 点击创建光标也视为用户直接操作（联动来源标记），使右视图点击能同步到左视图
-                        linkUserDragging = true
                         selectedIndex = idx; crosshairY = value.location.y
                     }
                 }
@@ -1895,10 +1897,12 @@ struct KlineChartView: View {
     /// 只要 linkUserDragging=true（任一视图的用户直接操作）就视为来源端，用于所有被联动视图统一做居中显示。
     private func publishLinkCursor(index: Int?) {
         guard cursorLinkEnabled else { return }
-        // 新语义：只要是用户直接操作的视图在拖动/点击产生了光标，就标记为"来源"，
-        // 所有其它视图接收到后一律居中显示。linkAutoCenter 仅保留作标记，不再影响居中逻辑。
-        linkSync.lastCursorFromRightUser = linkUserDragging
-        // 消费后立即复位，防止来源标记因手势中断/多次发布而粘滞
+        // 只有"用户直接操作"的视图（即来源）才真正对外发布联动光标。
+        // 联动接收端在 applyLinkCursor 里同步了光标位置后，会经 onChange(selectedIndex)
+        // 再次走到这里；若也发布，会形成回声：接收端按各自更小周期解析出的不同 date 回传，
+        // 导致来源视图收到与自己日期不一致的回声而在自己的视图里多此一举地居中。
+        // 只要 linkUserDragging == false（非用户手势触发），就视为回声、直接跳过发布。
+        guard linkUserDragging else { return }
         linkUserDragging = false
         let date: Int?
         if let index, index < sortedData.count { date = sortedData[index].date } else { date = nil }
@@ -1920,14 +1924,19 @@ struct KlineChartView: View {
         if let idx = selectedIndex, idx < sortedData.count, sortedData[idx].date == date { return }
         if let date {
             if let idx = nearestIndex(to: date) {
-                // 对称联动：所有被联动触发的视图，一律居中显示该K线（让其他视图用户看到联动位置）
-                let half = count / 2
-                let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
-                let newOffset = max(0, (sortedData.count - 1) - targetEnd)
-                if newOffset != endOffset {
-                    endOffset = newOffset
-                    refreshCurves()
-                    startPrefetch()
+                // 被联动视图只在「本次十字光标第一次出现」时才把该K线居中显示；
+                // 之后来源端拖动光标时的每次更新，仅移动本视图光标位置、不再继续居中，
+                // 避免拖动过程中视图窗口不停被拖走、无法在上下文里观察联动位置。
+                let isFirstAppearance = selectedIndex == nil
+                if isFirstAppearance {
+                    let half = count / 2
+                    let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
+                    let newOffset = max(0, (sortedData.count - 1) - targetEnd)
+                    if newOffset != endOffset {
+                        endOffset = newOffset
+                        refreshCurves()
+                        startPrefetch()
+                    }
                 }
                 selectedIndex = idx
                 crosshairY = nil   // 无真实触摸 y，交给 overlay 用主图中心渲染
