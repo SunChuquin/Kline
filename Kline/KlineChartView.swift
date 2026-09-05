@@ -576,6 +576,8 @@ struct KlineChartView: View {
 
     // 交互状态
     @State private var selectedIndex: Int? = nil
+    /// 副图三「裸」按钮控制的主图裸K：仅隐藏主图指标显示，不触发重算、不清除 mainCurves 缓存
+    @State private var bareFromSub = false
     /// 联动接收过程中，被联动视图在「本次十字光标第一次出现」时才居中一次；
     /// 之后来源端拖动光标时仅移动光标位置、不再反复居中（避免拖动时窗口被不停拖走）。
     @State private var linkCursorActive = false
@@ -916,7 +918,7 @@ struct KlineChartView: View {
     }
 
     /// 主图是否裸K：用户手动设置 或 主图放大模式（全屏裸K，不计算任何指标）
-    private var isBareK: Bool { config.showBareK || mainFullscreen }
+    private var isBareK: Bool { bareFromSub || config.showBareK || mainFullscreen }
 
     // MARK: - 指标计算区间（裁剪）
 
@@ -2821,7 +2823,7 @@ struct KlineChartView: View {
     private func mainCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
         MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
-                        curves: mainCurves.map { CanvasCurve(color: $0.color, values: mirroredSliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
+                        curves: isBareK ? [] : mainCurves.map { CanvasCurve(color: $0.color, values: mirroredSliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
@@ -3008,6 +3010,21 @@ struct KlineChartView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                // 副图3：最右侧「裸」按钮 —— 主图裸K开关（单图/联动均可显示）。
+                // 仅切换渲染层隐藏主图指标，不触发主图重算、不清除 mainCurves 缓存（切回立即显示）。
+                // 高亮样式与顶部导航栏「多/空」一致：开启=蓝，关闭=灰。
+                if m === subThird {
+                    Button {
+                        bareFromSub.toggle()
+                    } label: {
+                        Text("裸")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(bareFromSub ? Color.blue : Color.gray)
+                            .frame(width: 22, height: 22, alignment: .center)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -3032,8 +3049,10 @@ struct KlineChartView: View {
                     })
                 }
                 if isBareK { legendText("裸K") }
-                ForEach(Array(mainCurves.enumerated()), id: \.offset) { _, line in
-                    legendItem(line, mirrored: config.mainMirrored)
+                if !isBareK {
+                    ForEach(Array(mainCurves.enumerated()), id: \.offset) { _, line in
+                        legendItem(line, mirrored: config.mainMirrored)
+                    }
                 }
                 Spacer()
                 // 主图放大开关：进入后主图全屏裸K、显示全部 K 线；放大期间若双指缩放导致 K 线数变少，

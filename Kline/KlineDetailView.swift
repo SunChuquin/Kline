@@ -141,6 +141,10 @@ struct KlineDetailView: View {
     @State private var item: MetaItem
     var onClose: () -> Void
     @State private var showSettings = false
+    // 副图2 🔍 覆盖式搜索栏（单图模式：副图二指标栏右侧 🔍 打开；用于切换标的）
+    @State private var showSearch = false
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
     /// 自定义指标公式编辑器是否打开（由 K 线图内部触发，此处负责隐藏顶部栏实现真全屏）
     @State private var showCustomEditor = false
     /// 系统指标公式编辑器是否打开（同样需隐藏顶部栏实现真全屏）
@@ -280,6 +284,12 @@ struct KlineDetailView: View {
                         .transition(.opacity)
                         .zIndex(10)
                 }
+                // 单图 副图2 🔍 覆盖式搜索栏
+                if showSearch {
+                    chartSearchBar
+                        .transition(.opacity)
+                        .zIndex(20)
+                }
             }
             .onPreferenceChange(TopBarHeightPreferenceKey.self) { h in
                 if h > 0 { measuredTopBarHeight = h }
@@ -306,6 +316,58 @@ struct KlineDetailView: View {
 
     /// 整页（信息栏+主图）可拖分隔线覆盖层：每条分隔线独立实时拖拽。
     /// 高度由调用方传入（已裁掉顶部工具栏区域），本视图只负责在给定区域内排布分隔线
+    /// 单图 副图2 🔍 覆盖式搜索栏（复用 SearchContentView 的模糊搜索逻辑；选中即切换当前标的）
+    private var chartSearchBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Button {
+                    showSearch = false
+                    searchText = ""
+                    searchFocused = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                TextField("搜索代码/名称", text: $searchText)
+                    .font(.system(size: 14))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.gray.opacity(0.12))
+                    .cornerRadius(6)
+                    .focused($searchFocused)
+                    .autocorrectionDisabled()
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(Color.white)
+
+            if !searchText.isEmpty {
+                SearchContentView(searchText: $searchText) { result in
+                    showSearch = false
+                    searchText = ""
+                    searchFocused = false
+                    // 切换到搜索选中的标的并重新加载数据
+                    item = result
+                    loadData()
+                }
+            }
+        }
+        .background(Color.white)
+        .transition(.opacity)
+    }
+
     private func linkedDividerOverlay(width: CGFloat, height: CGFloat) -> some View {
         let totalWidth = width
         let views = linkedViews
@@ -976,6 +1038,15 @@ struct KlineDetailView: View {
                            chartHasCursor = has
                        },
                        suppressCrosshair: suppressCrosshair,
+                       // 单图：副图二指标栏右侧也显示 🔍（与联动多图一致），点击打开覆盖式搜索栏切换标的
+                       showSubTwoSearchButton: true,
+                       onSubTwoSearch: {
+                           showSearch = true
+                           // 打开搜索栏时弹起系统键盘
+                           DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                               searchFocused = true
+                           }
+                       },
                        mainLegendPortal: mainLegendPortal,
                        linkSync: linked ? linkSync : nil)
             .id(series.sorted)
