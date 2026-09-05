@@ -237,7 +237,7 @@ struct LinkedKlineTile: View {
                        // 避免多个 tile 用相同 metaID 并行预计算互相污染缓存（方向相关的副图空白根因）。
                        // 每次周期/标的切换，.id 变化触发全新图表状态，前台完整重算主图+副图。
                        metaId: nil, period: view.period,
-                       isolatedSubs: true, linkAutoCenter: linkAutoCenter,
+                       isolatedSubs: true, hideMainZoomButton: true, isLinkedTile: true, linkAutoCenter: linkAutoCenter,
                        cursorLinkEnabled: cursorLinkEnabled,
                        cursorClearToken: cursorClearToken,
                        // 联动：时间轴上一行 + 时间轴 pinned 覆盖 都不显示"额"（成交额）

@@ -527,6 +527,10 @@ struct KlineChartView: View {
     let period: KlinePeriod
     /// 是否使用独立的副图模型实例（双联动左右视图各用一套，避免共享模型被不同数据长度的曲线互相覆盖）
     private let isolatedSubs: Bool
+    /// 隐藏主图指标数值栏右侧的「放大/缩放」按钮（联动多视图场景不提供主图放大）
+    private let hideMainZoomButton: Bool
+    /// 是否为联动多图 tile（影响时间轴周期数显示等联动专属样式）
+    private let isLinkedTile: Bool
     /// 接收联动光标并自动滚动到窗口外K线时，是否把该K线居中显示。
     /// 在联动模式 cursorLinkEnabled 开启且对称联动下，所有视图联动一律居中，本字段仅用于光标来源标记。
     private let linkAutoCenter: Bool
@@ -665,6 +669,8 @@ struct KlineChartView: View {
          metaId: Int? = nil,
          period: KlinePeriod = .daily,
          isolatedSubs: Bool = false,
+         hideMainZoomButton: Bool = false,
+         isLinkedTile: Bool = false,
          linkAutoCenter: Bool = false,
          cursorLinkEnabled: Bool = false,
          cursorClearToken: UUID = UUID(),
@@ -685,6 +691,8 @@ struct KlineChartView: View {
         self.metaId = metaId
         self.period = period
         self.isolatedSubs = isolatedSubs
+        self.hideMainZoomButton = hideMainZoomButton
+        self.isLinkedTile = isLinkedTile
         self.linkAutoCenter = linkAutoCenter
         self.cursorLinkEnabled = cursorLinkEnabled
         self.cursorClearToken = cursorClearToken
@@ -1454,6 +1462,8 @@ struct KlineChartView: View {
                 if let fb = swipeFeedback {
                     let threshold: CGFloat = 70
                     let dir = fb.offset > 0 ? -1 : 1   // 右滑=更小周期/上一个标的，左滑=更大周期/下一个标的
+                    // 副图一（上方副图）作用调转：往左=切换小级别/上一个标的，往右=切换大级别/下一个标的
+                    let topDir = -dir
                     let triggeredSwitch: Bool
                     if abs(fb.offset) > threshold {
                         // 一次性锁：同一次 swipeFeedback 手势生命周期，外层回调只许一次
@@ -1463,12 +1473,12 @@ struct KlineChartView: View {
                             // 联动态：副图一切标的、副图二切周期（与常规模式交换角色的作用域）
                             if swapSubSwipeRoles {
                                 if fb.slot == .top {
-                                    onSwitchItem?(dir)
+                                    onSwitchItem?(topDir)
                                 } else {
                                     switchPeriod(direction: dir)
                                 }
                             } else if fb.slot == .top {
-                                switchPeriod(direction: dir)
+                                switchPeriod(direction: topDir)
                             } else {
                                 onSwitchItem?(dir)
                             }
@@ -2853,8 +2863,9 @@ struct KlineChartView: View {
             let fb = swipeFeedback
             let isDragging = fb?.slot == slot && (fb?.offset ?? 0).magnitude > 1
             let off = isDragging ? (fb?.offset ?? 0) : 0
-            let canL = slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(1) ?? false)
-            let canR = slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(-1) ?? false)
+            // 副图一（上方副图）方向已调转：左=小级别/上一标的，右=大级别/下一标的；副图二保持原方向
+            let canL = slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(1) ?? false)
+            let canR = slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(-1) ?? false)
             let threshold: CGFloat = 70
             ZStack {
             // 方向箭头提示：仅拖动中显示（滑动条出现前不显示），可切换方向高亮，边界方向灰显
@@ -2963,7 +2974,7 @@ struct KlineChartView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.blue)
+                            .foregroundColor(.secondary)
                             .frame(width: 22, height: 22, alignment: .center)
                             .contentShape(Rectangle())
                     }
@@ -3000,7 +3011,8 @@ struct KlineChartView: View {
                 // 主图放大开关：进入后主图全屏裸K、显示全部 K 线；放大期间若双指缩放导致 K 线数变少，
                 // 再次点击只重新全显（保持放大）；仅当全部 K 线都在屏幕内时才退出放大并恢复最新 100 根。
                 // 存在两个十字光标时（无论放大还是非放大），点击不切换放大状态，只定位到两个光标之间的 K 线
-                Button {
+                if !hideMainZoomButton {
+                    Button {
                     let hasTwoCursors = pinnedIndex != nil && selectedIndex != nil && pinnedIndex != selectedIndex
                     if hasTwoCursors {
                         // 存在两个十字光标：不切换放大/取消放大状态，
@@ -3059,6 +3071,7 @@ struct KlineChartView: View {
                 .accessibilityLabel((pinnedIndex != nil && selectedIndex != nil && pinnedIndex != selectedIndex)
                     ? "显示两个光标之间的K线"
                     : (mainFullscreen ? (count < maxVisibleCount ? "重新显示全部 K 线" : "退出主图放大") : "放大主图"))
+                }
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -3255,11 +3268,18 @@ struct KlineChartView: View {
             }
             HStack(spacing: 0) {
                 Text(left).font(.system(size: 10)).foregroundColor(.gray)
-                Text("   周期数\(count)个").font(.system(size: 10)).foregroundColor(.gray)
+                if !isLinkedTile {
+                    Text("   周期数\(count)个").font(.system(size: 10)).foregroundColor(.gray)
+                }
                 Spacer()
             }
             Text(right).font(.system(size: 10)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            // 联动多图：时间轴中间只显示周期数字，居中显示（单图保持「周期数xxx个」样式）
+            if isLinkedTile {
+                Text("\(count)").font(.system(size: 10)).foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
             // 📌 开启且第一个固定光标存在时：固定光标的行情数据覆盖显示在时间轴上（第二个光标出现后依然持续显示）
             if let pinnedIndex, pinnedIndex >= startIndex, pinnedIndex <= endIndex {
                 let item = sortedData[pinnedIndex]
