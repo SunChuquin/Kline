@@ -576,6 +576,9 @@ struct KlineChartView: View {
 
     // 交互状态
     @State private var selectedIndex: Int? = nil
+    /// 联动接收过程中，被联动视图在「本次十字光标第一次出现」时才居中一次；
+    /// 之后来源端拖动光标时仅移动光标位置、不再反复居中（避免拖动时窗口被不停拖走）。
+    @State private var linkCursorActive = false
     /// 📌 开启时固定下来的第一个光标（不可被点击清除；只随 pinEnabled 关闭而清除）
     @State private var pinnedIndex: Int? = nil
     @State private var pinnedY: CGFloat? = nil
@@ -874,7 +877,7 @@ struct KlineChartView: View {
     /// 指标栏取值：有光标时取光标值，否则取可见窗口最右侧值。
     /// 全部改为 O(1)/有界查找，避免拖拽时对整表做 O(n) 反向扫描（卡顿根源之一）。
     private func legendValue(_ arr: [Double]) -> Double? {
-        if let idx = selectedIndex, idx >= 0, idx < arr.count, !arr[idx].isNaN { return arr[idx] }
+        if let idx = renderCursorIndex, idx >= 0, idx < arr.count, !arr[idx].isNaN { return arr[idx] }
         let start = min(endIndex, arr.count - 1)
         guard start >= 0 else { return nil }
         // 从最近K线（endIndex）往回取「最近」的有限值：未全量计算时曲线只覆盖可见窗口附近，
@@ -888,6 +891,19 @@ struct KlineChartView: View {
     }
     private func legendValueFor(_ line: IndicatorLine) -> Double? { legendValue(line.values) }
     private func displayName(_ raw: String) -> String { raw.replacingOccurrences(of: "NOTEXT_", with: "") }
+
+    /// 当前用于渲染十字光标/行情信息/时序数值栏的索引。
+    /// 联动接收态（开启联动且非本地拖动）时，直接由共享 linkSync.cursorDate 解析：
+    ///   联动的被联动视图无需再把联动日期写回本地 selectedIndex（那会在 @ObservedObject 触发整树
+    ///   重绘之后，再叠一次 setState 重绘 → 联动拖动卡顿的根源）。改为纯渲染派生，每帧只重绘一次。
+    /// 本地拖动中 / 单图模式（cursorLinkEnabled=false）时，退回本地 selectedIndex，行为与原来一致。
+    private var renderCursorIndex: Int? {
+        if cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging {
+            if let d = linkSync.cursorDate { return nearestIndex(to: d) }
+            return nil
+        }
+        return selectedIndex
+    }
 
     // MARK: - 指标序列计算
 
@@ -1621,7 +1637,7 @@ struct KlineChartView: View {
     private func applyExitWindowFromCursors() {
         let maxEnd = max(0, sortedData.count - 1)
         // 两个光标（固定光标 + 活动光标）：A=左、B=右，显示 [A-10 ... B+10]
-        if let aIdx = pinnedIndex, let bIdx = selectedIndex, aIdx != bIdx {
+        if let aIdx = pinnedIndex, let bIdx = renderCursorIndex, aIdx != bIdx {
             let left = min(aIdx, bIdx)
             let right = max(aIdx, bIdx)
             let start = max(0, left - 10)
@@ -1631,7 +1647,7 @@ struct KlineChartView: View {
             return
         }
         // 一个光标：以光标所在K线为中心，前 49 + 1 + 后 50 = 100 根
-        if let center = selectedIndex ?? pinnedIndex {
+        if let center = renderCursorIndex ?? pinnedIndex {
             let start = clamp(center - 49, 0, max(0, maxEnd - 99))
             let end = min(maxEnd, start + 99)
             visibleCount = 100
@@ -1720,7 +1736,7 @@ struct KlineChartView: View {
             .overlay {
                 // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
                 ZStack(alignment: .topLeading) {
-                    cursorOverlay(index: selectedIndex, y: crosshairY ?? mainCenterY, compare: pinnedIndex, fixedPrice: nil, width: width, height: geometry.size.height,
+                    cursorOverlay(index: renderCursorIndex, y: crosshairY ?? mainCenterY, compare: pinnedIndex, fixedPrice: nil, width: width, height: geometry.size.height,
                                   candleSpacing: candleSpacing,
                                   mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
                                   s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
@@ -1898,7 +1914,7 @@ struct KlineChartView: View {
 
     /// 屏幕上是否有任意光标（固定光标或可交互光标），通知详情页用于控制 📌 按钮
     private func notifyHasCursor() {
-        onHasCursorChange?(selectedIndex != nil || pinnedIndex != nil)
+        onHasCursorChange?(renderCursorIndex != nil || pinnedIndex != nil)
     }
 
     /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象。
@@ -1920,8 +1936,9 @@ struct KlineChartView: View {
     }
 
     /// 应用另一视图发布的联动光标：把本视图光标移动到对应日期最近的 K 线。
-    /// 仅当 cursorLinkEnabled=true 才响应；拖动中/同日期防回声守卫保持不变；
-    /// 所有被联动视图一律居中显示联动光标（不再区分左/右视图贴边行为）。
+    /// 仅当 cursorLinkEnabled=true 才响应；拖动中/同日期防回声守卫保持不变。
+    /// 被联动视图的光标**始终保持在屏幕内**：若该K线滑出当前可视窗口就滚动窗口让它重新进入
+    /// （居中）；如果仍在窗口内则不动，避免拖动时整个窗口被反复拖走（保持上下文观察）。
     private func applyLinkCursor(_ date: Int?) {
         // 总开关：未开启光标联动时直接忽略
         guard cursorLinkEnabled else { return }
@@ -1930,45 +1947,56 @@ struct KlineChartView: View {
         if drag.cursorDragging { return }
         // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
         linkUserDragging = false
-        // 该日期正是本视图当前光标所在日期 → 自己发布的，忽略，避免回环
-        if let idx = selectedIndex, idx < sortedData.count, sortedData[idx].date == date { return }
-        if let date {
-            if let idx = nearestIndex(to: date) {
-                // 被联动视图只在「本次十字光标第一次出现」时才把该K线居中显示；
-                // 之后来源端拖动光标时的每次更新，仅移动本视图光标位置、不再继续居中，
-                // 避免拖动过程中视图窗口不停被拖走、无法在上下文里观察联动位置。
-                let isFirstAppearance = selectedIndex == nil
-                if isFirstAppearance {
-                    let half = count / 2
-                    let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
-                    let newOffset = max(0, (sortedData.count - 1) - targetEnd)
-                    if newOffset != endOffset {
-                        endOffset = newOffset
-                        refreshCurves()
-                        startPrefetch()
-                    }
-                }
-                selectedIndex = idx
-                crosshairY = nil   // 无真实触摸 y，交给 overlay 用主图中心渲染
-            }
-        } else {
-            selectedIndex = nil
-            crosshairY = nil
+        // 该日期正是本视图**本地**光标所在日期（自己发布的）→ 忽略，避免回环。
+        // 注意必须用本地 selectedIndex 判断，而不能用 renderCursorIndex：
+        // 被联动视图的 renderCursorIndex 直接由 linkSync.cursorDate 派生、恒等于该 date，
+        // 若用它判断会永远 return，导致联动光标无法居中。
+        if let li = selectedIndex, li < sortedData.count, sortedData[li].date == date { return }
+        guard let date, let idx = nearestIndex(to: date) else {
+            // 来源光标消失 → 本次联动会话结束，下次出现再居中
+            linkCursorActive = false
+            notifyHasCursor()
+            return
         }
+        // 被联动视图始终居中显示联动光标：每次联动更新都滚动窗口让该K线居中。
+        let half = count / 2
+        let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
+        let newOffset = max(0, (sortedData.count - 1) - targetEnd)
+        if newOffset != endOffset {
+            endOffset = newOffset
+            refreshCurves()
+            startPrefetch()
+        }
+        linkCursorActive = true
         notifyHasCursor()
     }
 
-    /// 找到日期与 target 最接近的 K 线索引（日/周视图跨周期联动用）
+    /// 找到日期与 target 最接近的 K 线索引（日/周视图跨周期联动用）。
+    /// sortedData 已按 date 升序排序 → 用二分查找定位（O(log n)），代替拖动十字光标时每帧的全量线性扫描，
+    /// 显著降低联动小周期视图在持续拖动时的卡顿。
     private func nearestIndex(to target: Int) -> Int? {
         guard !sortedData.isEmpty else { return nil }
-        if let exact = sortedData.firstIndex(where: { $0.date == target }) { return exact }
-        var best = 0
-        var bestDiff = abs(sortedData[0].date - target)
-        for i in 1..<sortedData.count {
-            let d = abs(sortedData[i].date - target)
-            if d < bestDiff { bestDiff = d; best = i }
+        var lo = 0
+        var hi = sortedData.count - 1
+        // 二分找第一个 date >= target 的下标
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if sortedData[mid].date < target {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
         }
-        return best
+        let idx = lo
+        // 精确命中直接返回
+        if sortedData[idx].date == target { return idx }
+        // 未命中：在 idx(>=target) 与 idx-1(<target) 中取更近者
+        if idx > 0 {
+            if abs(sortedData[idx - 1].date - target) <= abs(sortedData[idx].date - target) {
+                return idx - 1
+            }
+        }
+        return idx
     }
 
     private func refreshCurves(force: Bool = false) {
@@ -2578,8 +2606,8 @@ struct KlineChartView: View {
                 let bgColor = priceChange.map { $0 >= 0 ? upColor : downColor } ?? Color(red: 0.35, green: 0.75, blue: 1.0)
                 // 横线若与该光标（或对方光标）竖线的顶部日期标签/底部涨幅标签重叠，则在该区间断开不画在标签上
                 // 对方光标：两个光标共用一个横线层，需同时让开两个光标的竖线标签
-                let otherIndex: Int? = (index == selectedIndex) ? pinnedIndex : selectedIndex
-                let otherCompare: Int? = (index == selectedIndex) ? nil : pinnedIndex
+                let otherIndex: Int? = (index == renderCursorIndex) ? pinnedIndex : renderCursorIndex
+                let otherCompare: Int? = (index == renderCursorIndex) ? nil : pinnedIndex
                 let lineGap = crosshairLineGap(index: index, compare: compare, otherIndex: otherIndex, otherCompare: otherCompare,
                                                cy: cy, candleSpacing: candleSpacing, width: width,
                                                mainTop: mainTop, mainHeight: mainHeight)
@@ -2634,7 +2662,7 @@ struct KlineChartView: View {
                                ratios: mainCoordHidden ? [] : [0, 1], formatter: { String(format: "%.2f", $0) })
             // 最新价：只保留虚线（在 Canvas 中绘制），不显示数值，避免与虚线重叠
             // 可交互光标（pin 开启时即第二个光标）与固定光标的竖线/标签都绘制
-            mainCursorVLine(index: selectedIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
+            mainCursorVLine(index: renderCursorIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
             mainCursorVLine(index: pinnedIndex, compare: nil, width: width, candleSpacing: candleSpacing, height: height)
         }
         .frame(width: width, height: height)
@@ -2834,7 +2862,7 @@ struct KlineChartView: View {
                                ratios: labelRatios, formatter: subFmt)
 
             // 可交互光标（pin 开启时即第二个光标）与固定光标的副图竖线都绘制
-            subCursorVLine(index: selectedIndex, compare: pinnedIndex, candleSpacing: candleSpacing, height: height)
+            subCursorVLine(index: renderCursorIndex, compare: pinnedIndex, candleSpacing: candleSpacing, height: height)
             subCursorVLine(index: pinnedIndex, compare: nil, candleSpacing: candleSpacing, height: height)
         }
         .frame(width: width, height: height)
@@ -3013,7 +3041,7 @@ struct KlineChartView: View {
                 // 存在两个十字光标时（无论放大还是非放大），点击不切换放大状态，只定位到两个光标之间的 K 线
                 if !hideMainZoomButton {
                     Button {
-                    let hasTwoCursors = pinnedIndex != nil && selectedIndex != nil && pinnedIndex != selectedIndex
+                    let hasTwoCursors = pinnedIndex != nil && renderCursorIndex != nil && pinnedIndex != renderCursorIndex
                     if hasTwoCursors {
                         // 存在两个十字光标：不切换放大/取消放大状态，
                         // 只让屏幕显示两个光标之间的 K 线（A前10 + A与B之间 + B + B后10）
@@ -3058,7 +3086,7 @@ struct KlineChartView: View {
                     // 图标语义：存在两个十字光标时显示"放大镜"（点击只定位到两光标之间的 K 线，
                     // 不切换放大状态）；否则未放大或放大中需重新全显时显示"指向外"（点击进入放大/重新全显），
                     // 全部 K 线已全显可关闭时显示"指向内"（点击退出放大）
-                    let hasTwoCursors = pinnedIndex != nil && selectedIndex != nil && pinnedIndex != selectedIndex
+                    let hasTwoCursors = pinnedIndex != nil && renderCursorIndex != nil && pinnedIndex != renderCursorIndex
                     let needShowAll = mainFullscreen && count < maxVisibleCount
                     Image(systemName: hasTwoCursors ? "magnifyingglass"
                         : (needShowAll ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left"))
@@ -3068,7 +3096,7 @@ struct KlineChartView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel((pinnedIndex != nil && selectedIndex != nil && pinnedIndex != selectedIndex)
+                .accessibilityLabel((pinnedIndex != nil && renderCursorIndex != nil && pinnedIndex != renderCursorIndex)
                     ? "显示两个光标之间的K线"
                     : (mainFullscreen ? (count < maxVisibleCount ? "重新显示全部 K 线" : "退出主图放大") : "放大主图"))
                 }
@@ -3334,7 +3362,7 @@ struct KlineChartView: View {
     private func axisQuoteRow(width: CGFloat, height: CGFloat) -> some View {
         ZStack {
             // 光标出现时取光标所在K线，否则取屏幕最右边那根K线
-            let quoteIndex = selectedIndex ?? endIndex
+            let quoteIndex = renderCursorIndex ?? endIndex
             if quoteIndex >= startIndex, quoteIndex <= endIndex, quoteIndex >= 0, quoteIndex < sortedData.count {
                 let item = sortedData[quoteIndex]
                 let prev = prevClose(of: quoteIndex)
