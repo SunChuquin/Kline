@@ -70,12 +70,27 @@ final class LinkedTileDataSlot {
     var inFlightStart: Date?
 }
 
+/// 联动视图缩放持久化 key：跟随「视图内容 (标地, 周期)」而非视图下标。
+/// 这样删除/排序联动视图、重排 index 时，缩放级别仍跟着那个 (标地, 周期) 走，不会错位。
+struct LinkedZoomKey: Codable, Hashable {
+    let owner: Int
+    let meta: Int
+    let period: KlinePeriod
+}
+
 /// 按「当前打开的主标的 metaID」记忆该标的的联动视图配置
 final class LinkedViewStore: ObservableObject {
     static let shared = LinkedViewStore()
 
     /// key = 打开的主标的 metaID；value = 该标的的联动视图配置数组
     @Published private(set) var configs: [Int: [LinkedViewConfig]] = [:]
+
+    /// 各联动视图保存的可见K线数（缩放级别）。**刻意不用 @Published**：
+    /// 双指缩放时 visibleCount 高频变化，若发布会每帧触发整页（含重型K线图）重绘。
+    /// 只做静默落盘，视图身份用 .id 重建时从磁盘读回。
+    private var zooms: [LinkedZoomKey: CGFloat] = [:]
+    /// 缩放落盘的防抖任务（0.5s 内多次变化合并为一次写盘）
+    private var zoomWriteWorkItem: DispatchWorkItem?
 
     /// 进程内全局的 tile 数据槽。key = (ownerMetaID, tileIndex)。
     /// series/isLoading/inFlight 都挂在这，彻底解耦单个 SwiftUI tile 实例的生命周期。
@@ -146,8 +161,48 @@ final class LinkedViewStore: ObservableObject {
         return docs.appendingPathComponent("LinkedViews.json")
     }
 
+    /// 联动视图缩放级别文件（沙盒 Documents/LinkedZooms.json）
+    private var zoomFileURL: URL {
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("LinkedZooms.json")
+    }
+
     private init() {
         loadFromDisk()
+        loadZoomsFromDisk()
+    }
+
+    /// 联动视图缩放级别：返回该 (owner, 标地, 周期) 保存过的可见K线数；从未保存返回默认 100。
+    func zoom(owner: Int, meta: Int, period: KlinePeriod) -> CGFloat {
+        zooms[LinkedZoomKey(owner: owner, meta: meta, period: period)] ?? 100
+    }
+
+    /// 记录联动视图缩放级别：最新值立即写入内存（供视图读取），磁盘写入做 0.5s 防抖，
+    /// 连续变化只合并成一次落盘，避免缩放过程中逐帧编码/写文件造成无谓擦写与卡顿。
+    func setZoom(_ value: CGFloat, owner: Int, meta: Int, period: KlinePeriod) {
+        let rounded = value.rounded()
+        let key = LinkedZoomKey(owner: owner, meta: meta, period: period)
+        guard zooms[key] != rounded else { return }
+        zooms[key] = rounded
+        // 取消上一次待写盘任务（若手势未停），重新计时
+        zoomWriteWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if let data = try? JSONEncoder().encode(self.zooms) {
+                try? data.write(to: self.zoomFileURL, options: .atomic)
+            }
+        }
+        zoomWriteWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    private func loadZoomsFromDisk() {
+        guard let data = try? Data(contentsOf: zoomFileURL),
+              let decoded = try? JSONDecoder().decode([LinkedZoomKey: CGFloat].self, from: data) else {
+            zooms = [:]
+            return
+        }
+        zooms = decoded
     }
 
     // MARK: - 读取 / 写入
@@ -234,6 +289,8 @@ final class LinkedViewStore: ObservableObject {
     func reset(for metaID: Int,
                nameHint: (name: String, code: String, type: String)? = nil) {
         configs[metaID] = nil
+        // 一并清掉该标的的联动缩放记忆
+        for key in zooms.keys where key.owner == metaID { zooms[key] = nil }
         _ = configs(for: metaID, nameHint: nameHint)   // 触发默认重建并落盘
     }
 

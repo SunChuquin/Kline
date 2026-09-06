@@ -607,6 +607,10 @@ struct KlineChartView: View {
     @Binding var editorOwnerIndex: Int?
     /// 编辑器被激活时冒泡（联动 tile 据此把 editorOwnerIndex = 自己下标）。
     var onEditorActivate: (() -> Void)?
+    /// 进入时用该值初始化可见K线数（缩放级别）。nil = 用默认 100。仅联动视图由 LinkedViewStore 传入持久化值。
+    var initialVisibleCount: CGFloat? = nil
+    /// 可见K线数变化回调（联动持久化缩放级别用）。nil = 不回调（单图模式无需持久化）。
+    var onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil
 
     // 交互状态
     @State private var selectedIndex: Int? = nil
@@ -728,7 +732,9 @@ struct KlineChartView: View {
          linkSync: DualLinkSync? = nil,
          selfIndex: Int = 0,
          editorOwnerIndex: Binding<Int?> = .constant(nil),
-         onEditorActivate: (() -> Void)? = nil) {
+         onEditorActivate: (() -> Void)? = nil,
+         initialVisibleCount: CGFloat? = nil,
+         onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil) {
         self.series = series
         self.metaId = metaId
         self.period = period
@@ -754,6 +760,8 @@ struct KlineChartView: View {
         self.selfIndex = selfIndex
         self._editorOwnerIndex = editorOwnerIndex
         self.onEditorActivate = onEditorActivate
+        self.initialVisibleCount = initialVisibleCount
+        self.onVisibleCountChange = onVisibleCountChange
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -1909,6 +1917,10 @@ struct KlineChartView: View {
         }
         .background(Color.white)
         .onAppear {
+            // 恢复联动持久化的缩放级别（.id 重建后 @State 已回到默认 100，这里写入保存值）
+            if let saved = initialVisibleCount {
+                visibleCount = clamp(saved, 20, CGFloat(capVisibleCount))
+            }
             // 记录当前图表配置状态（周期/主图/副图/自定义），供外部读取 debug_log.txt 做自动化校验
             logChartState()
             // 周期一致性校验（单图模式）：联动态下真正的校验在 LinkedKlineTile.loadData 的
@@ -1927,6 +1939,10 @@ struct KlineChartView: View {
             // 先显示当前可见窗口（不卡），随后分块预计算更久远历史指标
             startPrefetch()
             notifyHasCursor()
+        }
+        .onChange(of: visibleCount) { newValue in
+            // 联动持久化缩放级别：把每次可见K线数变化上抛给外层（LinkedKlineTile 负责落盘）
+            onVisibleCountChange?(newValue)
         }
         .onChange(of: mainLegendTitle) { _ in
             // 指标配置/裸K/放大模式等引起标题变化时，同步给外层信息栏按钮

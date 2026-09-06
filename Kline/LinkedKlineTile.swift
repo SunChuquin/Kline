@@ -308,7 +308,11 @@ struct LinkedKlineTile: View {
                        mainLegendPortal: mainLegendPortal,
                        linkSync: sharedLinkSync,
                        selfIndex: view.index, editorOwnerIndex: $editorOwnerIndex,
-                       onEditorActivate: { editorOwnerIndex = view.index })
+                       onEditorActivate: { editorOwnerIndex = view.index },
+                       initialVisibleCount: linkedStore.zoom(owner: ownerMetaID, meta: view.metaID, period: view.period),
+                       onVisibleCountChange: { newZoom in
+                           linkedStore.setZoom(newZoom, owner: ownerMetaID, meta: view.metaID, period: view.period)
+                       })
             .overlay {
                 if showSearch {
                     chartSearchBar
