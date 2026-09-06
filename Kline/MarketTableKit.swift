@@ -130,8 +130,6 @@ struct MarketTableRow: View {
         let scrollW = scrollCols.reduce(0) { $0 + $1.width + Self.lineW }
         // 可视宽度：整表铺满屏幕
         let visW = UIScreen.main.bounds.width
-        // 最大可左移量：滚动内容总宽 - 可视宽
-        let maxX = max(0, (frozenW + scrollW) - visW)
         let rule = config.sortRule(for: page)
 
         ZStack(alignment: .topLeading) {

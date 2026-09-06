@@ -3849,9 +3849,8 @@ struct KlineChartView: View {
         func toComps(_ d: Int) -> DateComponents {
             DateComponents(year: d / 10000, month: (d / 100) % 100, day: d % 100)
         }
-        // Calendar(identifier:) 为 failable init（返回 Calendar?），这里显式解包
-        // 并额外提供一个 POSIX 回退时区宽松解析，避免 edge case 下强制解包崩溃。
-        var cal = Calendar(identifier: .gregorian) ?? Calendar.current
+        // Calendar(identifier:) 为非 failable init，无需解包回退
+        var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
         guard let a = cal.date(from: toComps(d1)),
               let b = cal.date(from: toComps(d2)) else { return 0 }

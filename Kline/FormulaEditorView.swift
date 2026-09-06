@@ -160,6 +160,8 @@ struct IndicatorEditSheet: View {
     var onRestoreBuiltin: (() -> String?)?
     /// 系统指标保存回调（传入编辑后的公式模板）
     var onSaveSystem: ((String) -> Void)?
+    /// 顶部标题显示的指标名称（系统指标传入 id，自定义指标走 indicator.name）
+    var displayName: String = ""
 
     @State private var name: String
     @State private var formula: String
@@ -202,6 +204,7 @@ struct IndicatorEditSheet: View {
 
     init(indicator: CustomIndicator?, data: [KlineItem], onCancel: @escaping () -> Void, onSave: @escaping (CustomIndicator) -> Void,
          isSystemIndicator: Bool = false,
+         displayName: String = "",
          systemInitialFormula: String = "",
          canRestoreBuiltin: Bool = false,
          onRestoreBuiltin: (() -> String?)? = nil,
@@ -211,6 +214,7 @@ struct IndicatorEditSheet: View {
         self.onCancel = onCancel
         self.onSave = onSave
         self.isSystemIndicator = isSystemIndicator
+        self.displayName = displayName
         self.systemInitialFormula = systemInitialFormula
         self.canRestoreBuiltin = canRestoreBuiltin
         self.onRestoreBuiltin = onRestoreBuiltin
@@ -225,7 +229,7 @@ struct IndicatorEditSheet: View {
     var body: some View {
         VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Text(isSystemIndicator ? "编辑系统指标公式" : (indicator == nil ? "新建指标" : "编辑指标"))
+                    Text("公式编辑器[\(displayName.isEmpty ? (indicator?.name ?? "新建指标") : displayName)]")
                         .font(.system(size: 16, weight: .bold)).foregroundColor(.black)
                     Spacer(minLength: 4)
                     Button("全选") { inputController.selectAll() }
@@ -668,6 +672,7 @@ struct SystemIndicatorEditorContainer: View {
                 onCancel: onClose,
                 onSave: { _ in },
                 isSystemIndicator: true,
+                displayName: id,
                 systemInitialFormula: SystemIndicatorStore.shared.template(for: id, period: period) ?? "",
                 canRestoreBuiltin: true,
                 onRestoreBuiltin: {

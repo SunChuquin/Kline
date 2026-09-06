@@ -563,31 +563,35 @@ final class MarketRowCache: ObservableObject {
     ///   - 公式必须有至少 1 条 OUTPUT 语句（或无冒号赋值 := 的最后一行）
     ///   - 取「最后一条输出线 values.last ?? 0」> 0 → 命中
     ///   - 解析/求值出错 → 未命中（默认未命中，日志丢到 DebugLogger）
-    func matchFormula(metaID: Int, formulaRaw: String, completion: @escaping (Bool) -> Void) {
-        guard let row = rows[metaID] else {
-            completion(false)
-            return
-        }
-        if let bars = row.recentBars, !bars.isEmpty {
-            // bars 已就绪：直接跑
-            computeQueue.async {
-                do {
-                    let outputs = try TDXFormulaEngine.evaluate(formula: formulaRaw, data: bars)
-                    guard let first = outputs.first else {
-                        completion(false); return
-                    }
-                    let v = first.values.last ?? 0
-                    completion(v > 0)
-                } catch {
-                    DebugLogger.shared.log("[MarketRowCache] matchFormula failed meta=\(metaID) err=\(error.localizedDescription)")
-                    completion(false)
-                }
+    nonisolated func matchFormula(metaID: Int, formulaRaw: String, completion: @escaping (Bool) -> Void) {
+        // rows / prefetch 都在 MainActor 隔离下；本方法被 computeQueue 后台闭包调用，
+        // 先切到 MainActor 读取行并触发预取，耗时求值再丢回 computeQueue，避免阻塞主线程。
+        Task { @MainActor in
+            guard let row = rows[metaID] else {
+                completion(false)
+                return
             }
-        } else {
-            // bars 还没好：先触发一次预取，之后返回 false；
-            // 用户刷新时会再来一次（下一轮可能 bars 就有了）。
-            prefetch(metas: [row.meta])
-            completion(false)
+            if let bars = row.recentBars, !bars.isEmpty {
+                // bars 已就绪：直接跑（耗时求值在 computeQueue 上串行推进）
+                computeQueue.async {
+                    do {
+                        let outputs = try TDXFormulaEngine.evaluate(formula: formulaRaw, data: bars)
+                        guard let first = outputs.first else {
+                            completion(false); return
+                        }
+                        let v = first.values.last ?? 0
+                        completion(v > 0)
+                    } catch {
+                        DebugLogger.shared.log("[MarketRowCache] matchFormula failed meta=\(metaID) err=\(error.localizedDescription)")
+                        completion(false)
+                    }
+                }
+            } else {
+                // bars 还没好：先触发一次预取，之后返回 false；
+                // 用户刷新时会再来一次（下一轮可能 bars 就有了）。
+                prefetch(metas: [row.meta])
+                completion(false)
+            }
         }
     }
 }

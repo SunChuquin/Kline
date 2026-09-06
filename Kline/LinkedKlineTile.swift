@@ -344,7 +344,7 @@ struct LinkedKlineTile: View {
 
     /// 本视图按候选列表切换标的（dir = -1 上一个 / +1 下一个）
     private func switchItem(_ dir: Int) {
-        guard let routerItem = DetailRouter.shared.item else { return }
+        guard DetailRouter.shared.item != nil else { return }
         let candidates = DetailRouter.shared.navItems
         guard !candidates.isEmpty else { return }
         guard let curIdx = candidates.firstIndex(where: { $0.id == view.metaID }) else { return }

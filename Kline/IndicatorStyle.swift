@@ -31,7 +31,7 @@ enum TDXLineStyle: String, CaseIterable {
 /// 通达信公式可用颜色（COLORXXX 选项名 → 颜色）
 enum TDXFormulaColor {
     /// 将 "COLORRED" 这类选项名映射为十六进制颜色串（nil 表示使用默认色）
-    static func hex(forOption option: String) -> String? {
+    nonisolated static func hex(forOption option: String) -> String? {
         switch option.uppercased() {
         case "COLORBLACK": return "000000"
         case "COLORBLUE": return "0050FF"

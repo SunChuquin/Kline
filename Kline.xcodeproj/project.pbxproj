@@ -156,6 +156,7 @@
 			shellPath = /bin/sh;
 			shellScript = "cd \"$SRCROOT\"\npython3 \"$SRCROOT/check_indicators.py\" \"$SRCROOT/Kline/Indicators\"\n";
 			showEnvVarsInLog = 0;
+			alwaysOutOfDate = 1;
 		};
 /* End PBXShellScriptBuildPhase section */
 

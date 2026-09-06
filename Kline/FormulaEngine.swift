@@ -28,17 +28,17 @@ struct TDXLexer {
     private let chars: [Character]
     private var pos = 0
 
-    init(_ source: String) {
+    nonisolated init(_ source: String) {
         self.chars = Array(source)
     }
 
-    mutating func tokenize() throws -> [TDXToken] {
+    nonisolated mutating func tokenize() throws -> [TDXToken] {
         var tokens: [TDXToken] = []
         while let tk = try next() { tokens.append(tk) }
         return tokens
     }
 
-    private mutating func next() throws -> TDXToken? {
+    private nonisolated mutating func next() throws -> TDXToken? {
         skipWhitespaceAndComments()
         guard pos < chars.count else { return nil }
         let c = chars[pos]
@@ -80,12 +80,12 @@ struct TDXLexer {
         }
     }
 
-    private func peek() -> Character? {
+    private nonisolated func peek() -> Character? {
         guard pos < chars.count else { return nil }
         return chars[pos]
     }
 
-    private mutating func skipWhitespaceAndComments() {
+    private nonisolated mutating func skipWhitespaceAndComments() {
         while pos < chars.count {
             let c = chars[pos]
             if c.isWhitespace || c == "\n" || c == "\r" || c == "\t" {
@@ -100,7 +100,7 @@ struct TDXLexer {
         }
     }
 
-    private mutating func readNumber() -> Double {
+    private nonisolated mutating func readNumber() -> Double {
         var s = ""
         while pos < chars.count {
             let c = chars[pos]
@@ -113,7 +113,7 @@ struct TDXLexer {
         return Double(s) ?? 0
     }
 
-    private mutating func readIdentifier() -> String {
+    private nonisolated mutating func readIdentifier() -> String {
         var s = ""
         while pos < chars.count {
             let c = chars[pos]
@@ -160,11 +160,11 @@ struct TDXParser {
     private let tokens: [TDXToken]
     private var pos = 0
 
-    init(tokens: [TDXToken]) {
+    nonisolated init(tokens: [TDXToken]) {
         self.tokens = tokens
     }
 
-    mutating func parse() throws -> [TDXStatement] {
+    nonisolated mutating func parse() throws -> [TDXStatement] {
         var stmts: [TDXStatement] = []
         while !isAtEnd {
             let stmt = try parseStatement()
@@ -179,7 +179,7 @@ struct TDXParser {
         return stmts
     }
 
-    private mutating func parseStatement() throws -> TDXStatement {
+    private nonisolated mutating func parseStatement() throws -> TDXStatement {
         let name = try consumeIdentifier("期望指标名称")
         if match(.assignOutput) {
             let expr = try parseExpr()
@@ -199,11 +199,11 @@ struct TDXParser {
     }
 
     // 表达式优先级从低到高
-    private mutating func parseExpr() throws -> TDXExpr {
+    private nonisolated mutating func parseExpr() throws -> TDXExpr {
         try parseOr()
     }
 
-    private mutating func parseOr() throws -> TDXExpr {
+    private nonisolated mutating func parseOr() throws -> TDXExpr {
         var lhs = try parseAnd()
         while matchIdentifier("OR") {
             let rhs = try parseAnd()
@@ -212,7 +212,7 @@ struct TDXParser {
         return lhs
     }
 
-    private mutating func parseAnd() throws -> TDXExpr {
+    private nonisolated mutating func parseAnd() throws -> TDXExpr {
         var lhs = try parseNot()
         while matchIdentifier("AND") {
             let rhs = try parseNot()
@@ -221,7 +221,7 @@ struct TDXParser {
         return lhs
     }
 
-    private mutating func parseNot() throws -> TDXExpr {
+    private nonisolated mutating func parseNot() throws -> TDXExpr {
         if matchIdentifier("NOT") {
             let rhs = try parseNot()
             return .unary(op: "not", rhs: rhs)
@@ -229,7 +229,7 @@ struct TDXParser {
         return try parseComparison()
     }
 
-    private mutating func parseComparison() throws -> TDXExpr {
+    private nonisolated mutating func parseComparison() throws -> TDXExpr {
         var lhs = try parseAdditive()
         while true {
             let op: String?
@@ -247,7 +247,7 @@ struct TDXParser {
         return lhs
     }
 
-    private mutating func parseAdditive() throws -> TDXExpr {
+    private nonisolated mutating func parseAdditive() throws -> TDXExpr {
         var lhs = try parseMultiplicative()
         while true {
             if match(.plus) {
@@ -263,7 +263,7 @@ struct TDXParser {
         return lhs
     }
 
-    private mutating func parseMultiplicative() throws -> TDXExpr {
+    private nonisolated mutating func parseMultiplicative() throws -> TDXExpr {
         var lhs = try parseUnary()
         while true {
             if match(.star) {
@@ -285,7 +285,7 @@ struct TDXParser {
 
     /// 隐式乘法起始符：标识符、数字、左括号之后紧跟它们视为相乘
     /// （排除 AND/OR/NOT 逻辑关键字，避免 "0 AND X" 被误判为 "0*AND"）
-    private func isImplicitMulStart(_ t: TDXToken?) -> Bool {
+    private nonisolated func isImplicitMulStart(_ t: TDXToken?) -> Bool {
         switch t {
         case .identifier(let s):
             let up = s.uppercased()
@@ -295,7 +295,7 @@ struct TDXParser {
         }
     }
 
-    private mutating func parseUnary() throws -> TDXExpr {
+    private nonisolated mutating func parseUnary() throws -> TDXExpr {
         if match(.minus) {
             let rhs = try parseUnary()
             return .unary(op: "-", rhs: rhs)
@@ -303,7 +303,7 @@ struct TDXParser {
         return try parsePrimary()
     }
 
-    private mutating func parsePrimary() throws -> TDXExpr {
+    private nonisolated mutating func parsePrimary() throws -> TDXExpr {
         guard !isAtEnd else { throw TDXEngineError.syntax("表达式不完整") }
         let token = tokens[pos]
         switch token {
@@ -336,35 +336,35 @@ struct TDXParser {
 
     // MARK: 工具
 
-    private var isAtEnd: Bool { pos >= tokens.count }
+    private nonisolated var isAtEnd: Bool { pos >= tokens.count }
 
-    private func peek() -> TDXToken? {
+    private nonisolated func peek() -> TDXToken? {
         guard pos < tokens.count else { return nil }
         return tokens[pos]
     }
 
-    private func check(_ t: TDXToken) -> Bool {
+    private nonisolated func check(_ t: TDXToken) -> Bool {
         peek() == t
     }
 
-    private mutating func match(_ t: TDXToken) -> Bool {
+    private nonisolated mutating func match(_ t: TDXToken) -> Bool {
         guard check(t) else { return false }
         pos += 1
         return true
     }
 
-    private mutating func matchIdentifier(_ name: String) -> Bool {
+    private nonisolated mutating func matchIdentifier(_ name: String) -> Bool {
         guard case .identifier(let s)? = peek(), s.uppercased() == name else { return false }
         pos += 1
         return true
     }
 
-    private mutating func consume(_ t: TDXToken, _ msg: String) throws -> TDXToken {
+    private nonisolated mutating func consume(_ t: TDXToken, _ msg: String) throws -> TDXToken {
         guard match(t) else { throw TDXEngineError.syntax(msg) }
         return t
     }
 
-    private mutating func consumeIdentifier(_ msg: String) throws -> String {
+    private nonisolated mutating func consumeIdentifier(_ msg: String) throws -> String {
         guard case .identifier(let s)? = peek() else { throw TDXEngineError.syntax(msg) }
         pos += 1
         return s
@@ -395,14 +395,15 @@ struct TDXOutputLine {
 /// 创建时预分配总容量，避免 append 过程中反复扩容复制（倍增扩容 Σ≈2N 会抵消收益）。
 /// 线程安全由调用方保证（后台预计算串行推进，同一公式状态不会被并发访问）
 final class TDXSharedArray: @unchecked Sendable {
-    var storage: [Double]
-    init(_ values: [Double], capacity: Int = 0) {
+    /// 可变存储：线程安全由调用方保证（后台预计算串行推进）
+    nonisolated(unsafe) var storage: [Double]
+    nonisolated init(_ values: [Double], capacity: Int = 0) {
         storage = values
         if capacity > storage.count {
             storage.reserveCapacity(capacity)
         }
     }
-    var count: Int { storage.count }
+    nonisolated var count: Int { storage.count }
 }
 
 /// 完整基础序列（整个标的的 C/H/L/O/V/AMOUNT），预计算各块共享引用，
@@ -410,7 +411,7 @@ final class TDXSharedArray: @unchecked Sendable {
 final class TDXSharedSeries: @unchecked Sendable {
     let closes, highs, lows, opens, volumes, turnovers: [Double]
     let count: Int
-    init(data: [KlineItem]) {
+    nonisolated init(data: [KlineItem]) {
         self.closes = data.map(\.close)
         self.highs = data.map(\.high)
         self.lows = data.map(\.low)
@@ -425,6 +426,8 @@ final class TDXSharedSeries: @unchecked Sendable {
 /// 但每块的 [0...上一块末尾] 是重复计算。状态延续让下一块只算新增区间。
 /// 该状态包含上一块末尾索引、全部语句变量前缀（引用共享）、递归函数调用末尾值、SAR/BARSLAST 状态机快照。
 struct TDXIncrementalState {
+    /// 非隔离空初始化：可在后台增量求值线程直接创建（属性均有默认值）
+    nonisolated init() {}
     /// 上一块末尾索引；-1 = 从头算
     var index: Int = -1
     /// 上一块算完后的语句变量（引用共享，[0...index]），增量时作为前缀复用
@@ -454,7 +457,7 @@ struct TDXEvaluator {
     /// 增量求值状态（resumeFrom = state.index；-1 = 从头算）
     private var incState = TDXIncrementalState()
 
-    init(data: [KlineItem], totalCount: Int? = nil) {
+    nonisolated init(data: [KlineItem], totalCount: Int? = nil) {
         // 数据需为“最新一根在末尾”的顺序，与图表索引对齐
         self.barCount = data.count
         self.finalCount = max(totalCount ?? data.count, data.count)
@@ -477,7 +480,7 @@ struct TDXEvaluator {
 
     /// 基于共享完整基础序列构建（增量预计算各块复用 series，仅切片复制当前块段，
     /// 避免每块从裁剪数据重复 map —— 实测是分块预计算慢的主因）
-    init(series: TDXSharedSeries, barCount: Int) {
+    nonisolated init(series: TDXSharedSeries, barCount: Int) {
         self.barCount = barCount
         self.finalCount = series.count
         let cs = Array(series.closes[0..<barCount])
@@ -492,7 +495,7 @@ struct TDXEvaluator {
         self.outputValues = cs
     }
 
-    mutating func evaluate(stmts: [TDXStatement]) throws -> [TDXOutputLine] {
+    nonisolated mutating func evaluate(stmts: [TDXStatement]) throws -> [TDXOutputLine] {
         var lines: [TDXOutputLine] = []
         for stmt in stmts {
             sarDirection = nil
@@ -524,7 +527,7 @@ struct TDXEvaluator {
 
     /// 增量求值入口：resuming 为上一块的状态（nil 表示从头算）。
     /// 返回输出行 + 最新增量状态（供下一块传入）。
-    mutating func evaluateIncremental(stmts: [TDXStatement], resuming: TDXIncrementalState?) throws -> (lines: [TDXOutputLine], state: TDXIncrementalState) {
+    nonisolated mutating func evaluateIncremental(stmts: [TDXStatement], resuming: TDXIncrementalState?) throws -> (lines: [TDXOutputLine], state: TDXIncrementalState) {
         if let resuming { incState = resuming } else { incState = TDXIncrementalState() }
         var lines: [TDXOutputLine] = []
         for stmt in stmts {
@@ -556,11 +559,11 @@ struct TDXEvaluator {
     }
 
     /// 增量模式下新增区间的起始索引 / 长度
-    private var incStart: Int { incState.index + 1 }
-    private var incLen: Int { max(0, barCount - incStart) }
+    private nonisolated var incStart: Int { incState.index + 1 }
+    private nonisolated var incLen: Int { max(0, barCount - incStart) }
 
     /// 语句求值：增量模式下复用上一块前缀（引用共享）、只算新增区间；含嵌套函数调用的语句从头算
-    private mutating func evalStatement(_ stmt: TDXStatement) throws -> TDXSharedArray {
+    private nonisolated mutating func evalStatement(_ stmt: TDXStatement) throws -> TDXSharedArray {
         let name = stmt.name.uppercased()
         let rf = incState.index
         // 表达式含嵌套函数调用时中间结果无法复用前缀，保守从头整段重算。
@@ -583,7 +586,7 @@ struct TDXEvaluator {
 
     /// 语句是否可增量：表达式树中所有函数调用的参数都是叶子（数字/变量），
     /// 即无「嵌套函数调用」。嵌套表达式的中间结果无法复用前缀，保守从头算
-    private func isIncremental(_ e: TDXExpr) -> Bool {
+    private nonisolated func isIncremental(_ e: TDXExpr) -> Bool {
         switch e {
         case .number, .variable:
             return true
@@ -597,7 +600,7 @@ struct TDXEvaluator {
     }
 
     /// 增量表达式求值：只计算新增区间 [incStart...barCount-1]，返回新增部分数组
-    private mutating func evalInc(_ e: TDXExpr, stmtName: String) throws -> [Double] {
+    private nonisolated mutating func evalInc(_ e: TDXExpr, stmtName: String) throws -> [Double] {
         switch e {
         case .number(let n):
             return Array(repeating: n, count: incLen)
@@ -623,7 +626,7 @@ struct TDXEvaluator {
     }
 
     /// 增量二元运算（逐元素，输入均为新增部分，无 offset）
-    private func binaryInc(_ op: String, _ a: [Double], _ b: [Double]) throws -> [Double] {
+    private nonisolated func binaryInc(_ op: String, _ a: [Double], _ b: [Double]) throws -> [Double] {
         var result = Array(repeating: 0.0, count: a.count)
         for i in 0..<a.count {
             let x = a[i], y = b[i]
@@ -647,7 +650,7 @@ struct TDXEvaluator {
     }
 
     /// 参数求值为完整数组（增量模式下参数只能是叶子：数字/变量；嵌套由 isIncremental 排除）
-    private mutating func evalFull(_ e: TDXExpr) throws -> [Double] {
+    private nonisolated mutating func evalFull(_ e: TDXExpr) throws -> [Double] {
         switch e {
         case .number(let n):
             return Array(repeating: n, count: barCount)
@@ -673,10 +676,10 @@ struct TDXEvaluator {
     }
 
     /// 规范化函数调用文本（用于 exprTail 缓存 key）
-    private func callKey(_ fn: String, _ args: [TDXExpr]) -> String {
+    private nonisolated func callKey(_ fn: String, _ args: [TDXExpr]) -> String {
         fn.uppercased() + "(" + args.map { argDesc($0) }.joined(separator: ",") + ")"
     }
-    private func argDesc(_ e: TDXExpr) -> String {
+    private nonisolated func argDesc(_ e: TDXExpr) -> String {
         switch e {
         case .number(let n): return "\(n)"
         case .variable(let n): return n.uppercased()
@@ -687,7 +690,7 @@ struct TDXEvaluator {
     }
 
     /// 增量函数调用：只算新增区间，返回新增部分数组
-    private mutating func evalCallInc(_ name: String, _ args: [TDXExpr], stmtName: String) throws -> [Double] {
+    private nonisolated mutating func evalCallInc(_ name: String, _ args: [TDXExpr], stmtName: String) throws -> [Double] {
         let fn = name.uppercased()
         let vals = try args.map { try evalFull($0) }
         func scalar(_ seq: [Double]) -> Double { seq.isEmpty ? 0 : seq[seq.count - 1] }
@@ -774,7 +777,7 @@ struct TDXEvaluator {
     // MARK: 增量序列算子（只算新增区间 [incStart...barCount-1]，返回新增部分数组）
 
     /// 增量移动平均：EMA/SMA 等递归用 exprTail 里上一块末尾值继续；MA 窗口从完整输入取
-    private mutating func movingAverageInc(_ seq: [Double], period: Int, ema: Bool, weight: Double, tailKey: String) -> [Double] {
+    private nonisolated mutating func movingAverageInc(_ seq: [Double], period: Int, ema: Bool, weight: Double, tailKey: String) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -817,7 +820,7 @@ struct TDXEvaluator {
     }
 
     /// 增量 SMA(X,N,M)：递归，用 exprTail 里上一块末尾继续
-    private mutating func smaInc(_ seq: [Double], period: Int, m: Double, tailKey: String) -> [Double] {
+    private nonisolated mutating func smaInc(_ seq: [Double], period: Int, m: Double, tailKey: String) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -845,7 +848,7 @@ struct TDXEvaluator {
 
     /// 增量 DMA(X,A)：动态移动平均 Y = A*X + (1-A)*Y'，A 为逐根权重序列；
     /// 递归，用 exprTail 里上一块末尾继续（与 SMA/EMA 一致，保证分块预计算正确）
-    private mutating func dmaInc(_ seq: [Double], _ a: [Double], tailKey: String) -> [Double] {
+    private nonisolated mutating func dmaInc(_ seq: [Double], _ a: [Double], tailKey: String) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -874,7 +877,7 @@ struct TDXEvaluator {
     }
 
     /// 增量全量累计 SUM(X,0)：用 exprTail 里上一块末尾累计值继续
-    private mutating func totalInc(_ seq: [Double], tailKey: String) -> [Double] {
+    private nonisolated mutating func totalInc(_ seq: [Double], tailKey: String) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: 0.0, count: len)
@@ -892,7 +895,7 @@ struct TDXEvaluator {
     }
 
     /// 增量滑动窗口（HHV/LLV/SUM/STD/COUNT）：窗口从完整输入取
-    private func rollingInc(_ seq: [Double], period: Int, kind: RollingKind) -> [Double] {
+    private nonisolated func rollingInc(_ seq: [Double], period: Int, kind: RollingKind) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -929,7 +932,7 @@ struct TDXEvaluator {
     }
 
     /// 增量平均绝对偏差 AVEDEV
-    private func avedevInc(_ seq: [Double], period: Int) -> [Double] {
+    private nonisolated func avedevInc(_ seq: [Double], period: Int) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -958,7 +961,7 @@ struct TDXEvaluator {
     }
 
     /// 增量 REF：查历史，非递归
-    private func referenceInc(_ seq: [Double], n: Int) -> [Double] {
+    private nonisolated func referenceInc(_ seq: [Double], n: Int) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -971,7 +974,7 @@ struct TDXEvaluator {
     }
 
     /// 增量逐元素（MAX/MIN/AND/OR）
-    private func elementWiseInc(_ a: [Double], _ b: [Double], _ f: (Double, Double) -> Double) -> [Double] {
+    private nonisolated func elementWiseInc(_ a: [Double], _ b: [Double], _ f: (Double, Double) -> Double) -> [Double] {
         let start = incStart
         var result = Array(repeating: 0.0, count: incLen)
         for i in start..<barCount {
@@ -981,7 +984,7 @@ struct TDXEvaluator {
     }
 
     /// 增量 IF
-    private func ternaryInc(_ cond: [Double], _ a: [Double], _ b: [Double]) -> [Double] {
+    private nonisolated func ternaryInc(_ cond: [Double], _ a: [Double], _ b: [Double]) -> [Double] {
         let start = incStart
         var result = Array(repeating: 0.0, count: incLen)
         for i in start..<barCount {
@@ -991,7 +994,7 @@ struct TDXEvaluator {
     }
 
     /// 增量 CROSS：需要前一索引，从完整输入取
-    private func crossInc(_ a: [Double], _ b: [Double]) -> [Double] {
+    private nonisolated func crossInc(_ a: [Double], _ b: [Double]) -> [Double] {
         let start = incStart
         var result = Array(repeating: 0.0, count: incLen)
         for i in start..<barCount {
@@ -1005,7 +1008,7 @@ struct TDXEvaluator {
     }
 
     /// 增量 SAR：用 sarStates 里上一块末尾状态机快照继续，算完更新快照
-    private mutating func sarInc(highs: [Double], lows: [Double], step: Double, maxStep: Double, stmtName: String) -> (values: [Double], isUp: [Bool]) {
+    private nonisolated mutating func sarInc(highs: [Double], lows: [Double], step: Double, maxStep: Double, stmtName: String) -> (values: [Double], isUp: [Bool]) {
         let start = incStart
         let len = incLen
         let hOffset = highs.count - barCount
@@ -1073,7 +1076,7 @@ struct TDXEvaluator {
     }
 
     /// 增量 BARSLAST：用 barsLastStates 里上一块末尾最近命中索引继续
-    private mutating func barsLastInc(_ cond: [Double], stmtName: String) -> [Double] {
+    private nonisolated mutating func barsLastInc(_ cond: [Double], stmtName: String) -> [Double] {
         let start = incStart
         let len = incLen
         var result = Array(repeating: Double.nan, count: len)
@@ -1089,7 +1092,7 @@ struct TDXEvaluator {
     }
 
     /// 解析输出线选项（类型/粗细/颜色/NOTEXT_），返回一个把样式写入输出线的闭包
-    private func applyOptions(_ options: [String]) -> (([Double], String) -> TDXOutputLine)? {
+    private nonisolated func applyOptions(_ options: [String]) -> (([Double], String) -> TDXOutputLine)? {
         guard !options.isEmpty else { return nil }
         return { value, name in
             var line = TDXOutputLine(name: name, values: value)
@@ -1117,7 +1120,7 @@ struct TDXEvaluator {
 
     // MARK: 表达式求值
 
-    private mutating func eval(_ e: TDXExpr) throws -> [Double] {
+    private nonisolated mutating func eval(_ e: TDXExpr) throws -> [Double] {
         switch e {
         case .number(let n):
             return Array(repeating: n, count: barCount)
@@ -1146,7 +1149,7 @@ struct TDXEvaluator {
         }
     }
 
-    private func binary(_ op: String, _ a: [Double], _ b: [Double]) throws -> [Double] {
+    private nonisolated func binary(_ op: String, _ a: [Double], _ b: [Double]) throws -> [Double] {
         var result = Array(repeating: 0.0, count: barCount)
         let offsetA = a.count - barCount
         let offsetB = b.count - barCount
@@ -1176,7 +1179,7 @@ struct TDXEvaluator {
 
     // MARK: 函数
 
-    private mutating func evalCall(_ name: String, _ args: [TDXExpr]) throws -> [Double] {
+    private nonisolated mutating func evalCall(_ name: String, _ args: [TDXExpr]) throws -> [Double] {
         let fn = name.uppercased()
         let vals = try args.map { try eval($0) }
 
@@ -1266,7 +1269,7 @@ struct TDXEvaluator {
         }
     }
 
-    private func requireArgs(_ fn: String, _ vals: [[Double]], _ n: Int) throws {
+    private nonisolated func requireArgs(_ fn: String, _ vals: [[Double]], _ n: Int) throws {
         guard vals.count >= n else {
             throw TDXEngineError.semantic("函数 \(fn) 至少需要 \(n) 个参数")
         }
@@ -1276,7 +1279,7 @@ struct TDXEvaluator {
 
     private enum RollingKind { case max, min, sum, std, count }
 
-    private func rolling(_ seq: [Double], period: Int, kind: RollingKind) -> [Double] {
+    private nonisolated func rolling(_ seq: [Double], period: Int, kind: RollingKind) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
         guard period > 0 else { return result }
@@ -1310,7 +1313,7 @@ struct TDXEvaluator {
         return result
     }
 
-    private func movingAverage(_ seq: [Double], period: Int, ema: Bool, weight: Double) -> [Double] {
+    private nonisolated func movingAverage(_ seq: [Double], period: Int, ema: Bool, weight: Double) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
         guard period > 0 else { return result }
@@ -1347,7 +1350,7 @@ struct TDXEvaluator {
         return result
     }
 
-    private func sma(_ seq: [Double], period: Int, m: Double) -> [Double] {
+    private nonisolated func sma(_ seq: [Double], period: Int, m: Double) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
         guard period > 0 else { return result }
@@ -1369,7 +1372,7 @@ struct TDXEvaluator {
     }
 
     /// 非增量 DMA(X,A)：动态移动平均 Y = A*X + (1-A)*Y'，A 为逐根权重序列
-    private func dma(_ seq: [Double], _ a: [Double]) -> [Double] {
+    private nonisolated func dma(_ seq: [Double], _ a: [Double]) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
         var prev: Double?
@@ -1391,7 +1394,7 @@ struct TDXEvaluator {
     }
 
     /// 从第一天起的全量累计（SUM(X,0)，用于 OBV 等）
-    private func total(_ seq: [Double]) -> [Double] {
+    private nonisolated func total(_ seq: [Double]) -> [Double] {
         var result = Array(repeating: 0.0, count: barCount)
         let offset = seq.count - barCount
         var sum = 0.0
@@ -1405,7 +1408,7 @@ struct TDXEvaluator {
     }
 
     /// 平均绝对偏差 AVEDEV(X,N)
-    private func avedev(_ seq: [Double], period: Int) -> [Double] {
+    private nonisolated func avedev(_ seq: [Double], period: Int) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
         guard period > 0 else { return result }
@@ -1432,7 +1435,7 @@ struct TDXEvaluator {
     }
 
     /// 抛物线转向 SAR（红/绿方向逐点着色）
-    private func sar(highs: [Double], lows: [Double], step: Double, maxStep: Double) -> (values: [Double], isUp: [Bool]) {
+    private nonisolated func sar(highs: [Double], lows: [Double], step: Double, maxStep: Double) -> (values: [Double], isUp: [Bool]) {
         let count = min(highs.count, lows.count)
         var out = Array(repeating: Double.nan, count: count)
         var upFlag = Array(repeating: true, count: count)
@@ -1475,7 +1478,7 @@ struct TDXEvaluator {
         return (out, upFlag)
     }
 
-    private func reference(_ seq: [Double], n: Int) -> [Double] {
+    private nonisolated func reference(_ seq: [Double], n: Int) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = seq.count - barCount
         for i in 0..<barCount {
@@ -1485,7 +1488,7 @@ struct TDXEvaluator {
         return result
     }
 
-    private func elementWise(_ a: [Double], _ b: [Double], _ f: (Double, Double) -> Double) -> [Double] {
+    private nonisolated func elementWise(_ a: [Double], _ b: [Double], _ f: (Double, Double) -> Double) -> [Double] {
         var result = Array(repeating: 0.0, count: barCount)
         let oa = a.count - barCount
         let ob = b.count - barCount
@@ -1495,7 +1498,7 @@ struct TDXEvaluator {
         return result
     }
 
-    private func ternary(_ cond: [Double], _ a: [Double], _ b: [Double]) -> [Double] {
+    private nonisolated func ternary(_ cond: [Double], _ a: [Double], _ b: [Double]) -> [Double] {
         var result = Array(repeating: 0.0, count: barCount)
         let oc = cond.count - barCount
         let oa = a.count - barCount
@@ -1506,7 +1509,7 @@ struct TDXEvaluator {
         return result
     }
 
-    private func cross(_ a: [Double], _ b: [Double]) -> [Double] {
+    private nonisolated func cross(_ a: [Double], _ b: [Double]) -> [Double] {
         var result = Array(repeating: 0.0, count: barCount)
         let oa = a.count - barCount
         let ob = b.count - barCount
@@ -1524,7 +1527,7 @@ struct TDXEvaluator {
         return result
     }
 
-    private func barsLast(_ cond: [Double]) -> [Double] {
+    private nonisolated func barsLast(_ cond: [Double]) -> [Double] {
         var result = Array(repeating: Double.nan, count: barCount)
         let offset = cond.count - barCount
         var lastIdx: Int?
@@ -1588,7 +1591,7 @@ enum TDXFormulaEngine {
     /// 把公式拆分成「每个输出行一个独立求值单元」。
     /// 每个单元 = 输出行 + 它全部传递依赖的赋值语句，可独立求值与独立缓存；
     /// 这样改某个参数只会使受影响行的单元文本变化，其余输出行可直接复用缓存结果。
-    static func splitOutputUnits(formula: String) throws -> [TDXOutputLineUnit] {
+    nonisolated static func splitOutputUnits(formula: String) throws -> [TDXOutputLineUnit] {
         var lexer = TDXLexer(formula)
         let tokens = try lexer.tokenize()
         guard !tokens.isEmpty else { throw TDXEngineError.syntax("公式为空") }
@@ -1630,7 +1633,7 @@ enum TDXFormulaEngine {
     }
 
     /// 递归收集表达式中的变量引用（函数名不会被收集，内置序列 C/H/O/L/V 等无赋值语句，自然跳过）
-    static func collectVars(_ e: TDXExpr, into set: inout Set<String>) {
+    nonisolated static func collectVars(_ e: TDXExpr, into set: inout Set<String>) {
         switch e {
         case .number: break
         case .variable(let n): set.insert(n.uppercased())
