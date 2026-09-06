@@ -214,6 +214,7 @@ struct MarketView: View {
         .onReceive(fav.objectWillChange) { _ in scheduleRefresh() }
         // 排序规则变化
         .onChange(of: colCfg.visibleColumns(for: .marketBoard)) { _ in scheduleRefresh() }
+        .onChange(of: colCfg.sortRule(for: .marketBoard)) { _ in scheduleRefresh() }
         // **关键**：每只标的的 bars 从后台到达后，rowCache 会 objectWillChange。
         // 由于 displayRows 里存的是 MarketRow（class，引用不变），如果不主动做一次 copy，
         // SwiftUI 会认为 displayRows 没变，ForEach 不会重算行内部的 Text → 一直显示 "-"。
