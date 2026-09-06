@@ -226,18 +226,19 @@ final class ChartConfigStore: ObservableObject {
     let subThird = SubChartModel()
 
     /// 三副图按周期记忆（key = 周期，value = 三副图选择；无记忆时用默认 CDJ/COL/MACD）
-    private var subscriptByPeriod: [KlinePeriod: [SubChartSelection]] = [:]
+    private var subscriptByPeriod: [KlinePeriod: [[SubChartSelection]]] = [:]
 
-    /// 三副图默认选择
-    private static let defaultSubSelections: [SubChartSelection] = [
-        SubChartSelection(kind: "CDJ", customID: nil),
-        SubChartSelection(kind: "COL", customID: nil),
-        SubChartSelection(kind: "MACD", customID: nil),
+    /// 三副图默认选择（每槽一个指标，与旧默认等价）
+    private static let defaultSubSelections: [[SubChartSelection]] = [
+        [SubChartSelection(kind: "CDJ", customID: nil)],
+        [SubChartSelection(kind: "COL", customID: nil)],
+        [SubChartSelection(kind: "MACD", customID: nil)],
     ]
 
     /// 取某周期的三副图记忆（无记忆时返回默认选择），不修改共享模型。
+    /// 返回每个槽位「已选指标列表」（每槽 ≤3）。
     /// 后台预计算、双联动隔离视图等"不落地共享模型"的读取统一走这里，保证副图按周期完全独立。
-    func subSelections(for period: KlinePeriod) -> [SubChartSelection] {
+    func subSelections(for period: KlinePeriod) -> [[SubChartSelection]] {
         if let s = subscriptByPeriod[period], s.count == 3 { return s }
         return Self.defaultSubSelections
     }
@@ -251,16 +252,12 @@ final class ChartConfigStore: ObservableObject {
     }
     /// 记录当前三副图的选择（含自定义指标 id）到某周期
     func recordSubKinds(for period: KlinePeriod) {
-        subscriptByPeriod[period] = [sel(from: subTop), sel(from: subBottom), sel(from: subThird)]
-    }
-    private func apply(_ s: SubChartSelection, to m: SubChartModel) {
-        if m.kind != s.kind || m.activeCustomID != s.customID {
-            m.kind = s.kind
-            m.activeCustomID = s.customID
+        subscriptByPeriod[period] = [subTop, subBottom, subThird].map { slot in
+            slot.items.map { SubChartSelection(kind: $0.kind, customID: $0.activeCustomID) }
         }
     }
-    private func sel(from m: SubChartModel) -> SubChartSelection {
-        SubChartSelection(kind: m.kind, customID: m.activeCustomID)
+    private func apply(_ s: [SubChartSelection], to m: SubChartModel) {
+        m.items = s.map { SubIndicatorItem(kind: $0.kind, customID: $0.customID) }
     }
 
     private init() {
@@ -275,9 +272,9 @@ final class ChartConfigStore: ObservableObject {
            let ds = try? JSONDecoder().decode(ChartDisplaySettings.self, from: data) {
             displaySettings = ds
         }
-        subTop.kind = "CDJ"
-        subBottom.kind = "COL"
-        subThird.kind = "MACD"
+        subTop.ensurePrimary().kind = "CDJ"
+        subBottom.ensurePrimary().kind = "COL"
+        subThird.ensurePrimary().kind = "MACD"
         // 恢复双联动分隔线位置记忆（优先新数组 key；旧单一占比 key 迁移为 [ratio]）
         if let data = UserDefaults.standard.data(forKey: Self.splitPositionsKey),
            let arr = try? JSONDecoder().decode([Double].self, from: data), !arr.isEmpty {
@@ -337,7 +334,13 @@ struct PrefetchCalcRequest {
 }
 
 struct SubPrefetchRequest {
+    /// 所属副图槽位（0/1/2 → subTop/subBottom/subThird）
+    let slot: Int
+    /// 槽内第几个叠加指标（对应 SubChartModel.items 下标），提交时按此写回对应 item
+    let itemIndex: Int
     let kind: String
+    /// 自定义指标 id（启用自定义时非空，用于提交时匹配颜色）
+    let customID: UUID?
     /// 自定义指标公式（启用自定义时非空，优先于系统公式）
     let customFormula: String?
     /// 系统指标公式（已替换参数）
@@ -477,21 +480,45 @@ final class MainIndicatorCache {
 
 // MARK: - 副图模型
 
-final class SubChartModel: ObservableObject {
-    @Published var kind: String = "VOL"
-    @Published var activeCustomID: UUID? = nil
-    @Published var titleName: String = "VOL"
-    @Published var curves: [IndicatorLine] = [] {
-        didSet {
-            // 诊断：任何把「非空」副图曲线清成空的写操作都打印调用栈，定位变空根因
-            if !oldValue.isEmpty && curves.isEmpty {
-                klineDebug("[KlineDebug] ⚠️副图清空 \(kind) 旧=\(oldValue.count)->新=0 | 栈:\(Thread.callStackSymbols.prefix(10).joined(separator:" | "))")
-            }
-        }
-    }
-    @Published var color: Color = Color(hex: "0050FF")!
-
+/// 副图槽位内某个叠加指标的一个独立实例（自带标题/颜色/曲线，独立坐标系）。
+final class SubIndicatorItem: Identifiable {
+    let id = UUID()
+    var kind: String = "VOL"
+    var activeCustomID: UUID? = nil
+    var titleName: String = "VOL"
+    /// 该指标自己的输出行，绘制时用这一组的独立 min/max
+    var curves: [IndicatorLine] = []
+    var color: Color = Color(hex: "0050FF")!
     var isCustom: Bool { activeCustomID != nil }
+
+    init() {}
+    init(kind: String, customID: UUID? = nil) {
+        self.kind = kind
+        self.activeCustomID = customID
+        self.titleName = kind
+    }
+}
+
+final class SubChartModel: ObservableObject {
+    /// 槽内叠加的每个指标（最多 3 个），每项自带独立坐标曲线，逐层透明叠放
+    @Published var items: [SubIndicatorItem] = []
+
+    /// —— 兼容单指标读取（取第一个已选指标）——
+    var kind: String { items.first?.kind ?? "VOL" }
+    var activeCustomID: UUID? { items.first?.activeCustomID }
+    var titleName: String { items.first?.titleName ?? "" }
+    var curves: [IndicatorLine] { items.first?.curves ?? [] }
+    var color: Color { items.first?.color ?? Color(hex: "0050FF")! }
+    var isCustom: Bool { items.first?.isCustom ?? false }
+
+    /// 确保 primary（第一个）指标项存在并返回；写单指标兼容路径用
+    func ensurePrimary() -> SubIndicatorItem {
+        if let f = items.first { return f }
+        let item = SubIndicatorItem()
+        item.kind = "VOL"
+        items = [item]
+        return item
+    }
 }
 
 /// 单个副图槽位的一次选择记忆（指标类型 + 所属自定义指标 id）
@@ -500,11 +527,11 @@ struct SubChartSelection {
     var customID: UUID?
 }
 
-/// 从一次副图选择构建独立实例（仅配置；titleName/color 由 recomputeSub 按指标重算补齐；双联动隔离用）
-private func subModel(from s: SubChartSelection) -> SubChartModel {
+/// 从一次副图选择列表构建独立实例（每个已选指标一个 SubIndicatorItem；
+/// titleName/color 由 recomputeSub 按指标重算补齐；双联动隔离用）
+private func subModel(from s: [SubChartSelection]) -> SubChartModel {
     let m = SubChartModel()
-    m.kind = s.kind
-    m.activeCustomID = s.customID
+    m.items = s.map { SubIndicatorItem(kind: $0.kind, customID: $0.customID) }
     return m
 }
 
@@ -1207,9 +1234,58 @@ struct KlineChartView: View {
         return fallback
     }
 
+    /// 计算单个叠加指标（item）的输出曲线。返回空表示求值失败（调用方保留旧曲线）。
+    /// 逻辑=旧 recomputeSub 的单指标主体，按 item 的 kind/customID 折算
+    private func computeSubItem(_ item: SubIndicatorItem, calcStart: Int, calcEnd: Int) -> [IndicatorLine] {
+        let calcData = calcData(from: calcStart, to: calcEnd)
+        var curves: [IndicatorLine] = []
+        if item.activeCustomID != nil,
+           let custom = customStore.indicators.first(where: { $0.id == item.activeCustomID }),
+           let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: calcData) {
+            for (i, line) in lines.enumerated() {
+                let built = IndicatorLine(name: displayName(line.name), values: line.values,
+                                          color: customLineColor(i, line: line, indicatorColor: custom.color),
+                                          style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue)
+                curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+            }
+        } else if item.kind == "VOL" || item.kind == "AMO" {
+            let isAmo = item.kind == "AMO"
+            let baseAll = isAmo ? turnovers : volumes
+            // 始终裁剪到 [calcStart...calcEnd]，padToFull 会补齐前后 NaN 到全量长度
+            let baseSlice = baseAll.isEmpty ? [] : Array(baseAll[calcStart...min(calcEnd, baseAll.count - 1)])
+            curves.append(padToFull(IndicatorLine(name: item.kind, values: baseSlice,
+                                                  color: isAmo ? upColor : downColor,
+                                                  style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
+                                    calcStart: calcStart, calcEnd: calcEnd))
+            for (i, p) in volMAFixedPeriods.enumerated() where p > 0 {
+                curves.append(padToFull(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: baseSlice, period: p),
+                                                      color: maColor(i), style: .solid, lineWidth: 1, hideValue: false),
+                                        calcStart: calcStart, calcEnd: calcEnd))
+            }
+        } else {
+            // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
+            if let formula = SystemIndicatorStore.shared.formula(for: item.kind, values: [:], period: self.period),
+               let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
+                for (i, line) in lines.enumerated() {
+                    guard !allNaN(line.values) else { continue }
+                    let built = IndicatorLine(name: displayName(line.name), values: line.values,
+                                              color: lineColor(from: line, fallback: maColor(i)),
+                                              style: line.style, lineWidth: line.lineWidth,
+                                              hideValue: line.hideValue,
+                                              barColor: line.colorStick ? .sign : .fixed,
+                                              markerColors: line.markerDirections?.map { $0 ? upColor : downColor })
+                    curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+                }
+            }
+        }
+        return curves
+    }
+
+    /// 重算某副图槽位：逐 item（该槽叠加的每个指标）分别计算，各自独立曲线/坐标。
+    /// 曲线分别存进 item.curves，缓存提升为「槽 → 该槽每个已选指标的一组曲线」
     private func recomputeSub(_ m: SubChartModel, force: Bool = false) {
         // 诊断：每次调用都打印（含调用来源栈），定位曲线被清空的具体路径
-        klineDebug("[KlineDebug] recomputeSub调用 \(m.kind) 现curves=\(m.curves.count) force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
+        klineDebug("[KlineDebug] recomputeSub调用 \(m.kind) items=\(m.items.count) force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记该副图待重算，关闭返回后再算
         if menuIsOpen {
             if !pendingSubCharts.contains(where: { $0 === m }) { pendingSubCharts.append(m) }
@@ -1220,57 +1296,59 @@ struct KlineChartView: View {
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         // 主图放大模式：副图不显示也不计算指标值（退出放大时重新计算）
         if mainFullscreen {
-            if !m.curves.isEmpty { klineDebug("[KlineDebug] 清空(mainFullscreen): \(m.kind)") }
-            m.curves = []
-            m.titleName = m.kind
+            if !m.items.allSatisfy({ $0.curves.isEmpty }) { klineDebug("[KlineDebug] 清空(mainFullscreen): \(m.kind)") }
+            for item in m.items { item.curves = [] }
             return
         }
         // 诊断：进入 recomputeSub 时曲线已为空（说明之前被某路径清空）
-        if m.curves.isEmpty { klineDebug("[KlineDebug] recomputeSub进入时空: \(m.kind) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) force=\(force)") }
+        if m.items.allSatisfy({ $0.curves.isEmpty }) { klineDebug("[KlineDebug] recomputeSub进入时空: \(m.kind) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) force=\(force)") }
+        let bgCovered = bgCoverageEnd >= endIndex
+        let curvesMatchCurrentData = m.items.allSatisfy { item in
+            item.curves.allSatisfy { $0.values.count == sortedData.count }
+        }
         // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
-        // 直接从缓存恢复该槽位完整曲线，避免在主线程全量重算副图指标造成明显卡顿。
+        // 直接从缓存恢复该槽位每个已选指标的完整曲线，避免在主线程全量重算副图指标造成明显卡顿。
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
         if bgCoverageEnd >= endIndex, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
             if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
                entry.bgCoverageEnd >= endIndex,
-               let curves = entry.subCurves[slot], !curves.isEmpty,
-               curves.allSatisfy({ $0.values.count == sortedData.count }) {
-                klineDebug("[KlineDebug] 恢复缓存: \(m.kind) curves=\(curves.count)")
-                m.curves = curves
-                let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind
-                m.color = customInd?.color ?? Color(hex: "0050FF")!
+               let groups = entry.subCurves[slot],
+               groups.count == m.items.count,
+               m.items.enumerated().allSatisfy({ idx, item in
+                   let grp = groups[idx]
+                   return !grp.isEmpty && grp.allSatisfy { $0.values.count == sortedData.count }
+               }) {
+                klineDebug("[KlineDebug] 恢复缓存: \(m.kind) groups=\(groups.map { $0.count })")
+                for (idx, item) in m.items.enumerated() {
+                    item.curves = groups[idx]
+                    let customInd = customStore.indicators.first { $0.id == item.activeCustomID }
+                    item.titleName = (item.isCustom ? customInd?.name : nil) ?? item.kind
+                    item.color = customInd?.color ?? Color(hex: "0050FF")!
+                }
                 return
             }
         }
-        // 后台正确计算已覆盖整个可见窗口：未强制重算时直接复用；指标变化（force）时用正确覆盖区间重算。
-        // 注意：m.curves 是跨周期共享的副图模型曲线，切换周期/配置变更后可能残留其它周期的旧曲线
-        // （长度与当前数据不一致）。此时绝不能因 bgCovered 提前返回，必须按当前周期数据重算，
-        // 否则副图曲线空白、十字光标不更新副图指标值
-        let bgCovered = bgCoverageEnd >= endIndex
-        let curvesMatchCurrentData = m.curves.allSatisfy { $0.values.count == sortedData.count }
-        if bgCovered, !force, !m.curves.isEmpty, curvesMatchCurrentData {
-            klineDebug("[KlineDebug] return(bgCovered) \(m.kind) curves=\(m.curves.count)")
+        // 后台正确计算已覆盖整个可见窗口：未强制重算时直接复用。注意 m.items 曲线可能残留
+        // 其它周期的旧曲线（长度与当前数据不一致），此时绝不能因 bgCovered 提前返回
+        if bgCovered, !force, !m.items.isEmpty, curvesMatchCurrentData {
+            klineDebug("[KlineDebug] return(bgCovered) \(m.kind) items=\(m.items.count)")
             return
         }
         // 后台尚未覆盖可见窗口：不在此同步计算近似指标（显示全部时会卡顿），
         // 保持当前已覆盖曲线，未覆盖部分渲染时因 NaN 自然显示为空，由后台 prefetch 补齐
-        if !force, !bgCovered, !m.curves.isEmpty, curvesMatchCurrentData {
-            klineDebug("[KlineDebug] return(未覆盖) \(m.kind) curves=\(m.curves.count)")
+        if !force, !bgCovered, !m.items.isEmpty, curvesMatchCurrentData {
+            klineDebug("[KlineDebug] return(未覆盖) \(m.kind) items=\(m.items.count)")
             return
         }
-        klineDebug("[KlineDebug] 进入计算 \(m.kind) 旧curves=\(m.curves.count) bgCovered=\(bgCovered) 匹配=\(curvesMatchCurrentData) force=\(force)")
-        let custom = customStore.indicators.first { $0.id == m.activeCustomID }
+        klineDebug("[KlineDebug] 进入计算 \(m.kind) items=\(m.items.count) bgCovered=\(bgCovered) 匹配=\(curvesMatchCurrentData) force=\(force)")
         // 计算区间选择：
         // - 联动隔离模式 + 强制重算（搜索切标后的首次 onAppear refreshCurves(force:true)）：
         //   直接用全量数据 [0...count-1] 计算，既保证指标 warmup 完整（MACD/EMA 等递归指标
         //   从首根 K 线开始累积，数值最准），又绕开 mergedCalcRange 的有限窗口 + 覆盖率推进
-        //   机制，避免数据量 < warmup 时 merged 区间只覆盖可见部分导致公式求值全 NaN、
-        //   副图最终显示为空。该场景只在切换标的时触发一次，是可接受的一次性开销。
+        //   机制，避免数据量 < warmup 时 merged 区间只覆盖可见部分导致公式求值全 NaN。
         // - 否则：优先走正确覆盖区间（bgCovered），否则用 mergedCalcRange 合并已覆盖区间
-        //   的近似前台计算，后台 prefetch 随后补齐。
         let (calcStart, calcEnd): (Int, Int)
         if force && isolatedSubs && !sortedData.isEmpty {
             calcStart = 0
@@ -1281,71 +1359,33 @@ struct KlineChartView: View {
         } else {
             (calcStart, calcEnd) = mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
         }
-        let calcData = calcData(from: calcStart, to: calcEnd)
-        var curves: [IndicatorLine] = []
-        if m.activeCustomID != nil, let custom,
-           let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: calcData) {
-            for (i, line) in lines.enumerated() {
-                let built = IndicatorLine(name: displayName(line.name), values: line.values,
-                                          color: customLineColor(i, line: line, indicatorColor: custom.color),
-                                          style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue)
-                curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
-            }
-        } else if m.kind == "VOL" || m.kind == "AMO" {
-            let isAmo = m.kind == "AMO"
-            let baseAll = isAmo ? turnovers : volumes
-            // 始终裁剪到 [calcStart...calcEnd]，padToFull 会补齐前后 NaN 到全量长度
-            let baseSlice = baseAll.isEmpty ? [] : Array(baseAll[calcStart...min(calcEnd, baseAll.count - 1)])
-            curves.append(padToFull(IndicatorLine(name: m.kind, values: baseSlice,
-                                                  color: isAmo ? upColor : downColor,
-                                                  style: .stick, lineWidth: 1, hideValue: false, barColor: .candle),
-                                    calcStart: calcStart, calcEnd: calcEnd))
-            for (i, p) in volMAFixedPeriods.enumerated() where p > 0 {
-                curves.append(padToFull(IndicatorLine(name: "MA\(p)", values: ChartSeries.ma(values: baseSlice, period: p),
-                                                      color: maColor(i), style: .solid, lineWidth: 1, hideValue: false),
-                                        calcStart: calcStart, calcEnd: calcEnd))
-            }
-        } else {
-                // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
-                if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: self.period),
-                   let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
-                    for (i, line) in lines.enumerated() {
-                        guard !allNaN(line.values) else { continue }
-                        let built = IndicatorLine(name: displayName(line.name), values: line.values,
-                                                  color: lineColor(from: line, fallback: maColor(i)),
-                                                  style: line.style, lineWidth: line.lineWidth,
-                                                  hideValue: line.hideValue,
-                                                  barColor: line.colorStick ? .sign : .fixed,
-                                                  markerColors: line.markerDirections?.map { $0 ? upColor : downColor })
-                        curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
-                    }
-                }
-        }
         // 防空保护：重算结果为空（如公式在裁剪区间求值失败/裁剪数据异常）时保留旧曲线，
         // 避免副图被清空变空白；后台分块预计算随后会用正确结果覆盖
-        if !curves.isEmpty || m.curves.isEmpty {
-            if curves.isEmpty { klineDebug("[DualLink] recomputeSub 计算空将覆盖 \(m.kind) isolated=\(isolatedSubs) 旧=\(m.curves.count) win=[\(startIndex)...\(endIndex)] calc=\(calcStart)...\(calcEnd)") }
-            m.curves = curves
-            m.titleName = (m.isCustom ? custom?.name : nil) ?? m.kind
-            m.color = custom?.color ?? Color(hex: "0050FF")!
-        } else {
-            klineDebug("[KlineDebug] 防空:计算空保留旧 \(m.kind) 旧=\(m.curves.count) bgCovered=\(bgCovered) calc=\(calcStart)...\(calcEnd) calcData=\(calcData.count)")
+        for item in m.items {
+            let newCurves = computeSubItem(item, calcStart: calcStart, calcEnd: calcEnd)
+            if !newCurves.isEmpty || item.curves.isEmpty {
+                if newCurves.isEmpty { klineDebug("[DualLink] recomputeSub 计算空将覆盖 \(item.kind) isolated=\(isolatedSubs) win=[\(startIndex)...\(endIndex)] calc=\(calcStart)...\(calcEnd)") }
+                item.curves = newCurves
+                let customInd = customStore.indicators.first { $0.id == item.activeCustomID }
+                item.titleName = (item.isCustom ? customInd?.name : nil) ?? item.kind
+                item.color = customInd?.color ?? Color(hex: "0050FF")!
+            }
         }
-        // 写回 (标的, 周期) 缓存：副图曲线按槽位存储，切回该周期时直接恢复
+        // 写回 (标的, 周期) 缓存：副图曲线按「槽 → 每已选指标一组」存储，切回该周期时直接恢复
         if let metaId = metaId {
             let store = ChartCacheStore.shared
             let fp = Self.currentConfigFingerprint(period: self.period)
             // 配置已变：失效旧缓存并同步本地覆盖状态，取消旧后台任务后用新配置重启，
             // 否则本地 bgCoverageEnd 保持旧大值会导致 startPrefetch 误判已算完而跳过重算
             if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
-                klineDebug("[KlineDebug] 副图配置变化(\(m.kind)) bgCoverageEnd=0 重启prefetch | 三副图count=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)] 当前m=\(m.curves.count)")
+                klineDebug("[KlineDebug] 副图配置变化(\(m.kind)) bgCoverageEnd=0 重启prefetch")
                 bgCoverageEnd = 0
                 prefetchToken = nil
                 startPrefetch()
             }
             let e = store.entry(for: metaId, period: period)
             let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
-            e.subCurves[slot] = m.curves
+            e.subCurves[slot] = m.items.map { $0.curves }
             e.configFingerprint = fp
         }
     }
@@ -1418,17 +1458,19 @@ struct KlineChartView: View {
 
     // MARK: - 副图坐标范围
 
-    private func subRange(_ m: SubChartModel) -> (min: Double, max: Double) {
+    /// 按一组曲线 + 指标类型取独立纵轴范围。每个叠加指标用独立的 selectionRange，
+    /// 因此多指标图层各自按数据 min/max 显示，互不挤压，避免归一化损失准确度
+    private func selectionRange(curves: [IndicatorLine], kind: String) -> (min: Double, max: Double) {
         let offsets = Array(startIndex...endIndex)
         var values: [Double] = []
-        for line in m.curves {
+        for line in curves {
             for idx in offsets where idx < line.values.count {
                 let v = line.values[idx]
                 if !v.isNaN { values.append(v) }
             }
         }
         let r: (min: Double, max: Double)
-        if m.kind == "VOL" || m.kind == "AMO" {
+        if kind == "VOL" || kind == "AMO" {
             // VOL/AMO 无公式模板，是成交量/成交额柱，最低值恒为 0
             let mx = values.max() ?? 1
             r = (0, mx * 1.08)
@@ -1442,6 +1484,16 @@ struct KlineChartView: View {
         // 空头镜像（取负）：范围镜像为 (-max)...(-min)，曲线随之镜像
         if config.mainMirrored { return (-r.max, -r.min) }
         return r
+    }
+
+    /// 槽内单个叠加指标的独立纵轴范围
+    private func itemRange(_ item: SubIndicatorItem) -> (min: Double, max: Double) {
+        selectionRange(curves: item.curves, kind: item.kind)
+    }
+
+    /// 兼容单指标读取：槽内 primary（第一个已选指标）的范围
+    private func subRange(_ m: SubChartModel) -> (min: Double, max: Double) {
+        selectionRange(curves: m.curves, kind: m.kind)
     }
 
     // MARK: - 手势
@@ -1637,6 +1689,7 @@ struct KlineChartView: View {
     private func logChartState() {
         let mains = config.mainIndicators(for: self.period).sorted().joined(separator: ",")
         let subs = config.subSelections(for: self.period)
+            .flatMap { $0 }
             .map { sel in sel.customID.map { "\(sel.kind)#\(String($0.uuidString.prefix(8)))" } ?? sel.kind }
             .joined(separator: ",")
         let custom = config.activeCustomIndicatorID(for: self.period)
@@ -1854,7 +1907,7 @@ struct KlineChartView: View {
                     case .main: activateCustom(ind)
                     case .sub:
                         let m = model(for: editingSlot)
-                        activateSubCustom(m, ind)
+                        applySubCustom(m, ind)
                     }
                 }
             }
@@ -2266,14 +2319,18 @@ struct KlineChartView: View {
                                            period: self.period)
         let main = entries.map { $0.formula }
         let mainIDs = entries.map { $0.id }
-        // 副图（3 个，与 subTop/subBottom/subThird 对应）
+        // 副图：扁平化列出每个槽位叠加的每个指标（带 slot/itemIndex 归属），提交时按归属写回对应 item
         var subs: [SubPrefetchRequest] = []
-        for m in [subTop, subBottom, subThird] {
-            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-            let isCustom = m.activeCustomID != nil && customInd != nil
-            let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:], period: self.period)
-            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
+        for (slot, m) in [subTop, subBottom, subThird].enumerated() {
+            for (itemIndex, item) in m.items.enumerated() {
+                let customInd = customStore.indicators.first { $0.id == item.activeCustomID }
+                let isCustom = item.activeCustomID != nil && customInd != nil
+                let customFormula = isCustom ? customInd?.formula : nil
+                let formula = (item.kind == "VOL" || item.kind == "AMO") ? nil : store.formula(for: item.kind, values: [:], period: self.period)
+                subs.append(SubPrefetchRequest(slot: slot, itemIndex: itemIndex, kind: item.kind,
+                                               customID: item.activeCustomID,
+                                               customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
+            }
         }
         return PrefetchCalcRequest(calcStart: calcStart, calcEnd: calcEnd, data: data,
                                    series: series,
@@ -2330,14 +2387,17 @@ struct KlineChartView: View {
             }
         }
         mainCurves = curves
-        // ---- 副图 ----
-        for (i, m) in [subTop, subBottom, subThird].enumerated() {
-            guard i < req.subs.count, i < result.subs.count else { continue }
-            let subReq = req.subs[i]
+        // ---- 副图：req.subs 为扁平化列表，按 slot/itemIndex 写回对应槽位的对应叠加 item ----
+        let subModels = [subTop, subBottom, subThird]
+        for (i, subReq) in req.subs.enumerated() {
+            guard i < result.subs.count, subReq.slot >= 0, subReq.slot < subModels.count else { continue }
+            let m = subModels[subReq.slot]
+            guard subReq.itemIndex < m.items.count else { continue }
+            let item = m.items[subReq.itemIndex]
             let raw = result.subs[i]
             var subCurves: [IndicatorLine] = []
             if subReq.customFormula != nil {
-                let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
+                let customInd = customStore.indicators.first { $0.id == item.activeCustomID }
                 for (j, out) in raw.enumerated() {
                     guard !allNaN(out.values) else { continue }
                     subCurves.append(padToFull(IndicatorLine(name: displayName(out.name), values: out.values,
@@ -2372,18 +2432,14 @@ struct KlineChartView: View {
             // 后台求值失败（subCurves 为空，如增量求值对某指标抛错）时保持前台/上次曲线，
             // 避免后台失败结果把副图清空（副图空白）；前台 recomputeSub(force:true) 已用非增量
             // 求值算好当前指标曲线，此时保留它比覆盖为空更合理
-            if !subCurves.isEmpty || m.curves.isEmpty {
-                let old = m.curves.count
-                klineDebug("[KlineDebug] commit覆盖 \(subReq.kind) \(old)->\(subCurves.count)")
-                if old > 0 && subCurves.isEmpty {
-                    klineDebug("[KlineDebug]   ↑ 非空被清空！调用栈:\(Thread.callStackSymbols.prefix(6).joined(separator:" | "))")
-                }
-                m.curves = subCurves
-                let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-                m.titleName = (m.isCustom ? customInd?.name : nil) ?? m.kind
-                m.color = customInd?.color ?? Color(hex: "0050FF")!
+            if !subCurves.isEmpty || item.curves.isEmpty {
+                klineDebug("[KlineDebug] commit覆盖 \(subReq.kind) \(item.curves.count)->\(subCurves.count)")
+                item.curves = subCurves
+                let customInd = customStore.indicators.first { $0.id == item.activeCustomID }
+                item.titleName = (item.isCustom ? customInd?.name : nil) ?? subReq.kind
+                item.color = customInd?.color ?? Color(hex: "0050FF")!
             } else {
-                klineDebug("[KlineDebug] commit保留旧 \(subReq.kind) 旧=\(m.curves.count)")
+                klineDebug("[KlineDebug] commit保留旧 \(subReq.kind) 旧=\(item.curves.count)")
             }
         }
         // 写回 (标的, 周期) 缓存：后台正确结果落盘，切走再回来直接恢复
@@ -2399,8 +2455,8 @@ struct KlineChartView: View {
             // 覆盖末端只增不减
             e.bgCoverageEnd = max(e.bgCoverageEnd, bgCoverageEnd)
             e.configFingerprint = fp
-            for (i, m) in [subTop, subBottom, subThird].enumerated() {
-                e.subCurves[i] = m.curves
+            for (i, m) in subModels.enumerated() {
+                e.subCurves[i] = m.items.map { $0.curves }
             }
         }
     }
@@ -2420,18 +2476,20 @@ struct KlineChartView: View {
         let entries = mainIndicatorEntries(store: store, customStore: customStore, config: config,
                                            customFormula: custom?.formula, period: period)
         parts.append(entries.map { "\($0.id)::\($0.formula)" }.joined(separator: "§"))
-        // 副图：3 个槽位，按该周期记忆读取，含指标类型、公式（VOL/AMO 量均线周期）
-        for sel in config.subSelections(for: period) {
-            let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
-            var s = sel.kind
-            if let customInd {
-                s += "|CUSTOM|" + customInd.formula
-            } else if sel.kind == "VOL" || sel.kind == "AMO" {
-                s += "|" + volMAFixedPeriods.map(String.init).joined(separator: ",")
-            } else {
-                s += "|" + (store.formula(for: sel.kind, values: [:], period: period) ?? "")
+        // 副图：3 个槽位，每槽可叠加 ≤3 个指标，按该周期记忆读取（双层：外槽、内叠加指标）
+        for slotSels in config.subSelections(for: period) {
+            for sel in slotSels {
+                let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
+                var s = sel.kind
+                if let customInd {
+                    s += "|CUSTOM|" + customInd.formula
+                } else if sel.kind == "VOL" || sel.kind == "AMO" {
+                    s += "|" + volMAFixedPeriods.map(String.init).joined(separator: ",")
+                } else {
+                    s += "|" + (store.formula(for: sel.kind, values: [:], period: period) ?? "")
+                }
+                parts.append(s)
             }
-            parts.append(s)
         }
         return parts.joined(separator: "\u{1F}")
     }
@@ -2485,13 +2543,16 @@ struct KlineChartView: View {
                                            customFormula: custom?.formula, period: period)
         let main = entries.map { $0.formula }
         let mainIDs = entries.map { $0.id }
-        // 副图（3 个，按该周期记忆，与 subTop/subBottom/subThird 对应）
+        // 副图：扁平化列出每槽每个叠加指标（带 slot/itemIndex），按该周期记忆
         var subs: [SubPrefetchRequest] = []
-        for sel in config.subSelections(for: period) {
-            let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
-            let customFormula = customInd?.formula
-            let formula = (sel.kind == "VOL" || sel.kind == "AMO") ? nil : store.formula(for: sel.kind, values: [:], period: period)
-            subs.append(SubPrefetchRequest(kind: sel.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
+        for (slot, slotSels) in config.subSelections(for: period).enumerated() {
+            for (itemIndex, sel) in slotSels.enumerated() {
+                let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
+                let customFormula = customInd?.formula
+                let formula = (sel.kind == "VOL" || sel.kind == "AMO") ? nil : store.formula(for: sel.kind, values: [:], period: period)
+                subs.append(SubPrefetchRequest(slot: slot, itemIndex: itemIndex, kind: sel.kind, customID: sel.customID,
+                                               customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
+            }
         }
         return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
                                    series: TDXSharedSeries(data: data),
@@ -2521,16 +2582,14 @@ struct KlineChartView: View {
             }
         }
         entry.mainCurves = curves
-        // 副图
-        var subCurves: [Int: [IndicatorLine]] = [:]
-        let subSels = config.subSelections(for: period)
-        for (i, sel) in subSels.enumerated() {
-            guard i < req.subs.count, i < result.subs.count else { continue }
-            let subReq = req.subs[i]
+        // 副图：req.subs 为扁平化列表，按 slot 归组为「槽 → 该槽每个已选指标一组曲线」
+        var subCurves: [Int: [[IndicatorLine]]] = [:]
+        for (i, subReq) in req.subs.enumerated() {
+            guard i < result.subs.count else { continue }
             let raw = result.subs[i]
             var sc: [IndicatorLine] = []
             if subReq.customFormula != nil {
-                let customInd = sel.customID.flatMap { id in CustomIndicatorStore.shared.indicators.first { $0.id == id } }
+                let customInd = subReq.customID.flatMap { id in CustomIndicatorStore.shared.indicators.first { $0.id == id } }
                 for (j, out) in raw.enumerated() {
                     guard !prefetchAllNaN(out.values) else { continue }
                     sc.append(IndicatorLine(name: prefetchDisplayName(out.name), values: out.values,
@@ -2557,7 +2616,10 @@ struct KlineChartView: View {
                                             markerColors: out.markerDirections?.map { $0 ? prefetchUpColor : prefetchDownColor }))
                 }
             }
-            subCurves[i] = sc
+            var group = subCurves[subReq.slot] ?? []
+            while group.count <= subReq.itemIndex { group.append([]) }
+            group[subReq.itemIndex] = sc
+            subCurves[subReq.slot] = group
         }
         entry.subCurves = subCurves
         entry.coverageStart = 0
@@ -2579,8 +2641,15 @@ struct KlineChartView: View {
         recomputeMainCurves(force: true)
     }
 
-    private func activateSubCustom(_ m: SubChartModel, _ ind: CustomIndicator?) {
-        m.activeCustomID = ind?.id
+    /// 自定义编辑保存后：把该自定义叠加到槽。
+    /// 已选则保留既有项（公式变化由 recomputeSub 重算）；未选且未达上限(3)则追加；达上限忽略
+    private func applySubCustom(_ m: SubChartModel, _ ind: CustomIndicator?) {
+        guard let ind else { return }
+        let exists = m.items.contains { $0.activeCustomID == ind.id }
+        if !exists {
+            guard m.items.count < 3 else { return }
+            m.items.append(SubIndicatorItem(kind: "CUSTOM", customID: ind.id))
+        }
         ChartConfigStore.shared.recordSubKinds(for: self.period)
         recomputeSub(m, force: true)
     }
@@ -2591,9 +2660,12 @@ struct KlineChartView: View {
             config.setActiveCustom(nil, for: self.period)
         }
         for m in [subTop, subBottom, subThird] {
-            if m.activeCustomID != nil,
-               !customStore.indicators.contains(where: { $0.id == m.activeCustomID }) {
-                m.activeCustomID = nil
+            for item in m.items {
+                if item.activeCustomID != nil,
+                   !customStore.indicators.contains(where: { $0.id == item.activeCustomID }) {
+                    item.activeCustomID = nil
+                    item.titleName = item.kind
+                }
             }
         }
     }
@@ -2611,24 +2683,24 @@ struct KlineChartView: View {
             return String(format: "%.2f", v)
         }
         if y >= s1Top && y <= s1Bottom {
-            let r = subRange(subTop)
-            let ratio = Double((y - s1Top) / s1Height)
-            let v = r.max - (r.max - r.min) * ratio
-            return subFormatter(for: subTop.kind)(v)
+            return subValueText(at: y, top: s1Top, height: s1Height, model: subTop)
         }
         if y >= s2Top && y <= s2Bottom {
-            let r = subRange(subBottom)
-            let ratio = Double((y - s2Top) / s2Height)
-            let v = r.max - (r.max - r.min) * ratio
-            return subFormatter(for: subBottom.kind)(v)
+            return subValueText(at: y, top: s2Top, height: s2Height, model: subBottom)
         }
         if y >= s3Top && y <= s3Bottom {
-            let r = subRange(subThird)
-            let ratio = Double((y - s3Top) / s3Height)
-            let v = r.max - (r.max - r.min) * ratio
-            return subFormatter(for: subThird.kind)(v)
+            return subValueText(at: y, top: s3Top, height: s3Height, model: subThird)
         }
         return ""
+    }
+
+    /// 副图光标数值：多选叠加时以最上层 item 的独立坐标为基准反算数值
+    private func subValueText(at y: CGFloat, top: CGFloat, height: CGFloat, model: SubChartModel) -> String {
+        guard let item = model.items.last else { return "" }
+        let r = itemRange(item)
+        let ratio = Double((y - top) / height)
+        let v = r.max - (r.max - r.min) * ratio
+        return subFormatter(for: item.kind)(v)
     }
 
     /// 十字光标横线 + 背景数值标签（横线从数值背景的最左边开始画起，贯穿全宽）
@@ -2986,31 +3058,43 @@ struct KlineChartView: View {
 
     private func subChart(model m: SubChartModel, width: CGFloat, candleSpacing: CGFloat,
                           height: CGFloat, slot: SubSlot) -> some View {
-        let range = subRange(m)
-        let subFmt: (Double) -> String = subFormatter(for: m.kind)
-        // 顶底坐标值：VOL/AMO 最低值恒为 0，底部"0"无需显示；
-        // .tdx 声明 COORD=0 的指标不显示坐标值；其他指标保留顶底两个值
+        // 多选叠加：每个叠加指标用独立纵轴（独立 selectionRange）放在独立透明 Canvas 图层里，
+        // 多层叠一起视觉上像一图多指标，互不挤压
+        let lastItem = m.items.last
+        // 顶底坐标值：仅单选（唯一指标）时显示该指标的独立坐标，多选一律隐藏避免误导
         let labelRatios: [CGFloat]
-        if m.kind == "VOL" || m.kind == "AMO" {
-            labelRatios = [0]
-        } else if !m.isCustom,
-                  SystemIndicatorStore.shared.defs(for: self.period)[m.kind]?.hideCoord == true {
-            labelRatios = []
+        if let it = lastItem, m.items.count == 1 {
+            if it.kind == "VOL" || it.kind == "AMO" {
+                labelRatios = [0]
+            } else if !it.isCustom,
+                      SystemIndicatorStore.shared.defs(for: self.period)[it.kind]?.hideCoord == true {
+                labelRatios = []
+            } else {
+                labelRatios = [0, 1]
+            }
         } else {
-            labelRatios = [0, 1]
+            labelRatios = []
         }
+        let legendRange = lastItem.map { itemRange($0) }
+        let legendMin = legendRange?.min ?? 0
+        let legendMax = legendRange?.max ?? 100
+        let subFmt: (Double) -> String = lastItem.map { subFormatter(for: $0.kind) } ?? { _ in "" }
         return ZStack(alignment: .topLeading) {
             Color.white
-            SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
-                           curves: m.curves.map { CanvasCurve(color: $0.color,
-                                                              values: subMirroredSliceArr($0.values),
-                                                              style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
-                           rangeMin: range.min, rangeMax: range.max,
-                           upColor: upColor, downColor: downColor, gridColor: gridColor)
-                .equatable()
-                .offset(x: panOffset)
-            // 顶底坐标值（是否显示由上方 labelRatios 决定）
-            overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
+            // 每层一个 SubChartCanvas，各自用自身曲线的独立 min/max
+            ForEach(m.items) { item in
+                let range = itemRange(item)
+                SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
+                               curves: item.curves.map { CanvasCurve(color: $0.color,
+                                                                     values: subMirroredSliceArr($0.values),
+                                                                     style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
+                               rangeMin: range.min, rangeMax: range.max,
+                               upColor: upColor, downColor: downColor, gridColor: gridColor)
+                    .equatable()
+                    .offset(x: panOffset)
+            }
+            // 顶底坐标值（多选时 labelRatios 为空，仅单选显示）
+            overlayPriceLabels(width: width, height: height, min: legendMin, max: legendMax,
                                ratios: labelRatios, formatter: subFmt)
 
             // 可交互光标（pin 开启时即第二个光标）与固定光标的副图竖线都绘制
@@ -3126,6 +3210,20 @@ struct KlineChartView: View {
                 ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
                     legendItem(line, mirrored: config.mainMirrored,
                                formatter: (m.kind == "VOL" || m.kind == "AMO") ? { formatVolume($0) } : nil)
+                }
+                // 额外叠加指标：每个独立小格（名称 + 各自曲线数值），VOL/AMO 按万/亿格式化
+                ForEach(Array(m.items.enumerated()), id: \.element.id) { idx, item in
+                    if idx > 0 {
+                        HStack(spacing: 3) {
+                            Text(item.titleName)
+                                .font(.system(size: 9))
+                                .foregroundColor(.gray)
+                            ForEach(Array(item.curves.enumerated()), id: \.offset) { _, line in
+                                legendItem(line, mirrored: config.mainMirrored,
+                                           formatter: (item.kind == "VOL" || item.kind == "AMO") ? { formatVolume($0) } : nil)
+                            }
+                        }
+                    }
                 }
                 Spacer()
                 // 副图1：最右侧「回到最新」按钮（右指带尾单箭头）。
@@ -3699,11 +3797,10 @@ struct KlineChartView: View {
                         groupHeader(g)
                         LazyVGrid(columns: gridColumns, spacing: 8) {
                             ForEach(kinds, id: \.self) { k in
-                                subTile(k, selected: !m.isCustom && m.kind == k) {
-                                    m.activeCustomID = nil
-                                    m.kind = k
-                                    ChartConfigStore.shared.recordSubKinds(for: self.period)
-                                    recomputeSub(m, force: true)
+                                subTile(k,
+                                        selected: isSubSelected(m: m, kind: k, customID: nil),
+                                        disabled: !isSubSelected(m: m, kind: k, customID: nil) && m.items.count >= 3) {
+                                    toggleSubSelection(m: m, kind: k, customID: nil)
                                 }
                             }
                         }
@@ -3761,19 +3858,43 @@ struct KlineChartView: View {
         return result
     }
 
-    /// 副图指标格：单选，选中名称蓝色
-    private func subTile(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    /// 副图槽内是否已选某指标（系统指标按 kind 判、自定义按 customID 判）
+    private func isSubSelected(m: SubChartModel, kind: String, customID: UUID?) -> Bool {
+        m.items.contains { $0.kind == kind && ($0.activeCustomID ?? nil) == customID }
+    }
+
+    /// 多选开关一个叠加指标：已选则移除（可清到 0 再重加），未选且未达上限(3)则追加，
+    /// 每次变更记录记忆并立即重算刷新。达上限时保留现场不动作
+    private func toggleSubSelection(m: SubChartModel, kind: String, customID: UUID?) {
+        if let idx = m.items.firstIndex(where: { $0.kind == kind && ($0.activeCustomID ?? nil) == customID }) {
+            m.items.remove(at: idx)
+        } else if m.items.count < 3 {
+            m.items.append(SubIndicatorItem(kind: kind, customID: customID))
+        } else {
+            return
+        }
+        ChartConfigStore.shared.recordSubKinds(for: self.period)
+        recomputeSub(m, force: true)
+    }
+
+    /// 副图指标格：复选框（多选，同主图样式）；未选且已达 3 个上限时置灰不可加
+    private func subTile(_ title: String, selected: Bool, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button {
             action()
         } label: {
-            Text(title)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundColor(selected ? .blue : .black)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color(uiColor: .systemGray6).opacity(selected ? 1 : 0.45))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.blue : Color.gray.opacity(0.25), lineWidth: selected ? 1.5 : 1))
+            VStack(spacing: 6) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14))
+                    .foregroundColor(selected ? .blue : .gray.opacity(0.6))
+                Text(title).font(.system(size: 13)).foregroundColor(.black)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Color(uiColor: .systemGray6).opacity(selected ? 1 : 0.45))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.blue : Color.gray.opacity(0.25), lineWidth: selected ? 1.5 : 1))
         }
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
     }
 
     private var subCustoms: [CustomIndicator] { customStore.indicators.filter { $0.scope == .sub && availableInCurrentPeriod($0) } }
@@ -3786,17 +3907,19 @@ struct KlineChartView: View {
     }
 
     private func subCustomRow(_ ind: CustomIndicator, model m: SubChartModel) -> some View {
-        HStack {
+        let on = m.items.contains { $0.activeCustomID == ind.id }
+        return HStack {
             Button {
-                activateSubCustom(m, ind)
+                toggleSubSelection(m: m, kind: "CUSTOM", customID: ind.id)
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: m.activeCustomID == ind.id ? "checkmark.circle.fill" : "circle")
-                        .foregroundColor(m.activeCustomID == ind.id ? .blue : .gray)
+                    Image(systemName: on ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 14))
+                        .foregroundColor(on ? .blue : .gray.opacity(0.6))
                     RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 14, height: 5)
                     Text(ind.name).font(.system(size: 14)).foregroundColor(.black)
-                    if m.activeCustomID == ind.id {
-                        Text("当前").font(.system(size: 10)).foregroundColor(.blue)
+                    if on {
+                        Text("叠加").font(.system(size: 10)).foregroundColor(.blue)
                     }
                 }
             }

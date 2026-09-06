@@ -20,8 +20,8 @@ final class ChartCacheStore {
         var mainCurves: [IndicatorLine] = []
         /// 主图各指标按输出行的缓存（class 引用，与视图共享同一实例）
         var mainCache = MainIndicatorCache()
-        /// 副图曲线（槽位 0/1/2 → subTop/subBottom/subThird）
-        var subCurves: [Int: [IndicatorLine]] = [:]
+        /// 副图曲线（槽位 0/1/2 → subTop/subBottom/subThird；每槽为该槽已叠加指标的曲线组，即「槽 → 每指标一组」）
+        var subCurves: [Int: [[IndicatorLine]]] = [:]
         /// 前台近似计算的覆盖区间（绝对索引）
         var coverageStart = 0
         var coverageEnd = -1
