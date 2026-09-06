@@ -934,12 +934,43 @@ struct KlineChartView: View {
     private func legendValueFor(_ line: IndicatorLine) -> Double? { legendValue(line.values) }
     private func displayName(_ raw: String) -> String { raw.replacingOccurrences(of: "NOTEXT_", with: "") }
 
+    /// 二分下界：第一个 date >= target 的下标；找不到返回 nil。
+    /// 与 nearestIndex 不同，它不做「更近者」回退 —— 只返回严格下界，
+    /// 用于精确框出 [range.0, range.1] 两竖轴各自对应的 K 线下标。
+    private func lowerBound(_ target: Int) -> Int? {
+        guard !sortedData.isEmpty else { return nil }
+        var lo = 0
+        var hi = sortedData.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if sortedData[mid].date < target { lo = mid + 1 } else { hi = mid }
+        }
+        return sortedData[lo].date >= target ? lo : nil
+    }
+
+    /// 联动来源为「更大周期」时，本视图（更小周期）要框出来的日期范围对应的两个 K 线下标。
+    /// 仅当开启光标联动、非本地拖动、来源日期存在、来源周期严格大于本视图周期时才生效。
+    /// 生效时本视图不显示十字光标，而由 linkRangeAxisOverlay 画两根无标签竖轴框住该范围。
+    private var linkRangeIndices: (left: Int, right: Int)? {
+        guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
+              linkSync.cursorDate != nil,
+              let rng = linkSync.sourceRange,
+              self.period.granularityRank < linkSync.sourcePeriod.granularityRank else { return nil }
+        let left = lowerBound(rng.0) ?? 0
+        guard let rb = lowerBound(rng.1 + 1) else { return nil }   // 范围右边界越出本视图数据 → 无法框出
+        let right = rb - 1
+        guard right >= left else { return nil }                     // 本视图完全没有落在范围内的K线
+        return (left, right)
+    }
+
     /// 当前用于渲染十字光标/行情信息/时序数值栏的索引。
     /// 联动接收态（开启联动且非本地拖动）时，直接由共享 linkSync.cursorDate 解析：
     ///   联动的被联动视图无需再把联动日期写回本地 selectedIndex（那会在 @ObservedObject 触发整树
     ///   重绘之后，再叠一次 setState 重绘 → 联动拖动卡顿的根源）。改为纯渲染派生，每帧只重绘一次。
     /// 本地拖动中 / 单图模式（cursorLinkEnabled=false）时，退回本地 selectedIndex，行为与原来一致。
     private var renderCursorIndex: Int? {
+        // 更大周期源的联动范围模式下不显示单一十字光标（改由双竖轴框范围）
+        if linkRangeIndices != nil { return nil }
         if cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging {
             if let d = linkSync.cursorDate { return nearestIndex(to: d) }
             return nil
@@ -1793,6 +1824,10 @@ struct KlineChartView: View {
             .overlay {
                 // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
                 ZStack(alignment: .topLeading) {
+                    // 更大周期源的联动范围：两根无标签竖轴框出来源周期K线覆盖的范围（此时 renderCursorIndex 为 nil，不画十字光标）
+                    if let rg = linkRangeIndices {
+                        linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing, height: geometry.size.height)
+                    }
                     cursorOverlay(index: renderCursorIndex, y: crosshairY ?? mainCenterY, compare: pinnedIndex, fixedPrice: nil, width: width, height: geometry.size.height,
                                   candleSpacing: candleSpacing,
                                   mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
@@ -1991,6 +2026,9 @@ struct KlineChartView: View {
         linkUserDragging = false
         let date: Int?
         if let index, index < sortedData.count { date = sortedData[index].date } else { date = nil }
+        // 记录来源周期与范围：更小周期的联动视图据此用双竖轴框出来源K线覆盖的时间范围
+        linkSync.sourcePeriod = self.period
+        linkSync.sourceRange = date.map { KlinePeriod.periodDateRange(self.period, date: $0) }
         if linkSync.cursorDate != date { linkSync.cursorDate = date }
     }
 
@@ -2006,6 +2044,13 @@ struct KlineChartView: View {
         if drag.cursorDragging { return }
         // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
         linkUserDragging = false
+        // 更大周期源的联动范围：本视图不显示十字光标，改为自动放大可见窗口让「双竖轴」框范围并居中
+        if let rg = linkRangeIndices {
+            linkCursorActive = true
+            centerLinkRange(left: rg.left, right: rg.right)
+            notifyHasCursor()
+            return
+        }
         // 该日期正是本视图**本地**光标所在日期（自己发布的）→ 忽略，避免回环。
         // 注意必须用本地 selectedIndex 判断，而不能用 renderCursorIndex：
         // 被联动视图的 renderCursorIndex 直接由 linkSync.cursorDate 派生、恒等于该 date，
@@ -2028,6 +2073,29 @@ struct KlineChartView: View {
         }
         linkCursorActive = true
         notifyHasCursor()
+    }
+
+    /// 让 [left, right] 两根竖轴范围内的K线全部进入屏幕并尽量居中。
+    /// 若范围大于当前可见数量则自动放大可见数（封顶全部K线）；否则沿用当前可见数只做居中。
+    /// 双指缩放进行中时忽略（避免与手指锚定冲突）。
+    private func centerLinkRange(left: Int, right: Int) {
+        guard !drag.twoFingerActive else { return }
+        let maxEnd = sortedData.count - 1
+        guard left >= 0, right >= left, right <= maxEnd else { return }
+        let span = right - left + 1
+        // 目标可见数：至少能容纳整个范围，但不超过本视图全部K线
+        let need = min(max(span, count), capVisibleCount)
+        // 范围中心对准屏幕中心：目标 end = right + (need - span) / 2，再夹到合法区间
+        let slack = need - span
+        let targetEnd = min(maxEnd, max(need - 1, right + slack / 2))
+        let newOffset = max(0, maxEnd - targetEnd)
+        // 只在有变化时刷新，避免每次来源移动都无意义重算
+        if Int(visibleCount.rounded()) != need || newOffset != endOffset {
+            visibleCount = CGFloat(need)
+            endOffset = newOffset
+            refreshCurves()
+            startPrefetch()
+        }
     }
 
     /// 找到日期与 target 最接近的 K 线索引（日/周视图跨周期联动用）。
@@ -2707,6 +2775,28 @@ struct KlineChartView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// 更大周期源的联动范围：在 [left, right] 两根K线处画两根全高无标签竖轴（含两轴间的淡色填充示意范围）。
+    /// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing），横贯主图与全部副图。
+    @ViewBuilder
+    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat, height: CGFloat) -> some View {
+        if left >= startIndex, left <= endIndex, right >= startIndex, right <= endIndex {
+            let xL = (CGFloat(left - startIndex) + 0.5) * candleSpacing
+            let xR = (CGFloat(right - startIndex) + 0.5) * candleSpacing
+            // 两轴之间淡色填充，示意被框住的范围
+            if xR > xL {
+                Rectangle()
+                    .fill(Color.blue.opacity(0.06))
+                    .frame(width: max(0, xR - xL), height: height)
+                    .position(x: (xL + xR) / 2, y: height / 2)
+            }
+            // 两根竖轴（无标签）
+            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: height)
+                .position(x: xL, y: height / 2)
+            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: height)
+                .position(x: xR, y: height / 2)
         }
     }
 

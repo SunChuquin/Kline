@@ -114,6 +114,10 @@ final class DualLinkSync: ObservableObject {
     /// 最近一次 cursorDate 是否由「右侧视图用户直接操作」产生。
     /// 左视图据此决定是否把联动K线居中显示；左视图自身拖动产生的回声不算
     var lastCursorFromRightUser = false
+    /// 产生当前 cursorDate 的「来源窗口期」：由来源视图在 publish 时写入。
+    /// 更小周期视图据此用两根竖轴框出来源周期K线覆盖的时间范围（无需十字光标）。
+    var sourcePeriod: KlinePeriod = .daily
+    @Published var sourceRange: (Int, Int)? = nil
 }
 
 /// 信息栏「主图指标名称按钮」桥接：图表把按钮标题（如"日线: MA"）与点击行为
@@ -417,6 +421,7 @@ struct KlineDetailView: View {
                     edgeAdjust = false
                     pinEnabled = false
                     linkSync.cursorDate = nil
+                    linkSync.sourceRange = nil
                     withAnimation { dualLink = false }
                 } else if drillIn != nil {
                     // 2. 钻取单图 → 恢复联动页面（dualLink 本身未被清，仍是 true）
@@ -514,6 +519,7 @@ struct KlineDetailView: View {
                     cursorLinkEnabled.toggle()
                     cursorClearToken = UUID()
                     linkSync.cursorDate = nil
+                    linkSync.sourceRange = nil
                 }
             }) {
                 Text("联")
@@ -1143,6 +1149,7 @@ struct KlineDetailView: View {
         edgeAdjust = false
         pinEnabled = false
         linkSync.cursorDate = nil
+        linkSync.sourceRange = nil
         cursorClearToken = UUID()
 
         guard databaseManager.isLoaded else { return }   // DB 就绪后 onChange 会重试

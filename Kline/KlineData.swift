@@ -114,6 +114,71 @@ enum KlinePeriod: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
+    /// 周期粒度等级：数字越大周期越大（日<周<月<季<年）。
+    /// 用于联动光标「更大周期源 → 更小周期目标」时，在更小周期视图上用双竖轴框出来源范围。
+    var granularityRank: Int {
+        switch self {
+        case .daily: return 0
+        case .weekly: return 1
+        case .monthly: return 2
+        case .quarterly: return 3
+        case .yearly: return 4
+        }
+    }
+
+    /// 该周期某一根K线（date，YYYYMMDD 整数）覆盖的时间范围。
+    /// 返回 (start, end) 也是 YYYYMMDD 整数，含首尾当天：
+    /// 日线=当天；周线=周一~周日；月/季/年=对应整月/整季/整年。
+    /// 用于联动光标在更小周期视图上用两根竖轴框出来源K线范围内的所有K线。
+    static func periodDateRange(_ period: KlinePeriod, date: Int) -> (Int, Int) {
+        let (y, m, d) = toYMD(date)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        switch period {
+        case .daily:
+            return (date, date)
+        case .weekly:
+            // 周线：显式固定「周一为一周起点」，不依赖用户地区的 firstWeekday 配置。
+            cal.firstWeekday = 2
+            var comps = DateComponents(); comps.year = y; comps.month = m; comps.day = d
+            guard let cur = cal.date(from: comps) else { return (date, date) }
+            let wd = cal.component(.weekday, from: cur) // 1=周日 ... 7=周六，周一=2
+            let back = (wd - 2 + 7) % 7
+            guard let monday = cal.date(byAdding: .day, value: -back, to: cur),
+                  let sunday = cal.date(byAdding: .day, value: 6, to: monday) else { return (date, date) }
+            return (fromComps(cal.dateComponents([.year, .month, .day], from: monday)),
+                    fromComps(cal.dateComponents([.year, .month, .day], from: sunday)))
+        case .monthly:
+            let start = fromYMD(y, m, 1)
+            var ecomps = DateComponents(); ecomps.year = y; ecomps.month = m; ecomps.day = 1
+            let days = cal.range(of: .day, in: .month, for: cal.date(from: ecomps) ?? Date()).map { $0.count - 1 } ?? d
+            return (start, fromYMD(y, m, days))
+        case .quarterly:
+            let qm = ((m - 1) / 3) * 3 + 1               // 季度首月
+            let start = fromYMD(y, qm, 1)
+            let qEnd = qm + 2                             // 季度末月
+            let ey = (qEnd > 12) ? y + 1 : y
+            let em = (qEnd > 12) ? qEnd - 12 : qEnd
+            var ecomps = DateComponents(); ecomps.year = ey; ecomps.month = em; ecomps.day = 1
+            let days = cal.range(of: .day, in: .month, for: cal.date(from: ecomps) ?? Date()).map { $0.count - 1 } ?? d
+            return (start, fromYMD(ey, em, days))
+        case .yearly:
+            return (fromYMD(y, 1, 1), fromYMD(y, 12, 31))
+        }
+    }
+
+    private static func toYMD(_ d: Int) -> (Int, Int, Int) {
+        (d / 10000, (d / 100) % 100, d % 100)
+    }
+
+    private static func fromYMD(_ y: Int, _ m: Int, _ d: Int) -> Int {
+        y * 10000 + m * 100 + d
+    }
+
+    private static func fromComps(_ c: DateComponents) -> Int {
+        fromYMD(c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
     /// 沙盒指示器目录中的周期文件夹名（与数据库周期表英文名一致）。
     /// 用于「按周期分目录」存储/加载各自独立的指标模板与参数。
     var folderName: String {
