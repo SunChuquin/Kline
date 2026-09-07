@@ -124,7 +124,10 @@ final class KlineHTTPServer {
                         let parts = requestLine.split(separator: " ")
                         let method = parts.count > 0 ? String(parts[0]) : ""
                         let rawPath = parts.count > 1 ? String(parts[1]) : ""
-                        let path = rawPath.split(separator: "?").first.map(String.init) ?? rawPath
+                        // 百分号解码 path（支持中文文件名/目录名），失败时退回原始串
+                        let decoded = (rawPath.split(separator: "?").first.map(String.init) ?? rawPath)
+                            .removingPercentEncoding ?? rawPath
+                        let path = decoded
                         let contentLength = Self.parseContentLength(from: headerText)
 
                         state.headerParsed = true
