@@ -272,6 +272,9 @@ struct LocalUpdateView: View {
         }
 
         let dst = DatabaseManager.writableDBPath
+        let srcSize = (try? fm.attributesOfItem(atPath: source)[.size] as? NSNumber)?.int64Value ?? -1
+        DebugLogger.shared.log("导入开始 src=\(source)(\(srcSize)) dst=\(dst) dstExists=\(fm.fileExists(atPath: dst)) srcExists=\(fm.fileExists(atPath: source))")
+
         do {
             // 覆盖前先备份旧库（种子库），万一失败可回退
             if fm.fileExists(atPath: dst) {
