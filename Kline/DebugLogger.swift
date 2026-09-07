@@ -10,43 +10,25 @@ import Foundation
 /// 轻量调试日志器：把关键运行状态写入日志文件，供外部工具读取后做文本分析。
 /// Release 构建同样写入，方便装到真机后离线读取；写入开销极小。
 ///
-/// 日志落点（2026-09-07 起为单选，不再双写）：
-/// - **TrollStore 版**（no-sandbox 生效，公共目录可写）：只写公共
-///   `/var/mobile/Media/Downloads/KlineLogs/debug_log.txt`，**不写沙盒**，
-///   避免沙盒容器写日志占用空间/影响性能。TRAE 用 `deploy_kline_to_ipad.py --pull-logs`（AFC）读取。
-/// - **Xcode 沙盒版**（公共目录不可写）：只写沙盒 `Documents/debug_log.txt`，
-///   TRAE 用 `apps pull` 读取（旧路径）。
+/// 日志落点（2026-09-07 起统一写沙盒）：TrollStore 版（AppDataContainers 修复后）
+/// 与 Xcode 沙盒版都写 `Documents/debug_log.txt`。TRAE 读取通道：
+/// - TrollStore 版：`sandbox_cli.py get Documents/debug_log.txt <local>`（沙盒直连，需 Kline 前台）
+/// - Xcode 签名版：`apps pull <bundle_id> Documents/debug_log.txt <local>`（house_arrest）
 final class DebugLogger {
     static let shared = DebugLogger()
 
-    /// 日志文件名（沙盒 Documents 或公共 KlineLogs 下同名）
+    /// 日志文件名（Documents 下）
     static let fileName = "debug_log.txt"
 
     /// 日志最大字节数，超过则截断重写，避免无限膨胀
     private let maxBytes = 1 << 20 // 1 MB
 
     private let queue = DispatchQueue(label: "com.sunck.Kline.debuglog")
-
-    /// 实际写入的日志文件 URL（公共目录 或 沙盒 Documents，二选一）
     private let logURL: URL
 
-    /// 是否 TrollStore 版（no-sandbox 生效）：true=只写公共目录，false=只写沙盒
-    let isTrollStore: Bool
-
     private init() {
-        // 检测公共日志目录是否可写：可写 = no-sandbox 生效 = TrollStore 版
-        let publicLogURL = URL(fileURLWithPath: "/var/mobile/Media/Downloads/KlineLogs/debug_log.txt")
-        let publicDir = publicLogURL.deletingLastPathComponent()
-        let publicWritable = (try? FileManager.default.createDirectory(at: publicDir, withIntermediateDirectories: true)) != nil
-        isTrollStore = publicWritable
-        if publicWritable {
-            // TrollStore 版：只写公共目录，不写沙盒（避免沙盒写日志占用容器空间/影响性能）
-            logURL = publicLogURL
-        } else {
-            // 沙盒版（Xcode 调试）：写 Documents
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            logURL = docs.appendingPathComponent(Self.fileName)
-        }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        logURL = docs.appendingPathComponent(Self.fileName)
     }
 
     /// 追加写一行日志（线程安全）
@@ -67,7 +49,7 @@ final class DebugLogger {
         }
     }
 
-    /// 清空日志文件（只清当前生效的目标，保证只保留本次会话）
+    /// 清空日志文件（只保留本次会话）
     func clear() {
         queue.async { [self] in
             try? Data().write(to: logURL, options: .atomic)

@@ -15,15 +15,20 @@ struct LocalUpdateView: View {
     @State private var isScanning = false
     @State private var scanResult: String = ""
     @State private var logScanResult: String = ""
-    @State private var importResult: String = ""
-    @State private var legacyResult: String = ""
     @State private var entitlementCheckResult: String = ""
 
-    private let downloadsPath = "/var/mobile/Media/Downloads"
-    /// 日志文件名（TrollStore 版写到公共 Downloads/KlineLogs/ 下）
-    private let logFilePath = "/var/mobile/Media/Downloads/KlineLogs/debug_log.txt"
-    /// Xcode 旧版 Kline（com.sunck.Kline.4G3V8W86TN）的容器数据库路径
-    private let legacyDBPath = "/private/var/mobile/Containers/Data/Application/CA1413A6-9D2A-4291-A2F6-A079B8AFD26C/Documents/tdx.db"
+    /// 沙盒 Documents 根路径
+    private var sandboxRoot: String {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+    }
+    /// 沙盒内 IPA 目录（自动部署助手把 IPA 传到沙盒 Downloads/ 下）
+    private var downloadsPath: String {
+        sandboxRoot + "/Downloads"
+    }
+    /// 沙盒内日志文件（DebugLogger 统一写 Documents/debug_log.txt）
+    private var logFilePath: String {
+        sandboxRoot + "/debug_log.txt"
+    }
 
     /// 当前 App 版本号
     private var currentVersion: String {
@@ -79,46 +84,6 @@ struct LocalUpdateView: View {
             // 日志扫描结果
             if !logScanResult.isEmpty {
                 Text(logScanResult)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // 导入 tdx.db 按钮（把公共 Downloads 的完整数据库复制进本 App 容器）
-            Button(action: importTdxDB) {
-                HStack {
-                    Image(systemName: "square.and.arrow.down.on.square")
-                    Text("导入 tdx.db（从 Downloads）")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.purple.opacity(0.12))
-                .cornerRadius(8)
-            }
-
-            // 导入结果
-            if !importResult.isEmpty {
-                Text(importResult)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // 使用旧版行情库按钮（直接只读挂载 Xcode 旧版容器数据库，不拷贝）
-            Button(action: useLegacyDB) {
-                HStack {
-                    Image(systemName: "externaldrive.fill.badge.checkmark")
-                    Text("使用旧版行情库（Xcode 版）")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.indigo.opacity(0.12))
-                .cornerRadius(8)
-            }
-
-            // 旧版库切换结果
-            if !legacyResult.isEmpty {
-                Text(legacyResult)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -240,115 +205,20 @@ struct LocalUpdateView: View {
         }
     }
 
-    // MARK: - 导入 tdx.db（优先公共 Downloads，其次自动扫描其他 Kline 容器）
-
-    /// 场景：TrollStore 版是新容器，只有 bundle 种子库（1 个演示标的）。
-    /// 数据源按优先级：
-    /// 1. 公共 Downloads/tdx.db（用户手动导出的）
-    /// 2. 自动扫描 /var/mobile/Containers/Data/Application/ 下其他容器的 tdx.db
-    ///    （Xcode 旧版的数据通常最大，自动选最大的一份；no-sandbox 可读容器目录）
-    private func importTdxDB() {
-        let fm = FileManager.default
-
-        // 候选 1：公共 Downloads
-        var src: String? = nil
-        var sourceNote = "公共 Downloads"
-        let pubPath = "/var/mobile/Media/Downloads/tdx.db"
-        if fm.fileExists(atPath: pubPath) {
-            src = pubPath
-        }
-
-        // 候选 2：自动扫描其他容器
-        if src == nil {
-            if let other = findLargestOtherTdxDB() {
-                src = other
-                sourceNote = "自动找到的其他容器（Xcode 旧版）"
-            }
-        }
-
-        guard let source = src else {
-            importResult = "❌ 未找到 tdx.db\n公共 Downloads 无，且无法扫描到其他容器的数据库\n可用「文件」App 把旧版 Kline 的 tdx.db 存到「我的 iPad/下载」后再试"
-            return
-        }
-
-        let dst = DatabaseManager.writableDBPath
-        let srcSize = (try? fm.attributesOfItem(atPath: source)[.size] as? NSNumber)?.int64Value ?? -1
-        DebugLogger.shared.log("导入开始 src=\(source)(\(srcSize)) dst=\(dst) dstExists=\(fm.fileExists(atPath: dst)) srcExists=\(fm.fileExists(atPath: source))")
-
-        do {
-            // 覆盖前先备份旧库（若存在），再删除；dst 不存在时直接复制（DatabaseManager 懒初始化可能未生成种子库）
-            if fm.fileExists(atPath: dst) {
-                let backup = dst + ".bak"
-                try? fm.removeItem(atPath: backup)
-                try? fm.copyItem(atPath: dst, toPath: backup)
-                try fm.removeItem(atPath: dst)
-            }
-            try fm.copyItem(atPath: source, toPath: dst)
-            importResult = "✅ tdx.db 已导入（来源：\(sourceNote)）\n请完全退出并重新打开 Kline 生效"
-            DebugLogger.shared.log("导入 tdx.db 成功: \(source) -> \(dst)")
-        } catch {
-            importResult = "❌ 导入失败：\(error.localizedDescription)"
-            DebugLogger.shared.log("导入 tdx.db 失败: \(error)")
-        }
-    }
-
-    /// 扫描所有 App 容器下的 Documents/tdx.db，返回本容器之外最大的那份（旧版完整数据）
-    private func findLargestOtherTdxDB() -> String? {
-        let containersRoot = "/var/mobile/Containers/Data/Application"
-        let myHome = NSHomeDirectory()
-        let fm = FileManager.default
-        guard let uuids = try? fm.contentsOfDirectory(atPath: containersRoot) else {
-            DebugLogger.shared.log("导入扫描 容器根不可读: \(containersRoot)")
-            return nil
-        }
-        var best: (path: String, size: Int64)?
-        for uuid in uuids {
-            let db = "\(containersRoot)/\(uuid)/Documents/tdx.db"
-            guard fm.fileExists(atPath: db),
-                  let attrs = try? fm.attributesOfItem(atPath: db),
-                  let size = (attrs[.size] as? NSNumber)?.int64Value else { continue }
-            if db.hasPrefix(myHome) { continue } // 跳过自身容器
-            DebugLogger.shared.log("导入扫描 候选: \(db) 大小 \(size)")
-            if best == nil || size > best!.size {
-                best = (db, size)
-            }
-        }
-        return best?.path
-    }
-
-    // MARK: - 使用旧版行情库（只读挂载 Xcode 旧版容器数据库）
-
-    /// TrollStore 版新容器只有种子库（1 个演示标的）。旧版（Xcode 签名，bundle id
-    /// com.sunck.Kline.4G3V8W86TN）容器里有 1.35GB 完整行情库。no-sandbox + 同 uid
-    /// (mobile) 下可直接只读打开该文件，零拷贝、零空间占用、即时生效。
-    private func useLegacyDB() {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: legacyDBPath) else {
-            legacyResult = "❌ 未找到旧版数据库\n\(legacyDBPath)"
-            DebugLogger.shared.log("使用旧版库失败 文件不存在: \(legacyDBPath)")
-            return
-        }
-        if DatabaseManager.shared.switchToExternalReadonly(path: legacyDBPath) {
-            legacyResult = "✅ 已启用旧版行情库（只读挂载）\n正在刷新列表，稍候查看行情"
-            DebugLogger.shared.log("使用旧版库成功: \(legacyDBPath)")
-        } else {
-            legacyResult = "❌ 打开旧版数据库失败（可能被占用或损坏）"
-            DebugLogger.shared.log("使用旧版库打开失败: \(legacyDBPath)")
-        }
-    }
-
-    // MARK: - 安装 IPA 到 TrollStore（本地 HTTP + URL Scheme，绕过共享面板崩溃）
+    // MARK: - 安装 IPA 到 TrollStore（沙盒本地 HTTP + URL Scheme，绕过共享面板崩溃）
 
     /// 原理：platform-application 权限下系统共享面板（UIActivityViewController）
     /// 生成 AirDrop 图标时 CoreImage GL 上下文空指针崩溃（iOS 系统组件问题）。
-    /// 改为 Kline 起本地 HTTP 服务器暴露 /download/<file>，用
-    /// `apple-magnifier://install?url=http://127.0.0.1:5051/download/<file>` 拉起 TrollStore。
+    /// 改为 Kline 起本地 HTTP 服务器暴露 /sandbox/Downloads/<file>，用
+    /// `apple-magnifier://install?url=http://127.0.0.1:5051/sandbox/Downloads/<file>` 拉起 TrollStore。
     private func shareIPA(_ file: IPAFileInfo) {
-        // 确保本地 HTTP 服务器已启动（提供 /download/<file>）
+        // 确保本地 HTTP 服务器已启动（提供 /sandbox/Downloads/<file>）
         KlineHTTPServer.shared.start()
 
         let safeName = (file.name as NSString).lastPathComponent
-        let trollURL = KlineHTTPServer.trollStoreInstallURL(localFile: safeName, port: KlineHTTPServer.shared.port)
+        // 沙盒直连 URL：TrollStore 经 KlineHTTP /sandbox 下载沙盒 IPA 安装
+        let downloadURL = "http://127.0.0.1:\(KlineHTTPServer.shared.port)/sandbox/Downloads/\(safeName.percentEncodedForQuery)"
+        let trollURL = "apple-magnifier://install?url=\(downloadURL.percentEncodedForQuery)"
 
         scanResult = "正在拉起 TrollStore 安装 \(safeName) ...\n(如系统弹确认框请选择「打开」)"
 
@@ -356,7 +226,7 @@ struct LocalUpdateView: View {
             if let url = URL(string: trollURL) {
                 UIApplication.shared.open(url) { success in
                     if !success {
-                        self.scanResult = "❌ 无法拉起 TrollStore\n请手动打开 TrollStore → + → Downloads/\(safeName)"
+                        self.scanResult = "❌ 无法拉起 TrollStore\n请手动打开 TrollStore → + → 沙盒 Downloads/\(safeName)"
                     }
                 }
             }
