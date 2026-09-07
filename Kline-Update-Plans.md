@@ -101,9 +101,9 @@ CI 构建时通过 `codesign --entitlements Kline.entitlements` 注入：
 
 - `com.apple.private.security.no-sandbox=true`：关闭 sandbox，Kline 可读全文件系统
 
-- `com.apple.private.security.container-required=true`：保留自身容器映射，防止丢失沙盒写权限
+> ⚠️ **踩坑记录（2026-09-07）**：最初误加了 `com.apple.private.security.container-required=true`，导致 no-sandbox 在 iPad 上完全不生效（权限自检全 ❌）。依据 TrollStore 官方 README 的 Unsandboxing 章节修正：去沙箱三选一为 `container-required=false` / `no-container=true` / `no-sandbox=true`（推荐，保留容器）。`container-required=true` 表示"必须要求容器"，会把 app 锁在沙盒里，与 no-sandbox 矛盾。**当前只保留 `no-sandbox=true`**（官方推荐组合）。
 
-> 这两个 entitlement 只在 CI（macOS runner）上注入，Xcode IDE 调试时不碰（Xcode 走自己的 CODE\_SIGN\_ENTITLEMENTS 配置，工程里是空的）。两条构建路径互不干扰。
+> 这两个点只在 CI（macOS runner）上注入，Xcode IDE 调试时不碰（Xcode 走自己的 CODE\_SIGN\_ENTITLEMENTS 配置，工程里是空的）。两条构建路径互不干扰。
 
 ### 双构建路径兼容性（Xcode IDE 调试 + CI TrollStore 同时支持）
 
@@ -135,7 +135,6 @@ CI 构建时通过 `codesign --entitlements Kline.entitlements` 注入：
 | 权限                   | 类型                    | 需要 provisioning profile | 闪退风险  | 能生效吗                                   |
 | -------------------- | --------------------- | ----------------------- | ----- | -------------------------------------- |
 | `no-sandbox`         | `com.apple.private.*` | ❌ 不需要                   | ❌ 不闪退 | ✅ TrollStore 社区广泛验证，iOS 15 A8 设备上大概率生效 |
-| `container-required` | `com.apple.private.*` | ❌ 不需要                   | ❌ 不闪退 | ✅ 同上，搭配 no-sandbox 的标准做法               |
 
 > **为什么不闪退：** `com.apple.private.*` 类权限不需要 provisioning profile 对应 capability，TrollStore 的 CoreTrust 签名足够让 AMFI 应用它们。不生效也只是权限不应用（权限自检显示 ❌），App 照常运行不崩溃。
 

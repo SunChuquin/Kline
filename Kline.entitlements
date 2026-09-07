@@ -4,7 +4,5 @@
 <dict>
     <key>com.apple.private.security.no-sandbox</key>
     <true/>
-    <key>com.apple.private.security.container-required</key>
-    <true/>
 </dict>
 </plist>
