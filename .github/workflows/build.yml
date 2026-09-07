@@ -69,7 +69,9 @@ jobs:
         run: |
           APP_PATH="./build/Build/Products/Release-iphoneos/Kline.app"
           # 每次构建注入唯一构建号（GitHub run number）：部署助手据此区分"旧版仍开着"与"新版已打开"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion string $GITHUB_RUN_NUMBER" "$APP_PATH/Info.plist"
+          # 注意：PlistBuddy 的 Set 不支持类型参数（会写入字面 "string xxx"），必须 Delete + Add 指定 string 类型
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$APP_PATH/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $GITHUB_RUN_NUMBER" "$APP_PATH/Info.plist"
           echo "CFBundleVersion:"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist"
 
