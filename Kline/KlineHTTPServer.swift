@@ -346,28 +346,35 @@ final class KlineHTTPServer {
     }
 
     /// POST /install-local：拉起 TrollStore 安装 IPA
-    /// body: {"file": "Kline.ipa", "scope": "download"|"sandbox"}
-    ///   - scope=download（默认）：文件在公共 Downloads，URL 用 /download/<file>
-    ///   - scope=sandbox：文件在沙盒 Documents 下（相对路径如 "Downloads/Kline.ipa"），URL 用 /sandbox/<path>
+    /// body 二选一：
+    ///   {"url": "http://<外部下载源>/Kline.ipa"} —— 直接打开外部 http/https URL（推荐：
+    ///     下载源放电脑/公网，避免 Kline 切后台后本地 HTTP 被冻结导致下载失败）
+    ///   {"file": "Kline.ipa", "scope": "download"|"sandbox"} —— 走 KlineHTTP 本地下载
+    ///     （scope=download 用 /download/<file>；scope=sandbox 用 /sandbox/<path>，文件在沙盒 Documents 下）
     private func handleInstallLocal(body: Data, connection: NWConnection) {
-        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let file = json["file"] as? String else {
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             respond(connection, status: 400, body: "{\"error\":\"bad body\"}")
             return
         }
-        let scope = (json["scope"] as? String) ?? "download"
-        let baseURL: String
-        if scope == "sandbox" {
-            baseURL = "http://127.0.0.1:\(port)/sandbox/\(file)"
-        } else {
-            let safeName = (file as NSString).lastPathComponent
-            baseURL = "http://127.0.0.1:\(port)/download/\(safeName)"
-        }
-        let trollURL = "apple-magnifier://install?url=\(baseURL.percentEncodedForQuery)"
-        DispatchQueue.main.async {
-            if let url = URL(string: trollURL) {
-                UIApplication.shared.open(url)
+        var trollURL: String?
+        if let direct = json["url"] as? String, !direct.isEmpty {
+            // 外部下载源：直接打开
+            trollURL = direct
+        } else if let file = json["file"] as? String {
+            let scope = (json["scope"] as? String) ?? "download"
+            if scope == "sandbox" {
+                trollURL = "apple-magnifier://install?url=\(("http://127.0.0.1:\(port)/sandbox/\(file)").percentEncodedForQuery)"
+            } else {
+                let safeName = (file as NSString).lastPathComponent
+                trollURL = "apple-magnifier://install?url=\(("http://127.0.0.1:\(port)/download/\(safeName)").percentEncodedForQuery)"
             }
+        }
+        guard let finalURL = trollURL, let url = URL(string: finalURL) else {
+            respond(connection, status: 400, body: "{\"error\":\"bad body\"}")
+            return
+        }
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url)
         }
         respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
     }
