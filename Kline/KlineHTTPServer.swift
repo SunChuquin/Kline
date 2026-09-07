@@ -71,6 +71,7 @@ final class KlineHTTPServer {
         var contentLength = 0
         var received = 0
         var isUpload = false
+        var uploadTarget = ""
         var uploadHandle: FileHandle?
         var bodyBuffer = Data()
         var done = false
@@ -131,15 +132,26 @@ final class KlineHTTPServer {
                         state.path = path
                         state.contentLength = contentLength
 
-                        // /upload：流式写盘到公共 Downloads（大文件不缓存内存）
-                        if (method == "POST" || method == "PUT"), path == "/upload" {
+                        // 流式写盘目标：/upload → 公共 Downloads；POST/PUT /sandbox/<rel> → 沙盒 Documents
+                        let isSandboxWrite = (method == "POST" || method == "PUT") && path.hasPrefix("/sandbox/")
+                        if (method == "POST" || method == "PUT"), path == "/upload" || isSandboxWrite {
                             state.isUpload = true
-                            let name = Self.queryParam(rawPath, "name") ?? "upload.bin"
-                            let safeName = (name as NSString).lastPathComponent
-                            let targetPath = downloadsPath + "/" + safeName
+                            let targetPath: String
+                            if path == "/upload" {
+                                let name = Self.queryParam(rawPath, "name") ?? "upload.bin"
+                                targetPath = downloadsPath + "/" + (name as NSString).lastPathComponent
+                            } else {
+                                let rel = String(path.dropFirst("/sandbox/".count))
+                                guard let resolved = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot) else {
+                                    respond(connection, status: 400, body: "bad path")
+                                    return
+                                }
+                                targetPath = resolved
+                            }
+                            state.uploadTarget = targetPath
                             FileManager.default.createFile(atPath: targetPath, contents: nil)
                             state.uploadHandle = FileHandle(forWritingAtPath: targetPath)
-                            DebugLogger.shared.log("上传开始: \(targetPath) len=\(contentLength)")
+                            DebugLogger.shared.log("沙盒上传开始: \(targetPath) len=\(contentLength)")
                             if requestBuffer.count > headerEnd.upperBound {
                                 let rest = requestBuffer.subdata(in: headerEnd.upperBound..<requestBuffer.endIndex)
                                 requestBuffer.removeAll()
@@ -203,13 +215,105 @@ final class KlineHTTPServer {
             handleInstall(body: body, connection: connection)
         case ("POST", "/install-local"):
             handleInstallLocal(body: body, connection: connection)
+        case ("GET", "/sandbox"), ("GET", "/sandbox/"):
+            listSandboxDirectory(sandboxRoot, connection: connection)
+        case ("DELETE", let p) where p.hasPrefix("/sandbox/"):
+            deleteSandboxPath(String(p.dropFirst("/sandbox/".count)), connection: connection)
         default:
-            if method == "GET", path.hasPrefix("/download/") {
+            if method == "GET", path.hasPrefix("/sandbox/") {
+                serveSandboxPath(String(path.dropFirst("/sandbox/".count)), connection: connection)
+            } else if method == "GET", path.hasPrefix("/download/") {
                 let filename = String(path.dropFirst("/download/".count))
                 serveFile(filename, connection: connection)
             } else {
                 respond(connection, status: 404, body: "not found")
             }
+        }
+    }
+
+    // MARK: - 沙盒直连（GET 列目录/读文件、POST/PUT 流式写、DELETE 删除，限 Documents 内）
+
+    /// 当前 App 沙盒 Documents 根路径
+    private var sandboxRoot: String {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+    }
+
+    /// 把沙盒相对路径解析为 Documents 内绝对路径（防路径穿越，结果必须落在 Documents 内）
+    static func resolveSandboxPath(_ rel: String, sandboxRoot: String) -> String? {
+        let root = URL(fileURLWithPath: sandboxRoot).standardizedFileURL
+        let target = root.appendingPathComponent(rel).standardizedFileURL
+        let targetPath = target.path
+        guard targetPath == root.path || targetPath.hasPrefix(root.path + "/") else {
+            return nil
+        }
+        return targetPath
+    }
+
+    /// 列出沙盒目录（JSON：name/size/mod/dir）
+    private func listSandboxDirectory(_ dir: String, connection: NWConnection) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: dir) else {
+            respond(connection, status: 404, body: "dir not found")
+            return
+        }
+        var arr: [[String: Any]] = []
+        for name in items {
+            let full = dir + "/" + name
+            var isDir: ObjCBool = false
+            fm.fileExists(atPath: full, isDirectory: &isDir)
+            let attrs = try? fm.attributesOfItem(atPath: full)
+            let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+            let mod = Int((attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
+            arr.append(["name": name, "size": size, "mod": mod, "dir": isDir.boolValue])
+        }
+        let json = (try? JSONSerialization.data(withJSONObject: arr)) ?? Data("[]".utf8)
+        respond(connection, status: 200, contentType: "application/json",
+                body: String(data: json, encoding: .utf8) ?? "[]")
+    }
+
+    /// GET /sandbox/<path>：目录则列出，文件则返回内容
+    private func serveSandboxPath(_ rel: String, connection: NWConnection) {
+        guard let target = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot) else {
+            respond(connection, status: 400, body: "bad path")
+            return
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: target, isDirectory: &isDir) else {
+            respond(connection, status: 404, body: "not found")
+            return
+        }
+        if isDir.boolValue {
+            listSandboxDirectory(target, connection: connection)
+            return
+        }
+        guard let handle = FileHandle(forReadingAtPath: target) else {
+            respond(connection, status: 500, body: "read failed")
+            return
+        }
+        defer { try? handle.close() }
+        let data = handle.readDataToEndOfFile()
+        let head = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: application/octet-stream\r\n"
+            + "Content-Length: \(data.count)\r\n"
+            + "Connection: close\r\n\r\n"
+        var out = Data(head.utf8)
+        out.append(data)
+        connection.send(content: out, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    /// DELETE /sandbox/<path>：删除沙盒内文件
+    private func deleteSandboxPath(_ rel: String, connection: NWConnection) {
+        guard let target = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot) else {
+            respond(connection, status: 400, body: "bad path")
+            return
+        }
+        do {
+            try FileManager.default.removeItem(atPath: target)
+            respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
+        } catch {
+            respond(connection, status: 500, body: "delete failed")
         }
     }
 
