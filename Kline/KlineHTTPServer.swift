@@ -63,29 +63,112 @@ final class KlineHTTPServer {
 
     // MARK: - 连接处理
 
+    /// 单连接状态：解析 header 后按请求类型分流（upload 流式写盘 / 普通请求攒 body）
+    private final class HTTPConnectionState {
+        var headerParsed = false
+        var method = ""
+        var path = ""
+        var contentLength = 0
+        var received = 0
+        var isUpload = false
+        var uploadHandle: FileHandle?
+        var bodyBuffer = Data()
+        var done = false
+    }
+
     private func handleNew(_ connection: NWConnection) {
         connection.start(queue: queue)
+        let state = HTTPConnectionState()
         var requestBuffer = Data()
 
+        func processBody(_ data: Data) {
+            guard !state.done else { return }
+            if state.isUpload {
+                guard let handle = state.uploadHandle else { return }
+                try? handle.write(contentsOf: data)
+                state.received += data.count
+                if state.received >= state.contentLength {
+                    try? handle.close()
+                    state.uploadHandle = nil
+                    state.done = true
+                    DebugLogger.shared.log("上传完成: \(state.received) bytes")
+                    respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
+                }
+            } else {
+                state.bodyBuffer.append(data)
+                state.received += data.count
+                if state.received >= state.contentLength {
+                    state.done = true
+                    let requestLine = state.method + " " + state.path + " HTTP/1.1"
+                    dispatch(requestLine: requestLine, body: state.bodyBuffer, connection: connection)
+                }
+            }
+        }
+
         func readLoop() {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [weak self] data, _, isComplete, error in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
                 guard let self = self else { return }
                 if let data = data, !data.isEmpty {
+                    if state.headerParsed {
+                        processBody(data)
+                        if state.done { return }
+                        readLoop()
+                        return
+                    }
                     requestBuffer.append(data)
                     if let headerEnd = requestBuffer.range(of: Data("\r\n\r\n".utf8)) {
                         let headerData = requestBuffer.subdata(in: requestBuffer.startIndex..<headerEnd.lowerBound)
                         let headerText = String(data: headerData, encoding: .utf8) ?? ""
                         let requestLine = headerText.components(separatedBy: "\r\n").first ?? ""
-                        let bodyStart = headerEnd.upperBound
+                        let parts = requestLine.split(separator: " ")
+                        let method = parts.count > 0 ? String(parts[0]) : ""
+                        let rawPath = parts.count > 1 ? String(parts[1]) : ""
+                        let path = rawPath.split(separator: "?").first.map(String.init) ?? rawPath
                         let contentLength = Self.parseContentLength(from: headerText)
-                        if requestBuffer.count - bodyStart >= contentLength {
-                            let body = requestBuffer.subdata(in: bodyStart..<(bodyStart + contentLength))
-                            self.dispatch(requestLine: requestLine, body: body, connection: connection)
+
+                        state.headerParsed = true
+                        state.method = method
+                        state.path = path
+                        state.contentLength = contentLength
+
+                        // /upload：流式写盘到公共 Downloads（大文件不缓存内存）
+                        if (method == "POST" || method == "PUT"), path == "/upload" {
+                            state.isUpload = true
+                            let name = Self.queryParam(rawPath, "name") ?? "upload.bin"
+                            let safeName = (name as NSString).lastPathComponent
+                            let targetPath = downloadsPath + "/" + safeName
+                            FileManager.default.createFile(atPath: targetPath, contents: nil)
+                            state.uploadHandle = FileHandle(forWritingAtPath: targetPath)
+                            DebugLogger.shared.log("上传开始: \(targetPath) len=\(contentLength)")
+                            if requestBuffer.count > headerEnd.upperBound {
+                                let rest = requestBuffer.subdata(in: headerEnd.upperBound..<requestBuffer.endIndex)
+                                requestBuffer.removeAll()
+                                processBody(rest)
+                                if state.done { return }
+                            }
+                            readLoop()
                             return
                         }
+
+                        // 普通请求：等待完整 body 后分发
+                        let bodyStart = headerEnd.upperBound
+                        let available = requestBuffer.count - bodyStart
+                        if available > 0 {
+                            state.bodyBuffer = requestBuffer.subdata(in: bodyStart..<requestBuffer.endIndex)
+                            state.received = available
+                            requestBuffer.removeAll()
+                        }
+                        if state.received >= contentLength {
+                            state.done = true
+                            dispatch(requestLine: requestLine, body: state.bodyBuffer, connection: connection)
+                            return
+                        }
+                        readLoop()
+                        return
                     }
                 }
                 if isComplete || error != nil {
+                    if let h = state.uploadHandle { try? h.close() }
                     connection.cancel()
                     return
                 }
@@ -217,6 +300,18 @@ final class KlineHTTPServer {
             }
         }
         return 0
+    }
+
+    /// 从原始路径中取 query 参数值（如 /upload?name=tdx.db → "tdx.db"）
+    private static func queryParam(_ rawPath: String, _ key: String) -> String? {
+        guard let query = rawPath.split(separator: "?").last, query.contains("=") else { return nil }
+        for pair in query.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            if kv.count == 2, String(kv[0]) == key {
+                return String(kv[1]).removingPercentEncoding
+            }
+        }
+        return nil
     }
 
     private func respond(_ connection: NWConnection, status: Int, contentType: String = "text/plain", body: String) {
