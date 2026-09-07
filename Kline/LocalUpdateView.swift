@@ -14,9 +14,12 @@ struct LocalUpdateView: View {
     @State private var ipaFiles: [IPAFileInfo] = []
     @State private var isScanning = false
     @State private var scanResult: String = ""
+    @State private var logScanResult: String = ""
     @State private var entitlementCheckResult: String = ""
 
     private let downloadsPath = "/var/mobile/Media/Downloads"
+    /// 日志文件名（TrollStore 版写到公共 Downloads/KlineLogs/ 下）
+    private let logFilePath = "/var/mobile/Media/Downloads/KlineLogs/debug_log.txt"
 
     /// 当前 App 版本号
     private var currentVersion: String {
@@ -56,6 +59,26 @@ struct LocalUpdateView: View {
                 .cornerRadius(8)
             }
             .disabled(isScanning)
+
+            // 扫描本地日志按钮（只显示文件信息，不读内容）
+            Button(action: scanLocalLog) {
+                HStack {
+                    Image(systemName: "doc.text.magnifyingglass")
+                    Text("扫描本地日志")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.teal.opacity(0.12))
+                .cornerRadius(8)
+            }
+
+            // 日志扫描结果
+            if !logScanResult.isEmpty {
+                Text(logScanResult)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             // 扫描结果列表
             if !ipaFiles.isEmpty {
@@ -143,6 +166,32 @@ struct LocalUpdateView: View {
                     self.isScanning = false
                     self.scanResult = "❌ 无法访问 \(self.downloadsPath)\n\(error.localizedDescription)\n\n此功能需要 TrollStore 版（no-sandbox 权限）"
                 }
+            }
+        }
+    }
+
+    // MARK: - 扫描本地日志（只显示文件信息，不读日志内容）
+
+    private func scanLocalLog() {
+        logScanResult = "检测中..."
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fm = FileManager.default
+            var result: String
+            if fm.fileExists(atPath: logFilePath),
+               let attrs = try? fm.attributesOfItem(atPath: logFilePath) {
+                let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+                let modDate = (attrs[.modificationDate] as? Date) ?? Date()
+
+                let sizeStr = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+                let df = DateFormatter()
+                df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                result = "✅ \(logFilePath.components(separatedBy: "/").last ?? "debug_log.txt")\n   大小: \(sizeStr) · 修改: \(df.string(from: modDate))"
+            } else {
+                result = "❌ 未找到日志文件\n   \(logFilePath)\n   (需 TrollStore 版启动过 Kline 才会生成)"
+            }
+            DispatchQueue.main.async {
+                self.logScanResult = result
             }
         }
     }
