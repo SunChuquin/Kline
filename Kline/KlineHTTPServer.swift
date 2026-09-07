@@ -45,7 +45,7 @@ final class KlineHTTPServer {
             case .ready:
                 isRunning = true
                 return
-            case .waiting(_), .preparing:
+            case .waiting(_), .setup, .cancelled:
                 isRunning = false
                 return
             default:
