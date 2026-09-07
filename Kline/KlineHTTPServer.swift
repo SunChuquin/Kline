@@ -203,7 +203,9 @@ final class KlineHTTPServer {
         }
         let method = String(parts[0])
         let rawPath = String(parts[1])
-        let path = rawPath.split(separator: "?").first.map(String.init) ?? rawPath
+        // 入口统一百分号解码（请求可能来自 handleNew 的原始行或重组行）
+        let path = (rawPath.split(separator: "?").first.map(String.init) ?? rawPath)
+            .removingPercentEncoding ?? rawPath
 
         switch (method, path) {
         case ("GET", "/"):
