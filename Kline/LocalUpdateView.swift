@@ -217,20 +217,38 @@ struct LocalUpdateView: View {
         }
     }
 
-    // MARK: - 导入 tdx.db（从公共 Downloads 复制完整数据库进本 App 容器）
+    // MARK: - 导入 tdx.db（优先公共 Downloads，其次自动扫描其他 Kline 容器）
 
     /// 场景：TrollStore 版是新容器，只有 bundle 种子库（1 个演示标的）。
-    /// 用户把 Xcode 版 Kline 的 Documents/tdx.db 导出到公共 Downloads 后，
-    /// 点此按钮复制到本 App 的 Documents/tdx.db，重启 App 生效。
+    /// 数据源按优先级：
+    /// 1. 公共 Downloads/tdx.db（用户手动导出的）
+    /// 2. 自动扫描 /var/mobile/Containers/Data/Application/ 下其他容器的 tdx.db
+    ///    （Xcode 旧版的数据通常最大，自动选最大的一份；no-sandbox 可读容器目录）
     private func importTdxDB() {
-        let src = "/var/mobile/Media/Downloads/tdx.db"
-        let dst = DatabaseManager.writableDBPath
-
         let fm = FileManager.default
-        guard fm.fileExists(atPath: src) else {
-            importResult = "❌ Downloads 下没有 tdx.db\n请先在「文件」App 把旧版 Kline 的 tdx.db 共享/存储到「我的 iPad」根目录或「下载」"
+
+        // 候选 1：公共 Downloads
+        var src: String? = nil
+        var sourceNote = "公共 Downloads"
+        let pubPath = "/var/mobile/Media/Downloads/tdx.db"
+        if fm.fileExists(atPath: pubPath) {
+            src = pubPath
+        }
+
+        // 候选 2：自动扫描其他容器
+        if src == nil {
+            if let other = findLargestOtherTdxDB() {
+                src = other
+                sourceNote = "自动找到的其他容器（Xcode 旧版）"
+            }
+        }
+
+        guard let source = src else {
+            importResult = "❌ 未找到 tdx.db\n公共 Downloads 无，且无法扫描到其他容器的数据库\n可用「文件」App 把旧版 Kline 的 tdx.db 存到「我的 iPad/下载」后再试"
             return
         }
+
+        let dst = DatabaseManager.writableDBPath
         do {
             // 覆盖前先备份旧库（种子库），万一失败可回退
             if fm.fileExists(atPath: dst) {
@@ -239,13 +257,37 @@ struct LocalUpdateView: View {
                 try? fm.copyItem(atPath: dst, toPath: backup)
             }
             try fm.removeItem(atPath: dst)
-            try fm.copyItem(atPath: src, toPath: dst)
-            importResult = "✅ tdx.db 已导入（\(dst.components(separatedBy: "/").last ?? "")）\n请完全退出并重新打开 Kline 生效"
-            DebugLogger.shared.log("导入 tdx.db 成功: \(src) -> \(dst)")
+            try fm.copyItem(atPath: source, toPath: dst)
+            importResult = "✅ tdx.db 已导入（来源：\(sourceNote)）\n请完全退出并重新打开 Kline 生效"
+            DebugLogger.shared.log("导入 tdx.db 成功: \(source) -> \(dst)")
         } catch {
             importResult = "❌ 导入失败：\(error.localizedDescription)"
             DebugLogger.shared.log("导入 tdx.db 失败: \(error)")
         }
+    }
+
+    /// 扫描所有 App 容器下的 Documents/tdx.db，返回本容器之外最大的那份（旧版完整数据）
+    private func findLargestOtherTdxDB() -> String? {
+        let containersRoot = "/var/mobile/Containers/Data/Application"
+        let myHome = NSHomeDirectory()
+        let fm = FileManager.default
+        guard let uuids = try? fm.contentsOfDirectory(atPath: containersRoot) else {
+            DebugLogger.shared.log("导入扫描 容器根不可读: \(containersRoot)")
+            return nil
+        }
+        var best: (path: String, size: Int64)?
+        for uuid in uuids {
+            let db = "\(containersRoot)/\(uuid)/Documents/tdx.db"
+            guard fm.fileExists(atPath: db),
+                  let attrs = try? fm.attributesOfItem(atPath: db),
+                  let size = (attrs[.size] as? NSNumber)?.int64Value else { continue }
+            if db.hasPrefix(myHome) { continue } // 跳过自身容器
+            DebugLogger.shared.log("导入扫描 候选: \(db) 大小 \(size)")
+            if best == nil || size > best!.size {
+                best = (db, size)
+            }
+        }
+        return best?.path
     }
 
     // MARK: - 安装 IPA 到 TrollStore（本地 HTTP + URL Scheme，绕过共享面板崩溃）
