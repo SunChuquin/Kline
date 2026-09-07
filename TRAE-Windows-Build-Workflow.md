@@ -1,9 +1,14 @@
 # TRAE Windows 自动构建 iOS IPA 工作流
 
-> **场景**：在 Windows 上运行 TRAE Word，生成 Swift 代码后自动推送 GitHub、监控 Actions 构建进度、下载 IPA、并在编译失败时依据日志自主修复。本流程已在本机实测通过，不依赖任何特定会话，可重复执行。
+> **场景**：在 Windows 上运行 TRAE，生成 Swift 代码后自动推送 GitHub、监控 Actions 构建进度、下载 IPA、并在编译失败时依据日志自主修复。本流程已在本机实测通过，不依赖任何特定会话，可重复执行。
+
+> **⚠️ 部署形态说明（2026-09-07 起，现行 = TrollStore 版）**：
+> - **现行**：CI 未签名构建 + ad-hoc 签名 + entitlements 注入（no-sandbox + platform-application）→ 永久安装，无 7 天限制。安装走 AFC push + TrollStore（`deploy_kline_to_ipad.py` / `remote_update.py`），`apps install` **不适用于此形态**。
+> - **旧形态（签名 IPA + `apps install`）已归档**：见 `archive/legacy-signed-install/`，仅回退/对照时参考。
+> - 本文档 v3.0 起按 TrollStore 现行形态编写。
 
 **作者**：sunchuquin  
-**首次验证日期**：2026-08-27  
+**首次验证日期**：2026-08-27（签名版闭环）；2026-09-07（TrollStore 版闭环）  
 **示例项目**：Kline（仓库 `SunChuquin/Kline`，Bundle ID `com.sunck.Kline`）
 
 ---
@@ -31,7 +36,7 @@
 | Windows 本机 | 已安装 Git，且 SSH/HTTPS 推送权限就绪 | `git --version` |
 | GitHub CLI | `gh` 已登录，token 含 `repo` 权限（下载产物需要） | `gh auth status` |
 | 项目仓库 | 已配置 `.github/workflows/build.yml`，参考 [iOS-GitHub-Actions-CI.md](./iOS-GitHub-Actions-CI.md) | `gh run list` |
-| GitHub Secrets | `CERTIFICATE_BASE64` / `CERTIFICATE_PASSWORD` / `PROVISION_PROFILE_BASE64` 已配置 | 见 CI 文档 |
+| GitHub Secrets | TrollStore 版**不需要**证书 Secrets（未签名构建 + ad-hoc）；签名版才需 `CERTIFICATE_BASE64` / `CERTIFICATE_PASSWORD` / `PROVISION_PROFILE_BASE64` | 见 CI 文档 |
 | 工作目录 | 切换到 Xcode 项目所在目录（含 `.github` 子目录的仓库根） | `cd c:\Users\sunck\home\projects\ios\Kline` |
 | iOS 安装工具链 | 已建 Python 3.10 venv 并装 `pymobiledevice3`（见第五步） | `.venv-ios\Scripts\pymobiledevice3.exe --help` |
 
@@ -197,66 +202,58 @@ gh run view <FAILED_RUN_ID> --log-failed 2>&1 | Select-String -Pattern "error:|w
 
 ---
 
-## 第五步：自动安装到 iPad（pymobiledevice3）
+## 第五步：安装到 iPad（TrollStore 版，现行）
 
-这一步让 TRAE 把下载好的 IPA 经 **USB** 直接装到 iPad，无需再手动用爱思助手。本质是 CLI 版的 iOS 通信/安装工具，签名机制与爱思助手一致（都需要已签名的 IPA + 描述文件包含目标设备 UDID）。
+> 现行形态的 IPA 是 **ad-hoc 签名**（非 Apple 开发者签名），`pymobiledevice3 apps install` 会被 iOS 拒绝。安装走 **AFC push + TrollStore** 两条路径（详见 [Kline-Update-Plans.md](./Kline-Update-Plans.md)）。
 
 ### 5.1 一次性的环境准备（已完成，发现可复用）
-
-scoop 里并**没有** `libimobiledevice`/`ideviceinstaller` 的现成 manifest（别照抄网络上"scoop install"的说法），本机改用 Python 版工具，装法如下：
 
 ```bash
 # 本机默认 Python 是 3.8，太旧；pymobiledevice3 需要 ≥3.9，故用已装的 Python 3.10 建独立 venv
 py -3.10 -m venv  c:\Users\sunck\home\projects\ios\.venv-ios
 c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pip.exe install pymobiledevice3
-# 装完即可用（成品可执行文件在 venv 的 Scripts 目录）
-c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe --help
 ```
-
-> 若日后换机器，只需重建这个 venv；`pymobiledevice3` 本身跨平台（Win/macOS/Linux 都支持 USB 连接 iOS）。
 
 ### 5.2 确认设备连接
 
 ```bash
-# 列出通过 USB 连接的 iOS 设备（拿 UDID）
 c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe usbmux list
 ```
 
-成功应输出类似：
+> **首次配对**：iPad 连接后若提示"要信任此电脑吗？"必须先在 iPad 上**手动点"信任"**——这一步物理上无法自动化，做一次，之后永久生效。
 
-```json
-[
-    {
-        "ConnectionType": "USB",
-        "DeviceClass": "iPad",
-        "DeviceName": "孙楚昆的iPad",
-        "ProductType": "iPad5,2",
-        "ProductVersion": "15.8.8",
-        "UniqueDeviceID": "b36adcb0...f81fe"
-    }
-]
-```
-
-> **首次配对**：iPad 连接后若提示"要信任此电脑吗？"必须先在 iPad 上**手动点"信任"**——这一步物理上无法自动化，做一次，之后永久生效。若设备已通过爱思助手/iTunes 连接过，通常已自动信任。
-
-### 5.3 安装 IPA（关键命令）
+### 5.3 一键推送 IPA 到 iPad（AFC）
 
 ```bash
-# 升级式安装：不卸载已装 App，直接覆盖应用本体，保留其沙盒/文档数据
-c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe apps install     c:\Users\sunck\home\projects\ios\artifacts\Kline\Kline.ipa
+# 默认把 artifacts 下最新的 Kline.ipa AFC push 到 /var/mobile/Media/Downloads/Kline.ipa
+& "c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\python.exe" "c:\Users\sunck\home\projects\ios\TrollRestore\deploy_kline_to_ipad.py"
 ```
 
-- 输出进度 `5%→100% Complete`，最后出现 **`Installation succeed.`** 即成功（Kline 实测约 2 秒）。
-- **不要**先用 `apps uninstall` 卸载——那会清空沙盒数据；直接用 `apps install` 是升级语义，保数据。
+### 5.4 触发安装（二选一）
 
-### 5.4 验证已安装
+**方式 A：远程触发（推荐，Kline 前台运行时）** —— 电脑一键，用户 iPad 只需点确认：
 
 ```bash
-# 查看已安装用户 App，确认 Bundle ID 存在
-c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\pymobiledevice3.exe apps list | Select-String "Kline"
+# 安装 Downloads 里的 Kline.ipa（走本地 HTTP + URL Scheme）
+& "c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\python.exe" "c:\Users\sunck\home\projects\ios\TrollRestore\remote_update.py" --local "Kline.ipa"
+# 或安装任意公网 URL 的 IPA（如 Gitee）
+& "...\python.exe" "...\remote_update.py" --url "https://.../Kline.ipa"
 ```
 
-确认出现 `com.sunck.Kline` 且 `"ProfileValidated": true` 即安装成功、签名有效。
+原理：`usbmux forward 5051` → 电脑 POST 给 Kline 内嵌 HTTP 服务器 → Kline 调 `apple-magnifier://install?url=...` → 用户在 iPad 点「打开」+「Install」。Kline 不在前台时脚本自动等待重试 90s。
+
+**方式 B：手动安装** —— 打开 TrollStore → 底部 `+` → 文件浏览器选 `Downloads/Kline.ipa` → Install。
+
+> ⚠️ **验证已安装**：TrollStore 版不在 Installation Lookup，`apps list` 查不到。确认方式：TrollStore 的 Apps 标签看版本号，或打开 Kline 本地更新面板看「当前版本」。
+
+### 5.5 读 Kline 调试日志（A1 日志双写，现行路径）
+
+TrollStore 版沙盒对 `apps pull`/house_arrest 不可用（AppNotInstalledError）。Kline 会把日志镜像到公共目录：
+
+```bash
+# AFC pull 公共日志（无需 bundle 注册）
+& "c:\Users\sunck\home\projects\ios\.venv-ios\Scripts\python.exe" "c:\Users\sunck\home\projects\ios\TrollRestore\deploy_kline_to_ipad.py" --pull-logs
+```
 
 ---
 
@@ -323,12 +320,15 @@ SET PM=.venv-ios\Scripts\pymobiledevice3.exe   # 简写（在 ios 根目录执�
 | `pymobiledevice3` 报 `TypeError: 'type' object is not subscriptable` | 本机默认 Python 3.8 太旧，工具需 ≥3.9 | 用 Python 3.10 venv（见第五步），勿用系统 3.8 |
 | `usbmux list` 空 / 找不到设备 | 设备未连、或未点"信任此电脑" | 插好 USB、iPad 解锁并确认已信任 |
 | `Installation failed` | IPA 签名失效/描述文件不含该设备 | 重新触发构建，确认描述文件含目标 UDID |
+| TrollStore 报错 173 | IPA 未签名 | 已由 CI 的 ad-hoc 签名步骤解决（不应再出现） |
+| `house_arrest`/`apps pull` 报 `AppNotInstalledError` | TrollStore 版不登记容器 | 改用 `deploy_kline_to_ipad.py --pull-logs`（AFC）读公共日志 |
+| `apps install` 报错/被拒 | 对 TrollStore 版（ad-hoc 签名）无效 | 走 AFC push + TrollStore 安装路径 |
 
 ---
 
 ## 限制与注意事项
 
-1. **免费 Apple 账号签名的 IPA 有效期仅 7 天**，过期需重新触发构建并重装。
+1. **免费 Apple 账号签名的 IPA 有效期仅 7 天**（仅旧签名形态）；**TrollStore 版永久有效，无 7 天限制**。
 2. **macOS runner 排队时间不固定**：GitHub 免费额度下，`macos-latest` 偶尔排队数分钟，属正常现象。
 3. **Node.js 20 deprecation 警告**：`actions/checkout@v4` 与 `actions/upload-artifact@v4` 目前会强制跑在 Node 24，仅是警告不影响构建。如需消除，可升级到对应 v5 版本。
 4. **敏感文件不入库**：`*.p12`、`*.mobileprovision`、`*_base64.txt`、`tdx.db` 等应放在 `.gitignore` 中或仓库根之外。本工作流中 `git add` 始终只加具体源码文件。
@@ -340,6 +340,6 @@ SET PM=.venv-ios\Scripts\pymobiledevice3.exe   # 简写（在 ios 根目录执�
 
 ---
 
-**文档版本**：2.0  
-**更新日期**：2026-08-31  
-**配套文档**：[iOS-GitHub-Actions-CI.md](./iOS-GitHub-Actions-CI.md)（CI 初始搭建指南）
+**文档版本**：3.0  
+**更新日期**：2026-09-07  
+**配套文档**：[Kline-Update-Plans.md](./Kline-Update-Plans.md)（TrollStore 部署形态总纲，含验证记录） · [archive/legacy-signed-install/](./archive/legacy-signed-install/)（旧签名形态归档）

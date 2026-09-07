@@ -24,18 +24,46 @@
 
 | 项                                                         | 依赖                                    | 预计耗时 |
 | --------------------------------------------------------- | ------------------------------------- | ---- |
-| 🥇 pymobiledevice3 `webinspector launch` 对 URL Scheme 的行为 | iPad USB 连接 + Safari Web Inspector 开启 | 5 分钟 |
-| 🥉 A2 本地更新面板在 iPad 上的实际效果                                 | 先用 `afc push` 推 IPA 到 iPad            | 5 分钟 |
-| no-sandbox 权限是否真的生效                                       | A2 面板的"权限自检"按钮                        | 1 分钟 |
+| ~~🥇 pymobiledevice3 `webinspector launch` 对 URL Scheme 的行为~~ | iPad USB 连接 + Safari Web Inspector 开启 | ✅ 已验证（2026-09-07） |
+| ~~🥉 A2 本地更新面板在 iPad 上的实际效果~~                                 | 先用 `afc push` 推 IPA 到 iPad            | ✅ 已验证（2026-09-07） |
+| ~~no-sandbox 权限是否真的生效~~                                       | A2 面板的"权限自检"按钮                        | ✅ 已验证（2026-09-07） |
 
 ### ❌ 未开始
 
 | 项                                        | 依赖               |
 | ---------------------------------------- | ---------------- |
 | Gitee 仓库创建 + access token 获取             | 用户操作（Gitee 网站）   |
-| 🥈 Kline HTTP 服务器代码（`Network.framework`） | 仅当 🥇 不通时才做      |
+| ~~🥈 Kline HTTP 服务器代码（`Network.framework`）~~ | 仅当 🥇 不通时才做 → ✅ 已实现（2026-09-07） |
 | Gitee Release 上传的 CI 步骤                  | 仅当 🥇 或 🥈 需要时才做 |
-| `remote_update.py` 脚本                    | 仅当 🥈 需要时才做      |
+| ~~`remote_update.py` 脚本~~                    | 仅当 🥈 需要时才做 → ✅ 已实现（2026-09-07） |
+
+### ✅ 2026-09-07 验证成果（核心）
+
+| 项 | 结果 | 说明 |
+|----|------|------|
+| 🥇 webinspector URL Scheme | ❌ **不通** | `launch`（AutomationSession）卡死；`runtime_evaluate` 改 location 无反应；CDP Page.navigate 返回空 frameId。WebView 层无法对自定义 scheme 做顶层导航（用户手动 Safari 地址栏输入才行）。**已判定 🥇 死路，转 🥈** |
+| no-sandbox 权限 | ✅ **生效**（关键：需 **`platform-application=true`**） | 仅 `no-sandbox=true` 或 `+container-required=false` 均启动闪退；`no-sandbox + platform-application` 正常启动且 Downloads 可读 |
+| 🥉 A2 本地更新 | ✅ **完整闭环** | 扫描 Downloads ✅；安装改用「本地 HTTP + URL Scheme」（见下） |
+| 🥈 远程更新 | ✅ **完整闭环** | KlineHTTPServer（5051）+ `remote_update.py`（usbmux forward 5051）+ 用户点确认。v1.0.2 远程安装成功（TrollStore 确认版本号） |
+| A1 日志双写 | ✅ **已实现并验证** | DebugLogger 镜像到公共 `Downloads/KlineLogs/debug_log.txt`；`deploy_kline_to_ipad.py --pull-logs` 拉取成功（读到启动日志） |
+| 版本号 | 1.0.2 (build 2) | pbxproj MARKETING_VERSION/CURRENT_PROJECT_VERSION 更新 |
+
+**两个新踩坑（重要）：**
+
+1. **`platform-application` 是 no-sandbox 生效的关键**：仅 no-sandbox（或 +container-required=false）会导致 App 启动即闪退（"Launched process exited during launch"，无崩溃报告，属 exec 阶段拦截）。加 `platform-application=true` 后 no-sandbox 正常生效。官方 README 原文："You might also need the platform-application entitlement in order for these to work properly"。
+
+2. **`platform-application` 副作用 → 系统共享面板必然闪退**：`UIActivityViewController` 生成 AirDrop 图标时 CoreImage GL 上下文空指针崩溃（`CI::GLContext` → pc=0，崩溃报告 Kline-2026-09-07-103502.ips 确认）。**替代方案**：Kline 内嵌 HTTP 服务器暴露 `http://127.0.0.1:5051/download/<file>`，用 `apple-magnifier://install?url=...` 拉起 TrollStore（规避 file:// 限制）。另 SMS 目录不可读也是该副作用（沙盒部分变严）。
+
+**🥈 远程更新当前触发链路（USB 直连，无需 WiFi）：**
+```
+电脑 remote_update.py
+  → usbmux forward 5051（iPad Kline HTTP 服务器）
+  → GET / 健康检查（不在前台自动等待重试 90s）
+  → POST /install {"url": <IPA下载URL>}  或  POST /install-local {"file": "Kline.ipa"}
+  → Kline 调 UIApplication.shared.open(apple-magnifier://install?url=...)
+  → 用户在 iPad 点「打开」→ TrollStore 下载 → Install
+```
+> Gitee 配置（仓库+token+CI 上传步骤）未做：当前走 `--local`（本地 Downloads 的 IPA）或 `--url`（任意公网 URL）。配好 Gitee 后 `--url` 即国内直连。
 
 ### 设备与环境信息
 
