@@ -74,6 +74,15 @@ struct ContentView: View {
                 }
             }
         }
+        .onAppear {
+            // App 启动即实例化行情行缓存，触发行情数值预热（无需等行情页首次打开）
+            _ = MarketRowCache.shared
+            MarketRowCache.shared.prewarmMarketData()
+        }
+        .onReceive(DatabaseManager.shared.$isLoaded) { loaded in
+            // 数据库就绪即预热（直接透传就绪标志，不依赖内部再读 db.isLoaded）
+            MarketRowCache.shared.prewarmMarketData(isLoaded: loaded)
+        }
         .overlay(
             // 全屏覆盖层
             Group {

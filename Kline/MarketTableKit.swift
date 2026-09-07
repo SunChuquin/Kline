@@ -217,6 +217,12 @@ struct MarketTableRow: View {
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
                             .lineLimit(1)
+                        // 已配置筛选的字段：显示漏斗小图标（没有选中排序箭头时也显示）
+                        if !config.filterLabels(for: col.field, page: page).isEmpty {
+                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.blue)
+                        }
                         if active, let r = rule {
                             Image(systemName: r.order == .descending ? "chevron.down" : "chevron.up")
                                 .font(.system(size: 9, weight: .bold))
@@ -258,12 +264,114 @@ struct MarketTableRow: View {
 
 // MARK: - 「字段显隐/排序」配置面板（底部 sheet，3/4 高）
 
+/// 字段多选筛选触发按钮。
+struct ColumnFilterButton: View {
+    let field: MarketField
+    @Binding var filterLabels: [String]
+    @Binding var isOpen: Bool
+
+    private var isEmpty: Bool { filterLabels.isEmpty }
+
+    var body: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 12))
+                Text(isEmpty ? "筛选" : "已选\(filterLabels.count)项")
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+            }
+            .foregroundColor(isEmpty ? .secondary : .blue)
+        }
+        .buttonStyle(.plain)
+        .frame(height: 28)
+    }
+}
+
+/// 多选筛选浮层面板（容器层居中显示，避免被 List 裁剪）。
+struct FilterOptionsPanel: View {
+    let options: [MarketRangeOption]
+    @Binding var filterLabels: [String]
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    Button {
+                        filterLabels = []
+                    } label: {
+                        HStack {
+                            Text("全部（不筛选）")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if filterLabels.isEmpty {
+                                Image(systemName: "checkmark").foregroundColor(.blue)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                    ForEach(options) { opt in
+                        let on = filterLabels.contains(opt.label)
+                        Button {
+                            if on {
+                                filterLabels.removeAll { $0 == opt.label }
+                            } else {
+                                filterLabels.append(opt.label)
+                            }
+                        } label: {
+                            HStack {
+                                Text(opt.label)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if on {
+                                    Image(systemName: "checkmark").foregroundColor(.blue)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
+
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { onClose() }
+            } label: {
+                Text("完成")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(width: 210)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
+    }
+}
+
 struct MarketColumnConfigPanel: View {
     @Environment(\.dismiss) private var dismiss
     let page: MarketConfigPage
     @ObservedObject var configStore: MarketConfigStore
 
     @State private var draft: MarketPageConfig
+    /// 当前展开筛选面板的字段（同时只允许一个展开；nil = 全部收起）
+    @State private var openFilterField: MarketField? = nil
 
     init(page: MarketConfigPage, configStore: MarketConfigStore) {
         self.page = page
@@ -304,53 +412,47 @@ struct MarketColumnConfigPanel: View {
                 List {
                     Section {
                         ForEach($draft.columns) { $col in
-                            HStack(spacing: 12) {
-                                // 拖动手柄
-                                Image(systemName: "line.3.horizontal")
-                                    .foregroundColor(.gray)
-                                    .font(.system(size: 14))
-                                Toggle(isOn: $col.visible) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(col.field.title)
-                                            .font(.system(size: 15))
-                                        Text(col.field.rawValue)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .toggleStyle(.switch)
+                            if col.field.isConfigurable {
+                            HStack(spacing: 8) {
+                                Text(col.field.title)
+                                    .font(.system(size: 15))
+                                    .lineLimit(1)
                                 Spacer()
-                                // 宽度微调
-                                Stepper(value: Binding(
-                                    get: { Int(col.widthOverride ?? col.field.defaultWidth) },
-                                    set: { nv in
-                                        let new = CGFloat(nv)
-                                        if abs(new - col.field.defaultWidth) < 0.5 {
-                                            col.widthOverride = nil
-                                        } else {
-                                            col.widthOverride = max(32, min(240, new))
-                                        }
-                                    }
-                                ), in: 32...240, step: 2) {
-                                    EmptyView()
+                                // 可筛选字段：自定义多选下拉（点选项不收起，点「完成」或外部才收起）
+                                if let opts = col.field.rangeFilterOptions {
+                                    ColumnFilterButton(
+                                        field: col.field,
+                                        filterLabels: $col.filterLabels,
+                                        isOpen: Binding(
+                                            get: { openFilterField == col.field },
+                                            set: { open in
+                                                if open {
+                                                    openFilterField = col.field
+                                                } else if openFilterField == col.field {
+                                                    openFilterField = nil
+                                                }
+                                            }
+                                        )
+                                    )
                                 }
-                                Text("\(Int(col.widthOverride ?? col.field.defaultWidth))pt")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 52, alignment: .trailing)
+                                Toggle("", isOn: $col.visible)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
                             }
-                            .padding(.vertical, 2)
+                            .frame(minHeight: 36)
+                            .zIndex(openFilterField == col.field ? 100 : 0)
+                            }
                         }
                         .onMove { from, to in
                             draft.columns.move(fromOffsets: from, toOffset: to)
                         }
                     } header: {
-                        Text("拖动调整列顺序，点击开关显示/隐藏列")
+                        Text("拖动右侧手柄调整列顺序，开关控制显示/隐藏")
                     } footer: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("• 现价/涨跌幅等数值颜色：涨红跌绿")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("• 数值字段可设置范围筛选，多字段同时生效（取交集）")
+                            Text("• 点击表头切换排序：降→升→取消（三击循环）")
                             Text("• 点击「完成」保存后立即生效，行情/自选页面各自独立")
-                            Text("• 点击表头可切换排序：降→升→取消（三击循环）")
                         }
                         .font(.footnote)
                     }
@@ -359,6 +461,34 @@ struct MarketColumnConfigPanel: View {
                 .environment(\.editMode, .constant(.active))
             }
             .background(Color(.systemGroupedBackground))
+            // 容器层浮层：屏幕居中显示多选筛选面板，避免被 List 行裁剪
+            .overlay {
+                if let field = openFilterField,
+                   let opts = field.rangeFilterOptions,
+                   let col = draft.columns.first(where: { $0.field == field }) {
+                    ZStack {
+                        Color.black.opacity(0.25)
+                            .ignoresSafeArea()
+                            .onTapGesture { openFilterField = nil }
+                        FilterOptionsPanel(
+                            options: opts,
+                            filterLabels: Binding(
+                                get: { col.filterLabels },
+                                set: { nv in
+                                    // 显式拷贝数组再写回，确保 @State draft 正确触发更新
+                                    var newCols = draft.columns
+                                    if let idx = newCols.firstIndex(where: { $0.field == field }) {
+                                        newCols[idx].filterLabels = nv
+                                        draft.columns = newCols
+                                    }
+                                }
+                            ),
+                            onClose: { openFilterField = nil }
+                        )
+                    }
+                    .zIndex(1000)
+                }
+            }
         }
     }
 }

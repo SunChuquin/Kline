@@ -122,8 +122,21 @@ enum MarketField: String, CaseIterable, Codable, Identifiable, Hashable {
     /// 默认启用的字段（用户首次进入看到的最小集合）
     static let defaultsVisible: [MarketField] = [
         .code, .name, .latestPrice, .changePct, .change,
-        .volume, .turnover, .high, .low, .prevClose
+        .volume, .turnover
     ]
+
+    /// 表头设置面板不支持配置的字段（不作为列显示、不在设置面板出现）
+    static let nonConfigurable: Set<MarketField> = [
+        .high, .low, .prevClose, .open,
+        .turnoverRate, .volRatio,
+        .ma5, .ma10, .ma20, .ma60,
+        .type, .lastDate,
+    ]
+
+    /// 该字段是否可在表头设置中配置（作为列显示/隐藏/排序/筛选）
+    var isConfigurable: Bool {
+        !Self.nonConfigurable.contains(self)
+    }
 
     /// 仅展示文本（不需要 K 线计算的字段）
     var isMetadataOnly: Bool {
@@ -132,6 +145,113 @@ enum MarketField: String, CaseIterable, Codable, Identifiable, Hashable {
         default: return false
         }
     }
+}
+
+// MARK: - 三级快捷筛选
+
+/// 一个可点击的筛选分段：标签 + 是否命中的判断（闭包持有者，按 label 判等）
+struct MarketRangeOption: Identifiable, Equatable {
+    let label: String
+    let matches: (Double) -> Bool
+    var id: String { label }
+    static func == (l: Self, r: Self) -> Bool { l.label == r.label }
+}
+
+extension MarketField {
+    /// 该字段可供配置的筛选分段（nil = 无预设，表头设置里不显示筛选下拉）
+    var rangeFilterOptions: [MarketRangeOption]? {
+        // 不可配置的字段不支持筛选
+        guard isConfigurable else { return nil }
+        switch self {
+        // 价格类（元）：复用「现价」这套分段
+        case .latestPrice:
+            return Self.priceOptions
+        // 涨跌幅（%）
+        case .changePct:
+            return Self.changePctOptions
+        // 涨跌额（元）
+        case .change:
+            return Self.changeAmountOptions
+        // 振幅（%）
+        case .amplitude:
+            return [
+                MarketRangeOption(label: ">10%", matches: { $0 > 10 }),
+                MarketRangeOption(label: "10~7", matches: { $0 > 7 && $0 <= 10 }),
+                MarketRangeOption(label: "7~5", matches: { $0 > 5 && $0 <= 7 }),
+                MarketRangeOption(label: "5~3", matches: { $0 > 3 && $0 <= 5 }),
+                MarketRangeOption(label: "3~0", matches: { $0 > 0 && $0 <= 3 }),
+            ]
+        // 多日涨幅（%）→ 统一用涨幅分档
+        case .pct3d, .pct5d, .pct10d, .pct20d, .pct60d, .pctYTD:
+            return Self.changePctRangeOptions
+        // 成交量 / 成交额（元，按亿/万分档）
+        case .volume, .turnover:
+            return Self.volumeTurnoverOptions
+        // 其他可配置字段（名称/代码）无数值分档
+        default:
+            return nil
+        }
+    }
+
+    /// 现价类（元）分段
+    static let priceOptions: [MarketRangeOption] = [
+        MarketRangeOption(label: ">1000元", matches: { $0 > 1000 }),
+        MarketRangeOption(label: "1000~500", matches: { $0 > 500 && $0 <= 1000 }),
+        MarketRangeOption(label: "500~100", matches: { $0 > 100 && $0 <= 500 }),
+        MarketRangeOption(label: "100~50", matches: { $0 > 50 && $0 <= 100 }),
+        MarketRangeOption(label: "50~30", matches: { $0 > 30 && $0 <= 50 }),
+        MarketRangeOption(label: "30~20", matches: { $0 > 20 && $0 <= 30 }),
+        MarketRangeOption(label: "20~10", matches: { $0 > 10 && $0 <= 20 }),
+        MarketRangeOption(label: "10~5", matches: { $0 > 5 && $0 <= 10 }),
+        MarketRangeOption(label: "5~2", matches: { $0 > 2 && $0 <= 5 }),
+        MarketRangeOption(label: "<2", matches: { $0 <= 2 }),
+    ]
+
+    /// 涨跌幅（%）分段
+    static let changePctOptions: [MarketRangeOption] = [
+        MarketRangeOption(label: "涨停", matches: { $0 >= 9.9 }),
+        MarketRangeOption(label: ">7%", matches: { $0 > 7 && $0 < 9.9 }),
+        MarketRangeOption(label: "7~5", matches: { $0 >= 5 && $0 <= 7 }),
+        MarketRangeOption(label: "5~3", matches: { $0 >= 3 && $0 < 5 }),
+        MarketRangeOption(label: "3~0", matches: { $0 > 0 && $0 < 3 }),
+        MarketRangeOption(label: "平", matches: { $0 == 0 }),
+        MarketRangeOption(label: "0~-3", matches: { $0 > -3 && $0 < 0 }),
+        MarketRangeOption(label: "-3~-5", matches: { $0 > -5 && $0 <= -3 }),
+        MarketRangeOption(label: "-5~-7", matches: { $0 >= -7 && $0 < -5 }),
+        MarketRangeOption(label: "跌停", matches: { $0 <= -9.9 }),
+    ]
+
+    /// 涨跌额（元）分段
+    static let changeAmountOptions: [MarketRangeOption] = [
+        MarketRangeOption(label: ">5元", matches: { $0 > 5 }),
+        MarketRangeOption(label: "5~3", matches: { $0 > 3 && $0 <= 5 }),
+        MarketRangeOption(label: "3~1", matches: { $0 > 1 && $0 <= 3 }),
+        MarketRangeOption(label: "1~-1", matches: { $0 > -1 && $0 <= 1 }),
+        MarketRangeOption(label: "-1~-3", matches: { $0 > -3 && $0 <= -1 }),
+        MarketRangeOption(label: "-3~-5", matches: { $0 > -5 && $0 <= -3 }),
+        MarketRangeOption(label: "<-5元", matches: { $0 <= -5 }),
+    ]
+
+    /// 成交量 / 成交额（元，按亿/万分档）分段
+    static let volumeTurnoverOptions: [MarketRangeOption] = [
+        MarketRangeOption(label: ">1000亿", matches: { $0 > 100_000_000_000 }),
+        MarketRangeOption(label: "1000亿~500亿", matches: { $0 > 50_000_000_000 && $0 <= 100_000_000_000 }),
+        MarketRangeOption(label: "500亿~100亿", matches: { $0 > 10_000_000_000 && $0 <= 50_000_000_000 }),
+        MarketRangeOption(label: "100亿~1亿", matches: { $0 > 100_000_000 && $0 <= 10_000_000_000 }),
+        MarketRangeOption(label: "1亿~1万", matches: { $0 > 10_000 && $0 <= 100_000_000 }),
+        MarketRangeOption(label: "<1万", matches: { $0 <= 10_000 }),
+    ]
+
+    /// 多日涨幅（%）分段
+    static let changePctRangeOptions: [MarketRangeOption] = [
+        MarketRangeOption(label: ">20%", matches: { $0 > 20 }),
+        MarketRangeOption(label: "20~10", matches: { $0 > 10 && $0 <= 20 }),
+        MarketRangeOption(label: "10~5", matches: { $0 > 5 && $0 <= 10 }),
+        MarketRangeOption(label: "5~0", matches: { $0 > 0 && $0 <= 5 }),
+        MarketRangeOption(label: "0~-5", matches: { $0 > -5 && $0 <= 0 }),
+        MarketRangeOption(label: "-5~-10", matches: { $0 > -10 && $0 <= -5 }),
+        MarketRangeOption(label: "<-10%", matches: { $0 <= -10 }),
+    ]
 }
 
 // MARK: - 排序键（支持升/降序 + 字段）
@@ -386,7 +506,52 @@ final class MarketRowCache: ObservableObject {
     /// 每轮预取完成后是否已做过一次"补试空行"。避免陷入无限重试
     private var didEmergencyRetry = false
 
-    private init() {}
+    // MARK: - App 启动预热（行情数值改为启动时即加载）
+
+    /// 启动预热是否已执行（幂等，只取一次全部行情 bars）
+    private var didPrewarm = false
+    /// 观察数据库就绪信号
+    private var isLoadedCancellable: AnyCancellable?
+
+    /// 行情页顶部三个分类对应的 meta.type 取值
+    private static let marketTypes: Set<String> = ["沪深主板", "沪深京指数", "扩展行情指数"]
+
+    private init() {
+        // 数据库就绪后预热行情数值，无需等行情页首次打开
+        isLoadedCancellable = db.$isLoaded
+            .filter { $0 }
+            .first()
+            .sink { [weak self] _ in self?.prewarmMarketData(isLoaded: true) }
+        // 若先于本对象创建时数据库已就绪，立即补一次
+        if db.isLoaded { prewarmMarketData(isLoaded: true) }
+    }
+
+    /// 对外入口：App 启动 / 数据库就绪时调用，幂等（只在首次真正预取）。
+    /// - Parameter isLoaded: 数据库就绪标志。调用方（如 onReceive）已确认就绪时传入 true，
+    ///   避免预热内部再依赖读 `db.isLoaded`（已验证 @Published 值与属性读取存在时序差异）。
+    func prewarmMarketData(isLoaded: Bool? = nil) {
+        prewarmMarketBars(isLoaded: isLoaded)
+    }
+
+    /// App 启动预热：行情页所需所有分类的 bars，在启动时即预取（置顶优先）。
+    private func prewarmMarketBars(isLoaded: Bool? = nil) {
+        let loaded = isLoaded ?? db.isLoaded
+        guard !didPrewarm, loaded else { return }
+        didPrewarm = true
+        let metas = db.metaList.filter { Self.marketTypes.contains($0.type) }
+        guard !metas.isEmpty else {
+            // 数据库就绪但暂时没拉到标的（极早时机），交回下轮观察重试不影响
+            didPrewarm = false
+            return
+        }
+        // 关键：必须先为每只标的注册行壳，否则 prefetchPrioritized 回写时
+        // `rows[m.id]?.setBars(arr)` 因 rows[id] 为 nil（可选链）被静默丢弃。
+        for m in metas { _ = row(for: m, prefetch: false) }
+        let faved = metas.filter { FavoritesStore.shared.isFavorited($0.id) }
+        let others = metas.filter { !FavoritesStore.shared.isFavorited($0.id) }
+        DebugLogger.shared.log("[Cache] prewarmMarketBars: total=\(metas.count) faved=\(faved.count) others=\(others.count)")
+        prefetchPrioritized(high: faved, low: others)
+    }
 
     // MARK: - 入口：取一行（若缓存已有直接给；否则后台预取）
 

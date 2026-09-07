@@ -72,9 +72,14 @@ class DatabaseManager: ObservableObject {
     }
 
     private func openDatabase() {
-        guard ensureWritableDBExists() else { return }
+        guard ensureWritableDBExists() else {
+            DebugLogger.shared.log("[DB] ensureWritableDBExists 失败")
+            return
+        }
         let path = Self.writableDBPath
-        if sqlite3_open(path, &db) != SQLITE_OK {
+        let rc = sqlite3_open(path, &db)
+        if rc != SQLITE_OK {
+            DebugLogger.shared.log("[DB] 无法打开数据库 path=\(path)")
             DispatchQueue.main.async { [weak self] in
                 self?.errorMessage = "无法打开数据库"
             }

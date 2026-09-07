@@ -55,6 +55,8 @@ struct MarketView: View {
     @State private var selectedTab: MarketTab = .mainBoard
     @State private var showColumnPanel = false
     @State private var addGroupTarget: MetaItem? = nil
+    /// 有字段筛选生效时，合并 bars 陆续到位触发的重筛选（防抖，避免每行刷全表）
+    @State private var filterDebounce: DispatchWorkItem? = nil
 
     // 顶部一级/二级菜单（参考测试页2 居中 Tab + 分段胶囊样式）
     @State private var topMenu: TopField = .market
@@ -96,6 +98,23 @@ struct MarketView: View {
         }
     }
 
+    /// 当前排序字段（无排序时为 nil）
+    private var currentSortField: MarketField? {
+        colCfg.sortRule(for: .marketBoard)?.field
+    }
+
+    /// 当前页面是否有任一字段筛选生效（决定 bars 到位后是否防抖重刷）
+    private var hasActiveFilters: Bool {
+        !colCfg.activeFilters(for: .marketBoard).isEmpty
+    }
+
+    /// 字段筛选配置的 Equatable 快照（供 onChange 检测「表头设置」里筛选变化）
+    private var filterConfigKey: [String] {
+        colCfg.config(for: .marketBoard).columns
+            .filter { !$0.filterLabels.isEmpty }
+            .map { "\($0.field.rawValue)=\($0.filterLabels.sorted().joined(separator: "|"))" }
+    }
+
     /// 一次性：分置顶/非置顶 → 置顶优先预取 → 注册壳 → 排序 → 写入 displayRows。
     /// **仅在输入变化时调用**（tab/搜索/加载完毕/收藏变化/排序规则变化），不在计算属性里调用。
     private func scheduleRefresh() {
@@ -126,9 +145,24 @@ struct MarketView: View {
         } else {
             list = faved + others
         }
+        // 5) 字段筛选（表头设置面板配置，可多字段同时生效；同字段多档取 OR，跨字段取 AND）
+        let filters = colCfg.activeFilters(for: .marketBoard)
+        let filtered: [MarketRow]
+        if filters.isEmpty {
+            filtered = list
+        } else {
+            filtered = list.filter { row in
+                for (field, options) in filters {
+                    guard let v = row.number(field) else { return false }
+                    // 同字段多档命中任一即可（OR）
+                    if !options.contains(where: { $0.matches(v) }) { return false }
+                }
+                return true
+            }
+        }
         // 只在差异大时赋值（减少 SwiftUI 触发）
-        if list.map(\.id) != displayRows.map(\.id) {
-            displayRows = list
+        if filtered.map(\.id) != displayRows.map(\.id) {
+            displayRows = filtered
         }
     }
 
@@ -214,13 +248,25 @@ struct MarketView: View {
         .onReceive(fav.objectWillChange) { _ in scheduleRefresh() }
         // 排序规则变化
         .onChange(of: colCfg.visibleColumns(for: .marketBoard)) { _ in scheduleRefresh() }
-        .onChange(of: colCfg.sortRule(for: .marketBoard)) { _ in scheduleRefresh() }
+        .onChange(of: colCfg.sortRule(for: .marketBoard)) { _ in
+            scheduleRefresh()
+        }
+        // 字段筛选变化（「表头设置」面板里调整筛选后）
+        .onChange(of: filterConfigKey) { _ in scheduleRefresh() }
         // **关键**：每只标的的 bars 从后台到达后，rowCache 会 objectWillChange。
         // 由于 displayRows 里存的是 MarketRow（class，引用不变），如果不主动做一次 copy，
         // SwiftUI 会认为 displayRows 没变，ForEach 不会重算行内部的 Text → 一直显示 "-"。
         // 这里做一次轻量 copy，保证行内 Text 重算。
         .onReceive(rowCache.objectWillChange) { _ in
+            // 已展示行的数值先做轻量 copy 立即刷新
             displayRows = displayRows
+            // 有字段筛选时，把「值刚到、此前被排除」的行加回：防抖 250ms 合并，避免每行刷全表
+            if hasActiveFilters {
+                filterDebounce?.cancel()
+                let item = DispatchWorkItem { scheduleRefresh() }
+                filterDebounce = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+            }
         }
         .sheet(isPresented: $showColumnPanel) {
             MarketColumnConfigPanel(page: .marketBoard, configStore: colCfg)
@@ -353,6 +399,7 @@ struct MarketView: View {
         .background(Color(.systemGray6).opacity(0.4))
     }
 
+    /// 三级快捷筛选栏已移除：字段筛选改由「表头设置」面板按字段配置（可多字段同时筛选）。
     // MARK: - 行卡片（主组件）
 
     /// 可视列里冻结前 3 列后，其余列的最大可左移量（整表横向滚动上限）

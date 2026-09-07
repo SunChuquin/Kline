@@ -25,7 +25,25 @@ struct MarketColumnPref: Codable, Hashable, Identifiable {
     var visible: Bool
     /// 若用户手动拖改过列宽，则覆盖默认宽度；nil 表示使用 defaultWidth
     var widthOverride: CGFloat?
+    /// 该字段在表头设置里配置的筛选分段 label 列表（空 = 不筛选）。可多字段同时生效（AND），同字段多档取 OR
+    var filterLabels: [String]
     var id: String { field.rawValue }
+
+    init(field: MarketField, visible: Bool, widthOverride: CGFloat? = nil, filterLabels: [String] = []) {
+        self.field = field
+        self.visible = visible
+        self.widthOverride = widthOverride
+        self.filterLabels = filterLabels
+    }
+
+    /// 兼容旧版持久化数据：filterLabels 字段缺失时回退为空数组，避免解码失败导致整份配置被重置
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        field = try c.decode(MarketField.self, forKey: .field)
+        visible = try c.decode(Bool.self, forKey: .visible)
+        widthOverride = try c.decodeIfPresent(CGFloat.self, forKey: .widthOverride)
+        filterLabels = try c.decodeIfPresent([String].self, forKey: .filterLabels) ?? []
+    }
 }
 
 /// 某页面的完整配置
@@ -107,11 +125,28 @@ final class MarketConfigStore: ObservableObject {
     /// 返回可见列数组（按配置顺序过滤），保证字段顺序与用户设置一致
     func visibleColumns(for page: MarketConfigPage) -> [MarketColumnPref] {
         let c = config(for: page)
-        return c.columns.filter { $0.visible }
+        return c.columns.filter { $0.visible && $0.field.isConfigurable }
     }
 
     func sortRule(for page: MarketConfigPage) -> MarketSortRule? {
         config(for: page).sortRule
+    }
+
+    /// 某字段当前选中的筛选分段 labels（空 = 未筛选）
+    func filterLabels(for field: MarketField, page: MarketConfigPage) -> [String] {
+        config(for: page).columns.first(where: { $0.field == field })?.filterLabels ?? []
+    }
+
+    /// 当前页面所有生效的字段筛选（可多字段）；同字段多档取 OR，跨字段取 AND
+    func activeFilters(for page: MarketConfigPage) -> [(field: MarketField, options: [MarketRangeOption])] {
+        config(for: page).columns.compactMap { col in
+            let labels = col.filterLabels
+            guard !labels.isEmpty,
+                  let opts = col.field.rangeFilterOptions else { return nil }
+            let selected = opts.filter { labels.contains($0.label) }
+            guard !selected.isEmpty else { return nil }
+            return (col.field, selected)
+        }
     }
 
     func width(for field: MarketField, page: MarketConfigPage) -> CGFloat {
@@ -192,8 +227,8 @@ final class MarketConfigStore: ObservableObject {
         for f in defaultsVisible {
             cols.append(MarketColumnPref(field: f, visible: true, widthOverride: nil))
         }
-        // 其他字段默认隐藏，接在后面
-        for f in MarketField.allCases where !defaultsVisible.contains(f) {
+        // 其他可配置字段默认隐藏，接在后面
+        for f in MarketField.allCases where !defaultsVisible.contains(f) && f.isConfigurable {
             cols.append(MarketColumnPref(field: f, visible: false, widthOverride: nil))
         }
         return MarketPageConfig(columns: cols, sortRule: nil)
