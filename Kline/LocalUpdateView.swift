@@ -378,14 +378,7 @@ struct LocalUpdateView: View {
                 results.append("❌ Downloads/ 不可读")
             }
 
-            // 测试 2：读系统禁区 SMS 目录
-            if let _ = try? FileManager.default.contentsOfDirectory(atPath: "/private/var/mobile/Library/SMS") {
-                results.append("✅ /private/var/mobile/Library/SMS/ 可读")
-            } else {
-                results.append("❌ SMS 目录不可读（no-sandbox 未生效）")
-            }
-
-            // 测试 3：读根目录
+            // 测试 2：读根目录
             if let _ = try? FileManager.default.contentsOfDirectory(atPath: "/") {
                 results.append("✅ / 根目录可读")
             } else {
