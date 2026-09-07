@@ -31,6 +31,9 @@ struct KlineApp: App {
         // 每次启动重置沙盒日志，保证 debug_log.txt 只含本次启动到现在的记录
         DebugLogger.shared.clear()
         DebugLogger.shared.log("== App 启动 == 版本:\(KlineApp.appVersion)")
+
+        // 启动本地 HTTP 服务器（A2 本地更新安装 + 🥈 远程更新触发）
+        KlineHTTPServer.shared.start()
     }
 
     var body: some Scene {

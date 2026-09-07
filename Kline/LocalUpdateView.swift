@@ -147,30 +147,28 @@ struct LocalUpdateView: View {
         }
     }
 
-    // MARK: - 共享 IPA 到 TrollStore（B1 系统共享面板）
+    // MARK: - 安装 IPA 到 TrollStore（本地 HTTP + URL Scheme，绕过共享面板崩溃）
 
+    /// 原理：platform-application 权限下系统共享面板（UIActivityViewController）
+    /// 生成 AirDrop 图标时 CoreImage GL 上下文空指针崩溃（iOS 系统组件问题）。
+    /// 改为 Kline 起本地 HTTP 服务器暴露 /download/<file>，用
+    /// `apple-magnifier://install?url=http://127.0.0.1:5051/download/<file>` 拉起 TrollStore。
     private func shareIPA(_ file: IPAFileInfo) {
-        let url = URL(fileURLWithPath: file.path)
+        // 确保本地 HTTP 服务器已启动（提供 /download/<file>）
+        KlineHTTPServer.shared.start()
+
+        let safeName = (file.name as NSString).lastPathComponent
+        let trollURL = KlineHTTPServer.trollStoreInstallURL(localFile: safeName, port: KlineHTTPServer.shared.port)
+
+        scanResult = "正在拉起 TrollStore 安装 \(safeName) ...\n(如系统弹确认框请选择「打开」)"
 
         DispatchQueue.main.async {
-            let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-
-            // iPad 需要 popover
-            if let windowScene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first,
-               let rootVC = windowScene.windows.first?.rootViewController
-            {
-                av.popoverPresentationController?.sourceView = rootVC.view
-                av.popoverPresentationController?.sourceRect = CGRect(
-                    x: rootVC.view.bounds.midX,
-                    y: rootVC.view.bounds.midY,
-                    width: 0,
-                    height: 0
-                )
-                av.popoverPresentationController?.permittedArrowDirections = []
-
-                rootVC.present(av, animated: true)
+            if let url = URL(string: trollURL) {
+                UIApplication.shared.open(url) { success in
+                    if !success {
+                        self.scanResult = "❌ 无法拉起 TrollStore\n请手动打开 TrollStore → + → Downloads/\(safeName)"
+                    }
+                }
             }
         }
     }
@@ -250,8 +248,8 @@ struct IPACardView: View {
 
             Button(action: onShare) {
                 HStack {
-                    Image(systemName: "square.and.arrow.up")
-                    Text("共享到 TrollStore")
+                    Image(systemName: "icloud.and.arrow.down")
+                    Text("安装到 TrollStore")
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
