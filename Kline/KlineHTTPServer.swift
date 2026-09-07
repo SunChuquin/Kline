@@ -152,6 +152,9 @@ final class KlineHTTPServer {
                                 targetPath = resolved
                             }
                             state.uploadTarget = targetPath
+                            // 确保父目录存在（PUT 沙盒子目录时，Documents 下可能没有目标目录）
+                            let parentDir = (targetPath as NSString).deletingLastPathComponent
+                            try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
                             FileManager.default.createFile(atPath: targetPath, contents: nil)
                             state.uploadHandle = FileHandle(forWritingAtPath: targetPath)
                             DebugLogger.shared.log("沙盒上传开始: \(targetPath) len=\(contentLength)")
@@ -342,15 +345,25 @@ final class KlineHTTPServer {
         respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
     }
 
-    /// POST /install-local：用本地 HTTP URL 拉起 TrollStore 安装 Downloads 下的 IPA（A2 本地更新）
+    /// POST /install-local：拉起 TrollStore 安装 IPA
+    /// body: {"file": "Kline.ipa", "scope": "download"|"sandbox"}
+    ///   - scope=download（默认）：文件在公共 Downloads，URL 用 /download/<file>
+    ///   - scope=sandbox：文件在沙盒 Documents 下（相对路径如 "Downloads/Kline.ipa"），URL 用 /sandbox/<path>
     private func handleInstallLocal(body: Data, connection: NWConnection) {
         guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let file = json["file"] as? String else {
             respond(connection, status: 400, body: "{\"error\":\"bad body\"}")
             return
         }
-        let safeName = (file as NSString).lastPathComponent
-        let trollURL = Self.trollStoreInstallURL(localFile: safeName, port: port)
+        let scope = (json["scope"] as? String) ?? "download"
+        let baseURL: String
+        if scope == "sandbox" {
+            baseURL = "http://127.0.0.1:\(port)/sandbox/\(file)"
+        } else {
+            let safeName = (file as NSString).lastPathComponent
+            baseURL = "http://127.0.0.1:\(port)/download/\(safeName)"
+        }
+        let trollURL = "apple-magnifier://install?url=\(baseURL.percentEncodedForQuery)"
         DispatchQueue.main.async {
             if let url = URL(string: trollURL) {
                 UIApplication.shared.open(url)
