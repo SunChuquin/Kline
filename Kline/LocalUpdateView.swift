@@ -15,6 +15,7 @@ struct LocalUpdateView: View {
     @State private var isScanning = false
     @State private var scanResult: String = ""
     @State private var logScanResult: String = ""
+    @State private var importResult: String = ""
     @State private var entitlementCheckResult: String = ""
 
     private let downloadsPath = "/var/mobile/Media/Downloads"
@@ -75,6 +76,26 @@ struct LocalUpdateView: View {
             // 日志扫描结果
             if !logScanResult.isEmpty {
                 Text(logScanResult)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // 导入 tdx.db 按钮（把公共 Downloads 的完整数据库复制进本 App 容器）
+            Button(action: importTdxDB) {
+                HStack {
+                    Image(systemName: "square.and.arrow.down.on.square")
+                    Text("导入 tdx.db（从 Downloads）")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.purple.opacity(0.12))
+                .cornerRadius(8)
+            }
+
+            // 导入结果
+            if !importResult.isEmpty {
+                Text(importResult)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -193,6 +214,37 @@ struct LocalUpdateView: View {
             DispatchQueue.main.async {
                 self.logScanResult = result
             }
+        }
+    }
+
+    // MARK: - 导入 tdx.db（从公共 Downloads 复制完整数据库进本 App 容器）
+
+    /// 场景：TrollStore 版是新容器，只有 bundle 种子库（1 个演示标的）。
+    /// 用户把 Xcode 版 Kline 的 Documents/tdx.db 导出到公共 Downloads 后，
+    /// 点此按钮复制到本 App 的 Documents/tdx.db，重启 App 生效。
+    private func importTdxDB() {
+        let src = "/var/mobile/Media/Downloads/tdx.db"
+        let dst = DatabaseManager.writableDBPath
+
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: src) else {
+            importResult = "❌ Downloads 下没有 tdx.db\n请先在「文件」App 把旧版 Kline 的 tdx.db 共享/存储到「我的 iPad」根目录或「下载」"
+            return
+        }
+        do {
+            // 覆盖前先备份旧库（种子库），万一失败可回退
+            if fm.fileExists(atPath: dst) {
+                let backup = dst + ".bak"
+                try? fm.removeItem(atPath: backup)
+                try? fm.copyItem(atPath: dst, toPath: backup)
+            }
+            try fm.removeItem(atPath: dst)
+            try fm.copyItem(atPath: src, toPath: dst)
+            importResult = "✅ tdx.db 已导入（\(dst.components(separatedBy: "/").last ?? "")）\n请完全退出并重新打开 Kline 生效"
+            DebugLogger.shared.log("导入 tdx.db 成功: \(src) -> \(dst)")
+        } catch {
+            importResult = "❌ 导入失败：\(error.localizedDescription)"
+            DebugLogger.shared.log("导入 tdx.db 失败: \(error)")
         }
     }
 
