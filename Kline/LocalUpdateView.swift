@@ -276,13 +276,13 @@ struct LocalUpdateView: View {
         DebugLogger.shared.log("导入开始 src=\(source)(\(srcSize)) dst=\(dst) dstExists=\(fm.fileExists(atPath: dst)) srcExists=\(fm.fileExists(atPath: source))")
 
         do {
-            // 覆盖前先备份旧库（种子库），万一失败可回退
+            // 覆盖前先备份旧库（若存在），再删除；dst 不存在时直接复制（DatabaseManager 懒初始化可能未生成种子库）
             if fm.fileExists(atPath: dst) {
                 let backup = dst + ".bak"
                 try? fm.removeItem(atPath: backup)
                 try? fm.copyItem(atPath: dst, toPath: backup)
+                try fm.removeItem(atPath: dst)
             }
-            try fm.removeItem(atPath: dst)
             try fm.copyItem(atPath: source, toPath: dst)
             importResult = "✅ tdx.db 已导入（来源：\(sourceNote)）\n请完全退出并重新打开 Kline 生效"
             DebugLogger.shared.log("导入 tdx.db 成功: \(source) -> \(dst)")
