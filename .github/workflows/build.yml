@@ -56,6 +56,15 @@ jobs:
           echo ""
           echo "Done."
 
+      - name: Set TrollStore display name (Kline-TS)
+        run: |
+          APP_PATH="./build/Build/Products/Release-iphoneos/Kline.app"
+          # 与 Xcode 编译版（显示名 Kline）区分，TrollStore 版显示 Kline-TS
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Kline-TS" "$APP_PATH/Info.plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Kline-TS" "$APP_PATH/Info.plist"
+          echo "DisplayName:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$APP_PATH/Info.plist"
+
       - name: Package .app to .ipa
         run: |
           mkdir -p Payload
