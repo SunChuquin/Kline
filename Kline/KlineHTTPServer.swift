@@ -281,7 +281,9 @@ final class KlineHTTPServer {
             return
         }
         var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: target, isDirectory: &isDir) else {
+        let exists = FileManager.default.fileExists(atPath: target, isDirectory: &isDir)
+        DebugLogger.shared.log("沙盒GET rel=[\(rel)] target=[\(target)] exists=\(exists) dir=\(isDir.boolValue)")
+        guard exists else {
             respond(connection, status: 404, body: "not found")
             return
         }
@@ -312,10 +314,12 @@ final class KlineHTTPServer {
             respond(connection, status: 400, body: "bad path")
             return
         }
+        DebugLogger.shared.log("沙盒DEL rel=[\(rel)] target=[\(target)] exists=\(FileManager.default.fileExists(atPath: target))")
         do {
             try FileManager.default.removeItem(atPath: target)
             respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
         } catch {
+            DebugLogger.shared.log("沙盒DEL 失败: \(error)")
             respond(connection, status: 500, body: "delete failed")
         }
     }
