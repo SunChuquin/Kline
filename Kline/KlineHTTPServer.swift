@@ -39,9 +39,18 @@ final class KlineHTTPServer {
 
     /// 启动/重连服务器（幂等：已就绪则跳过；failed 状态会重建监听）
     func start() {
-        if let l = listener, l.state == .ready || l.state == .waiting || l.state == .preparing {
-            isRunning = (l.state == .ready)
-            return
+        if let existing = listener {
+            let st = existing.state
+            switch st {
+            case .ready:
+                isRunning = true
+                return
+            case .waiting(_), .preparing:
+                isRunning = false
+                return
+            default:
+                break
+            }
         }
         do {
             let params = NWParameters.tcp
