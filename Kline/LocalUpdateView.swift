@@ -16,11 +16,14 @@ struct LocalUpdateView: View {
     @State private var scanResult: String = ""
     @State private var logScanResult: String = ""
     @State private var importResult: String = ""
+    @State private var legacyResult: String = ""
     @State private var entitlementCheckResult: String = ""
 
     private let downloadsPath = "/var/mobile/Media/Downloads"
     /// 日志文件名（TrollStore 版写到公共 Downloads/KlineLogs/ 下）
     private let logFilePath = "/var/mobile/Media/Downloads/KlineLogs/debug_log.txt"
+    /// Xcode 旧版 Kline（com.sunck.Kline.4G3V8W86TN）的容器数据库路径
+    private let legacyDBPath = "/private/var/mobile/Containers/Data/Application/CA1413A6-9D2A-4291-A2F6-A079B8AFD26C/Documents/tdx.db"
 
     /// 当前 App 版本号
     private var currentVersion: String {
@@ -96,6 +99,26 @@ struct LocalUpdateView: View {
             // 导入结果
             if !importResult.isEmpty {
                 Text(importResult)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // 使用旧版行情库按钮（直接只读挂载 Xcode 旧版容器数据库，不拷贝）
+            Button(action: useLegacyDB) {
+                HStack {
+                    Image(systemName: "externaldrive.fill.badge.checkmark")
+                    Text("使用旧版行情库（Xcode 版）")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.indigo.opacity(0.12))
+                .cornerRadius(8)
+            }
+
+            // 旧版库切换结果
+            if !legacyResult.isEmpty {
+                Text(legacyResult)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -288,6 +311,27 @@ struct LocalUpdateView: View {
             }
         }
         return best?.path
+    }
+
+    // MARK: - 使用旧版行情库（只读挂载 Xcode 旧版容器数据库）
+
+    /// TrollStore 版新容器只有种子库（1 个演示标的）。旧版（Xcode 签名，bundle id
+    /// com.sunck.Kline.4G3V8W86TN）容器里有 1.35GB 完整行情库。no-sandbox + 同 uid
+    /// (mobile) 下可直接只读打开该文件，零拷贝、零空间占用、即时生效。
+    private func useLegacyDB() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacyDBPath) else {
+            legacyResult = "❌ 未找到旧版数据库\n\(legacyDBPath)"
+            DebugLogger.shared.log("使用旧版库失败 文件不存在: \(legacyDBPath)")
+            return
+        }
+        if DatabaseManager.shared.switchToExternalReadonly(path: legacyDBPath) {
+            legacyResult = "✅ 已启用旧版行情库（只读挂载）\n正在刷新列表，稍候查看行情"
+            DebugLogger.shared.log("使用旧版库成功: \(legacyDBPath)")
+        } else {
+            legacyResult = "❌ 打开旧版数据库失败（可能被占用或损坏）"
+            DebugLogger.shared.log("使用旧版库打开失败: \(legacyDBPath)")
+        }
     }
 
     // MARK: - 安装 IPA 到 TrollStore（本地 HTTP + URL Scheme，绕过共享面板崩溃）

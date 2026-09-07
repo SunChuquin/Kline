@@ -88,6 +88,32 @@ class DatabaseManager: ObservableObject {
         loadMetaList()
     }
 
+    /// 只读切换数据库到外部路径（如 Xcode 旧版容器的完整 tdx.db）。
+    /// 不拷贝、不占本容器空间，行情查询即时指向该库。用于 TrollStore 版新容器
+    /// 只有种子库时，直接复用旧版完整数据。
+    /// - Returns: 切换是否成功
+    func switchToExternalReadonly(path: String) -> Bool {
+        let ok = dbQueue.sync {
+            if db != nil {
+                sqlite3_close(db)
+                db = nil
+            }
+            var newDB: OpaquePointer?
+            let rc = sqlite3_open_v2(path, &newDB, SQLITE_OPEN_READONLY, nil)
+            guard rc == SQLITE_OK, let opened = newDB else {
+                if newDB != nil { sqlite3_close(newDB) }
+                return false
+            }
+            db = opened
+            return true
+        }
+        if ok {
+            // 串行队列外触发 meta 重新加载（避免死锁）
+            loadMetaList()
+        }
+        return ok
+    }
+
     func loadMetaList() {
         dbQueue.async { [weak self] in
             guard let self = self else { return }
