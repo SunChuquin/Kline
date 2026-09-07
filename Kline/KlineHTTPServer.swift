@@ -32,11 +32,17 @@ final class KlineHTTPServer {
     private let queue = DispatchQueue(label: "com.sunck.Kline.httpserver")
     private var listener: NWListener?
 
+    /// 服务器是否就绪（监听中）——供 UI 显示连接状态
+    private(set) var isRunning = false
+
     private init() {}
 
-    /// 启动服务器（幂等，重复调用不重复监听）
+    /// 启动/重连服务器（幂等：已就绪则跳过；failed 状态会重建监听）
     func start() {
-        guard listener == nil else { return }
+        if let l = listener, l.state == .ready || l.state == .waiting || l.state == .preparing {
+            isRunning = (l.state == .ready)
+            return
+        }
         do {
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
@@ -45,10 +51,13 @@ final class KlineHTTPServer {
                 self?.handleNew(connection)
             }
             listener.stateUpdateHandler = { [weak self] state in
+                guard let self = self else { return }
                 switch state {
                 case .ready:
-                    DebugLogger.shared.log("KlineHTTPServer ready: 0.0.0.0:\(self?.port ?? 0)")
+                    self.isRunning = true
+                    DebugLogger.shared.log("KlineHTTPServer ready: 0.0.0.0:\(self.port)")
                 case .failed(let error):
+                    self.isRunning = false
                     DebugLogger.shared.log("KlineHTTPServer failed: \(error)")
                 default:
                     break

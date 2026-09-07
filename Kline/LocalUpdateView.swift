@@ -16,6 +16,8 @@ struct LocalUpdateView: View {
     @State private var scanResult: String = ""
     @State private var logScanResult: String = ""
     @State private var entitlementCheckResult: String = ""
+    /// 本地 HTTP 服务是否在线（供状态标签显示，点击可重连）
+    @State private var serverOK = false
 
     /// 沙盒 Documents 根路径
     private var sandboxRoot: String {
@@ -49,6 +51,22 @@ struct LocalUpdateView: View {
                 Text("当前: \(currentVersion)")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+            }
+
+            // 本地服务连接状态（点击可重连；断开时显示红色）
+            Button(action: reconnectServer) {
+                HStack(spacing: 6) {
+                    Image(systemName: serverOK ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(serverOK ? .green : .red)
+                    Text(serverOK ? "本地服务在线（点击检测）" : "本地服务离线（点击重连）")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color(.tertiarySystemBackground))
+                .cornerRadius(6)
             }
 
             // 扫描按钮
@@ -131,6 +149,25 @@ struct LocalUpdateView: View {
         .padding()
         .background(Color(.secondarySystemBackground))
         .cornerRadius(12)
+        .onAppear {
+            refreshServerStatus()
+        }
+    }
+
+    // MARK: - 本地服务状态（点击重连）
+
+    private func refreshServerStatus() {
+        serverOK = KlineHTTPServer.shared.isRunning
+    }
+
+    private func reconnectServer() {
+        KlineHTTPServer.shared.start()
+        // 状态由 stateUpdateHandler 异步更新，稍后轮询一次
+        scanResult = "已尝试重连本地服务…"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            refreshServerStatus()
+            self.scanResult = serverOK ? "✅ 本地服务已恢复在线" : "❌ 重连失败，请检查 App 状态"
+        }
     }
 
     // MARK: - 扫描 Downloads 目录
