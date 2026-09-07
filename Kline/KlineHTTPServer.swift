@@ -230,8 +230,9 @@ final class KlineHTTPServer {
 
         switch (method, path) {
         case ("GET", "/"):
+            // 状态 JSON 含 version 字段：电脑侧部署助手据此判断"新版 Kline 已重新打开"
             respond(connection, status: 200, contentType: "application/json",
-                    body: "{\"status\":\"ok\",\"app\":\"Kline\"}")
+                    body: Self.statusJSON())
         case ("GET", "/files"):
             let files = listIPAFiles()
             let json = (try? JSONSerialization.data(withJSONObject: files)) ?? Data("[]".utf8)
@@ -463,6 +464,22 @@ final class KlineHTTPServer {
             }
         }
         return nil
+    }
+
+    /// 状态 JSON（供电脑侧部署助手检测"新版 Kline 已重新打开"并校验版本号）
+    static func statusJSON() -> String {
+        let info = Bundle.main.infoDictionary
+        let v = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let b = info?["CFBundleVersion"] as? String ?? "?"
+        let dn = info?["CFBundleDisplayName"] as? String ?? "Kline"
+        let bid = Bundle.main.bundleIdentifier ?? "?"
+        return "{\"status\":\"ok\",\"app\":\"Kline\",\"displayName\":\"\(Self.jsonEsc(dn))\","
+            + "\"version\":\"\(Self.jsonEsc(v)) (\(Self.jsonEsc(b)))\",\"bundle\":\"\(Self.jsonEsc(bid))\"}"
+    }
+
+    private static func jsonEsc(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     private func respond(_ connection: NWConnection, status: Int, contentType: String = "text/plain", body: String) {
