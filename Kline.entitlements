@@ -6,5 +6,7 @@
     <true/>
     <key>platform-application</key>
     <true/>
+    <key>com.apple.private.security.storage.AppDataContainers</key>
+    <true/>
 </dict>
 </plist>
