@@ -245,6 +245,8 @@ final class KlineHTTPServer {
             handleInstallLocal(body: body, connection: connection)
         case ("POST", "/spawnroot-test"):
             handleSpawnRootTest(connection: connection)
+        case ("GET", "/opener-log"):
+            handleOpenerLog(connection: connection)
         case ("GET", "/sandbox"), ("GET", "/sandbox/"):
             listSandboxDirectory(sandboxRoot, connection: connection)
         case ("DELETE", let p) where p.hasPrefix("/sandbox/"):
@@ -424,6 +426,21 @@ final class KlineHTTPServer {
             .replacingOccurrences(of: "\"", with: "'")
         respond(connection, status: 200, contentType: "application/json",
                 body: "{\"result\":\"\(safe)\"}")
+    }
+
+    /// GET /opener-log：读取 opener（root daemon）写下的诊断日志，供排查"装完自动打开"是否生效
+    private func handleOpenerLog(connection: NWConnection) {
+        let path = "/private/var/tmp/opener.log"
+        var text = "(opener.log 不存在或不可读)"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let s = String(data: data, encoding: .utf8) {
+            text = s
+        }
+        let safe = text.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\n")
+            .replacingOccurrences(of: "\"", with: "'")
+        respond(connection, status: 200, contentType: "text/plain",
+                body: safe)
     }
 
     /// GET /download/<file>：返回 Downloads 目录下的文件
@@ -682,6 +699,7 @@ enum RootRunner {
         var pid: pid_t = 0
         let sr = spawnFn(&pid, executable, nil, OpaquePointer(attr), argv, nil)
         // 不回读、不 waitpid：让子进程（opener）独立存活，成为孤儿由 launchd 收养。
+        DebugLogger.shared.log("spawnDetached \(executable) args=\(arguments) => sr=\(sr) pid=\(pid)")
         _ = pid
         return sr
     }

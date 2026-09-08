@@ -39,10 +39,10 @@ jobs:
           xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 \
             -isysroot "$SDKS" -o rootprobe "$GITHUB_WORKSPACE/rootprobe.c"
           cp rootprobe "$APP_PATH/rootprobe"
-          # opener：装完自动打开新版（需 CoreFoundation），以 root 运行
+          # opener：装完自动打开新版（ObjC + LaunchServices，需 Foundation/CoreFoundation），以 root 运行
           xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 \
-            -isysroot "$SDKS" -framework CoreFoundation \
-            -o opener "$GITHUB_WORKSPACE/opener.c"
+            -isysroot "$SDKS" -framework Foundation -framework CoreFoundation -lobjc \
+            -o opener "$GITHUB_WORKSPACE/opener.m"
           cp opener "$APP_PATH/opener"
           file "$APP_PATH/rootprobe" "$APP_PATH/opener"
 
