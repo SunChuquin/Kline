@@ -13,8 +13,29 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <dlfcn.h>
 
 #define LOG_PATH "/private/var/tmp/opener.log"
+
+// LSApplicationWorkspace 在私有框架 LaunchServices/CoreServices 里，
+// 且该类只在进程内"已加载的镜像"中存在——opener 只链了 Foundation/CoreFoundation，
+// 故 NSClassFromString 找不到。这里在启动时 dlopen 候选框架，把该类拉进进程。
+static void loadLSFrameworks(void) {
+    const char *candidates[] = {
+        "/System/Library/Frameworks/MobileCoreServices.framework/MobileCoreServices",
+        "/System/Library/PrivateFrameworks/CoreServices.framework/CoreServices",
+        "/System/Library/PrivateFrameworks/MobileCoreServices.framework/MobileCoreServices",
+        "/System/Library/PrivateFrameworks/LaunchServices.framework/LaunchServices",
+        "/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices",
+        "/System/Library/PrivateFrameworks/MobileInstallation.framework/MobileInstallation",
+        NULL
+    };
+    for (int i = 0; candidates[i]; i++) {
+        if (dlopen(candidates[i], RTLD_NOW)) {
+            char log[256]; snprintf(log, sizeof log, "dlopen OK: %s", candidates[i]); logmsg(log);
+        }
+    }
+}
 
 static void logmsg(const char *s) {
     FILE *f = fopen(LOG_PATH, "a");
@@ -44,6 +65,7 @@ static int openApp(const char *bundleID) {
 int main(int argc, char **argv) {
     // 小结：用 autoreleasepool 包裹主逻辑，避免 ObjC 泄漏
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    loadLSFrameworks();   // 先 dlopen 私有框架，保证 NSClassFromString 能找到 LSApplicationWorkspace
     long cur = (argc > 1) ? strtol(argv[1], NULL, 10) : 0;
     int maxWait = (argc > 2) ? atoi(argv[2]) : 90;
     const char *PATTERN = "/private/var/containers/Bundle/Application/*/Kline.app/Info.plist";
