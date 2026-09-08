@@ -531,6 +531,15 @@ extension String {
 
 // MARK: - RootRunner（方案A：以 root 运行子进程，对应 TrollStore 的 spawnRoot）
 
+// persona 私有函数：这些符号未导出动态符号表，dlsym 取不到，需用 @_silgen_name 让链接器
+// 直接解析（与 TrollStore 的 ObjC 直接链接一致），底层来自 libSystem。
+@_silgen_name("posix_spawnattr_set_persona_np")
+private func rrSetPersona(_ attr: UnsafeMutableRawPointer!, _ id: Int32, _ flags: UInt32) -> Int32
+@_silgen_name("posix_spawnattr_set_persona_uid_np")
+private func rrSetUid(_ attr: UnsafeMutableRawPointer!, _ uid: UInt32) -> Int32
+@_silgen_name("posix_spawnattr_set_persona_gid_np")
+private func rrSetGid(_ attr: UnsafeMutableRawPointer!, _ gid: UInt32) -> Int32
+
 /// 以 root（persona 99 + uid/gid 0）spawn 子进程。
 ///
 /// 需要调用方具备 `com.apple.private.persona-mgmt`（已注入 Kline.entitlements）。
@@ -551,19 +560,14 @@ enum RootRunner {
         typealias AttrFn = @convention(c) (OpaquePointer) -> Int32
         typealias AddDupFn = @convention(c) (OpaquePointer, Int32, Int32) -> Int32
         typealias AddCloseFn = @convention(c) (OpaquePointer, Int32) -> Int32
-        typealias SetPersonaFn = @convention(c) (OpaquePointer, Int32, UInt32) -> Int32
-        typealias SetIdFn = @convention(c) (OpaquePointer, UInt32) -> Int32
 
         guard let spawnFn: SpawnFn = load("posix_spawn"),
               let attrInit: AttrFn = load("posix_spawnattr_init"),
               let actInit: AttrFn = load("posix_spawn_file_actions_init"),
               let addDup: AddDupFn = load("posix_spawn_file_actions_adddup2"),
-              let addClose: AddCloseFn = load("posix_spawn_file_actions_addclose"),
-              let persona: SetPersonaFn = load("posix_spawnattr_set_persona_np"),
-              let pUid: SetIdFn = load("posix_spawnattr_set_persona_uid_np"),
-              let pGid: SetIdFn = load("posix_spawnattr_set_persona_gid_np") else {
+              let addClose: AddCloseFn = load("posix_spawn_file_actions_addclose") else {
             // 软失败：任一必需符号缺失时返回错误串，不要闪退
-            return (-200, "", "symbol(s) not found (attrDestroy/actDestroy/spawn optional)")
+            return (-200, "", "required symbol(s) not found")
         }
         let attrDestroy: AttrFn? = load("posix_spawnattr_destroy")
         let actDestroy: AttrFn? = load("posix_spawn_file_actions_destroy")
@@ -586,10 +590,10 @@ enum RootRunner {
             actions.deallocate()
         }
 
-        // persona 99 + uid/gid 0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0）
-        persona(OpaquePointer(attr), 99, 0)
-        pUid(OpaquePointer(attr), 0)
-        pGid(OpaquePointer(attr), 0)
+        // persona 99 + uid/gid 0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0；符号经链接器直接解析）
+        rrSetPersona(attr, 99, 0)
+        rrSetUid(attr, 0)
+        rrSetGid(attr, 0)
 
         // 捕获 stdout/stderr
         var pipeOut = [Int32](repeating: -1, count: 2)
