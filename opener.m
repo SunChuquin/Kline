@@ -67,7 +67,9 @@ int main(int argc, char **argv) {
                         if (bid && ver && CFStringCompare(bid, CFSTR("com.sunck.Kline"), 0) == kCFCompareEqualTo) {
                             long v = parseVersion(ver);
                             snprintf(log, sizeof log, "found ver=%ld cur=%ld", v, cur); logmsg(log);
-                            if (v > cur) {
+                            // 判定：只要是"与当前已装版本不同的 Kline"安装（不必更高），即可打开。
+                            // 避免为了触发生成一堆递增版本号。
+                            if (v != cur) {
                                 logmsg("new version detected -> open");
                                 int r = openApp("com.sunck.Kline");
                                 snprintf(log, sizeof log, "open ret=%d", r); logmsg(log);

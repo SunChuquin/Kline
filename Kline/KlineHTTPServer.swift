@@ -398,12 +398,14 @@ final class KlineHTTPServer {
             return
         }
         // 方案A「装完自动打开新版」：先以 root spawn 一个 opener 守护（独立于 App 生命周期，
-        // 装完检测到版本升高后自动拉起新版 Kline），再触发 TrollStore 安装。
-        // 当前版本号作为 首个 argv 传给 opener，供其判定“已装新版本”。
+        // 装完检测到版本与当前不同后自动拉起新版 Kline），再触发 TrollStore 安装。
+        // 当前版本号作为 首个 argv 传给 opener，供其判定"已装新版本"。
         let curVer = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
-        RootRunner.spawnDetached(
+        DebugLogger.shared.log("install-local received body=\(String(decoding: body, as: UTF8.self)) curVer=\(curVer)")
+        let srOpen = RootRunner.spawnDetached(
             executable: Bundle.main.bundlePath + "/opener",
             arguments: [curVer])
+        DebugLogger.shared.log("install-local spawned opener => sr=\(srOpen)")
         DispatchQueue.main.async {
             UIApplication.shared.open(url)
         }
