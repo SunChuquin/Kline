@@ -636,12 +636,27 @@ enum RootRunner {
                 String(data: errData, encoding: .utf8) ?? "")
     }
 
-    /// 便捷：spawn /bin/launchctl print system 确认是否真的拿到 root（方案A 阶段1 验收）
+    /// 便捷：spawn iOS 内置 root 工具确认是否真的拿到 root（方案A 阶段1 验收）。
+    /// 多候选路径循环：launchctl 在 iOS 不同版本路径有差异，逐个尝试第一个已有 root 能力的。
     static func verifyRoot() -> String {
-        // 该 subcommand 需 root：非 root 会因权限失败，root 成功返回较大输出（截断展示）。
-        let r = spawnRoot(executable: "/bin/launchctl", arguments: ["print", "system"])
-        let trimmed = String(r.stdout.prefix(1200))
-        return "code=\(r.code) out=[\(trimmed)] err=[\(r.stderr)]"
+        typealias C = (String, [String])
+        let candidates: [C] = [
+            ("/bin/launchctl", ["print", "system"]),
+            ("/usr/bin/launchctl", ["print", "system"]),
+            ("/usr/sbin/launchctl", ["print", "system"]),
+            ("/sbin/launchctl", ["print", "system"]),
+            ("/usr/bin/env", []),
+        ]
+        var log: [String] = []
+        for (exe, args) in candidates {
+            let r = spawnRoot(executable: exe, arguments: args)
+            let trimmed = String(r.stdout.prefix(300)).replacingOccurrences(of: "\n", with: " ")
+            log.append("\(exe):code=\(r.code) out=[\(trimmed)]")
+            if r.code == 0 && !r.stdout.isEmpty {
+                return "ROOT_OK \(exe) code=0 out=[\(String(r.stdout.prefix(1200)))]"
+            }
+        }
+        return log.joined(separator: " | ")
     }
 
     /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）
