@@ -395,6 +395,13 @@ final class KlineHTTPServer {
             respond(connection, status: 400, body: "{\"error\":\"bad body\"}")
             return
         }
+        // 方案A「装完自动打开新版」：先以 root spawn 一个 opener 守护（独立于 App 生命周期，
+        // 装完检测到版本升高后自动拉起新版 Kline），再触发 TrollStore 安装。
+        // 当前版本号作为 首个 argv 传给 opener，供其判定“已装新版本”。
+        let curVer = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
+        RootRunner.spawnDetached(
+            executable: Bundle.main.bundlePath + "/opener",
+            arguments: [curVer])
         DispatchQueue.main.async {
             UIApplication.shared.open(url)
         }
@@ -646,6 +653,37 @@ enum RootRunner {
         } else {
             return "CODE=\(r.code) => 非 root（期望 0） stdout=[\(r.stdout)] stderr=[\(r.stderr)]"
         }
+    }
+
+    /// fire-and-forget：以 root（persona 99）后台 spawn 一个独立进程并立即返回（不等待、不读输出）。
+    /// 用于 spawn opener 这类“与 App 生命周期无关、须在 App 被终止后依然存活”的守护。
+    @discardableResult
+    static func spawnDetached(executable: String, arguments: [String] = []) -> Int32 {
+        typealias SpawnFn = @convention(c) (UnsafeMutablePointer<pid_t>?, UnsafePointer<CChar>?, OpaquePointer?, OpaquePointer?, UnsafePointer<UnsafeMutablePointer<CChar>?>?, UnsafePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
+        typealias AttrFn = @convention(c) (OpaquePointer) -> Int32
+        guard let spawnFn: SpawnFn = load("posix_spawn"),
+              let attrInit: AttrFn = load("posix_spawnattr_init") else { return -100 }
+
+        var args = arguments
+        args.insert(executable, at: 0)
+        var argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
+        argv.append(nil)
+        defer { argv.forEach { free($0) } }
+
+        let attr = UnsafeMutableRawPointer.allocate(byteCount: 512, alignment: 16)
+        defer { attr.deallocate() }
+        attrInit(OpaquePointer(attr))
+
+        // persona 99 + uid/gid 0（继承 symbol 直接链接）
+        rrSetPersona(attr, 99, 0)
+        rrSetUid(attr, 0)
+        rrSetGid(attr, 0)
+
+        var pid: pid_t = 0
+        let sr = spawnFn(&pid, executable, nil, OpaquePointer(attr), argv, nil)
+        // 不回读、不 waitpid：让子进程（opener）独立存活，成为孤儿由 launchd 收养。
+        _ = pid
+        return sr
     }
 
     /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）。
