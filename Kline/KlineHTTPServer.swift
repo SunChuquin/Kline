@@ -538,10 +538,8 @@ extension String {
 /// 故全部经 `dlsym` 取符号 + 统一用 `OpaquePointer` 传参，避免依赖具体类型桥接而编译失败。
 enum RootRunner {
 
-    private static func load<F>(_ name: String) -> F {
-        guard let sym = dlsym(nil, name) else {
-            fatalError("RootRunner: symbol \(name) not found")
-        }
+    private static func load<F>(_ name: String) -> F? {
+        guard let sym = dlsym(nil, name) else { return nil }
         return unsafeBitCast(sym, to: F.self)
     }
 
@@ -556,16 +554,19 @@ enum RootRunner {
         typealias SetPersonaFn = @convention(c) (OpaquePointer, Int32, UInt32) -> Int32
         typealias SetIdFn = @convention(c) (OpaquePointer, UInt32) -> Int32
 
-        let spawnFn: SpawnFn = load("posix_spawn")
-        let attrInit: AttrFn = load("posix_spawnattr_init")
-        let attrDestroy: AttrFn = load("posix_spawnattr_destroy")
-        let actInit: AttrFn = load("posix_spawn_file_actions_init")
-        let actDestroy: AttrFn = load("posix_spawn_file_actions_destroy")
-        let addDup: AddDupFn = load("posix_spawn_file_actions_adddup2")
-        let addClose: AddCloseFn = load("posix_spawn_file_actions_addclose")
-        let setPersona: SetPersonaFn = load("posix_spawnattr_set_persona_np")
-        let setUid: SetIdFn = load("posix_spawnattr_set_persona_uid_np")
-        let setGid: SetIdFn = load("posix_spawnattr_set_persona_gid_np")
+        guard let spawnFn: SpawnFn = load("posix_spawn"),
+              let attrInit: AttrFn = load("posix_spawnattr_init"),
+              let actInit: AttrFn = load("posix_spawn_file_actions_init"),
+              let addDup: AddDupFn = load("posix_spawn_file_actions_adddup2"),
+              let addClose: AddCloseFn = load("posix_spawn_file_actions_addclose"),
+              let persona: SetPersonaFn = load("posix_spawnattr_set_persona_np"),
+              let pUid: SetIdFn = load("posix_spawnattr_set_persona_uid_np"),
+              let pGid: SetIdFn = load("posix_spawnattr_set_persona_gid_np") else {
+            // 软失败：任一必需符号缺失时返回错误串，不要闪退
+            return (-200, "", "symbol(s) not found (attrDestroy/actDestroy/spawn optional)")
+        }
+        let attrDestroy: AttrFn? = load("posix_spawnattr_destroy")
+        let actDestroy: AttrFn? = load("posix_spawn_file_actions_destroy")
 
         var args = arguments
         args.insert(executable, at: 0)
@@ -579,16 +580,16 @@ enum RootRunner {
         attrInit(OpaquePointer(attr))
         actInit(OpaquePointer(actions))
         defer {
-            attrDestroy(OpaquePointer(attr))
-            actDestroy(OpaquePointer(actions))
+            attrDestroy?(OpaquePointer(attr))
+            actDestroy?(OpaquePointer(actions))
             attr.deallocate()
             actions.deallocate()
         }
 
         // persona 99 + uid/gid 0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0）
-        setPersona(OpaquePointer(attr), 99, 0)
-        setUid(OpaquePointer(attr), 0)
-        setGid(OpaquePointer(attr), 0)
+        persona(OpaquePointer(attr), 99, 0)
+        pUid(OpaquePointer(attr), 0)
+        pGid(OpaquePointer(attr), 0)
 
         // 捕获 stdout/stderr
         var pipeOut = [Int32](repeating: -1, count: 2)
