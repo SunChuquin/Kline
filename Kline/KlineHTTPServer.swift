@@ -548,7 +548,9 @@ private func rrSetGid(_ attr: UnsafeMutableRawPointer!, _ gid: UInt32) -> Int32
 enum RootRunner {
 
     private static func load<F>(_ name: String) -> F? {
-        guard let sym = dlsym(nil, name) else { return nil }
+        // 注意：Apple 的 RTLD_DEFAULT 是 (void*)-2，不是 NULL；dlsym(nil,…) 全局搜索会失效。
+        let handle = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
+        guard let sym = dlsym(handle, name) else { return nil }
         return unsafeBitCast(sym, to: F.self)
     }
 
@@ -566,8 +568,12 @@ enum RootRunner {
               let actInit: AttrFn = load("posix_spawn_file_actions_init"),
               let addDup: AddDupFn = load("posix_spawn_file_actions_adddup2"),
               let addClose: AddCloseFn = load("posix_spawn_file_actions_addclose") else {
-            // 软失败：任一必需符号缺失时返回错误串，不要闪退
-            return (-200, "", "required symbol(s) not found")
+            // 软失败：任一必需符号缺失时返回错误串（并列出具体缺失，便于诊断），不要闪退
+            let std = ["posix_spawn", "posix_spawnattr_init", "posix_spawnattr_destroy",
+                       "posix_spawn_file_actions_init", "posix_spawn_file_actions_destroy",
+                       "posix_spawn_file_actions_adddup2", "posix_spawn_file_actions_addclose"]
+            let missing = std.filter { dlsym(UnsafeMutableRawPointer(bitPattern: -2), $0) == nil }
+            return (-200, "", "MISSING: " + (missing.isEmpty ? "?" : missing.joined(separator: ",")))
         }
         let attrDestroy: AttrFn? = load("posix_spawnattr_destroy")
         let actDestroy: AttrFn? = load("posix_spawn_file_actions_destroy")
