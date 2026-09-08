@@ -33,6 +33,9 @@ final class KlineHTTPServer {
     private let queue = DispatchQueue(label: "com.sunck.Kline.httpserver")
     private var listener: NWListener?
 
+    /// 连续绑定失败次数（用于启动时撞上旧进程未释放端口的自动重试）
+    private var bindRetry = 0
+
     /// 服务器是否就绪（监听中）——供 UI 显示连接状态
     private(set) var isRunning = false
 
@@ -64,11 +67,24 @@ final class KlineHTTPServer {
                 guard let self = self else { return }
                 switch state {
                 case .ready:
+                    self.bindRetry = 0
                     self.isRunning = true
                     DebugLogger.shared.log("KlineHTTPServer ready: 0.0.0.0:\(self.port)")
                 case .failed(let error):
                     self.isRunning = false
                     DebugLogger.shared.log("KlineHTTPServer failed: \(error)")
+                    // 自动拉起常撞上"旧进程 5051 尚未释放"（Address already in use），
+                    // 首次绑定失败后按退避自动重建监听，免去手动点"重新连接"。
+                    // 上限 10 次，避免端口始终被占时无限重试。
+                    if self.bindRetry < 10 {
+                        self.bindRetry += 1
+                        let delay = 0.8 * Double(self.bindRetry)
+                        self.queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                            guard let self = self, !self.isRunning else { return }
+                            DebugLogger.shared.log("KlineHTTPServer bind retry #\(self.bindRetry)...")
+                            self.start()
+                        }
+                    }
                 default:
                     break
                 }
