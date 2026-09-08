@@ -17,6 +17,8 @@
 
 #define LOG_PATH "/private/var/tmp/opener.log"
 
+static void logmsg(const char *s);   // 前置声明：loadLSFrameworks 在其定义前调用
+
 // LSApplicationWorkspace 在私有框架 LaunchServices/CoreServices 里，
 // 且该类只在进程内"已加载的镜像"中存在——opener 只链了 Foundation/CoreFoundation，
 // 故 NSClassFromString 找不到。这里在启动时 dlopen 候选框架，把该类拉进进程。
@@ -57,7 +59,7 @@ static int openApp(const char *bundleID) {
     if (!ws) { logmsg("defaultWorkspace nil"); [pool drain]; return -2; }
     NSString *bid = [NSString stringWithUTF8String:bundleID];
     BOOL ok = (BOOL)[ws performSelector:NSSelectorFromString(@"openApplicationWithBundleID:") withObject:bid];
-    char log[256]; snprintf(log, sizeof log, "openApplicationWithBundleID:%@ -> %d", bid, (int)ok); logmsg(log);
+    char log[256]; snprintf(log, sizeof log, "openApplicationWithBundleID:%s -> %d", [bid UTF8String], (int)ok); logmsg(log);
     [pool drain];
     return ok ? 0 : -3;
 }
