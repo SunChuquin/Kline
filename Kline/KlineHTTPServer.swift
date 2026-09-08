@@ -637,12 +637,15 @@ enum RootRunner {
     }
 
     /// 便捷：spawn 内嵌的 rootprobe 助手，确认是否真的拿到 root（方案A 阶段1/2 验收）。
-    /// rootprobe 由 CI 用 xcrun clang 编译并嵌入 Kline.app；它打印 UID=x，Kline 以
-    /// persona 99 + uid0 spawn 它。若输出 UID=0 即证明拿到 root。
+    /// rootprobe 由 CI 编译嵌入 Kline.app，以【退出码】表达结果：0=已拿到 root，1=非 root。
     static func verifyRoot() -> String {
         let exe = Bundle.main.bundlePath + "/rootprobe"
         let r = spawnRoot(executable: exe, arguments: [])
-        return "code=\(r.code) out=[\(r.stdout)] err=[\(r.stderr)]"
+        if r.code == 0 {
+            return "⬇ CODE=0 => UID=0 (ROOT 已拿到)"
+        } else {
+            return "CODE=\(r.code) => 非 root（期望 0） stdout=[\(r.stdout)] stderr=[\(r.stderr)]"
+        }
     }
 
     /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）。
