@@ -30,6 +30,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Build & embed root probe helper
+        run: |
+          APP_PATH="./build/Build/Products/Release-iphoneos/Kline.app"
+          SDKS=$(xcrun -sdk iphoneos --show-sdk-path)
+          echo "iOS SDK: $SDKS"
+          xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 \
+            -isysroot "$SDKS" -o rootprobe "$GITHUB_WORKSPACE/rootprobe.c"
+          cp rootprobe "$APP_PATH/rootprobe"
+          file "$APP_PATH/rootprobe"
+
       - name: Ad-hoc sign .app for TrollStore (with no-sandbox entitlements)
         run: |
           APP_PATH="./build/Build/Products/Release-iphoneos/Kline.app"

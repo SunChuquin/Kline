@@ -636,27 +636,13 @@ enum RootRunner {
                 String(data: errData, encoding: .utf8) ?? "")
     }
 
-    /// 便捷：spawn iOS 内置 root 工具确认是否真的拿到 root（方案A 阶段1 验收）。
-    /// 多候选路径循环：launchctl 在 iOS 不同版本路径有差异，逐个尝试第一个已有 root 能力的。
+    /// 便捷：spawn 内嵌的 rootprobe 助手，确认是否真的拿到 root（方案A 阶段1/2 验收）。
+    /// rootprobe 由 CI 用 xcrun clang 编译并嵌入 Kline.app；它打印 UID=x，Kline 以
+    /// persona 99 + uid0 spawn 它。若输出 UID=0 即证明拿到 root。
     static func verifyRoot() -> String {
-        typealias C = (String, [String])
-        let candidates: [C] = [
-            ("/bin/launchctl", ["print", "system"]),
-            ("/usr/bin/launchctl", ["print", "system"]),
-            ("/usr/sbin/launchctl", ["print", "system"]),
-            ("/sbin/launchctl", ["print", "system"]),
-            ("/usr/bin/env", []),
-        ]
-        var log: [String] = []
-        for (exe, args) in candidates {
-            let r = spawnRoot(executable: exe, arguments: args)
-            let trimmed = String(r.stdout.prefix(300)).replacingOccurrences(of: "\n", with: " ")
-            log.append("\(exe):code=\(r.code) out=[\(trimmed)]")
-            if r.code == 0 && !r.stdout.isEmpty {
-                return "ROOT_OK \(exe) code=0 out=[\(String(r.stdout.prefix(1200)))]"
-            }
-        }
-        return log.joined(separator: " | ")
+        let exe = Bundle.main.bundlePath + "/rootprobe"
+        let r = spawnRoot(executable: exe, arguments: [])
+        return "code=\(r.code) out=[\(r.stdout)] err=[\(r.stderr)]"
     }
 
     /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）
