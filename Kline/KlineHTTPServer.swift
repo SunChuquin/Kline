@@ -645,13 +645,16 @@ enum RootRunner {
         return "code=\(r.code) out=[\(r.stdout)] err=[\(r.stderr)]"
     }
 
-    /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）
+    /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）。
+    /// 用 withUnsafeMutableBytes 取得真实连续内存指针，避免 Swift 数组桥接导致读不到数据。
     private static func readAll(_ fd: Int32, into data: inout Data) {
-        var buf = [UInt8](repeating: 0, count: 4096)
+        var buf = [UInt8](repeating: 0, count: 8192)
         while true {
-            let n = read(fd, &buf, 4096)
-            if n <= 0 { break }
-            data.append(buf, count: n)
+            let n = buf.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) -> Int in
+                read(fd, raw.baseAddress!, raw.count)
+            }
+            if n <= 0 { return }
+            data.append(contentsOf: buf.prefix(n))
         }
     }
 }
