@@ -636,10 +636,12 @@ enum RootRunner {
                 String(data: errData, encoding: .utf8) ?? "")
     }
 
-    /// 便捷：spawn /usr/bin/id 确认是否真的拿到 root（方案A 阶段1 验收）
+    /// 便捷：spawn /bin/launchctl print system 确认是否真的拿到 root（方案A 阶段1 验收）
     static func verifyRoot() -> String {
-        let r = spawnRoot(executable: "/usr/bin/id", arguments: [])
-        return "code=\(r.code) out=[\(r.stdout)] err=[\(r.stderr)]"
+        // 该 subcommand 需 root：非 root 会因权限失败，root 成功返回较大输出（截断展示）。
+        let r = spawnRoot(executable: "/bin/launchctl", arguments: ["print", "system"])
+        let trimmed = String(r.stdout.prefix(1200))
+        return "code=\(r.code) out=[\(trimmed)] err=[\(r.stderr)]"
     }
 
     /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）
