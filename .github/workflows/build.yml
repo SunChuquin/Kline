@@ -61,8 +61,15 @@ jobs:
           # 先给主二进制注入 entitlements（含 no-sandbox）
           codesign -f -s - --entitlements "$ENT" "$BIN_PATH"
           # 再给 .app 下其他 Mach-O（dylib/PlugIns 等）做无 entitlements 的 ad-hoc 签名，
-          # 避免整个 --deep 签给非主程序二进制套上 no-sandbox（可能导致闪退）
-          find "$APP_PATH" -type f ! -name "Kline" -exec sh -c 'file "$1" | grep -qE "^.*: Mach-O" && echo "  signing: $1" && codesign -f -s - "$1"' _ {} \; 2>&1 | head -50
+          # 避免整个 --deep 签给非主程序二进制套上 no-sandbox（可能导致闪退）。
+          # rootprobe/opener 需保留 no-sandbox（被 Kline spawn 为 root 守护时须能写 /private/var 下日志、
+          # 读系统容器 Info.plist），故排除，单独在后面签上 entitlements。
+          find "$APP_PATH" -type f ! -name "Kline" ! -name "rootprobe" ! -name "opener" \
+            -exec sh -c 'file "$1" | grep -qE "^.*: Mach-O" && echo "  signing: $1" && codesign -f -s - "$1"' _ {} \; 2>&1 | head -50
+          echo "=== Sign root helpers with no-sandbox entitlements ==="
+          codesign -f -s - --entitlements "$ENT" "$APP_PATH/rootprobe"
+          codesign -f -s - --entitlements "$ENT" "$APP_PATH/opener"
+          for h in rootprobe opener; do echo "--- $h entitlements ---"; codesign -d --entitlements :- "$APP_PATH/$h" 2>&1; done
           echo ""
           echo "=== Verify signature on .app bundle ==="
           codesign -v "$APP_PATH" 2>&1 || true
