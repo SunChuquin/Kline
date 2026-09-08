@@ -534,61 +534,77 @@ extension String {
 /// 以 root（persona 99 + uid/gid 0）spawn 子进程。
 ///
 /// 需要调用方具备 `com.apple.private.persona-mgmt`（已注入 Kline.entitlements）。
-/// persona 相关函数为私有符号，通过 `dlsym` 取用，避免依赖 SDK 声明而编译失败。
+/// iOS SDK 里 posix_spawnattr_t 等被桥接为不透明指针，且 persona 函数为私有符号，
+/// 故全部经 `dlsym` 取符号 + 统一用 `OpaquePointer` 传参，避免依赖具体类型桥接而编译失败。
 enum RootRunner {
+
+    private static func load<F>(_ name: String) -> F {
+        guard let sym = dlsym(nil, name) else {
+            fatalError("RootRunner: symbol \(name) not found")
+        }
+        return unsafeBitCast(sym, to: F.self)
+    }
 
     /// 以 root spawn 一条命令并捕获 stdout/stderr。
     /// - Returns: (code, stdout, stderr)。spawn 本身失败时 code 为 posix 错误码（>0，如 2=ENOENT）。
     @discardableResult
     static func spawnRoot(executable: String, arguments: [String] = []) -> (code: Int32, stdout: String, stderr: String) {
+        typealias SpawnFn = @convention(c) (UnsafeMutablePointer<pid_t>?, UnsafePointer<CChar>?, OpaquePointer?, OpaquePointer?, UnsafePointer<UnsafeMutablePointer<CChar>?>?, UnsafePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
+        typealias AttrFn = @convention(c) (OpaquePointer) -> Int32
+        typealias AddDupFn = @convention(c) (OpaquePointer, Int32, Int32) -> Int32
+        typealias AddCloseFn = @convention(c) (OpaquePointer, Int32) -> Int32
+        typealias SetPersonaFn = @convention(c) (OpaquePointer, Int32, UInt32) -> Int32
+        typealias SetIdFn = @convention(c) (OpaquePointer, UInt32) -> Int32
+
+        let spawnFn: SpawnFn = load("posix_spawn")
+        let attrInit: AttrFn = load("posix_spawnattr_init")
+        let attrDestroy: AttrFn = load("posix_spawnattr_destroy")
+        let actInit: AttrFn = load("posix_spawn_file_actions_init")
+        let actDestroy: AttrFn = load("posix_spawn_file_actions_destroy")
+        let addDup: AddDupFn = load("posix_spawn_file_actions_adddup2")
+        let addClose: AddCloseFn = load("posix_spawn_file_actions_addclose")
+        let setPersona: SetPersonaFn = load("posix_spawnattr_set_persona_np")
+        let setUid: SetIdFn = load("posix_spawnattr_set_persona_uid_np")
+        let setGid: SetIdFn = load("posix_spawnattr_set_persona_gid_np")
+
         var args = arguments
         args.insert(executable, at: 0)
-
         var argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
         argv.append(nil)
         defer { argv.forEach { free($0) } }
 
-        // persona 私有符号签名
-        typealias SetPersonaFn = @convention(c) (OpaquePointer, Int32, UInt32) -> Int32
-        typealias SetIdFn = @convention(c) (OpaquePointer, UInt32) -> Int32
-        func load<F>(_ name: String) -> F? {
-            guard let sym = dlsym(nil, name) else { return nil }
-            return unsafeBitCast(sym, to: F.self)
-        }
-        guard let setPersona: SetPersonaFn = load("posix_spawnattr_set_persona_np"),
-              let setUid: SetIdFn = load("posix_spawnattr_set_persona_uid_np"),
-              let setGid: SetIdFn = load("posix_spawnattr_set_persona_gid_np") else {
-            return (-200, "", "persona symbols not resolved")
+        // attr / actions：分配一块不透明缓冲区（opaque 结构体实际远小于 512B）
+        let attr = UnsafeMutableRawPointer.allocate(byteCount: 512, alignment: 16)
+        let actions = UnsafeMutableRawPointer.allocate(byteCount: 512, alignment: 16)
+        attrInit(OpaquePointer(attr))
+        actInit(OpaquePointer(actions))
+        defer {
+            attrDestroy(OpaquePointer(attr))
+            actDestroy(OpaquePointer(actions))
+            attr.deallocate()
+            actions.deallocate()
         }
 
-        let attr = posix_spawnattr_t.allocate(capacity: 1)
-        defer { posix_spawnattr_destroy(attr); attr.deallocate() }
-        guard posix_spawnattr_init(attr) == 0 else { return (-200, "", "posix_spawnattr_init failed") }
-
-        // persona 99 + 0/0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0）
+        // persona 99 + uid/gid 0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0）
         setPersona(OpaquePointer(attr), 99, 0)
         setUid(OpaquePointer(attr), 0)
         setGid(OpaquePointer(attr), 0)
 
         // 捕获 stdout/stderr
-        let actions = posix_spawn_file_actions_t.allocate(capacity: 1)
-        defer { posix_spawn_file_actions_destroy(actions); actions.deallocate() }
-        posix_spawn_file_actions_init(actions)
-
         var pipeOut = [Int32](repeating: -1, count: 2)
         var pipeErr = [Int32](repeating: -1, count: 2)
         pipe(&pipeOut)
         pipe(&pipeErr)
-        posix_spawn_file_actions_adddup2(actions, pipeOut[1], STDOUT_FILENO)
-        posix_spawn_file_actions_adddup2(actions, pipeErr[1], STDERR_FILENO)
-        posix_spawn_file_actions_addclose(actions, pipeOut[0])
-        posix_spawn_file_actions_addclose(actions, pipeErr[0])
-        posix_spawn_file_actions_addclose(actions, pipeOut[1])
-        posix_spawn_file_actions_addclose(actions, pipeErr[1])
+        addDup(OpaquePointer(actions), pipeOut[1], STDOUT_FILENO)
+        addDup(OpaquePointer(actions), pipeErr[1], STDERR_FILENO)
+        addClose(OpaquePointer(actions), pipeOut[0])
+        addClose(OpaquePointer(actions), pipeErr[0])
+        addClose(OpaquePointer(actions), pipeOut[1])
+        addClose(OpaquePointer(actions), pipeErr[1])
 
         var pid: pid_t = 0
-        let spawnErr = posix_spawn(&pid, executable, actions, attr, &argv, nil)
-        // 关闭子进程写端，父进程开始读
+        let spawnErr = spawnFn(&pid, executable, OpaquePointer(actions), OpaquePointer(attr), argv, nil)
+        // 父进程关闭写端（子进程已继承），开始读取
         close(pipeOut[1]); close(pipeErr[1])
         guard spawnErr == 0 else {
             close(pipeOut[0]); close(pipeErr[0])
