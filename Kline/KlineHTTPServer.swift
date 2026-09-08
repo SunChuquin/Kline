@@ -8,6 +8,7 @@
 import Foundation
 import Network
 import UIKit
+import Darwin
 
 /// 轻量 HTTP 服务器（Network.framework），前台监听 0.0.0.0:5051。
 ///
@@ -242,6 +243,8 @@ final class KlineHTTPServer {
             handleInstall(body: body, connection: connection)
         case ("POST", "/install-local"):
             handleInstallLocal(body: body, connection: connection)
+        case ("POST", "/spawnroot-test"):
+            handleSpawnRootTest(connection: connection)
         case ("GET", "/sandbox"), ("GET", "/sandbox/"):
             listSandboxDirectory(sandboxRoot, connection: connection)
         case ("DELETE", let p) where p.hasPrefix("/sandbox/"):
@@ -404,6 +407,18 @@ final class KlineHTTPServer {
         return "apple-magnifier://install?url=\(downloadURL.percentEncodedForQuery)"
     }
 
+    /// POST /spawnroot-test：以 root（persona 99）spawn /usr/bin/id，验证 persona-mgmt 生效（方案A 阶段1冒烟）
+    private func handleSpawnRootTest(connection: NWConnection) {
+        let result = RootRunner.verifyRoot()
+        DebugLogger.shared.log("spawnroot-test: \(result)")
+        let safe = result.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+        respond(connection, status: 200, contentType: "application/json",
+                body: "{\"result\":\"\(safe)\"}")
+    }
+
     /// GET /download/<file>：返回 Downloads 目录下的文件
     private func serveFile(_ filename: String, connection: NWConnection) {
         let safeName = (filename as NSString).lastPathComponent
@@ -511,5 +526,102 @@ extension String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         return addingPercentEncoding(withAllowedCharacters: allowed) ?? self
+    }
+}
+
+// MARK: - RootRunner（方案A：以 root 运行子进程，对应 TrollStore 的 spawnRoot）
+
+/// 以 root（persona 99 + uid/gid 0）spawn 子进程。
+///
+/// 需要调用方具备 `com.apple.private.persona-mgmt`（已注入 Kline.entitlements）。
+/// persona 相关函数为私有符号，通过 `dlsym` 取用，避免依赖 SDK 声明而编译失败。
+enum RootRunner {
+
+    /// 以 root spawn 一条命令并捕获 stdout/stderr。
+    /// - Returns: (code, stdout, stderr)。spawn 本身失败时 code 为 posix 错误码（>0，如 2=ENOENT）。
+    @discardableResult
+    static func spawnRoot(executable: String, arguments: [String] = []) -> (code: Int32, stdout: String, stderr: String) {
+        var args = arguments
+        args.insert(executable, at: 0)
+
+        var argv: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
+        argv.append(nil)
+        defer { argv.forEach { free($0) } }
+
+        // persona 私有符号签名
+        typealias SetPersonaFn = @convention(c) (OpaquePointer, Int32, UInt32) -> Int32
+        typealias SetIdFn = @convention(c) (OpaquePointer, UInt32) -> Int32
+        func load<F>(_ name: String) -> F? {
+            guard let sym = dlsym(nil, name) else { return nil }
+            return unsafeBitCast(sym, to: F.self)
+        }
+        guard let setPersona: SetPersonaFn = load("posix_spawnattr_set_persona_np"),
+              let setUid: SetIdFn = load("posix_spawnattr_set_persona_uid_np"),
+              let setGid: SetIdFn = load("posix_spawnattr_set_persona_gid_np") else {
+            return (-200, "", "persona symbols not resolved")
+        }
+
+        let attr = posix_spawnattr_t.allocate(capacity: 1)
+        defer { posix_spawnattr_destroy(attr); attr.deallocate() }
+        guard posix_spawnattr_init(attr) == 0 else { return (-200, "", "posix_spawnattr_init failed") }
+
+        // persona 99 + 0/0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0）
+        setPersona(OpaquePointer(attr), 99, 0)
+        setUid(OpaquePointer(attr), 0)
+        setGid(OpaquePointer(attr), 0)
+
+        // 捕获 stdout/stderr
+        let actions = posix_spawn_file_actions_t.allocate(capacity: 1)
+        defer { posix_spawn_file_actions_destroy(actions); actions.deallocate() }
+        posix_spawn_file_actions_init(actions)
+
+        var pipeOut = [Int32](repeating: -1, count: 2)
+        var pipeErr = [Int32](repeating: -1, count: 2)
+        pipe(&pipeOut)
+        pipe(&pipeErr)
+        posix_spawn_file_actions_adddup2(actions, pipeOut[1], STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(actions, pipeErr[1], STDERR_FILENO)
+        posix_spawn_file_actions_addclose(actions, pipeOut[0])
+        posix_spawn_file_actions_addclose(actions, pipeErr[0])
+        posix_spawn_file_actions_addclose(actions, pipeOut[1])
+        posix_spawn_file_actions_addclose(actions, pipeErr[1])
+
+        var pid: pid_t = 0
+        let spawnErr = posix_spawn(&pid, executable, actions, attr, &argv, nil)
+        // 关闭子进程写端，父进程开始读
+        close(pipeOut[1]); close(pipeErr[1])
+        guard spawnErr == 0 else {
+            close(pipeOut[0]); close(pipeErr[0])
+            return (spawnErr, "", "posix_spawn error \(spawnErr)")
+        }
+
+        var outData = Data()
+        var errData = Data()
+        readAll(pipeOut[0], into: &outData)
+        readAll(pipeErr[0], into: &errData)
+        close(pipeOut[0]); close(pipeErr[0])
+
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        let code = (status >> 8) & 0xff
+        return (code,
+                String(data: outData, encoding: .utf8) ?? "",
+                String(data: errData, encoding: .utf8) ?? "")
+    }
+
+    /// 便捷：spawn /usr/bin/id 确认是否真的拿到 root（方案A 阶段1 验收）
+    static func verifyRoot() -> String {
+        let r = spawnRoot(executable: "/usr/bin/id", arguments: [])
+        return "code=\(r.code) out=[\(r.stdout)] err=[\(r.stderr)]"
+    }
+
+    /// 阻塞读满 fd 到 Data（子进程退出/EOF 结束）
+    private static func readAll(_ fd: Int32, into data: inout Data) {
+        var buf = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let n = read(fd, &buf, 4096)
+            if n <= 0 { break }
+            data.append(buf, count: n)
+        }
     }
 }
