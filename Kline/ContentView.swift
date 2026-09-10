@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var lastSimulateTapTime: Date?
     @ObservedObject private var detailRouter = DetailRouter.shared
     private let doubleTapInterval: TimeInterval = 0.3
+    private let ciFailureProbe = __ciFailProbe__   // CI 失败场景测试：故意引用未定义符号
 
     // 菜单按钮配置 - 参考通达信手机版风格
     let menuItems = [
