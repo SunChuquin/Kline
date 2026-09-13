@@ -290,6 +290,7 @@ struct MarketTestView: View {
             // 标题行
             HStack(spacing: 6) {
                 Text("市场概况").font(.system(size: 19, weight: .bold)).foregroundColor(.primary)
+                    .accessibilityIdentifier("test.marketOverview")
                 Spacer()
                 Text("总成交额").font(.system(size: 13)).foregroundColor(.secondary)
                 Text(String(format: "%.0f亿", totalTurnoverYi)).font(.system(size: 14, weight: .bold)).foregroundColor(.red)

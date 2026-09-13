@@ -99,6 +99,7 @@ struct HomeView: View {
                     Text("首页")
                         .font(.title)
                     Text("欢迎来到首页")
+                        .accessibilityIdentifier("home.welcome")
                 }
                 .frame(maxHeight: .infinity)
             }

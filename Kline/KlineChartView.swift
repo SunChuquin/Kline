@@ -3596,7 +3596,14 @@ struct KlineChartView: View {
             }
             .frame(width: geometry.size.width, height: min(geometry.size.height * heightFraction, 660))
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            // 只圆顶部两角：底边贴紧物理屏幕底边后，底部若保留圆角，两角会露出深色遮罩
+            .clipShape(TopRoundedCornerRect(radius: 16))
+            // ⚠️ 固定高度面板直接加 .ignoresSafeArea 无效：扩展容器内默认居中放置，
+            // 面板只下移半个 inset、底部仍留灰缝（露出遮罩）。
+            // 必须用贪婪 frame(alignment:.bottom) 把面板钉在容器底边，
+            // 扩展后容器底边 = 物理屏幕底边，面板才真正贴底
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(edges: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -4298,5 +4305,27 @@ struct SubChartCanvas: View, Equatable {
         let range = rangeMax - rangeMin
         guard range > 0 else { return h }
         return h * CGFloat(1 - (v - rangeMin) / range)
+    }
+}
+
+// MARK: - 顶部圆角矩形（iOS 15 兼容的 UnevenRoundedRectangle 替代）
+// 底部面板贴紧物理屏幕底边时使用：只圆顶部两角，底部两角为直角，
+// 避免贴底后底部圆角缝隙露出深色遮罩
+struct TopRoundedCornerRect: Shape {
+    var radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let r = min(radius, min(rect.width, rect.height) / 2)
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY + r))
+        p.addArc(center: CGPoint(x: rect.minX + r, y: rect.minY + r),
+                 radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+        p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.minY + r),
+                 radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }

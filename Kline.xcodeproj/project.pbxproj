@@ -10,9 +10,20 @@
 		D25AA45030236FBC002D45C4 /* tdx.db in Resources */ = {isa = PBXBuildFile; fileRef = D25AA44F30236FBC002D45C4 /* tdx.db */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		D2C5C510000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D2C5C4A42FE4F6CD00D5918E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D2C5C4AB2FE4F6CD00D5918E;
+			remoteInfo = Kline;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		D25AA44F30236FBC002D45C4 /* tdx.db */ = {isa = PBXFileReference; lastKnownFileType = file; path = tdx.db; sourceTree = "<group>"; };
 		D2C5C4AC2FE4F6CD00D5918E /* Kline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kline.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2C5C5100000000000000001 /* KlineUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KlineUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -34,10 +45,22 @@
 			path = Kline;
 			sourceTree = "<group>";
 		};
+		D2C5C5100000000000000002 /* KlineUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KlineUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		D2C5C4A92FE4F6CD00D5918E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2C5C5100000000000000005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -52,6 +75,7 @@
 			children = (
 				D25AA44F30236FBC002D45C4 /* tdx.db */,
 				D2C5C4AE2FE4F6CD00D5918E /* Kline */,
+				D2C5C5100000000000000002 /* KlineUITests */,
 				D2C5C4AD2FE4F6CD00D5918E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -60,6 +84,7 @@
 			isa = PBXGroup;
 			children = (
 				D2C5C4AC2FE4F6CD00D5918E /* Kline.app */,
+				D2C5C5100000000000000001 /* KlineUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -90,6 +115,29 @@
 			productReference = D2C5C4AC2FE4F6CD00D5918E /* Kline.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D2C5C5100000000000000003 /* KlineUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D2C5C5100000000000000009 /* Build configuration list for PBXNativeTarget "KlineUITests" */;
+			buildPhases = (
+				D2C5C5100000000000000004 /* Sources */,
+				D2C5C5100000000000000005 /* Frameworks */,
+				D2C5C5100000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D2C5C510000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D2C5C5100000000000000002 /* KlineUITests */,
+			);
+			name = KlineUITests;
+			packageProductDependencies = (
+			);
+			productName = KlineUITests;
+			productReference = D2C5C5100000000000000001 /* KlineUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -102,6 +150,10 @@
 				TargetAttributes = {
 					D2C5C4AB2FE4F6CD00D5918E = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					D2C5C5100000000000000003 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = D2C5C4AB2FE4F6CD00D5918E;
 					};
 				};
 			};
@@ -120,6 +172,7 @@
 			projectRoot = "";
 			targets = (
 				D2C5C4AB2FE4F6CD00D5918E /* Kline */,
+				D2C5C5100000000000000003 /* KlineUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -130,6 +183,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				D25AA45030236FBC002D45C4 /* tdx.db in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2C5C5100000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -168,7 +228,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D2C5C5100000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D2C5C510000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D2C5C4AB2FE4F6CD00D5918E /* Kline */;
+			targetProxy = D2C5C510000000000000000A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		D2C5C4B52FE4F6CE00D5918E /* Debug */ = {
@@ -385,6 +460,56 @@
 			};
 			name = Release;
 		};
+		D2C5C5100000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4G3V8W86TN;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sunck.KlineUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_TARGET_NAME = Kline;
+			};
+			name = Debug;
+		};
+		D2C5C5100000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4G3V8W86TN;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sunck.KlineUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TEST_TARGET_NAME = Kline;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -402,6 +527,15 @@
 			buildConfigurations = (
 				D2C5C4B82FE4F6CE00D5918E /* Debug */,
 				D2C5C4B92FE4F6CE00D5918E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D2C5C5100000000000000009 /* Build configuration list for PBXNativeTarget "KlineUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D2C5C5100000000000000007 /* Debug */,
+				D2C5C5100000000000000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

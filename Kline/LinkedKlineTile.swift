@@ -78,6 +78,9 @@ struct LinkedKlineTile: View {
     @State private var showSearch = false
     @State private var searchText = ""
     @FocusState private var searchFocused: Bool
+    // Full 键盘避让：键盘 Full/缩小 状态 + 输入行底部全局 y（供结果面板限高计算）
+    @ObservedObject private var kbDock = KeyboardDockState.shared
+    @State private var inputRowBottomY: CGFloat = 0
 
     var body: some View {
         Group {
@@ -105,6 +108,20 @@ struct LinkedKlineTile: View {
         // onAppear 入口：优先查共享槽 → 已有命中或已在飞 → 0 次 DB 查询；无则发起一次。
         // 完全绕开 onChange/self.view 旧快照坑。
         .onAppear { tryLoadOnAppear() }
+        // ⚠️ 配置变化驱动重载（单视图重置按钮等外部改配置的通道）：
+        // 实测 .id 重建在「父级原地更新 tile（ForEach identity 不变）」时**不可靠**——
+        // 重建不一定发生，onAppear 不一定触发（reset 后只出现图表 period 参数变了、
+        // 数据没重载的现场，debug log 无任何 loadData）。因此与 SWIPE_IMMEDIATE_LOAD
+        // 同一模式：在 onChange 里用**闭包参数 newValue** 显式触发 loadData（绝不能读
+        // self.view.*，iOS16 旧快照坑）。若 .id 重建确实发生了，新实例 onAppear 的
+        // tryLoadOnAppear 会命中刚提交的槽位缓存，tryBeginFlight 槽位守卫防重复查询，
+        // 两条路径自然收敛，不会双重加载。
+        .onChange(of: view) { newValue in
+            guard newValue.metaID != view.metaID || newValue.period != view.period else { return }
+            DebugLogger.shared.log("[LinkedTile#\(newValue.index)] CONFIG_CHANGE \(view.metaID)/\(view.period.rawValue) → \(newValue.metaID)/\(newValue.period.rawValue)（外部改配置，显式重载）")
+            loadData(targetMetaID: newValue.metaID, targetPeriod: newValue.period,
+                     initiator: "CONFIG_CHANGE")
+        }
     }
 
     /// onAppear 阶段的加载决策（共享槽 + 在途登记 → 绝大多数命中后根本不查 DB）
@@ -153,14 +170,33 @@ struct LinkedKlineTile: View {
             linkedStore.markLoading(ownerMetaID: ownerMetaID, tileIndex: idx)
             return
         }
+        // 0.5) 槽位命中守卫：目标 (metaID, period) 已成功持有 series → 无需重复查询。
+        //    背景：多路触发（SWIPE_IMMEDIATE_LOAD / CONFIG_CHANGE onChange / .id 重建
+        //    onAppear）可能先后到达，若前一路已完成提交，后路直接复用，避免同数据反复查库。
+        //    series 为 nil（明确无数据）或在途/加载中不拦截，保证"重查拿新数据"语义不变。
+        let held = linkedStore.slot(ownerMetaID: ownerMetaID, tileIndex: idx)
+        if held.loadedMetaID == targetMetaID, held.loadedPeriod == targetPeriod,
+           held.series != nil, !held.isLoading {
+            DebugLogger.shared.log("[LinkedTile#\(idx)] loadData⏭️ [\(initiator)] SKIP(槽位已持有 \(targetPeriod.rawValue))")
+            return
+        }
         // 1) 全局在途登记：同 (owner,index,metaID,period) 只允许一次在飞；已经有在飞的直接跳过。
         //    这样 SWIPE_IMMEDIATE_LOAD 在旧实例先登记 → 新实例 onAppear 随后到达时发现已在飞，
         //    根本不重复查，也就不会出现 "新实例的ticket把旧实例正确结果作废" 的反向竞态。
         let started = linkedStore.tryBeginFlight(ownerMetaID: ownerMetaID, tileIndex: idx,
                                                  metaID: targetMetaID, period: targetPeriod)
-        // 2) 本地 @State ticket 也同步递增：即便仍有旧异步回调回来，也能被本地 ticket 淘汰。
-        let ticket = loadTicket + 1
-        loadTicket = ticket
+        // 2) 本地 @State ticket：**仅在真正发起查询时递增**。
+        //    ⚠️ SKIP(inFlight) 路径绝不递增——同目标在途结果本就该提交到共享槽，
+        //    若此处自增 ticket 会把它判为过期丢弃（查询回来了却不写槽），tile 永远
+        //    卡在加载态。2026-09-13 单视图重置的 CONFIG_CHANGE onChange 通道引入过
+        //    此回归（滑动切标的/切周期全部卡加载），根因即 SKIP 路径误增 ticket。
+        let ticket: Int
+        if started {
+            ticket = loadTicket + 1
+            loadTicket = ticket
+        } else {
+            ticket = loadTicket  // 仅用于日志展示当前值，不影响任何守卫
+        }
         DebugLogger.shared.log("[LinkedTile#\(idx)] loadData⤴️ [\(initiator)] ticket=\(ticket) \(started ? "START" : "SKIP(inFlight)") targetMeta=\(targetMetaID) targetPeriod=\(targetPeriod.rawValue) owner=\(ownerMetaID)")
         guard started else {
             // 已经有完全相同目标在飞：仅把本地 UI 显示为 loading，其余交给在途结果写入共享槽。
@@ -314,8 +350,11 @@ struct LinkedKlineTile: View {
                            linkedStore.setZoom(newZoom, owner: ownerMetaID, meta: view.metaID, period: view.period)
                        })
             .overlay {
+                // 副图二 🔍 覆盖式搜索栏：顶部锚定，正好落在本视图主图指标数值栏
+                // （KlineChartView 第一行 mainLegendRow）；overlay 默认居中会落在副图一指标栏区域
                 if showSearch {
                     chartSearchBar
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
             .id(chartIdentity)
@@ -405,13 +444,32 @@ struct LinkedKlineTile: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
             .background(Color.white)
+            // 实测输入行底部的全局 y（屏幕坐标），供 Full 键盘避让计算
+            .background(
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { inputRowBottomY = g.frame(in: .global).maxY }
+                        .onChange(of: g.frame(in: .global).maxY) { inputRowBottomY = $0 }
+                }
+            )
 
             if !searchText.isEmpty {
                 searchResultList
+                    // Full 键盘（停靠全行）：限高到键盘顶，保证结果完全可见；
+                    // 非 Full（浮动/迷你键盘用户可拖走）：nil 不限制，维持原显示
+                    .frame(maxHeight: searchResultMaxHeight, alignment: .top)
+                    // 动画时长同步键盘动画，避免面板调整与键盘动画脱节产生闪烁
+                    .animation(.easeInOut(duration: kbDock.lastAnimDuration), value: searchResultMaxHeight)
             }
         }
         .background(Color.white)
         .transition(.opacity)
+    }
+
+    /// Full 键盘时结果面板高度上限 = 键盘顶 − 输入行底；非 Full 或未测量时返回 nil（不限高）
+    private var searchResultMaxHeight: CGFloat? {
+        guard kbDock.isFull, inputRowBottomY > 0 else { return nil }
+        return max(96, kbDock.topY - inputRowBottomY)
     }
 
     private var searchResultList: some View {
@@ -504,5 +562,47 @@ struct SearchContentView: View {
         }
         searchTask = task
         DispatchQueue.global(qos: .userInitiated).async(execute: task)
+    }
+}
+
+// MARK: - iPad 键盘 Full/缩小 状态跟踪
+
+/// 跟踪 iPad 键盘「Full（停靠全行）」与「缩小（浮动小键盘/迷你条）」状态：
+/// Full → 键盘占满屏幕底部整行，会持续遮挡其上方内容，覆盖式搜索结果面板需主动限高避让；
+/// 缩小 → 宽度远小于屏宽且可被用户拖动到任意位置，布局不做避让（用户可自行拖开）。
+/// 判定依据 keyboardWillChangeFrame 的 endFrame：可见且宽度 ≥ 屏宽 85% 视为 Full。
+/// （浮动小键盘约 iPhone 宽度、迷你条更窄，均远小于 iPad 屏宽的 85%，不会误判为 Full）
+final class KeyboardDockState: ObservableObject {
+    static let shared = KeyboardDockState()
+
+    /// 键盘是否处于 Full（停靠全行）状态；不可见时为 false
+    @Published private(set) var isFull = false
+    /// 键盘顶边 y（当前方向屏幕坐标，与视图 .global 坐标同基准）；键盘不可见时 = 屏幕底边 y
+    @Published private(set) var topY: CGFloat = UIScreen.main.bounds.maxY
+    /// 最近一次键盘动画时长（供视图动画同步，避免面板调整与键盘动画脱节产生闪烁）
+    @Published private(set) var lastAnimDuration: Double = 0.25
+
+    private var cancellable: AnyCancellable?
+
+    private init() {
+        // [weak self] 防止闭包持有共享单例造成引用环；sink 存于自身属性，生命周期 = 单例
+        cancellable = NotificationCenter.default.publisher(
+            for: UIApplication.keyboardWillChangeFrameNotification
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] note in
+            guard let self,
+                  let end = note.userInfo?[UIApplication.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let dur = (note.userInfo?[UIApplication.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+            let screen = UIScreen.main.bounds
+            let visible = end.minY < screen.maxY - 1          // 键盘未完全滑出屏幕底部
+            let full = visible && end.width >= screen.width * 0.85
+            // 仅在实际变化时发布：浮动键盘拖动过程中会连续发通知，静默吸收避免无效刷新
+            if full != isFull || (full && abs(end.minY - topY) > 0.5) || (!visible && topY != screen.maxY) {
+                lastAnimDuration = max(0.1, dur)
+                isFull = full
+                topY = visible ? end.minY : screen.maxY
+            }
+        }
     }
 }

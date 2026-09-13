@@ -425,6 +425,7 @@ struct MarketTest2View: View {
                 Text("同花顺")
                     .font(.system(size: 19, weight: .bold))
                     .foregroundColor(.primary)
+                    .accessibilityIdentifier("test2.logo")
                     .padding(.vertical, 4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

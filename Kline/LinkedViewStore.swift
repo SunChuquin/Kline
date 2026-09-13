@@ -177,6 +177,17 @@ final class LinkedViewStore: ObservableObject {
         zooms[LinkedZoomKey(owner: owner, meta: meta, period: period)] ?? 100
     }
 
+    /// 清除某 (owner, 标的, 周期) 的缩放记忆，恢复默认 100（单视图重置用），立即落盘。
+    /// 与整组 reset 清光 owner 缩放不同，这里只清目标内容键，其余视图/内容的缩放记忆保留
+    func removeZoom(owner: Int, meta: Int, period: KlinePeriod) {
+        let key = LinkedZoomKey(owner: owner, meta: meta, period: period)
+        guard zooms[key] != nil else { return }
+        zooms[key] = nil
+        if let data = try? JSONEncoder().encode(zooms) {
+            try? data.write(to: zoomFileURL, options: .atomic)
+        }
+    }
+
     /// 记录联动视图缩放级别：最新值立即写入内存（供视图读取），磁盘写入做 0.5s 防抖，
     /// 连续变化只合并成一次落盘，避免缩放过程中逐帧编码/写文件造成无谓擦写与卡顿。
     func setZoom(_ value: CGFloat, owner: Int, meta: Int, period: KlinePeriod) {

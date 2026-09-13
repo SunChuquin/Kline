@@ -26,6 +26,7 @@ struct SimulationView: View {
                 Text("模拟")
                     .font(.title)
                 Text("模拟交易功能")
+                    .accessibilityIdentifier("simulation.subtitle")
             }
             .frame(maxHeight: .infinity)
         }

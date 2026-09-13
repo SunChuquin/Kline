@@ -149,6 +149,9 @@ struct KlineDetailView: View {
     @State private var showSearch = false
     @State private var searchText = ""
     @FocusState private var searchFocused: Bool
+    // Full 键盘避让：键盘 Full/缩小 状态 + 输入行底部屏幕 y（供结果面板限高计算）
+    @ObservedObject private var kbDock = KeyboardDockState.shared
+    @State private var inputRowBottomY: CGFloat = 0
     /// 自定义指标公式编辑器是否打开（由 K 线图内部触发，此处负责隐藏顶部栏实现真全屏）
     @State private var showCustomEditor = false
     /// 系统指标公式编辑器是否打开（同样需隐藏顶部栏实现真全屏）
@@ -290,9 +293,13 @@ struct KlineDetailView: View {
                         .transition(.opacity)
                         .zIndex(10)
                 }
-                // 单图 副图2 🔍 覆盖式搜索栏
+                // 单图 副图2 🔍 覆盖式搜索栏：顶部锚定后下移工具栏高度，
+                // 使搜索栏正好落在主图指标数值栏（KlineChartView 第一行 mainLegendRow）。
+                // 不能用 overlay 默认居中：垂直居中恰好落在主图/副图一交界（副图一指标栏区域）
                 if showSearch {
                     chartSearchBar
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .offset(y: infoBarTopOffset)
                         .transition(.opacity)
                         .zIndex(20)
                 }
@@ -301,6 +308,11 @@ struct KlineDetailView: View {
                 if h > 0 { measuredTopBarHeight = h }
             }
         }
+        // 页面内容延伸到物理屏幕底边（时间轴贴底，不留 home indicator 空白；
+        // 用户要求全 App 所有页面底部贴紧为0）。仅忽略 container 区，
+        // 键盘避让行为不受影响；geometry.size.height 同步变大，
+        // 分隔线覆盖层/设置面板/图表内部布局均按新高度自适应
+        .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
             if databaseManager.isLoaded {
                 loadData()
@@ -318,11 +330,14 @@ struct KlineDetailView: View {
                 }
             }
         }
+        // 键盘避让已由 ContentView 根部全局禁用（覆盖单图搜索与双联动 tile 搜索）；
+        // 公式编辑器走 fullScreenCover 独立图层，自管键盘行为，不受影响
     }
 
-    /// 整页（信息栏+主图）可拖分隔线覆盖层：每条分隔线独立实时拖拽。
-    /// 高度由调用方传入（已裁掉顶部工具栏区域），本视图只负责在给定区域内排布分隔线
     /// 单图 副图2 🔍 覆盖式搜索栏（复用 SearchContentView 的模糊搜索逻辑；选中即切换当前标的）
+    /// 输入行底部 y 实测方式与 LinkedKlineTile 完全一致（.global 直接读，不加补偿）：
+    /// .offset 位移已反映在全局坐标中，之前额外加 topLayoutOffset 属重复补偿，
+    /// 会导致结果面板限高偏短、面板与键盘之间露出K线缝隙
     private var chartSearchBar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -358,6 +373,14 @@ struct KlineDetailView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
             .background(Color.white)
+            // 实测输入行底部全局 y（屏幕坐标，与 LinkedKlineTile 同款、不加任何补偿）
+            .background(
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { inputRowBottomY = g.frame(in: .global).maxY }
+                        .onChange(of: g.frame(in: .global).maxY) { inputRowBottomY = $0 }
+                }
+            )
 
             if !searchText.isEmpty {
                 SearchContentView(searchText: $searchText) { result in
@@ -368,10 +391,21 @@ struct KlineDetailView: View {
                     item = result
                     loadData()
                 }
+                // Full 键盘（停靠全行）：限高到键盘顶，保证结果完全可见；
+                // 非 Full（浮动/迷你键盘用户可拖走）：nil 不限制，维持原显示
+                .frame(maxHeight: searchResultMaxHeight, alignment: .top)
+                // 动画时长同步键盘动画，避免面板调整与键盘动画脱节产生闪烁
+                .animation(.easeInOut(duration: kbDock.lastAnimDuration), value: searchResultMaxHeight)
             }
         }
         .background(Color.white)
         .transition(.opacity)
+    }
+
+    /// Full 键盘时结果面板高度上限 = 键盘顶 − 输入行底；非 Full 或未测量时返回 nil（不限高）
+    private var searchResultMaxHeight: CGFloat? {
+        guard kbDock.isFull, inputRowBottomY > 0 else { return nil }
+        return max(96, kbDock.topY - inputRowBottomY)
     }
 
     private func linkedDividerOverlay(width: CGFloat, height: CGFloat) -> some View {
@@ -448,6 +482,7 @@ struct KlineDetailView: View {
                     .background(Color.gray.opacity(0.12))
                     .cornerRadius(corner)
             }
+            .accessibilityIdentifier("kline.backButton")
 
             // 单图（普通单图 or 钻取单图）：在返回按钮右侧直接显示「标的名称 + 标的代码」，替代原先的独立信息栏
             if !compact {
@@ -628,6 +663,9 @@ struct KlineDetailView: View {
                 LinkedInfoCell(portal: tilePortal(at: v.index),
                                name: v.name,
                                code: v.displayCode,
+                               isModified: isLinkedViewModified(v),
+                               onReset: { resetLinkedView(v) },
+                               resetID: "linked.resetButton.\(v.index)",
                                onDrillIn: {
                                     startDrillIn(metaID: v.metaID,
                                                  period: v.period,
@@ -657,6 +695,38 @@ struct KlineDetailView: View {
     /// 联动第 index 个视图的信息栏按钮桥接（越界兜底取最后一个，避免偶发崩溃）
     private func tilePortal(at index: Int) -> MainLegendPortal {
         tilePortals[min(max(index, 0), tilePortals.count - 1)]
+    }
+
+    // MARK: - 单视图重置（信息栏 arrow.counterclockwise 按钮）
+
+    /// 联动视图第 slot 格的默认周期：与 setViewCount 生成规则一致（按 allCases 顺序取，
+    /// slot 0=日线 1=周线 2=月线 3=季线，越界兜底日线）
+    private func defaultLinkedPeriod(slot: Int) -> KlinePeriod {
+        let periods = KlinePeriod.allCases
+        return periods.indices.contains(slot) ? periods[slot] : .daily
+    }
+
+    /// 视图配置是否偏离默认（改过标的或周期）。**按配置计算而非脏标记**：
+    /// 设置页整组重置/改视图数量后各视图回到默认 → 自动变灰，
+    /// 天然满足"排除仅重置联动视图配置的情况"；手动改回默认也会自动变灰
+    private func isLinkedViewModified(_ v: LinkedViewConfig) -> Bool {
+        v.metaID != item.id || v.period != defaultLinkedPeriod(slot: v.index)
+    }
+
+    /// 单视图重置：恢复该视图默认配置（主标的 + 槽位默认周期）并清该内容键的缩放记忆。
+    /// 走 updateView（与副图二搜索切标的同一通道），tile 检测到 (metaID, period) 变化
+    /// 自动走加载流程（loading 转圈 = 重置过程反馈），完成后按钮自动变灰
+    private func resetLinkedView(_ v: LinkedViewConfig) {
+        guard isLinkedViewModified(v) else { return }
+        let hint = (name: item.name, code: item.code, type: item.type)
+        let def = LinkedViewConfig(index: v.index,
+                                   metaID: item.id,
+                                   name: hint.name,
+                                   code: hint.code,
+                                   type: hint.type,
+                                   period: defaultLinkedPeriod(slot: v.index))
+        LinkedViewStore.shared.removeZoom(owner: item.id, meta: def.metaID, period: def.period)
+        LinkedViewStore.shared.updateView(def, for: item.id)
     }
 
     private var chartArea: some View {
@@ -892,7 +962,12 @@ struct KlineDetailView: View {
             .frame(maxWidth: .infinity, alignment: .top)
             .frame(height: geometry.size.height * 0.75)
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // 只圆顶部两角：底边贴紧物理屏幕底边后，底部若保留圆角，两角会露出深色遮罩
+            .clipShape(TopRoundedCornerRect(radius: 16))
+            // ⚠️ 固定高度面板直接加 .ignoresSafeArea 无效（扩展容器内居中、只下移半个 inset），
+            // 必须贪婪 frame(alignment:.bottom) 钉底 + ignoresSafeArea 扩展才真正贴紧物理底边
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(edges: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1180,6 +1255,12 @@ private struct LinkedInfoCell: View {
     @ObservedObject var portal: MainLegendPortal
     let name: String
     let code: String
+    /// 单视图重置：视图配置被改过（切标的/调周期）时高亮可点，点击恢复该视图默认配置；
+    /// 样式对齐副图一指标栏 arrow.right 按钮（22×22、12pt semibold、灰0.35/蓝）
+    var isModified: Bool = false
+    var onReset: (() -> Void)? = nil
+    /// 重置按钮的 UI 测试定位标识（按视图索引区分，如 "linked.resetButton.0"）
+    var resetID: String = "linked.resetButton"
     /// 点击最右侧 chevron 按钮时触发；nil 时不显示钻取按钮
     var onDrillIn: (() -> Void)? = nil
 
@@ -1201,6 +1282,19 @@ private struct LinkedInfoCell: View {
                 .minimumScaleFactor(0.55)
                 .layoutPriority(0.5)
             Spacer(minLength: 6)
+            if let onReset {
+                Button(action: onReset) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(isModified ? Color.blue : Color.gray.opacity(0.35))
+                        .frame(width: 22, height: 22, alignment: .center)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!isModified)
+                .accessibilityIdentifier(resetID)
+                // 默认（未修改）不高亮但保持可见的灰色禁用态，与副图一 arrow.right 按钮一致
+            }
             if let onDrillIn {
                 Button(action: onDrillIn) {
                     Image(systemName: "chevron.right")

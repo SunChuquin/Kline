@@ -42,6 +42,8 @@ struct FormulaEditorView: View {
             }
         }
         .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+        // 列表内容贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
+        .ignoresSafeArea(.container, edges: .bottom)
         .overlay {
             if showEditor {
                 IndicatorEditSheet(
@@ -392,6 +394,8 @@ struct IndicatorEditSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white)
+        // 表单贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
+        .ignoresSafeArea(.container, edges: .bottom)
         .alert("存在修改未保存，是否取消修改？", isPresented: $showCancelConfirm) {
             Button("继续编辑", role: .cancel) { }
             Button("取消修改", role: .destructive) { onCancel() }
@@ -689,5 +693,7 @@ struct SystemIndicatorEditorContainer: View {
             .id(id)
         }
         .background(Color.white)
+        // 表单贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
+        .ignoresSafeArea(.container, edges: .bottom)
     }
 }

@@ -126,6 +126,7 @@ struct FavoritesView: View {
         HStack(spacing: 8) {
             Text("自选")
                 .font(.system(size: 18, weight: .bold))
+                .accessibilityIdentifier("favorites.title")
                 .padding(.leading, 16)
             Spacer()
             // 刷新公式分组（仅当选中 formula 分组）
@@ -536,6 +537,8 @@ struct FavManageSheet: View {
             }
             .background(Color(.systemGroupedBackground))
         }
+        // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
+        .ignoresSafeArea(.keyboard)
     }
 }
 
@@ -603,6 +606,8 @@ struct FavAddGroupSheet: View {
             }
             .background(Color(.systemGroupedBackground))
         }
+        // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
+        .ignoresSafeArea(.keyboard)
     }
 }
 
@@ -666,6 +671,8 @@ struct FavFormulaEditorSheet: View {
             }
             .background(Color(.systemGroupedBackground))
         }
+        // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
+        .ignoresSafeArea(.keyboard)
     }
 }
 

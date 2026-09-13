@@ -227,6 +227,7 @@ struct MarketView: View {
                     }
             }
         }
+        // 键盘避让已由 ContentView 根部全局禁用，此处无需重复处理
         .onAppear { scheduleRefresh() }
         // 搜索
         .onChange(of: searchText) { newValue in
@@ -443,6 +444,7 @@ struct MarketView: View {
             }, frozenCount: 3, xOffset: hScrollOffset, isFaved: isFaved)
         }
         .padding(.trailing, 8)
+        .accessibilityIdentifier("market.rowCard")
         // 长按弹菜单：加自选 / 取消自选 / 加入指定分组
         .contextMenu {
             Button(action: { fav.toggleFavorite(meta.id) }) {

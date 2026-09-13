@@ -133,7 +133,9 @@ struct ProfileView: View {
             }
             .padding(16)
         }
-        .background(Color(.systemBackground))
+        // 内容延伸到物理屏幕底边 + 背景铺满（否则 2018 等机型底部 20pt 露出下层导航栏）
+        .background(Color(.systemBackground).ignoresSafeArea())
+        .ignoresSafeArea(.container, edges: .bottom)
         .overlay(
             Group {
                 if isDetailPresented, let title = selectedItemTitle {
