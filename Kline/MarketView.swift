@@ -286,8 +286,8 @@ struct MarketView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // 搜索 + 行情设置/单元格宽度调整 —— 贴右
-                HStack(spacing: 6) {
+                // 左侧：行情设置按钮（贴左，居中 Tab 两侧留白）
+                HStack {
                     // 行情设置按钮：默认打开「行情表设置」面板；
                     // 从设置面板点「单元格宽度调整」后，切换为「带方框的❌」
                     // 图标，保持宽度调整模式（左右拖动列分隔线调整列宽），
@@ -306,8 +306,13 @@ struct MarketView: View {
                     .buttonStyle(.plain)
                     .frame(width: 28, height: 28)
                     .help(edgeAdjust ? "退出单元格宽度调整" : "行情表设置（表头/冻结/宽度调整）")
+                    Spacer()
+                }
+                .padding(.leading, 12)
 
-                    // 搜索：点击弹出与「双击首页」一致的搜索页面（复用 HomeView 搜索模式）
+                // 右侧：搜索按钮（保持最右不动）
+                HStack {
+                    Spacer()
                     Button { homeSearchActive = true } label: {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary).font(.system(size: 16))
@@ -316,7 +321,6 @@ struct MarketView: View {
                     .frame(width: 28, height: 28)
                     .help("搜索标的")
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 12)
             }
             .frame(maxWidth: .infinity)
