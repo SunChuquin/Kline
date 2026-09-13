@@ -3481,19 +3481,19 @@ struct KlineChartView: View {
                 coverageProgressBar(width: width, height: height)
             }
             HStack(spacing: 0) {
-                Text(left).font(.system(size: 10)).foregroundColor(.gray)
+                Text(left).font(.system(size: 11)).foregroundColor(.gray)
                 if !isLinkedTile {
-                    Text("   周期数\(count)个").font(.system(size: 10)).foregroundColor(.gray)
+                    Text("   周期数\(count)个").font(.system(size: 11)).foregroundColor(.gray)
                 }
                 Spacer()
             }
             .padding(.leading, 12)   // 起始文字朝中间偏移 4pt
-            Text(right).font(.system(size: 10)).foregroundColor(.gray)
+            Text(right).font(.system(size: 11)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 4)   // 截止文字朝中间偏移 4pt
             // 联动多图：时间轴中间只显示周期数字，居中显示（单图保持「周期数xxx个」样式）
             if isLinkedTile {
-                Text("\(count)").font(.system(size: 10)).foregroundColor(.gray)
+                Text("\(count)").font(.system(size: 11)).foregroundColor(.gray)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             // 📌 开启且第一个固定光标存在时：固定光标的行情数据覆盖显示在时间轴上（第二个光标出现后依然持续显示）
@@ -3580,8 +3580,8 @@ struct KlineChartView: View {
     /// 时间轴上紧凑的"标题:值"单元（标题灰色小字、值带色）
     private func axisKV(_ title: String, _ value: String, _ color: Color) -> some View {
         HStack(spacing: 2) {
-            Text(title).font(.system(size: 9)).foregroundColor(.gray)
-            Text(value).font(.system(size: 10)).foregroundColor(color)
+            Text(title).font(.system(size: 11)).foregroundColor(.gray)
+            Text(value).font(.system(size: 11)).foregroundColor(color)
         }
     }
 
