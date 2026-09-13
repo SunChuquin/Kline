@@ -16,6 +16,54 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         return [.landscapeLeft, .landscapeRight]
     }
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // iPadOS 26+ 已废弃 UIRequiresFullScreen，窗口化多任务模式下系统会忽略
+        // 方向声明（Apple 开发者论坛实测回归）。官方替代路径（TN3192）= 运行时对每个
+        // UIWindowScene：① sizeRestrictions 固定为横屏全屏尺寸（禁缩放）；
+        // ② requestGeometryUpdate 主动请求横屏几何。在 scene 激活/设备姿态变化时重新应用。
+        // ⚠️ UIApplication.connectedScenes 只在通知回调读取，绝不在 SwiftUI body 求值期读取
+        //（body 期读 UIKit 会毒化视图更新事务，项目历史踩坑）。
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(lockAllScenes),
+                                               name: UIApplication.didBecomeActiveNotification,
+                                               object: nil)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(lockAllScenes),
+                                               name: UIScene.didActivateNotification,
+                                               object: nil)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(orientationDidChange),
+                                               name: UIDevice.orientationDidChangeNotification,
+                                               object: nil)
+        // 姿态通知默认不生成，必须显式开启，否则上面的 observer 永不触发
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        return true
+    }
+
+    @objc private func orientationDidChange() {
+        // 设备姿态变化后（iPadOS 26 可能把 App 强转竖屏），下一帧重新请求横屏
+        DispatchQueue.main.async { [weak self] in self?.lockAllScenes() }
+    }
+
+    @objc private func lockAllScenes() {
+        for case let ws as UIWindowScene in UIApplication.shared.connectedScenes {
+            applyLandscapeLock(to: ws)
+        }
+    }
+
+    private func applyLandscapeLock(to scene: UIWindowScene) {
+        guard #available(iOS 16.0, *) else { return }
+        // ① 固定横屏全屏尺寸：minimum = maximum，窗口不可缩放（iPhone 上 sizeRestrictions=nil，无操作）
+        let screen = scene.screen.bounds.size
+        let landscape = CGSize(width: max(screen.width, screen.height),
+                               height: min(screen.width, screen.height))
+        scene.sizeRestrictions?.minimumSize = landscape
+        scene.sizeRestrictions?.maximumSize = landscape
+        // ② 主动请求横屏几何更新（系统忽略声明时的强制路径）
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: [.landscapeLeft, .landscapeRight]))
+    }
 }
 
 @main
