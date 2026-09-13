@@ -469,16 +469,48 @@ struct MarketColumnConfigPanel: View {
     @Environment(\.dismiss) private var dismiss
     let page: MarketConfigPage
     @ObservedObject var configStore: MarketConfigStore
+    /// 点击「单元格宽度调整」后的回调（由调用方负责关闭面板并进入宽度调整模式）
+    var onEnableEdgeAdjust: (() -> Void)? = nil
 
     @State private var draft: MarketPageConfig
     /// 当前展开筛选面板的字段（同时只允许一个展开；nil = 全部收起）
     @State private var openFilterField: MarketField? = nil
 
-    init(page: MarketConfigPage, configStore: MarketConfigStore) {
+    init(page: MarketConfigPage, configStore: MarketConfigStore, onEnableEdgeAdjust: (() -> Void)? = nil) {
         self.page = page
         self.configStore = configStore
+        self.onEnableEdgeAdjust = onEnableEdgeAdjust
         // 编辑副本：用户点取消可以直接放弃
         _draft = State(initialValue: configStore.config(for: page))
+    }
+
+    /// 快捷操作卡片组：进入单元格宽度调整模式（关闭面板，由右上角按钮接管）
+    private var quickActionSection: some View {
+        Section {
+            Button {
+                onEnableEdgeAdjust?()
+                dismiss()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.left.and.right.square")
+                        .font(.system(size: 15))
+                    Text("单元格宽度调整")
+                        .font(.system(size: 15))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.gray.opacity(0.6))
+                }
+                .frame(minHeight: 36)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.blue)
+        } header: {
+            Text("快捷操作")
+        } footer: {
+            Text("进入后可直接左右拖动各列分隔线调整列宽；右上角按钮变为「带方框的❌」，点击即退出")
+        }
     }
 
     /// 表格冻结卡片组：第 1 列恒冻结（不可取消），第 2/3 列可开关。
@@ -623,6 +655,9 @@ struct MarketColumnConfigPanel: View {
 
                     // === 卡片组 2：表格冻结（冻结前 N 列，第 1 列恒冻结） ===
                     frozenConfigSection
+
+                    // === 卡片组 3：快捷操作（单元格宽度调整） ===
+                    quickActionSection
                 }
                 .listStyle(.insetGrouped)
                 .environment(\.editMode, .constant(.active))

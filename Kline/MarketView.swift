@@ -251,7 +251,10 @@ struct MarketView: View {
             }
         }
         .sheet(isPresented: $showColumnPanel) {
-            MarketColumnConfigPanel(page: .marketBoard, configStore: colCfg)
+            MarketColumnConfigPanel(page: .marketBoard, configStore: colCfg) {
+                // 点击「单元格宽度调整」：面板关闭后进入宽度调整模式
+                withAnimation(.easeInOut(duration: 0.15)) { edgeAdjust = true }
+            }
         }
         .sheet(item: Binding(
             get: { addGroupTarget.map(IdentifiableMeta.init) },
@@ -283,28 +286,26 @@ struct MarketView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // 搜索 + 边线调节 + 表头设置 —— 贴右
+                // 搜索 + 行情设置/单元格宽度调整 —— 贴右
                 HStack(spacing: 6) {
-                    // 边线调节按钮：开启后左右拖动列边界调整并持久化列宽
+                    // 行情设置按钮：默认打开「行情表设置」面板；
+                    // 从设置面板点「单元格宽度调整」后，切换为「带方框的❌」
+                    // 图标，保持宽度调整模式（左右拖动列分隔线调整列宽），
+                    // 再点一次退出该模式并恢复为设置按钮
                     Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { edgeAdjust.toggle() }
+                        if edgeAdjust {
+                            withAnimation(.easeInOut(duration: 0.15)) { edgeAdjust = false }
+                        } else {
+                            showColumnPanel = true
+                        }
                     } label: {
-                        Text("边")
-                            .font(.system(size: 14, weight: .semibold))
+                        Image(systemName: edgeAdjust ? "xmark.square" : "slider.horizontal.3")
                             .foregroundColor(edgeAdjust ? .blue : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 30, height: 30)
-                    .help("开启后可左右拖动各列分隔线调整列宽")
-
-                    // 表头设置按钮
-                    Button { showColumnPanel = true } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .foregroundColor(.secondary).font(.system(size: 16))
+                            .font(.system(size: 16))
                     }
                     .buttonStyle(.plain)
                     .frame(width: 28, height: 28)
-                    .help("表头设置（字段显隐/排序/宽度）")
+                    .help(edgeAdjust ? "退出单元格宽度调整" : "行情表设置（表头/冻结/宽度调整）")
 
                     // 搜索：点击弹出与「双击首页」一致的搜索页面（复用 HomeView 搜索模式）
                     Button { homeSearchActive = true } label: {
