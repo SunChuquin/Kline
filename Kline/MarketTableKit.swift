@@ -74,9 +74,9 @@ private struct HostInsetsKey: PreferenceKey {
 /// ⚠️ 读 UIKit（interfaceOrientation）只发生在 onAppear/旋转通知回调中，
 /// 禁止在 body 求值期读 UIApplication（会毒化视图更新事务导致 UI 永不刷新）。
 struct NotchSideSafeArea: ViewModifier {
-    /// 中文字宽基准：12pt（用户定版；用作刘海侧安全区减量与另一侧留白，
+    /// 用作刘海侧安全区减量与另一侧留白，
     /// 在不同屏幕尺寸/分辨率下保持一致）。
-    private let hanziWidth: CGFloat = 12
+    private let hanziWidth: CGFloat = 4
     @State private var notchOnLeading = true
     @State private var hInsets = EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
 
