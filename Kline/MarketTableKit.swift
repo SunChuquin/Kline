@@ -605,7 +605,13 @@ struct MarketColumnConfigPanel: View {
                 Divider()
 
                 List {
-                    // === 卡片组 1：表头设置（原表头配置功能） ===
+                    // === 卡片组 1：快捷操作（单元格宽度调整） ===
+                    quickActionSection
+
+                    // === 卡片组 2：表格冻结（冻结前 N 列，第 1 列恒冻结） ===
+                    frozenConfigSection
+
+                    // === 卡片组 3：表头设置（原表头配置功能） ===
                     Section {
                         ForEach($draft.columns) { $col in
                             if col.field.isConfigurable {
@@ -652,12 +658,6 @@ struct MarketColumnConfigPanel: View {
                         }
                         .font(.footnote)
                     }
-
-                    // === 卡片组 2：表格冻结（冻结前 N 列，第 1 列恒冻结） ===
-                    frozenConfigSection
-
-                    // === 卡片组 3：快捷操作（单元格宽度调整） ===
-                    quickActionSection
                 }
                 .listStyle(.insetGrouped)
                 .environment(\.editMode, .constant(.active))
