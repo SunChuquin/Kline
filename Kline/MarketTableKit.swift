@@ -245,8 +245,7 @@ struct MarketTableRow: View {
                             .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                             .frame(maxHeight: .infinity)
                             .contentShape(Rectangle())
-                        Color(.black).frame(width: Self.lineW)
-                            .opacity(0.35)
+                        Color.clear.frame(width: Self.lineW)   // 列边界线已隐藏，仅保留宽度占位
                     }
                 }
                 // 滚动区宽度 = max(可视宽, 全部列宽)：列放得下就铺满，放不下才横向滚动
@@ -259,20 +258,20 @@ struct MarketTableRow: View {
 
                 // 冻结区：前 N 列固定，盖在滚动区上方，右侧竖分割线
                 HStack(spacing: 0) {
-                    Color(.black).frame(width: Self.lineW).opacity(0.35)
+                    Color.clear.frame(width: Self.lineW)   // 列边界线已隐藏，仅保留宽度占位
                     ForEach(frozenCols) { col in
                         content(col, header: mode.isHeader, meta: metaOf, rule: rule)
                             .padding(.horizontal, col.isNameCode ? 8 : 6)
                             .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                             .frame(maxHeight: .infinity)
                             .contentShape(Rectangle())
-                        Color(.black).frame(width: Self.lineW).opacity(0.35)
+                        Color.clear.frame(width: Self.lineW)   // 列边界线已隐藏，仅保留宽度占位
                     }
                 }
                 .frame(width: frozenW, height: rowHeight, alignment: .leading)
                 .padding(.top, mode.isHeader ? 1 : 0)
                 .background(rowBackground)
-                .overlay(alignment: .trailing) { Color(.separator).frame(width: 0.5) }
+                .overlay(alignment: .trailing) { Color.clear.frame(width: 0.5) }   // 冻结区分割线已隐藏，保留占位
                 .zIndex(2)
                 .clipped()
             }
