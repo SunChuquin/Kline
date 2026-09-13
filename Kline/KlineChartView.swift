@@ -3487,8 +3487,10 @@ struct KlineChartView: View {
                 }
                 Spacer()
             }
+            .padding(.leading, 4)   // 起始文字朝中间偏移 4pt
             Text(right).font(.system(size: 10)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.trailing, 4)   // 截止文字朝中间偏移 4pt
             // 联动多图：时间轴中间只显示周期数字，居中显示（单图保持「周期数xxx个」样式）
             if isLinkedTile {
                 Text("\(count)").font(.system(size: 10)).foregroundColor(.gray)
