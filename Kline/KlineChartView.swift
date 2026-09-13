@@ -1812,9 +1812,10 @@ struct KlineChartView: View {
                         subChart(model: subThird, width: width, candleSpacing: candleSpacing, height: sub3Height,
                                  slot: .third)
                     }
-                    // 时间轴上方新增一行：十字光标出现时显示 开/收/高/低/涨/额 行情数据
-                    axisQuoteRow(width: width, height: timeHeight)
+                    // 底部两行顺序：时间轴在上（倒数第二行）、行情数据行贴底（倒数第一行）
                     timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
+                    // 时间轴下方新增一行：十字光标出现时显示 开/收/高/低/涨/额 行情数据
+                    axisQuoteRow(width: width, height: timeHeight)
                 }
                 // 双指手势层：按面板分片覆盖（主图/各副图各一块），不覆盖 legend 行的按钮，
                 // 面板上的单指触摸沿响应链派发给祖先 ZStack 上的 chartDragGesture
