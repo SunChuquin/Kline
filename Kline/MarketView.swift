@@ -36,7 +36,7 @@ enum FavField: String, CaseIterable, Identifiable {
 /// 行情页「市场」二级分类（对应 tdx_parser.py 生成的 meta.type 取值；
 /// 「ETF指数」= 沪深京指数 + 扩展行情指数 合并展示）
 enum MarketTab: String, CaseIterable, Identifiable {
-    case mainBoard = "主板"
+    case mainBoard = "沪深主板"
     case etfIndex = "ETF指数"
     var id: String { rawValue }
 }
