@@ -87,7 +87,8 @@ struct ContentView: View {
     }
 
     // MARK: - 底部导航栏（VStack 底部固定段）
-    // 高度 = 分隔线1pt + 按钮行（约25pt），所有机型一致、按钮行直接贴物理屏幕底边。
+    // 高度 = 分隔线1pt + 按钮行（上图下字，图标20 + 文字11，约46pt），
+    // 所有机型一致、按钮行直接贴物理屏幕底边。
     // 不做 home indicator 安全区垫高（用户要求与 mini4 形态统一，指示条绘制在按钮上层）；
     // 背景由外层 VStack 的 ignoresSafeArea(edges:.bottom) 铺到物理屏幕底边
     private var bottomMenuBar: some View {
@@ -96,20 +97,21 @@ struct ContentView: View {
             Color(.separator)
                 .frame(height: 1)
                 .offset(y: -2)
-            // 菜单按钮
+            // 菜单按钮（上图下字：图标在上、文字在下）
             HStack {
                 ForEach(0..<menuItems.count, id: \.self) { index in
                     Button(action: {
                         handleTabTap(index: index)
                     }) {
-                        HStack(spacing: 4) {
+                        VStack(spacing: 2) {
                             Image(systemName: menuItems[index].icon)
                                 .font(.system(size: 20))
                             Text(menuItems[index].title)
-                                .font(.system(size: 16))
+                                .font(.system(size: 11))
                         }
                         .foregroundColor(selectedTab == index ? .accentColor : Color(.secondaryLabel))
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                     }
                     .accessibilityIdentifier(tabIDs[index])
                 }
