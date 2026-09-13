@@ -25,6 +25,99 @@ struct ColumnLayout: Identifiable {
     var id: String { "\(field.rawValue)_\(isNameCode ? "1" : "0")" }
 }
 
+// MARK: - 宿主宽度实测（异形屏安全区适配）
+
+/// 回传宿主视图实际渲染宽度的 PreferenceKey
+struct HostWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+extension View {
+    /// 把宿主实际渲染宽度（自动扣除横屏刘海侧安全区 inset）写入绑定。
+    /// 行情/自选表格用它计算横向滚动上限：不能用 UIScreen.main.bounds.width——
+    /// 刘海屏横屏时左右安全区使实际可视宽度更小，用全屏宽会把滚动上限算短，
+    /// 最右列永远滚不进可视区。
+    func marketTableHostWidth(to width: Binding<CGFloat>) -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: HostWidthKey.self, value: geo.size.width)
+            }
+        )
+        .onPreferenceChange(HostWidthKey.self) { w in
+            if w > 0, width.wrappedValue != w { width.wrappedValue = w }
+        }
+    }
+}
+
+// MARK: - 异形屏横屏适配：仅刘海侧保留安全区，另一侧贴紧物理屏幕边缘
+
+/// 回传宿主视图当前安全区 inset 的 PreferenceKey
+private struct HostInsetsKey: PreferenceKey {
+    static var defaultValue = EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+    static func reduce(value: inout EdgeInsets, nextValue: () -> EdgeInsets) {
+        value = EdgeInsets(top: max(value.top, nextValue().top),
+                           leading: max(value.leading, nextValue().leading),
+                           bottom: max(value.bottom, nextValue().bottom),
+                           trailing: max(value.trailing, nextValue().trailing))
+    }
+}
+
+/// 系统在刘海屏横屏时左右两侧给对称 inset（如 iPhone 11 各 48pt，Apple 有意为之），
+/// 但实际只有刘海那一侧有遮挡，另一侧应贴紧物理屏幕边缘（用户定版）。
+/// 应用位置：ContentView 根布局（全 App 唯一一处，页面内禁止重复叠加——二次外扩会越过物理边缘）。
+/// 刘海侧由界面方向决定（⚠️ UIInterfaceOrientation 与设备姿态命名相反，已实测验证）：
+/// landscapeRight → 刘海在 leading；landscapeLeft → 刘海在 trailing；旋转时经通知回调自动换边。
+/// 无刘海设备（iPad/Home 键机型）横向 inset=0，此修饰符为无操作。
+/// ⚠️ 读 UIKit（interfaceOrientation）只发生在 onAppear/旋转通知回调中，
+/// 禁止在 body 求值期读 UIApplication（会毒化视图更新事务导致 UI 永不刷新）。
+struct NotchSideSafeArea: ViewModifier {
+    @State private var notchOnLeading = true
+    @State private var hInsets = EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+
+    func body(content: Content) -> some View {
+        content
+            // 先在未加 padding 的原始几何上测 inset（避免 padding→测量→padding 反馈回路）；
+            // 贴边后测量值变为非刘海侧 0/刘海侧 inset，padding 重算结果不变（收敛不动点）
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: HostInsetsKey.self, value: geo.safeAreaInsets)
+                }
+            )
+            // 非刘海侧用负 padding 外扩，抵消系统对称 inset，贴紧物理屏幕边缘
+            .padding(.leading, notchOnLeading ? 0 : -hInsets.trailing)
+            .padding(.trailing, notchOnLeading ? -hInsets.leading : 0)
+            .onPreferenceChange(HostInsetsKey.self) { hInsets = $0 }
+            .onAppear { updateNotchSide() }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                updateNotchSide()
+            }
+    }
+
+    private func updateNotchSide() {
+        let orient = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.interfaceOrientation
+        switch orient {
+        // ⚠️ UIInterfaceOrientation 与设备姿态命名相反（已实测验证）：
+        // landscapeRight = 设备顶部（刘海）朝左 → 刘海在 leading
+        // landscapeLeft  = 设备顶部朝右 → 刘海在 trailing
+        case .landscapeRight: notchOnLeading = true
+        case .landscapeLeft:  notchOnLeading = false
+        default: break                              // 其余状态保持现值
+        }
+    }
+}
+
+extension View {
+    /// 异形屏横屏适配：仅刘海侧保留安全区 inset，另一侧贴紧物理屏幕边缘
+    func notchSideOnlySafeArea() -> some View {
+        modifier(NotchSideSafeArea())
+    }
+}
+
 // MARK: - 唯一列网格（表头 / 表内容共用的唯一定义）
 // 统一列宽、格子对齐与右边界竖线；marker 参数区分表头/数据内容。
 
@@ -128,52 +221,60 @@ struct MarketTableRow: View {
         let scrollCols = Array(cols.dropFirst(frozenCount))
         let frozenW = frozenCols.reduce(Self.lineW) { $0 + $1.width + Self.lineW }
         let scrollW = scrollCols.reduce(0) { $0 + $1.width + Self.lineW }
-        // 可视宽度：整表铺满屏幕
-        let visW = UIScreen.main.bounds.width
         let rule = config.sortRule(for: page)
 
-        ZStack(alignment: .topLeading) {
-            // 滚动区：其余列（前接与冻结区等宽的占位），横向 offset 平移
-            HStack(spacing: 0) {
-                Color.clear.frame(width: frozenW)
-                ForEach(scrollCols) { col in
-                    content(col, header: mode.isHeader, meta: metaOf, rule: rule)
-                        .padding(.horizontal, col.isNameCode ? 8 : 6)
-                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
-                        .frame(maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                    Color(.black).frame(width: Self.lineW)
-                        .opacity(0.35)
+        // 用 GeometryReader 实测宿主宽 visW（自动落在安全区/贴边后的真实可视宽内）。
+        // ⚠️ 行外框必须固定=visW：若用 minWidth: 列总和，ZStack 布局宽会被撑到所有列之和
+        //（远超屏宽），.clipped() 只裁视觉不裁布局尺寸，外层 VStack 居中它 → 两侧对称溢出
+        //（mini 等无刘海机型无 inset 吸收，溢出最明显）。列总和只放进内部滚动区。
+        GeometryReader { geo in
+            let visW = geo.size.width
+            ZStack(alignment: .topLeading) {
+                // 滚动区：其余列（前接与冻结区等宽的占位），横向 offset 平移
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: frozenW)
+                    ForEach(scrollCols) { col in
+                        content(col, header: mode.isHeader, meta: metaOf, rule: rule)
+                            .padding(.horizontal, col.isNameCode ? 8 : 6)
+                            .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                        Color(.black).frame(width: Self.lineW)
+                            .opacity(0.35)
+                    }
                 }
-            }
-            .frame(width: max(visW, frozenW + scrollW), height: rowHeight, alignment: .leading)
-            .padding(.top, mode.isHeader ? 1 : 0)
-            .background(rowBackground)
-            .offset(x: xOffset)
-            .zIndex(0)
-            .clipped()
+                // 滚动区宽度 = max(可视宽, 全部列宽)：列放得下就铺满，放不下才横向滚动
+                .frame(width: max(visW, frozenW + scrollW), height: rowHeight, alignment: .leading)
+                .padding(.top, mode.isHeader ? 1 : 0)
+                .background(rowBackground)
+                .offset(x: xOffset)
+                .zIndex(0)
+                .clipped()
 
-            // 冻结区：前 N 列固定，盖在滚动区上方，右侧竖分割线
-            HStack(spacing: 0) {
-                Color(.black).frame(width: Self.lineW).opacity(0.35)
-                ForEach(frozenCols) { col in
-                    content(col, header: mode.isHeader, meta: metaOf, rule: rule)
-                        .padding(.horizontal, col.isNameCode ? 8 : 6)
-                        .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
-                        .frame(maxHeight: .infinity)
-                        .contentShape(Rectangle())
+                // 冻结区：前 N 列固定，盖在滚动区上方，右侧竖分割线
+                HStack(spacing: 0) {
                     Color(.black).frame(width: Self.lineW).opacity(0.35)
+                    ForEach(frozenCols) { col in
+                        content(col, header: mode.isHeader, meta: metaOf, rule: rule)
+                            .padding(.horizontal, col.isNameCode ? 8 : 6)
+                            .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                        Color(.black).frame(width: Self.lineW).opacity(0.35)
+                    }
                 }
+                .frame(width: frozenW, height: rowHeight, alignment: .leading)
+                .padding(.top, mode.isHeader ? 1 : 0)
+                .background(rowBackground)
+                .overlay(alignment: .trailing) { Color(.separator).frame(width: 0.5) }
+                .zIndex(2)
+                .clipped()
             }
-            .frame(width: frozenW, height: rowHeight, alignment: .leading)
-            .padding(.top, mode.isHeader ? 1 : 0)
-            .background(rowBackground)
-            .overlay(alignment: .trailing) { Color(.separator).frame(width: 0.5) }
-            .zIndex(2)
+            // 整行严格 = visW 并裁剪，列再多也不越界（溢出交给内部滚动区 + offset 处理）
+            .frame(width: visW, height: rowHeight, alignment: .leading)
             .clipped()
         }
-        .frame(width: visW, height: rowHeight, alignment: .leading)
-        .clipped()
+        .frame(height: rowHeight)
         .contentShape(Rectangle())
         .onTapGesture {
             // 数据行整行可点打开标的详情；表头 metaOf 为 nil 不触发（不拦截排序按钮）

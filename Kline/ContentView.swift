@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var selectedTab = 5
+    @State private var selectedTab = 2
     @State private var isSearching = false
     @State private var isProfilePresented = false
     @State private var isTestPresented = false
@@ -22,13 +22,11 @@ struct ContentView: View {
         (icon: "house", title: "首页"),
         (icon: "folder", title: "自选"),
         (icon: "chart.bar", title: "行情"),
-        (icon: "gamecontroller", title: "模拟"),
-        (icon: "flask", title: "测试"),
-        (icon: "eyedropper", title: "测试2")
+        (icon: "gamecontroller", title: "模拟")
     ]
 
     // 底部菜单对应的 UITest 定位标识（与 KlineUITests 冒烟用例约定一致）
-    private let tabIDs = ["tab.home", "tab.favorites", "tab.market", "tab.simulation", "tab.test", "tab.test2"]
+    private let tabIDs = ["tab.home", "tab.favorites", "tab.market", "tab.simulation"]
 
     private var detailItem: MetaItem? { detailRouter.item }
 
@@ -82,6 +80,10 @@ struct ContentView: View {
                 }
             }
         )
+        // 异形屏横屏适配（全 App 唯一一处）：仅刘海侧保留安全区 inset，
+        // 另一侧贴紧物理屏幕边缘。行情/自选表格、K线页、底部导航栏、各覆盖层
+        // 全部继承此根布局安全区；页面内禁止重复叠加（二次外扩会越过物理边缘）。
+        .notchSideOnlySafeArea()
     }
 
     // MARK: - 底部导航栏（VStack 底部固定段）
@@ -174,10 +176,6 @@ struct ContentView: View {
             MarketView()
         case 3:
             SimulationView()
-        case 4:
-            MarketTestView()
-        case 5:
-            MarketTest2View()
         default:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
         }

@@ -82,6 +82,9 @@ struct FavoritesView: View {
                 listBody
             }
         }
+        // 异形屏横屏贴边已由 ContentView 根布局统一处理，此处仅实测宿主宽度
+        // （贴边后的真实可视宽），供 maxHOffset 计算横向滚动上限
+        .marketTableHostWidth(to: $tableVisibleWidth)
         .onChange(of: dbm.isLoaded) { loaded in
             if loaded { prefetchAllGroups() }
         }
@@ -335,10 +338,15 @@ struct FavoritesView: View {
         }
     }
 
+    /// 表格宿主实测宽度（安全区内，异形屏横屏已扣除刘海侧 inset）
+    @State private var tableVisibleWidth: CGFloat = 0
+
     /// 可视列里冻结前 3 列后，其余列的最大可左移量（整表横向滚动上限）
     private var maxHOffset: CGFloat {
-        max(0, MarketTableRow.scrollContentWidth(for: .favorites, config: colCfg, frozenCount: 3)
-             - UIScreen.main.bounds.width)
+        // 可视宽度用实测宿主宽（安全区内）；首帧未测量完成前退回 UIScreen 估算
+        let visW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
+        return max(0, MarketTableRow.scrollContentWidth(for: .favorites, config: colCfg, frozenCount: 3)
+             - visW)
     }
 
     /// 横向拖拽：按主轴向驱动 hScrollOffset（冻结列固定、其余列平移）；
