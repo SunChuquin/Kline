@@ -33,11 +33,11 @@ enum FavField: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// 行情页「市场」二级分类（对应 tdx_parser.py 生成的 meta.type 三个取值）
+/// 行情页「市场」二级分类（对应 tdx_parser.py 生成的 meta.type 取值；
+/// 「ETF指数」= 沪深京指数 + 扩展行情指数 合并展示）
 enum MarketTab: String, CaseIterable, Identifiable {
     case mainBoard = "主板"
-    case index = "指数"
-    case etf = "ETF"
+    case etfIndex = "ETF指数"
     var id: String { rawValue }
 }
 
@@ -58,7 +58,7 @@ struct MarketView: View {
 
     // 顶部一级/二级菜单（参考测试页2 居中 Tab + 分段胶囊样式）
     @State private var topMenu: TopField = .market
-    // 市场 → 二级：主板/指数/ETF（即 MarketTab）
+    // 市场 → 二级：主板/ETF指数（即 MarketTab）
     @State private var pickerSeg: PickerField = .trend
     @State private var favSeg: FavField = .holdings
 
@@ -73,18 +73,18 @@ struct MarketView: View {
     /// **渲染用的行快照**：由 `scheduleRefresh()` 写入，避免在计算属性里做预取副作用（否则会死循环触发重绘）。
     @State private var displayRows: [MarketRow] = []
 
-    /// 当前「市场」二级分类对应的 meta.type 值（主板/指数/ETF）
-    private var currentType: String {
+    /// 当前「市场」二级分类对应的 meta.type 取值集合
+    /// （ETF指数 合并展示原「指数」+「ETF」两类内容）
+    private var currentTypes: [String] {
         switch selectedTab {
-        case .mainBoard: return "沪深主板"
-        case .index: return "沪深京指数"
-        case .etf: return "扩展行情指数"
+        case .mainBoard: return ["沪深主板"]
+        case .etfIndex: return ["沪深京指数", "扩展行情指数"]
         }
     }
 
     /// 当前「市场」二级分类下的全部标的（搜索已改为独立搜索页，不在此就地过滤）
     private var tabItems: [MetaItem] {
-        databaseManager.metaList.filter { $0.type == currentType }
+        databaseManager.metaList.filter { currentTypes.contains($0.type) }
     }
 
     /// 表格冻结列数（「行情表设置」面板可配置：第 1 列恒冻结，第 2/3 列可开关；范围 1~3）
@@ -332,7 +332,7 @@ struct MarketView: View {
         .background(Color(.systemBackground))
     }
 
-    /// 二级胶囊栏：一级=市场→主板/指数/ETF；选股→趋势/震荡/反转/情绪；自选→持仓/股池
+    /// 二级胶囊栏：一级=市场→主板/ETF指数；选股→趋势/震荡/反转/情绪；自选→持仓/股池
     private var secondLevelBar: some View {
         HStack(spacing: 0) {
             switch topMenu {
