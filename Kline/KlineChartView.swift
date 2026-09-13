@@ -3487,7 +3487,7 @@ struct KlineChartView: View {
                 }
                 Spacer()
             }
-            .padding(.leading, 4)   // 起始文字朝中间偏移 4pt
+            .padding(.leading, 12)   // 起始文字朝中间偏移 4pt
             Text(right).font(.system(size: 10)).foregroundColor(.gray)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 4)   // 截止文字朝中间偏移 4pt
