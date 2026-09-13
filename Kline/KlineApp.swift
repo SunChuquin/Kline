@@ -8,15 +8,13 @@
 import SwiftUI
 import UIKit
 
-/// 方向锁定：iPad 仅横屏（左右两个横屏方向可自由切换），iPhone 仅竖屏。
+/// 方向锁定：iPad 与 iPhone 均仅横屏（左右两个横屏方向可自由切换），旋转设备不翻转。
 /// 与 pbxproj 的 INFOPLIST_KEY_UISupportedInterfaceOrientations_* 双重保险，
-/// 启动即正确方向，用户旋转设备也不会翻转。
+/// 启动即正确方向，前后台切换/设备旋转全程稳定横屏。
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        return UIDevice.current.userInterfaceIdiom == .pad
-            ? [.landscapeLeft, .landscapeRight]
-            : [.portrait]
+        return [.landscapeLeft, .landscapeRight]
     }
 }
 
