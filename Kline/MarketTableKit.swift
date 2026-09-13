@@ -74,6 +74,9 @@ private struct HostInsetsKey: PreferenceKey {
 /// ⚠️ 读 UIKit（interfaceOrientation）只发生在 onAppear/旋转通知回调中，
 /// 禁止在 body 求值期读 UIApplication（会毒化视图更新事务导致 UI 永不刷新）。
 struct NotchSideSafeArea: ViewModifier {
+    /// 中文字宽基准：系统标准 body 字号 = 17pt（iOS 标准字体尺寸；
+    /// 中文方块字宽≈字号）。在不同屏幕尺寸/分辨率下保持一致。
+    private let hanziWidth: CGFloat = 17
     @State private var notchOnLeading = true
     @State private var hInsets = EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
 
@@ -86,9 +89,12 @@ struct NotchSideSafeArea: ViewModifier {
                     Color.clear.preference(key: HostInsetsKey.self, value: geo.safeAreaInsets)
                 }
             )
-            // 非刘海侧用负 padding 外扩，抵消系统对称 inset，贴紧物理屏幕边缘
-            .padding(.leading, notchOnLeading ? 0 : -hInsets.trailing)
-            .padding(.trailing, notchOnLeading ? -hInsets.leading : 0)
+            // 精确适配（刘海侧为基准，另一侧贴边）：
+            // ① 刘海侧：保留系统 inset，再减一个中文字宽（内容探入 W，安全区 48→31）；
+            // ② 另一侧：原贴物理边缘，改为留一个中文字宽（内容离边缘 W），
+            //    两侧合计留白不变，界面整体更均衡；交互元素仍在可点击区域内
+            .padding(.leading, notchOnLeading ? -hanziWidth : -hInsets.trailing + hanziWidth)
+            .padding(.trailing, notchOnLeading ? -hInsets.leading + hanziWidth : -hanziWidth)
             .onPreferenceChange(HostInsetsKey.self) { hInsets = $0 }
             .onAppear { updateNotchSide() }
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
