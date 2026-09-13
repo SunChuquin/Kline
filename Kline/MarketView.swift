@@ -48,13 +48,11 @@ struct MarketView: View {
     @ObservedObject private var colCfg = MarketConfigStore.shared
     @ObservedObject private var detailRouter = DetailRouter.shared
 
-    @State private var searchText = ""
-    @State private var searchResults: [MetaItem] = []
-    @State private var showSearchField = false
-    @FocusState private var isSearchFocused: Bool
     @State private var selectedTab: MarketTab = .mainBoard
     @State private var showColumnPanel = false
     @State private var addGroupTarget: MetaItem? = nil
+    /// 点击顶部搜索图标后弹出搜索页（复用 HomeView 搜索模式，等同双击首页的效果）
+    @State private var homeSearchActive = false
     /// 有字段筛选生效时，合并 bars 陆续到位触发的重筛选（防抖，避免每行刷全表）
     @State private var filterDebounce: DispatchWorkItem? = nil
 
@@ -84,18 +82,9 @@ struct MarketView: View {
         }
     }
 
-    /// 当前「市场」二级分类下的全部标的（搜索为空时展示此列表 + 排序）
+    /// 当前「市场」二级分类下的全部标的（搜索已改为独立搜索页，不在此就地过滤）
     private var tabItems: [MetaItem] {
         databaseManager.metaList.filter { $0.type == currentType }
-    }
-
-    private var filteredItems: [MetaItem] {
-        if searchText.isEmpty {
-            return tabItems
-        } else {
-            // 搜索结果为全库匹配，再按当前 Tab 类型过滤
-            return searchResults.filter { $0.type == currentType }
-        }
     }
 
     /// 当前排序字段（无排序时为 nil）
@@ -122,7 +111,7 @@ struct MarketView: View {
             displayRows = []
             return
         }
-        let metas = filteredItems
+        let metas = tabItems
         // 1) 分置顶 / 非置顶
         let favedMetas = metas.filter { fav.isFavorited($0.id) }
         let othersMetas = metas.filter { !fav.isFavorited($0.id) }
@@ -171,9 +160,8 @@ struct MarketView: View {
             headerView
             Divider()
             if databaseManager.isLoaded {
-                if filteredItems.isEmpty {
-                    MarketEmptyStateView(icon: "magnifyingglass",
-                                         message: searchText.isEmpty ? "暂无标的" : "没有找到相关股票")
+                if tabItems.isEmpty {
+                    MarketEmptyStateView(icon: "magnifyingglass", message: "暂无标的")
                 } else {
                     // 表头（吸顶，冻结前 3 列）+ 列表（横向手势滚动 / 边线调节覆盖层）
                     ZStack(alignment: .topLeading) {
@@ -215,16 +203,14 @@ struct MarketView: View {
                 loadingView
             }
         }
-        // 搜索展开时：覆盖其余区域拦截点击，点击外部即收起搜索框
+        // 点击顶部搜索图标：弹出与「双击首页」完全一致的搜索页面——
+        // 直接复用 HomeView 的搜索模式（返回按钮+搜索框+SearchPageView），
+        // 不新建任何搜索实现；isSearching=true 时 HomeView 即呈现搜索界面，
+        // 点返回按钮写回 false → 覆盖层关闭、回到行情页
         .overlay {
-            if showSearchField {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        searchText = ""
-                        showSearchField = false
-                        isSearchFocused = false
-                    }
+            if homeSearchActive {
+                HomeView(isSearching: $homeSearchActive, isProfilePresented: .constant(false))
+                    .transition(.opacity)
             }
         }
         // 异形屏横屏贴边已由 ContentView 根布局统一处理，此处仅实测宿主宽度
@@ -232,19 +218,6 @@ struct MarketView: View {
         .marketTableHostWidth(to: $tableVisibleWidth)
         // 键盘避让已由 ContentView 根部全局禁用，此处无需重复处理
         .onAppear { scheduleRefresh() }
-        // 搜索
-        .onChange(of: searchText) { newValue in
-            if !newValue.isEmpty {
-                databaseManager.searchMetaAsync(keyword: newValue) { results in
-                    searchResults = results
-                }
-            } else {
-                searchResults = []
-            }
-            scheduleRefresh()
-        }
-        // 搜索结果到位后重排
-        .onChange(of: searchResults) { _ in scheduleRefresh() }
         // 切 Tab / 数据库加载完毕
         .onChange(of: selectedTab) { _ in scheduleRefresh() }
         .onChange(of: databaseManager.isLoaded) { _ in scheduleRefresh() }
@@ -328,22 +301,14 @@ struct MarketView: View {
                     .frame(width: 28, height: 28)
                     .help("表头设置（字段显隐/排序/宽度）")
 
-                    // 搜索栏（默认展开，始终显示，不折叠为图标）
-                    HStack(spacing: 6) {
+                    // 搜索：点击弹出与「双击首页」一致的搜索页面（复用 HomeView 搜索模式）
+                    Button { homeSearchActive = true } label: {
                         Image(systemName: "magnifyingglass")
-                            .foregroundColor(.gray).font(.system(size: 13))
-                        TextField("搜索代码/名称", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .focused($isSearchFocused)
-                            .submitLabel(.search)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onSubmit { isSearchFocused = false }
+                            .foregroundColor(.secondary).font(.system(size: 16))
                     }
-                    .padding(EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9))
-                    .background(Color(.systemGray5))
-                    .cornerRadius(10)
-                    .frame(width: 150)
+                    .buttonStyle(.plain)
+                    .frame(width: 28, height: 28)
+                    .help("搜索标的")
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 12)
@@ -445,7 +410,6 @@ struct MarketView: View {
             // 整行单元格（冻结前3列 + 滚动列）；自选高亮由 MarketTableRow.isFaved 呈现
             MarketTableRow(page: .marketBoard, mode: .data(meta: meta), config: colCfg, rowCache: rowCache,
                            onOpen: { meta in
-                isSearchFocused = false
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = displayRows.map { $0.meta }
                 DetailRouter.shared.open(meta, in: ctx)
