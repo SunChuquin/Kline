@@ -87,6 +87,11 @@ struct MarketView: View {
         databaseManager.metaList.filter { $0.type == currentType }
     }
 
+    /// 表格冻结列数（「行情表设置」面板可配置：第 1 列恒冻结，第 2/3 列可开关；范围 1~3）
+    private var frozenCount: Int {
+        colCfg.frozenCount(for: .marketBoard)
+    }
+
     /// 当前排序字段（无排序时为 nil）
     private var currentSortField: MarketField? {
         colCfg.sortRule(for: .marketBoard)?.field
@@ -167,7 +172,7 @@ struct MarketView: View {
                     ZStack(alignment: .topLeading) {
                         VStack(spacing: 0) {
                             MarketTableRow(page: .marketBoard, mode: .header, config: colCfg, rowCache: rowCache,
-                                           frozenCount: 3, xOffset: hScrollOffset)
+                                           frozenCount: frozenCount, xOffset: hScrollOffset)
                             .background(Color(.systemBackground))
                             // 列表：外层垂直 ScrollView 保留上下滚动/懒加载；
                             // 横向用手势驱动 hScrollOffset（冻结前3列不动，其余列平移）
@@ -191,7 +196,7 @@ struct MarketView: View {
                         if edgeAdjust {
                             ColumnResizeOverlay(
                                 cols: MarketTableRow.renderedColumns(for: .marketBoard, config: colCfg),
-                                frozenCount: 3,
+                                frozenCount: frozenCount,
                                 xOffset: hScrollOffset,
                                 onResize: onResizeColumn
                             )
@@ -378,7 +383,7 @@ struct MarketView: View {
     private var maxHOffset: CGFloat {
         // 可视宽度用实测宿主宽（安全区内）；首帧未测量完成前退回 UIScreen 估算
         let visW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
-        return max(0, MarketTableRow.scrollContentWidth(for: .marketBoard, config: colCfg, frozenCount: 3)
+        return max(0, MarketTableRow.scrollContentWidth(for: .marketBoard, config: colCfg, frozenCount: frozenCount)
              - visW)
     }
 
@@ -413,7 +418,7 @@ struct MarketView: View {
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = displayRows.map { $0.meta }
                 DetailRouter.shared.open(meta, in: ctx)
-            }, frozenCount: 3, xOffset: hScrollOffset, isFaved: isFaved)
+            }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: isFaved)
         }
         .padding(.trailing, 8)
         .accessibilityIdentifier("market.rowCard")

@@ -37,6 +37,11 @@ struct FavoritesView: View {
         return out
     }
 
+    /// 表格冻结列数（「行情表设置」面板可配置：第 1 列恒冻结，第 2/3 列可开关；范围 1~3）
+    private var frozenCount: Int {
+        colCfg.frozenCount(for: .favorites)
+    }
+
     private var currentGroup: FavoritesGroup {
         let gid = fav.selectedGroupID
         if let g = tabs.first(where: { $0.id == gid }) { return g }
@@ -77,7 +82,7 @@ struct FavoritesView: View {
             } else {
                 // 表头（吸顶，冻结前3列，横向跟随整表滚动）
                 MarketTableRow(page: .favorites, mode: .header, config: colCfg, rowCache: rowCache,
-                               frozenCount: 3, xOffset: hScrollOffset)
+                               frozenCount: frozenCount, xOffset: hScrollOffset)
                 .background(Color(.systemBackground))
                 listBody
             }
@@ -305,7 +310,7 @@ struct FavoritesView: View {
                     MarketTableRow(page: .favorites, mode: .data(meta: mm), config: colCfg, rowCache: rowCache,
                                    onOpen: { meta in
                         DetailRouter.shared.open(meta, in: currentItems)
-                    }, frozenCount: 3, xOffset: hScrollOffset, isFaved: mFaved)
+                    }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: mFaved)
                     .contextMenu {
                         Button(role: .destructive) {
                             fav.removeFromGroup(id: gid, metaID: mm.id)
@@ -345,7 +350,7 @@ struct FavoritesView: View {
     private var maxHOffset: CGFloat {
         // 可视宽度用实测宿主宽（安全区内）；首帧未测量完成前退回 UIScreen 估算
         let visW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
-        return max(0, MarketTableRow.scrollContentWidth(for: .favorites, config: colCfg, frozenCount: 3)
+        return max(0, MarketTableRow.scrollContentWidth(for: .favorites, config: colCfg, frozenCount: frozenCount)
              - visW)
     }
 
@@ -377,7 +382,7 @@ struct FavoritesView: View {
             MarketTableRow(page: .favorites, mode: .data(meta: meta), config: colCfg, rowCache: rowCache,
                            onOpen: { meta in
                 DetailRouter.shared.open(meta, in: currentItems)
-            }, frozenCount: 3, xOffset: hScrollOffset, isFaved: isFaved)
+            }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: isFaved)
         }
         .padding(.trailing, 8)
         // 长按弹菜单：取消自选 / 加入其它分组 / 移动分组

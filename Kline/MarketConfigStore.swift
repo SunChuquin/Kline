@@ -52,6 +52,36 @@ struct MarketPageConfig: Codable {
     var columns: [MarketColumnPref]
     /// 当前排序规则（可选；nil 表示默认顺序，即列表源顺序）
     var sortRule: MarketSortRule?
+    /// 冻结前 N 个渲染列（1~3）：第 1 列恒冻结；第 2/3 列可配置。默认 3
+    var frozenCount: Int
+
+    init(columns: [MarketColumnPref], sortRule: MarketSortRule?, frozenCount: Int = 3) {
+        self.columns = columns
+        self.sortRule = sortRule
+        self.frozenCount = frozenCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case columns
+        case sortRule
+        case frozenCount
+    }
+
+    /// 兼容旧版持久化数据：frozenCount 字段缺失时回退为默认 3，
+    /// 避免解码失败导致整份配置被重置
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        columns = try c.decode([MarketColumnPref].self, forKey: .columns)
+        sortRule = try c.decodeIfPresent(MarketSortRule.self, forKey: .sortRule)
+        frozenCount = try c.decodeIfPresent(Int.self, forKey: .frozenCount) ?? 3
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(columns, forKey: .columns)
+        try c.encodeIfPresent(sortRule, forKey: .sortRule)
+        try c.encode(frozenCount, forKey: .frozenCount)
+    }
 }
 
 @MainActor
@@ -157,6 +187,11 @@ final class MarketConfigStore: ObservableObject {
         return field.defaultWidth
     }
 
+    /// 冻结前 N 个渲染列（1~3），恒 >=1（最左侧列不可取消冻结）
+    func frozenCount(for page: MarketConfigPage) -> Int {
+        min(3, max(1, config(for: page).frozenCount))
+    }
+
     // MARK: - 写配置
 
     /// 更新整个页面配置（列显隐/顺序/宽度 / 排序一次全存）
@@ -187,6 +222,13 @@ final class MarketConfigStore: ObservableObject {
         if let idx = c.columns.firstIndex(where: { $0.field == field }) {
             c.columns[idx].widthOverride = width
         }
+        update(page, config: c)
+    }
+
+    /// 设置冻结列数（1~3 连续冻结；第 1 列恒冻结不可取消，下限 1）
+    func setFrozenCount(_ n: Int, page: MarketConfigPage) {
+        var c = self.config(for: page)
+        c.frozenCount = min(3, max(1, n))
         update(page, config: c)
     }
 

@@ -481,6 +481,65 @@ struct MarketColumnConfigPanel: View {
         _draft = State(initialValue: configStore.config(for: page))
     }
 
+    /// 表格冻结卡片组：第 1 列恒冻结（不可取消），第 2/3 列可开关。
+    /// 冻结为连续前 N 列（frozenCount 1~3）：打开第 3 列自动带上第 2 列；
+    /// 关闭第 2 列连带解除第 3 列。列名取当前渲染列顺序（与表格实际冻结一致）。
+    private var frozenConfigSection: some View {
+        let renderCols = MarketTableRow.renderedColumns(for: page, config: configStore)
+        return Section {
+            // 第 1 列：恒冻结，开关置灰不可操作
+            if renderCols.count >= 1 {
+                HStack(spacing: 8) {
+                    Text("第 1 列（\(renderCols[0].field.title)）")
+                        .font(.system(size: 15))
+                        .lineLimit(1)
+                    Spacer()
+                    Toggle("", isOn: .constant(true))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(true)
+                }
+                .frame(minHeight: 36)
+            }
+            // 第 2 列：可开关
+            if renderCols.count >= 2 {
+                HStack(spacing: 8) {
+                    Text("第 2 列（\(renderCols[1].field.title)）")
+                        .font(.system(size: 15))
+                        .lineLimit(1)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { draft.frozenCount >= 2 },
+                        set: { on in draft.frozenCount = on ? max(draft.frozenCount, 2) : 1 }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                }
+                .frame(minHeight: 36)
+            }
+            // 第 3 列：可开关
+            if renderCols.count >= 3 {
+                HStack(spacing: 8) {
+                    Text("第 3 列（\(renderCols[2].field.title)）")
+                        .font(.system(size: 15))
+                        .lineLimit(1)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { draft.frozenCount >= 3 },
+                        set: { on in draft.frozenCount = on ? 3 : 2 }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                }
+                .frame(minHeight: 36)
+            }
+        } header: {
+            Text("表格冻结")
+        } footer: {
+            Text("最左侧列保持冻结不可取消；冻结为连续前 N 列，关闭某列后其右侧列同步解除")
+        }
+    }
+
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -489,7 +548,7 @@ struct MarketColumnConfigPanel: View {
                     Button("取消") { dismiss() }
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text("表头设置")
+                    Text("行情表设置")
                         .font(.system(size: 16, weight: .semibold))
                     Spacer()
                     Button("重置") {
@@ -497,7 +556,10 @@ struct MarketColumnConfigPanel: View {
                     }
                     .foregroundColor(.orange)
                     Button(action: {
-                        configStore.update(page, config: draft)
+                        var saved = draft
+                        // 冻结列数做范围收敛（1~3），防止异常值写入
+                        saved.frozenCount = min(3, max(1, saved.frozenCount))
+                        configStore.update(page, config: saved)
                         dismiss()
                     }) {
                         Text("完成")
@@ -511,6 +573,7 @@ struct MarketColumnConfigPanel: View {
                 Divider()
 
                 List {
+                    // === 卡片组 1：表头设置（原表头配置功能） ===
                     Section {
                         ForEach($draft.columns) { $col in
                             if col.field.isConfigurable {
@@ -548,15 +611,18 @@ struct MarketColumnConfigPanel: View {
                             draft.columns.move(fromOffsets: from, toOffset: to)
                         }
                     } header: {
-                        Text("拖动右侧手柄调整列顺序，开关控制显示/隐藏")
+                        Text("表头设置")
                     } footer: {
                         VStack(alignment: .leading, spacing: 3) {
+                            Text("• 拖动右侧手柄调整列顺序，开关控制显示/隐藏")
                             Text("• 数值字段可设置范围筛选，多字段同时生效（取交集）")
                             Text("• 点击表头切换排序：降→升→取消（三击循环）")
-                            Text("• 点击「完成」保存后立即生效，行情/自选页面各自独立")
                         }
                         .font(.footnote)
                     }
+
+                    // === 卡片组 2：表格冻结（冻结前 N 列，第 1 列恒冻结） ===
+                    frozenConfigSection
                 }
                 .listStyle(.insetGrouped)
                 .environment(\.editMode, .constant(.active))
