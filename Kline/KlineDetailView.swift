@@ -120,6 +120,11 @@ final class DualLinkSync: ObservableObject {
     /// 更小周期视图据此用两根竖轴框出来源周期K线覆盖的时间范围（无需十字光标）。
     var sourcePeriod: KlinePeriod = .daily
     @Published var sourceRange: (Int, Int)? = nil
+    /// 当前联动光标会话的来源视图下标（= 发起视图的 KlineChartView.selfIndex）。
+    /// 只有来源视图「再点一下」能取消整组联动光标；非来源小周期视图据此放置纯本地
+    /// 「第二个十字光标」（不发布、不联动），非来源大周期/同周期视图据此忽略点击与拖动。
+    /// cursorDate 被清空（取消/开关联动/开「边」/钻取/退出）时随之一并置 nil。
+    var sourceID: Int? = nil
 }
 
 /// 信息栏「主图指标名称按钮」桥接：图表把按钮标题（如"日线: MA"）与点击行为
@@ -458,6 +463,7 @@ struct KlineDetailView: View {
                     pinEnabled = false
                     linkSync.cursorDate = nil
                     linkSync.sourceRange = nil
+                    linkSync.sourceID = nil
                     withAnimation { dualLink = false }
                 } else if drillIn != nil {
                     // 2. 钻取单图 → 恢复联动页面（dualLink 本身未被清，仍是 true）
@@ -516,6 +522,7 @@ struct KlineDetailView: View {
                     if turningOn {
                         linkSync.cursorDate = nil
                         linkSync.sourceRange = nil
+                        linkSync.sourceID = nil
                     }
                 }) {
                     Text("边")
@@ -567,6 +574,7 @@ struct KlineDetailView: View {
                     cursorClearToken = UUID()
                     linkSync.cursorDate = nil
                     linkSync.sourceRange = nil
+                    linkSync.sourceID = nil
                 }
             }) {
                 Text("联")
@@ -1237,6 +1245,7 @@ struct KlineDetailView: View {
         pinEnabled = false
         linkSync.cursorDate = nil
         linkSync.sourceRange = nil
+        linkSync.sourceID = nil
         cursorClearToken = UUID()
 
         guard databaseManager.isLoaded else { return }   // DB 就绪后 onChange 会重试
