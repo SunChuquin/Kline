@@ -567,6 +567,9 @@ struct KlineChartView: View {
     /// 清光标广播令牌（外层切换 cursorLinkEnabled 或整体退出联动时更新 UUID，
     /// 本视图 onChange 清空自身 selectedIndex/pinnedIndex 等所有光标状态）
     let cursorClearToken: UUID
+    /// 联动复盘：本视图显示标的的 metaID（tile 传入；单图为 nil）。
+    /// 大周期视图合成"形成中K线"时，用它取**本标的**的来源周期数据（跨标的互不借用）。
+    let linkedMetaID: Int?
     /// 联动模式下隐藏行情行里的"额"（成交额）字段：时间轴上一行 与 时间轴内 pinned 覆盖 均隐藏
     let hideQuoteTurnover: Bool
     /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
@@ -595,6 +598,8 @@ struct KlineChartView: View {
     /// 双视图联动同步（左日线/右周线共用；单视图时传入独立空对象，cursorDate 不变化、无副作用）。
     /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
     @ObservedObject var linkSync: DualLinkSync
+    /// 联动复盘：观察来源周期数据缓存，目标大周期视图在来源数据到达后重绘合成K线
+    @ObservedObject private var linkSourceCache = LinkSourceBarCache.shared
     /// 联动：本视图是否正由用户直接拖动光标（用于区分「右侧用户操作」与「左侧拖动回声」）
     @State private var linkUserDragging = false
     @Binding var chartStyle: ChartStyle
@@ -719,6 +724,7 @@ struct KlineChartView: View {
          linkAutoCenter: Bool = false,
          cursorLinkEnabled: Bool = false,
          cursorClearToken: UUID = UUID(),
+         linkedMetaID: Int? = nil,
          hideQuoteTurnover: Bool = false,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
          onPeriodPrefetched: ((KlinePeriod) -> Void)? = nil,
@@ -746,6 +752,7 @@ struct KlineChartView: View {
         self.linkAutoCenter = linkAutoCenter
         self.cursorLinkEnabled = cursorLinkEnabled
         self.cursorClearToken = cursorClearToken
+        self.linkedMetaID = linkedMetaID
         self.hideQuoteTurnover = hideQuoteTurnover
         self.onPeriodSwitch = onPeriodSwitch
         self.onPeriodPrefetched = onPeriodPrefetched
@@ -988,15 +995,115 @@ struct KlineChartView: View {
         return selectedIndex
     }
 
-    /// 联动接收态下，可交互光标横线应对准的价格 = 联动到的那根K线**收盘价**。
+    /// 联动接收态下，可交互光标横线应对准的价格 = 联动到的那根K线**收盘价**
+    /// （复盘合成时为合成K线收盘价，即光标所指来源K线收盘价）。
     /// 手指不在本视图，横线不再固定主图垂直中点（中点价格没有指向意义），而是精确落在该K线收盘价位。
     /// 镜像（"空"）模式下随 mir() 取负，与镜像后的价格域、蜡烛绘制保持一致；
     /// 本地手指拖动 / 单图 / 双竖轴范围框模式下返回 nil（保持原有手指跟手行为）。
     private var linkedCursorClose: Double? {
         guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
               let idx = renderCursorIndex, idx >= 0, idx < sortedData.count else { return nil }
-        let close = sortedData[idx].close
+        let close = cursorDisplayItem(at: idx).close
         return close > 0 ? mir(close) : nil
+    }
+
+    // MARK: - 联动「历史时点复盘」（目标周期 ≥ 来源周期）
+
+    /// 一次复盘的核心状态：光标所在的本周期K线全局索引 + 该索引的合成K线（同周期/数据未就绪为 nil）。
+    /// 纯渲染派生：cursorDate 消失即整体为 nil，合成/淡化零残留。
+    private struct LinkReplay: Equatable {
+        let idx: Int
+        let synthetic: KlineItem?
+        /// 未来淡化起始全局索引（合成/光标K线的下一根）
+        var dimFrom: Int { idx + 1 }
+    }
+
+    /// 当前是否处于复盘态及其内容。与双竖轴范围框（rank <）互斥：
+    /// - rank 严格大于来源周期：合成"形成中K线"（需本标的来源周期数据，已懒加载则即时合成）；
+    /// - rank 相等（同周期，含跨标的）：不合成，synthetic=nil，但淡化仍生效；
+    /// - 来源数据未加载/区间无K线（停牌）：synthetic=nil，回退真实K线显示，淡化仍生效。
+    private var linkReplayState: LinkReplay? {
+        guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
+              linkRangeIndices == nil,
+              let date = linkSync.cursorDate,
+              self.period.granularityRank >= linkSync.sourcePeriod.granularityRank,
+              let idx = nearestIndex(to: date),
+              idx >= 0, idx < sortedData.count else { return nil }
+        var synth: KlineItem?
+        if self.period.granularityRank > linkSync.sourcePeriod.granularityRank, let meta = linkedMetaID {
+            synth = synthesizeBar(targetIndex: idx, asOf: date,
+                                  source: linkSourceCache.bars(metaID: meta, period: linkSync.sourcePeriod))
+        }
+        return LinkReplay(idx: idx, synthetic: synth)
+    }
+
+    /// 可交互光标在某索引处用于显示/读数的 K 线：复盘合成态取合成K线，其余取真实K线。
+    /// 固定光标（pinned）索引与复盘 idx 不可能相同（联动态无 pin），故该函数可被共用读数点直接调用。
+    private func cursorDisplayItem(at index: Int) -> KlineItem {
+        if let r = linkReplayState, r.idx == index, let s = r.synthetic { return s }
+        return sortedData[index]
+    }
+
+    /// 确保复盘所需的（本标的, 来源周期）数据已发起加载；命中/在途时不重复查询。
+    /// 在光标日期到达与图表 onAppear（切周期/标的后重建）两个入口调用。
+    private func ensureLinkSourceBars() {
+        // cursorDate 为 nil（无活动光标）时绝不请求，否则 onAppear 会用默认 sourcePeriod 误取
+        guard cursorLinkEnabled, linkSync.cursorDate != nil,
+              self.period.granularityRank > linkSync.sourcePeriod.granularityRank,
+              let meta = linkedMetaID else { return }
+        linkSourceCache.request(metaID: meta, period: linkSync.sourcePeriod)
+    }
+
+    /// 用来源周期K线合成目标大周期光标所在那根"形成中K线"。
+    /// 聚合区间 = [本目标K线所属大周期的起始边界 …… ≤asOf 的最后一根来源K线]：
+    /// 开=首根开、收=末根收、高/低=包络、量/额=累加；合成K线日期沿用目标周期K线起始日。
+    /// source 为空（未加载/无数据）或区间内无K线时返回 nil。
+    private func synthesizeBar(targetIndex idx: Int, asOf date: Int, source src: [KlineItem]) -> KlineItem? {
+        guard !src.isEmpty, idx >= 0, idx < sortedData.count else { return nil }
+        let target = sortedData[idx]
+        let (periodStart, _) = KlinePeriod.periodDateRange(self.period, date: target.date)
+        guard let lo = lowerBoundSorted(src, periodStart),
+              let hi = lastIndexNotAfter(src, date), hi >= lo else { return nil }
+        var open = 0.0
+        var close = 0.0
+        var high = -Double.greatestFiniteMagnitude
+        var low = Double.greatestFiniteMagnitude
+        var volume = 0.0
+        var turnover = 0.0
+        for k in lo...hi {
+            let it = src[k]
+            if k == lo { open = it.open }
+            close = it.close
+            if it.high > high { high = it.high }
+            if it.low < low { low = it.low }
+            volume += it.volume
+            turnover += it.turnover
+        }
+        return KlineItem(date: target.date, open: open, high: high, low: low,
+                         close: close, volume: volume, turnover: turnover)
+    }
+
+    /// 升序 K 线序列中第一个 date >= target 的下标（无则 nil）
+    private func lowerBoundSorted(_ src: [KlineItem], _ target: Int) -> Int? {
+        var lo = 0
+        var hi = src.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if src[mid].date < target { lo = mid + 1 } else { hi = mid }
+        }
+        return src[lo].date >= target ? lo : nil
+    }
+
+    /// 升序 K 线序列中最后一个 date <= target 的下标（无则 nil）
+    private func lastIndexNotAfter(_ src: [KlineItem], _ target: Int) -> Int? {
+        var lo = 0
+        var hi = src.count - 1
+        var ans: Int?
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if src[mid].date <= target { ans = mid; lo = mid + 1 } else { hi = mid - 1 }
+        }
+        return ans
     }
 
     // MARK: - 指标序列计算
@@ -1949,6 +2056,9 @@ struct KlineChartView: View {
             // cache，天然对齐。isolatedSubs (metaId==nil, 联动态 tile) 跳过本次校验，
             // 改由 loadData 侧调用 static 版本。
             if metaId != nil { verifyPeriodSignature() }
+            // 联动复盘：切周期/标的导致 .id 重建后，若联动光标仍在（cursorDate 未变、
+            // 不会再收到 onChange），立即补一次来源数据加载请求，命中缓存则当帧即可合成
+            ensureLinkSourceBars()
             // 把主图指标按钮标题/点击行为同步给外层信息栏
             syncMainLegendPortal()
             // 副图配置已持久化在共享仓库，无需重置
@@ -2100,6 +2210,9 @@ struct KlineChartView: View {
             notifyHasCursor()
             return
         }
+        // 复盘态（本视图周期严格大于来源周期）：确保本标的来源周期数据已加载，
+        // 到达后经 LinkSourceBarCache.revision 驱动合成K线重绘（同周期无需来源数据）
+        ensureLinkSourceBars()
         // 被联动视图始终居中显示联动光标：每次联动更新都滚动窗口让该K线居中。
         let half = count / 2
         let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
@@ -2785,7 +2898,8 @@ struct KlineChartView: View {
                 // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）
                 if isInPanel(y, mainTop, mainBottom),
                    index >= startIndex, index < endIndex, endIndex >= 0, endIndex < sortedData.count {
-                    let cursorItem = sortedData[index]
+                    // 联动复盘：涨幅基准为合成K线收盘；屏幕末根是真实K线（"从当时到窗口右侧"）
+                    let cursorItem = cursorDisplayItem(at: index)
                     let screenLast = sortedData[endIndex]
                     if cursorItem.close > 0, screenLast.close > 0 {
                         let pct = (screenLast.close - cursorItem.close) / cursorItem.close * 100
@@ -2872,7 +2986,8 @@ struct KlineChartView: View {
     @ViewBuilder
     private func mainCursorVLine(index: Int?, compare: Int?, width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
         if let index, index >= startIndex, index <= endIndex {
-            let item = sortedData[index]
+            // 联动复盘：可交互光标在合成索引时，距今涨幅等读数用合成K线（日期与真实K线一致）
+            let item = cursorDisplayItem(at: index)
             let xPosition = (CGFloat(index - startIndex) + 0.5) * candleSpacing
             // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）；第二个光标蓝色、固定光标黑色
             let topCut = clampedAxisY(0, in: height) + 8
@@ -3009,14 +3124,34 @@ struct KlineChartView: View {
         // 注意：K线空实心/类型直接读取 config.chartStyle —— config 已被 @ObservedObject 观察，
         // 这样「K线设置-显示组-类型」修改（含启动时从 UserDefaults 恢复）都会立即驱动主图重绘实心/空心，
         // 不依赖外部传入的 @Binding 中间层传播。
-        MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
+        // 联动复盘：全局 idx → 可见切片本地索引；合成K线镜像取负与 mirroredSlice 同构。
+        let replay = linkReplayState
+        let localCount = max(0, endIndex - startIndex + 1)
+        let syntheticBar: SyntheticBar? = {
+            guard let r = replay, let s = r.synthetic,
+                  r.idx >= startIndex, r.idx <= endIndex else { return nil }
+            let item: KlineItem
+            if mainMirrored {
+                item = KlineItem(date: s.date, open: -s.open, high: -s.high, low: -s.low,
+                                 close: -s.close, volume: s.volume, turnover: s.turnover)
+            } else {
+                item = s
+            }
+            return SyntheticBar(index: r.idx - startIndex, item: item)
+        }()
+        let dimFromLocal: Int? = replay.flatMap { r in
+            let d = r.dimFrom - startIndex
+            return (d >= 0 && d < localCount) ? d : nil
+        }
+        return MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
                         curves: isBareK ? [] : mainCurves.map { CanvasCurve(color: $0.color, values: mirroredSliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
                         gaps: mainMirrored ? mirroredGaps : gaps, sliceStart: startIndex,
-                        latest: mirroredLatest)
+                        latest: mirroredLatest,
+                        syntheticBar: syntheticBar, dimFromIndex: dimFromLocal)
             .equatable()
     }
 
@@ -3037,6 +3172,22 @@ struct KlineChartView: View {
         } else {
             labelRatios = [0, 1]
         }
+        // 联动复盘：未来淡化本地索引 + VOL/AMO 合成柱（镜像时与副图曲线同规则取负）
+        let replay = linkReplayState
+        let localCount = max(0, endIndex - startIndex + 1)
+        let dimLocal: Int? = replay.flatMap { r in
+            let d = r.dimFrom - startIndex
+            return (d >= 0 && d < localCount) ? d : nil
+        }
+        let synthStick: SyntheticStick? = {
+            guard let r = replay, let s = r.synthetic,
+                  r.idx >= startIndex, r.idx <= endIndex,
+                  m.kind == "VOL" || m.kind == "AMO" else { return nil }
+            let v = m.kind == "AMO" ? s.turnover : s.volume
+            return SyntheticStick(index: r.idx - startIndex,
+                                  value: config.mainMirrored ? -v : v,
+                                  isUp: s.isUp)
+        }()
         return ZStack(alignment: .topLeading) {
             Color.white
             SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
@@ -3044,7 +3195,8 @@ struct KlineChartView: View {
                                                               values: subMirroredSliceArr($0.values),
                                                               style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
                            rangeMin: range.min, rangeMax: range.max,
-                           upColor: upColor, downColor: downColor, gridColor: gridColor)
+                           upColor: upColor, downColor: downColor, gridColor: gridColor,
+                           dimFromIndex: dimLocal, syntheticStick: synthStick)
                 .equatable()
                 .offset(x: panOffset)
             // 顶底坐标值（是否显示由上方 labelRatios 决定）
@@ -3160,10 +3312,20 @@ struct KlineChartView: View {
                     showMainSheet = false
                     withAnimation { showSubSheet.toggle() }
                 })
-                // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式
+                // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式；
+                // 联动复盘时光标所在大周期K线的量/额为来源周期累加值，显式覆盖读数
+                let isVolAmo = (m.kind == "VOL" || m.kind == "AMO")
                 ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
+                    // 仅 stick 柱线（VOL/AMO 本体）取合成量/额；同图的 MA 均量线不覆盖
+                    let volAmoOverride: Double? = {
+                        guard isVolAmo, line.style == .stick,
+                              let r = linkReplayState, let s = r.synthetic,
+                              r.idx == renderCursorIndex else { return nil }
+                        return m.kind == "AMO" ? s.turnover : s.volume
+                    }()
                     legendItem(line, mirrored: config.mainMirrored,
-                               formatter: (m.kind == "VOL" || m.kind == "AMO") ? { formatVolume($0) } : nil)
+                               formatter: isVolAmo ? { formatVolume($0) } : nil,
+                               valueOverride: volAmoOverride)
                 }
                 Spacer()
                 // 副图1：最右侧「回到最新」按钮（右指带尾单箭头）。
@@ -3353,12 +3515,14 @@ struct KlineChartView: View {
         }
     }
 
-    private func legendItem(_ line: IndicatorLine, format: String = "%.2f", mirrored: Bool = false, formatter: ((Double) -> String)? = nil) -> some View {
+    private func legendItem(_ line: IndicatorLine, format: String = "%.2f", mirrored: Bool = false, formatter: ((Double) -> String)? = nil,
+                            valueOverride: Double? = nil) -> some View {
         // NOTEXT_ 前缀的输出线：不显示名称也不显示数值（仅保留线条）
         if line.hideValue { return AnyView(EmptyView()) }
         let name = legendName(line)
         let color = line.color
-        if let value = legendValueFor(line), !value.isNaN {
+        // 联动复盘：VOL/AMO 合成量/额由外部显式覆盖，优先于曲线数组读数
+        if let value = valueOverride ?? legendValueFor(line), !value.isNaN {
             if value == 0 {
                 klineDebug("[KlineDebug] ⚠️图例值=0 \(name) endIdx=\(endIndex) sel=\(String(describing: selectedIndex)) valuesCount=\(line.values.count) nan=\(line.values.filter{$0.isNaN}.count)")
             }
@@ -3457,9 +3621,10 @@ struct KlineChartView: View {
             let c = labelCenter(a, offset: o, labelWidth: dateW, width: width)
             return (c - dateW / 2)...(c + dateW / 2)
         }
-        // 底部涨幅标签：同理
-        if let last = sortedData.last, last.close > 0, sortedData[index].close > 0 {
-            let pct = (last.close - sortedData[index].close) / sortedData[index].close * 100
+        // 底部涨幅标签：同理（联动复盘时收盘价取合成K线）
+        let displayClose = cursorDisplayItem(at: index).close
+        if let last = sortedData.last, last.close > 0, displayClose > 0 {
+            let pct = (last.close - displayClose) / displayClose * 100
             let periodCount = max(0, (sortedData.count - 1) - index)
             let pctLine2 = stats.map { String(format: "%@  %@", formatVolume($0.volSum), formatAmount($0.amoSum)) }
             let pctW = pctLine2.map { labelTextWidth($0, fontSize: 10) } ?? labelTextWidth(String(format: "%+.2f%%  %d", pct, periodCount), fontSize: 10)
@@ -3573,7 +3738,8 @@ struct KlineChartView: View {
             // 光标出现时取光标所在K线，否则取屏幕最右边那根K线
             let quoteIndex = renderCursorIndex ?? endIndex
             if quoteIndex >= startIndex, quoteIndex <= endIndex, quoteIndex >= 0, quoteIndex < sortedData.count {
-                let item = sortedData[quoteIndex]
+                // 联动复盘：光标索引处读合成K线（开收高低/量额随合成变化）；其余位置读真实K线
+                let item = cursorDisplayItem(at: quoteIndex)
                 let prev = prevClose(of: quoteIndex)
                 let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
                 // 空头镜像：开/收/高/低取负显示；涨跌幅取负后数值不变（分子分母同号）
@@ -4016,6 +4182,11 @@ struct MainChartCanvas: View, Equatable {
     let sliceStart: Int
     /// 整个数据集的最后一根K线（最新价线固定在最新收盘价位置，与屏幕滚动位置无关）
     let latest: KlineItem?
+    /// 联动复盘：光标所在大周期K线的单点合成替换（本地索引 + 已镜像处理的合成K线）
+    var syntheticBar: SyntheticBar? = nil
+    /// 联动复盘：未来淡化起始本地索引（含）；nil = 不淡化
+    var dimFromIndex: Int? = nil
+    var dimAlpha: Double = 1.0 / 3.0
 
     var body: some View {
         Canvas { ctx, size in
@@ -4040,7 +4211,14 @@ struct MainChartCanvas: View, Equatable {
             case .bare, .solid:
                 drawCandles(ctx, h: h, candleWidth: candleWidth, hollow: chartStyle == .bare, cols: cols)
             case .close:
-                strokeLine(ctx, values: slice.map(\.close), color: Color(red: 0.2, green: 0.4, blue: 0.9), h: h, style: .solid, lineWidth: 1, step: lineStep)
+                // 收盘线：复盘态先把合成点收盘价替换进序列，再按"历史原色 / 未来淡化"分段绘制
+                var closeValues = slice.map(\.close)
+                if let sb = syntheticBar, sb.index >= 0, sb.index < closeValues.count {
+                    closeValues[sb.index] = sb.item.close
+                }
+                strokeLine(ctx, values: closeValues, color: Color(red: 0.2, green: 0.4, blue: 0.9),
+                           h: h, style: .solid, lineWidth: 1, step: lineStep,
+                           dimFrom: dimFromIndex, dimAlpha: dimAlpha)
             case .ohlc:
                 drawOHLC(ctx, h: h, candleWidth: candleWidth, step: lineStep)
             }
@@ -4050,10 +4228,32 @@ struct MainChartCanvas: View, Equatable {
             if showLatestPriceLine, let latest {
                 let y = yPos(latest.close, h: h)
                 var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
-                ctx.stroke(p, with: .color(latest.isUp ? upColor.opacity(0.6) : downColor.opacity(0.6)),
+                // 复盘态：最新价线属于"未来"，同步淡化（光标在最后一根时 dimFromIndex=nil，不淡化）
+                let baseColor = latest.isUp ? upColor.opacity(0.6) : downColor.opacity(0.6)
+                let lineColor = dimFromIndex == nil ? baseColor : baseColor.opacity(dimAlpha)
+                ctx.stroke(p, with: .color(lineColor),
                            style: StrokeStyle(lineWidth: 0.5, dash: [12, 6]))
             }
         }
+    }
+
+    // MARK: 联动复盘：单点替换 / 未来淡化的绘制辅助（本地索引）
+
+    /// 某本地索引实际用于绘制的 K 线（合成点替换）
+    private func effectiveItem(_ li: Int) -> KlineItem {
+        if let sb = syntheticBar, sb.index == li { return sb.item }
+        return slice[li]
+    }
+
+    /// 未来淡化区索引判定
+    private func isDimmed(_ li: Int) -> Bool {
+        guard let d = dimFromIndex else { return false }
+        return li >= d
+    }
+
+    /// 按淡化状态调整颜色
+    private func dimmed(_ color: Color, _ li: Int) -> Color {
+        isDimmed(li) ? color.opacity(dimAlpha) : color
     }
 
     /// 跳空缺口：使用预计算的缺口列表，仅绘制位于当前可见区间内的缺口。
@@ -4081,9 +4281,11 @@ struct MainChartCanvas: View, Equatable {
             let y0 = yPos(gap.top, h: h)
             let y1 = yPos(gap.bottom, h: h)
             let rect = CGRect(x: xStart, y: min(y0, y1), width: max(0.5, width), height: max(0.5, abs(y1 - y0)))
-            let color = gap.isUp ? upColor.opacity(0.18) : downColor.opacity(0.18)
+            // 联动复盘：缺口整体位于未来淡化区时同步降透明度；跨边界的缺口保持原色
+            let gapDim: Double = (dimFromIndex.map { (gap.startIdx - sliceStart) >= $0 } ?? false) ? dimAlpha : 1.0
+            let color = (gap.isUp ? upColor.opacity(0.18) : downColor.opacity(0.18)).opacity(gapDim)
             ctx.fill(Path(rect), with: .color(color))
-            ctx.stroke(Path(rect), with: .color(color.opacity(0.8)), lineWidth: 0.5)
+            ctx.stroke(Path(rect), with: .color(color.opacity(0.8 * gapDim)), lineWidth: 0.5)
         }
     }
 
@@ -4093,10 +4295,13 @@ struct MainChartCanvas: View, Equatable {
         guard n > 0 else { return }
         let blockLen = max(1, (n + cols - 1) / cols)
         if blockLen == 1 {
-            for (li, item) in slice.enumerated() {
+            for li in 0..<n {
+                // 联动复盘：合成索引单点替换；未来淡化区整体降透明度
+                let item = effectiveItem(li)
                 let x = (CGFloat(li) + 0.5) * candleSpacing
                 drawOneCandle(ctx, open: item.open, close: item.close, low: item.low, high: item.high,
-                              x: x, candleWidth: candleWidth, h: h, hollow: hollow, color: item.isUp ? upColor : downColor)
+                              x: x, candleWidth: candleWidth, h: h, hollow: hollow,
+                              color: dimmed(item.isUp ? upColor : downColor, li))
             }
             return
         }
@@ -4106,15 +4311,18 @@ struct MainChartCanvas: View, Equatable {
             var low = Double.greatestFiniteMagnitude
             var high = -Double.greatestFiniteMagnitude
             for k in lo..<hi {
-                let it = slice[k]
+                // 合成点在超聚合块内时也参与包络（极窄窗口场景）
+                let it = effectiveItem(k)
                 if it.low < low { low = it.low }
                 if it.high > high { high = it.high }
             }
-            let open = slice[lo].open
-            let close = slice[hi - 1].close
+            let open = effectiveItem(lo).open
+            let close = effectiveItem(hi - 1).close
             let span = hi - lo
             let x = (CGFloat(lo) + CGFloat(span) * 0.5) * candleSpacing
-            let color = slice[hi - 1].isUp ? upColor : downColor
+            let baseColor = effectiveItem(hi - 1).isUp ? upColor : downColor
+            // 整块都在未来区才淡化（跨合成/淡化边界的块保持原色，避免半块变色）
+            let color = (dimFromIndex.map { lo >= $0 } ?? false) ? baseColor.opacity(dimAlpha) : baseColor
             drawOneCandle(ctx, open: open, close: close, low: low, high: high,
                           x: x, candleWidth: max(1.5, candleWidth), h: h, hollow: hollow, color: color)
             lo = hi
@@ -4141,9 +4349,10 @@ struct MainChartCanvas: View, Equatable {
     /// 美国线：K 数过多时按步长采样，保留首尾点。
     private func drawOHLC(_ ctx: GraphicsContext, h: CGFloat, candleWidth: CGFloat, step: Int) {
         for li in decimatedIndices(count: slice.count, step: step) {
-            let item = slice[li]
+            // 联动复盘：合成索引单点替换、未来淡化
+            let item = effectiveItem(li)
             let x = (CGFloat(li) + 0.5) * candleSpacing
-            let color = item.isUp ? upColor : downColor
+            let color = dimmed(item.isUp ? upColor : downColor, li)
             let yH = yPos(item.high, h: h)
             let yL = yPos(item.low, h: h)
             var bar = Path(); bar.move(to: CGPoint(x: x, y: yH)); bar.addLine(to: CGPoint(x: x, y: yL))
@@ -4160,7 +4369,8 @@ struct MainChartCanvas: View, Equatable {
     private func drawCurve(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat, step: Int) {
         switch curve.style {
         case .dotline:
-            strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .dotline, lineWidth: curve.lineWidth, step: step)
+            strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .dotline, lineWidth: curve.lineWidth, step: step,
+                       dimFrom: dimFromIndex, dimAlpha: dimAlpha)
         case .pointdot:
             let colors = curve.markerColors
             for idx in decimatedIndices(count: curve.values.count, step: step) {
@@ -4168,7 +4378,7 @@ struct MainChartCanvas: View, Equatable {
                 guard !v.isNaN else { continue }
                 let x = (CGFloat(idx) + 0.5) * candleSpacing
                 let y = yPos(v, h: h)
-                let c = colors?[idx] ?? curve.color
+                let c = dimmed(colors?[idx] ?? curve.color, idx)
                 var dot = Path()
                 dot.addEllipse(in: CGRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3))
                 ctx.fill(dot, with: .color(c))
@@ -4182,26 +4392,40 @@ struct MainChartCanvas: View, Equatable {
                 let x = (CGFloat(i) + 0.5) * candleSpacing
                 let yv = yPos(v, h: h)
                 let rect = CGRect(x: x - barWidth / 2, y: min(yBase, yv), width: barWidth, height: max(0.5, abs(yBase - yv)))
-                ctx.fill(Path(rect), with: .color(curve.color))
+                ctx.fill(Path(rect), with: .color(dimmed(curve.color, i)))
             }
         case .solid:
-            strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .solid, lineWidth: curve.lineWidth, step: step)
+            strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .solid, lineWidth: curve.lineWidth, step: step,
+                       dimFrom: dimFromIndex, dimAlpha: dimAlpha)
         case .nodraw:
             break
         }
     }
 
-    private func strokeLine(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat, style: TDXLineStyle, lineWidth: Double, step: Int = 1) {
-        var path = Path(); var started = false
-        for i in decimatedIndices(count: values.count, step: step) {
+    /// 折线绘制，支持联动复盘的「历史原色 / 未来淡化」两段着色：
+    /// dimFrom 之前（含合成点 idx）原色，dimFrom 起（含）淡化。NaN 在各段内自然断开。
+    private func strokeLine(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat, style: TDXLineStyle, lineWidth: Double, step: Int = 1,
+                            dimFrom: Int? = nil, dimAlpha: Double = 1.0 / 3.0) {
+        let s: StrokeStyle = style == .dotline ? StrokeStyle(lineWidth: lineWidth, dash: [3, 3]) : StrokeStyle(lineWidth: lineWidth)
+        let indices = decimatedIndices(count: values.count, step: step)
+        let boundary = dimFrom ?? values.count
+        // 历史段（i < boundary）
+        var hist = Path(); var histStarted = false
+        // 未来段（i >= boundary）
+        var fut = Path(); var futStarted = false
+        for i in indices {
             let v = values[i]
             guard !v.isNaN else { continue }
             let x = (CGFloat(i) + 0.5) * candleSpacing
             let y = yPos(v, h: h)
-            if started { path.addLine(to: CGPoint(x: x, y: y)) } else { path.move(to: CGPoint(x: x, y: y)); started = true }
+            if i < boundary {
+                if histStarted { hist.addLine(to: CGPoint(x: x, y: y)) } else { hist.move(to: CGPoint(x: x, y: y)); histStarted = true }
+            } else {
+                if futStarted { fut.addLine(to: CGPoint(x: x, y: y)) } else { fut.move(to: CGPoint(x: x, y: y)); futStarted = true }
+            }
         }
-        let s: StrokeStyle = style == .dotline ? StrokeStyle(lineWidth: lineWidth, dash: [3, 3]) : StrokeStyle(lineWidth: lineWidth)
-        ctx.stroke(path, with: .color(color), style: s)
+        if histStarted { ctx.stroke(hist, with: .color(color), style: s) }
+        if futStarted { ctx.stroke(fut, with: .color(color.opacity(dimAlpha)), style: s) }
     }
 
     private func yPos(_ v: Double, h: CGFloat) -> CGFloat {
@@ -4247,6 +4471,86 @@ struct IndicatorNameButton: View {
     }
 }
 
+// MARK: - 联动「历史时点复盘」支撑类型
+
+/// 主图 Canvas 的单点合成K线替换：index 为可见切片(slice)本地索引，item 已按镜像需要取负。
+/// 联动复盘态下，光标所在的大周期 K 线用来源周期数据实时合成，由该结构在绘制时单点替换。
+struct SyntheticBar: Equatable {
+    let index: Int
+    let item: KlineItem
+
+    // 自定义相等：忽略 KlineItem 每次合成新生成的 UUID（仅比 OHLCV 内容），
+    // 保证 MainChartCanvas.equatable() 在合成内容未变时不做无意义重绘
+    static func == (l: SyntheticBar, r: SyntheticBar) -> Bool {
+        l.index == r.index
+            && l.item.date == r.item.date
+            && l.item.open == r.item.open
+            && l.item.high == r.item.high
+            && l.item.low == r.item.low
+            && l.item.close == r.item.close
+            && l.item.volume == r.item.volume
+            && l.item.turnover == r.item.turnover
+    }
+}
+
+/// 副图 Canvas 的单点合成柱替换（VOL/AMO）：index 为可见切片本地索引，value 已按镜像需要取负。
+struct SyntheticStick: Equatable {
+    let index: Int
+    let value: Double
+    let isUp: Bool
+
+    static func == (l: SyntheticStick, r: SyntheticStick) -> Bool {
+        l.index == r.index && l.value == r.value && l.isUp == r.isUp
+    }
+}
+
+/// 联动复盘用：按 (标的, 来源周期) 懒加载来源周期K线（升序），同进程多个 tile 共享
+/// （月线、季线视图合成同一标的的周线时只查一次 DB）。行情库在会话内不变，进程内缓存不做失效；
+/// 切换周期/标的导致图表 .id 重建后，新实例直接命中。
+final class LinkSourceBarCache: ObservableObject {
+    static let shared = LinkSourceBarCache()
+
+    struct Key: Hashable {
+        let metaID: Int
+        let period: KlinePeriod
+    }
+
+    /// 每次有新的一组数据加载完成即递增，驱动各图表重新派生合成K线
+    @Published private(set) var revision = 0
+
+    private var storage: [Key: [KlineItem]] = [:]
+    private var inflight = Set<Key>()
+    private let lock = NSLock()
+
+    /// 同步读取已缓存的来源周期K线（升序）；未加载返回空数组（不区分"无数据"与"加载中"，
+    /// 两种情况下调用方都先按真实K线绘制，request 完成后经 revision 刷新为合成形态）
+    func bars(metaID: Int, period: KlinePeriod) -> [KlineItem] {
+        lock.lock(); defer { lock.unlock() }
+        return storage[Key(metaID: metaID, period: period)] ?? []
+    }
+
+    /// 命中缓存或已在途时无操作；否则后台查询一次，完成后在主线程递增 revision
+    func request(metaID: Int, period: KlinePeriod) {
+        let key = Key(metaID: metaID, period: period)
+        lock.lock()
+        if storage[key] != nil || inflight.contains(key) { lock.unlock(); return }
+        inflight.insert(key)
+        lock.unlock()
+        DispatchQueue.global(qos: .userInitiated).async {
+            // fetchBars 返回 date DESC，统一排序为升序供二分与聚合
+            let sorted = DatabaseManager.shared.fetchBars(metaId: metaID, period: period)
+                .sorted { $0.date < $1.date }
+            DispatchQueue.main.async {
+                self.lock.lock()
+                self.storage[key] = sorted
+                self.inflight.remove(key)
+                self.lock.unlock()
+                self.revision += 1
+            }
+        }
+    }
+}
+
 // MARK: - 副图 Canvas（VOL/AMO/MACD/KDJ/RSI/自定义通用）
 
 struct SubChartCanvas: View, Equatable {
@@ -4257,6 +4561,11 @@ struct SubChartCanvas: View, Equatable {
     let rangeMin: Double
     let rangeMax: Double
     let upColor, downColor, gridColor: Color
+    /// 联动复盘：未来淡化起始本地索引（含），nil = 不淡化
+    var dimFromIndex: Int? = nil
+    var dimAlpha: Double = 1.0 / 3.0
+    /// 联动复盘：VOL/AMO 在光标索引处的合成柱（值已按镜像取负）
+    var syntheticStick: SyntheticStick? = nil
 
     var body: some View {
         Canvas { ctx, size in
@@ -4282,18 +4591,24 @@ struct SubChartCanvas: View, Equatable {
         let barWidth = max(0.6, candleSpacing * 0.55)
         let yZero = yPos(0, h: h)
         for i in decimatedIndices(count: curve.values.count, step: step) {
-            let v = curve.values[i]
+            // 联动复盘：合成索引的柱（VOL/AMO）单点替换为合成量/额
+            let synthHere = syntheticStick?.index == i ? syntheticStick : nil
+            let v = synthHere?.value ?? curve.values[i]
             guard !v.isNaN else { continue }
             let x = (CGFloat(i) + 0.5) * candleSpacing
             let yv = yPos(v, h: h)
             let rect = CGRect(x: x - barWidth / 2, y: min(yZero, yv), width: barWidth, height: max(0.5, abs(yZero - yv)))
-            let color: Color
+            var color: Color
             switch curve.barColor {
             case .sign: color = v >= 0 ? upColor.opacity(0.85) : downColor.opacity(0.85)
             case .candle:
-                if i < slice.count { color = slice[i].isUp ? upColor.opacity(0.85) : downColor.opacity(0.85) } else { color = curve.color }
+                // 合成柱的涨跌按合成K线；否则按原 slice
+                let isUp = synthHere?.isUp ?? (i < slice.count ? slice[i].isUp : v >= 0)
+                color = isUp ? upColor.opacity(0.85) : downColor.opacity(0.85)
             case .fixed: color = curve.color
             }
+            // 未来淡化区柱体降透明度（合成点本身不淡化）
+            if let d = dimFromIndex, i >= d { color = color.opacity(dimAlpha) }
             ctx.fill(Path(rect), with: .color(color))
         }
     }
@@ -4306,23 +4621,32 @@ struct SubChartCanvas: View, Equatable {
                 guard !v.isNaN else { continue }
                 let x = (CGFloat(idx) + 0.5) * candleSpacing
                 let y = yPos(v, h: h)
-                let c = colors?[idx] ?? curve.color
+                var c = colors?[idx] ?? curve.color
+                if let d = dimFromIndex, idx >= d { c = c.opacity(dimAlpha) }
                 var dot = Path()
                 dot.addEllipse(in: CGRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3))
                 ctx.fill(dot, with: .color(c))
             }
             return
         }
-        var path = Path(); var started = false
+        // 联动复盘：历史段原色、未来段淡化（NaN 在各段内自然断开）
+        let boundary = dimFromIndex ?? curve.values.count
+        var hist = Path(); var histStarted = false
+        var fut = Path(); var futStarted = false
         for i in decimatedIndices(count: curve.values.count, step: step) {
             let v = curve.values[i]
             guard !v.isNaN else { continue }
             let x = (CGFloat(i) + 0.5) * candleSpacing
             let y = yPos(v, h: h)
-            if started { path.addLine(to: CGPoint(x: x, y: y)) } else { path.move(to: CGPoint(x: x, y: y)); started = true }
+            if i < boundary {
+                if histStarted { hist.addLine(to: CGPoint(x: x, y: y)) } else { hist.move(to: CGPoint(x: x, y: y)); histStarted = true }
+            } else {
+                if futStarted { fut.addLine(to: CGPoint(x: x, y: y)) } else { fut.move(to: CGPoint(x: x, y: y)); futStarted = true }
+            }
         }
         let s: StrokeStyle = curve.style == .dotline ? StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3]) : StrokeStyle(lineWidth: curve.lineWidth)
-        ctx.stroke(path, with: .color(curve.color), style: s)
+        if histStarted { ctx.stroke(hist, with: .color(curve.color), style: s) }
+        if futStarted { ctx.stroke(fut, with: .color(curve.color.opacity(dimAlpha)), style: s) }
     }
 
     private func yPos(_ v: Double, h: CGFloat) -> CGFloat {

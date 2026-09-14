@@ -279,6 +279,8 @@ struct LinkedKlineTile: View {
                        isolatedSubs: true, hideMainZoomButton: true, isLinkedTile: true, linkAutoCenter: linkAutoCenter,
                        cursorLinkEnabled: cursorLinkEnabled,
                        cursorClearToken: cursorClearToken,
+                       // 联动复盘：本视图标的 metaID，供大周期视图用本标的来源周期数据合成"形成中K线"
+                       linkedMetaID: view.metaID,
                        // 联动：时间轴上一行 + 时间轴 pinned 覆盖 都不显示"额"（成交额）
                        hideQuoteTurnover: true,
                        onPeriodSwitch: { newPeriod in
