@@ -1,8 +1,6 @@
 # 联动多图模式 · 光标联动使用说明
 
 > 适用版本：Kline（iPad）。本文说明在**联动多图模式**下，点击右上角「**联**」字按钮开启**光标联动**后，多个视图之间十字光标的联动规则与操作方式。
->
-> 📌 **版本状态**：本文第 6.1 节、第 9 节场景二描述的「**历史时点复盘**」（被联动大周期视图中，光标所在 K 线实时合成、其后 K 线统一淡化、光标点指标实时重算）是**已确认、待实施**的设计。实施完成前的安装版本中，"目标周期 ≥ 来源周期"的视图仅显示十字光标（竖线定位 + 收盘价横线），暂无合成 K 线与淡化效果。
 
 ## 目录
 
@@ -264,4 +262,9 @@ A：不会。只同步日期；各视图缩放级别、平移位置独立并分�
 - 范围框渲染（双蓝轴 + 淡蓝底纹）：`KlineChartView.swift` 中的 `linkRangeAxisOverlay`
 - 联动视图数量 / 标的 / 周期配置与缩放持久化：[LinkedViewStore.swift](Kline/LinkedViewStore.swift)（`Documents/LinkedViews.json`、`Documents/LinkedZooms.json`）
 - 单格视图的数据加载与切周期 / 切标的手势：[LinkedKlineTile.swift](Kline/LinkedKlineTile.swift)
-- **「历史时点复盘」实施计划**（合成 K 线、未来淡化、指标 as-of 重算）：[linked-asof-replay-plan.md](.trae/documents/linked-asof-replay-plan.md)（实施完成后本索引补充对应组件名）
+- 「历史时点复盘」核心实现（均在 [KlineChartView.swift](Kline/KlineChartView.swift)）：
+  - 复盘派生与合成 K 线：`linkReplayState` / `synthesizeBar` / `cursorDisplayItem` / `linkedMetaID`
+  - 来源周期数据共享懒加载：`LinkSourceBarCache`
+  - 合成替换 / 未来淡化绘制：`SyntheticBar` / `SyntheticStick`，`MainChartCanvas` 与 `SubChartCanvas` 的 `syntheticBar` / `syntheticStick` / `dimFromIndex` 入参
+  - 合成点指标异步重算：`AsOfTrigger` / `scheduleAsOf` / `evaluateAsOf` / `AsOfValueCache` / `asOfMain` / `asOfSubs`
+- 「历史时点复盘」设计与实施记录：[linked-asof-replay-plan.md](.trae/documents/linked-asof-replay-plan.md)

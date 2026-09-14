@@ -1,8 +1,10 @@
 # 联动模式：大周期/同周期视图的「历史时点复盘」（合成 K 线 + 未来淡化 + 指标 as-of 重算）
 
-> 状态：**设计已与用户确认，待实施**。用户手册（`Kline/Kline-联动多图光标联动说明.md` 第 6.1 节）已按本设计更新；实施完成前安装版本仅为"十字光标 + 收盘价横线"形态。
+> 状态：**已实施，待真机验收**（2026-09-14，CI 通过）。
+> - 阶段 A（合成 K 线 + 未来淡化视觉层）：commit `9160e96`
+> - 阶段 B（指标 as-of 异步重算）：commit `579d613`（编译修复 `e97e0bf`）
 >
-> 创建：2026-09-14。
+> 实施与本计划的偏差记录见文末「实施记录」。创建：2026-09-14。
 
 ## 1. Context（背景与目标）
 
@@ -241,3 +243,19 @@ cursorDate 变化
 - `Kline/LinkedKlineTile.swift` — 预计无改动（metaID/period 已透传）；如新缓存类需要注入再小改
 - `Kline/DatabaseManager.swift` — 仅复用 `fetchBars`，无改动
 - 用户手册：`Kline/Kline-联动多图光标联动说明.md`（已按目标形态更新，实施完成后去掉顶部"待实施"状态标注并补技术索引）
+
+## 11. 实施记录（2026-09-14）
+
+**实际改动文件**：仅 `Kline/KlineChartView.swift` 与 `Kline/LinkedKlineTile.swift`（新增 `linkedMetaID: view.metaID` 传参）；`DualLinkSync`、`KlineData.swift`、`DatabaseManager.swift` 均未改动，与预案一致。
+
+**与计划的偏差/落实细节**：
+
+1. `LinkSourceBarCache` 未做新鲜度签名（计划 4.2 提过的轻量选项被采用）：行情库会话内不变，进程内缓存 + tile `.id` 重建即满足，key=(metaID, sourcePeriod)。
+2. Canvas 入参采用 `SyntheticBar` / `SyntheticStick` 具名结构体而非元组，并**自定义 == 忽略 KlineItem 新 UUID**（合成 item 每次新建，否则会击穿 Canvas 的 `.equatable()` 优化）。
+3. `dimAlpha` 类型为 `Double`（`Color.opacity` 入参要求），不是 CGFloat。
+4. as-of 行对齐严格复刻前台过滤：主图按 unit 成功才占曲线位（失败不递增下标）；副图自定义行全保留、系统行过滤全 NaN；VOL/AMO stick 行用合成量/额、同图 MA 均量线走 as-of。
+5. as-of 曲线替换在**可见切片数组**上单点改值后再入 Canvas（未新增 Canvas override 入参），配合阶段 A 的分段淡化绘制，合成点自动以原色落在历史段末端。
+6. 调度入口三处：`onChange(of: asOfTrigger)`、`onAppear`（切周期/标的重建补偿）、来源数据到达经 `LinkSourceBarCache.revision` 驱动 trigger 从 nil 变非 nil。
+7. 编译修复一次：`subChart(model:slot:)` 本有 `slot: SubSlot` 参数，阶段 B 新增的同名 Int 局部变量遮蔽导致编译失败（`e97e0bf` 改名 `subSlotIndex`）。
+
+**待真机验收重点**（对应第 5 节验收清单）：周→月合成随拖动变形、季从自身起始边界聚合、四样式+镜像、跨标的各算各的、清光标复原、快速拖动流畅度与指标值滞后观感。
