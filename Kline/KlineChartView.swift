@@ -3297,7 +3297,8 @@ struct KlineChartView: View {
             let d = r.dimFrom - startIndex
             return (d >= 0 && d < localCount) ? d : nil
         }
-        let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
+        // 槽位下标（0/1/2，as-of 结果索引）；注意勿与函数参数 slot: SubSlot 同名
+        let subSlotIndex = m === subTop ? 0 : (m === subBottom ? 1 : 2)
         let synthStick: SyntheticStick? = {
             guard let r = replay, let s = r.synthetic,
                   r.idx >= startIndex, r.idx <= endIndex,
@@ -3312,7 +3313,7 @@ struct KlineChartView: View {
             var values = subMirroredSliceArr(line.values)
             if let r = replay, r.synthetic != nil,
                r.idx >= startIndex, r.idx <= endIndex,
-               let v = asOfSubs[slot][lineIndex] {
+               let v = asOfSubs[subSlotIndex][lineIndex] {
                 let local = r.idx - startIndex
                 if local >= 0, local < values.count { values[local] = config.mainMirrored ? -v : v }
             }
