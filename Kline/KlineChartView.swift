@@ -988,6 +988,17 @@ struct KlineChartView: View {
         return selectedIndex
     }
 
+    /// 联动接收态下，可交互光标横线应对准的价格 = 联动到的那根K线**收盘价**。
+    /// 手指不在本视图，横线不再固定主图垂直中点（中点价格没有指向意义），而是精确落在该K线收盘价位。
+    /// 镜像（"空"）模式下随 mir() 取负，与镜像后的价格域、蜡烛绘制保持一致；
+    /// 本地手指拖动 / 单图 / 双竖轴范围框模式下返回 nil（保持原有手指跟手行为）。
+    private var linkedCursorClose: Double? {
+        guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
+              let idx = renderCursorIndex, idx >= 0, idx < sortedData.count else { return nil }
+        let close = sortedData[idx].close
+        return close > 0 ? mir(close) : nil
+    }
+
     // MARK: - 指标序列计算
 
     private func customLineColor(_ index: Int, line: TDXOutputLine, indicatorColor: Color?) -> Color {
@@ -1839,7 +1850,13 @@ struct KlineChartView: View {
                     if let rg = linkRangeIndices {
                         linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing, height: geometry.size.height)
                     }
-                    cursorOverlay(index: renderCursorIndex, y: crosshairY ?? mainCenterY, compare: pinnedIndex, fixedPrice: nil, width: width, height: geometry.size.height,
+                    // 可交互光标横线 y：
+                    //   联动接收态 → 按联动K线收盘价反算（fixedPrice 同步传入，标签精确显示收盘价）；
+                    //   本地手指操作/单图 → 手指位置 crosshairY，轻点等无手指位置时回退主图中线。
+                    let interactiveCY = linkedCursorClose.map {
+                        priceToY($0, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight)
+                    } ?? crosshairY ?? mainCenterY
+                    cursorOverlay(index: renderCursorIndex, y: interactiveCY, compare: pinnedIndex, fixedPrice: linkedCursorClose, width: width, height: geometry.size.height,
                                   candleSpacing: candleSpacing,
                                   mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
                                   s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
