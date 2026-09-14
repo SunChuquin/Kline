@@ -502,6 +502,12 @@ struct KlineDetailView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.gray)
                     .lineLimit(1)
+            } else {
+                // 联动多图：返回按钮右侧显示「联动模式 - 主标的名称」
+                Text("联动模式 - \(item.name)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.black)
+                    .lineLimit(1)
             }
 
             Spacer()
