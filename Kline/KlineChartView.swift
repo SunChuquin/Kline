@@ -3034,8 +3034,11 @@ struct KlineChartView: View {
                                      bgColor: bgColor,
                                      lineColor: compare != nil ? Color.blue : Color.black.opacity(0.45))
                 // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
-                // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）
-                if isInPanel(y, mainTop, mainBottom),
+                // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）。
+                // 联动「历史时点复盘」态（本视图周期严格大于来源周期）同样不显示：屏幕末根属于
+                // 光标之后的「未来淡化区」（站在光标时点尚未发生），"从光标到窗口右侧"的涨幅在复盘语义下不成立
+                if linkReplayState?.idx != index,
+                   isInPanel(y, mainTop, mainBottom),
                    index >= startIndex, index < endIndex, endIndex >= 0, endIndex < sortedData.count {
                     // 联动复盘：涨幅基准为合成K线收盘；屏幕末根是真实K线（"从当时到窗口右侧"）
                     let cursorItem = cursorDisplayItem(at: index)
