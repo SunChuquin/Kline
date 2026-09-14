@@ -1,6 +1,7 @@
 # 联动模式：大周期/同周期视图的「历史时点复盘」（合成 K 线 + 未来淡化 + 指标 as-of 重算）
 
 > 状态：**已实施并通过真机验收**（2026-09-14，CI 通过；含 D2 调整与所属周期定位 bug 修复）。
+>
 > - 阶段 A（合成 K 线 + 未来淡化视觉层）：commit `9160e96`
 > - 阶段 B（指标 as-of 异步重算）：commit `579d613`（编译修复 `e97e0bf`）
 > - 同周期不淡化（D2 调整）：commit `26cc489`
@@ -24,17 +25,19 @@
 
 ## 2. 已确认的决策（2026-09-14，用户拍板，勿再变更）
 
-| # | 决策点 | 结论 |
-| --- | --- | --- |
-| D1 | 淡化覆盖范围 | **全部元素统一 1/3**：主图蜡烛（四种样式）、VOL/AMO 柱、主图与全部副图指标曲线、最新价虚线等参考线；只改 alpha，不改数值 |
+| #  | 决策点              | 结论                                                                                                                      |
+| -- | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| D1 | 淡化覆盖范围           | **全部元素统一 1/3**：主图蜡烛（四种样式）、VOL/AMO 柱、主图与全部副图指标曲线、最新价虚线等参考线；只改 alpha，不改数值                                                 |
 | D2 | 同周期目标（日→日等，含跨标的） | ~~也淡化~~ → **2026-09-14 真机验收后调整：同周期不进入复盘，不淡化、不合成**，只保留普通十字光标（竖线+收盘价横线）。代码上 `linkReplayState` 生效条件由 rank `>=` 收紧为严格大于 `>` |
-| D3 | 跨标的 | **也淡化、也合成**，但各视图用**自己标的**的来源周期数据合成（B 的月线用 B 的周线，绝不借 A 的数据） |
-| D4 | 拖动时指标重算策略 | **后台异步重算 + 缓存**：合成 K 线图形实时跟手；指标点允许极短暂显示上一次结果，算出后刷新 |
+| D3 | 跨标的              | **也淡化、也合成**，但各视图用**自己标的**的来源周期数据合成（B 的月线用 B 的周线，绝不借 A 的数据）                                                              |
+| D4 | 拖动时指标重算策略        | **后台异步重算 + 缓存**：合成 K 线图形实时跟手；指标点允许极短暂显示上一次结果，算出后刷新                                                                      |
 
 补充确认（用户原始描述已覆盖）：
 
-- 合成聚合起点 = **目标大周期自身的起始边界**（`KlinePeriod.periodDateRange(targetPeriod, dateOfI).0` 在来源序列中的下界），不是光标当天；季中/年中触发时必须纳入此前已走完的来源 K 线；
-- 横线价格 = 合成 K 线收盘价 = D 所指来源 K 线收盘价（同标的时与来源视图手指处一致；跨标的时是 B 自己数据的末根收盘价）；
+- [ ] 合成聚合起点 = **目标大周期自身的起始边界**（`KlinePeriod.periodDateRange(targetPeriod, dateOfI).0` 在来源序列中的下界），不是光标当天；季中/年中触发时必须纳入此前已走完的来源 K 线；
+
+* [ ] 横线价格 = 合成 K 线收盘价 = D 所指来源 K 线收盘价（同标的时与来源视图手指处一致；跨标的时是 B 自己数据的末根收盘价）；
+
 - 光标在库最新一根时：无未来区域、合成值与库中未完结大 K 线一致，自然退化为现状，无需特判；
 - 周线归属月按"起始交易日所在月"（跨月周整周计入一侧），这是以周线为最小信息单元的固有近似，用户知情接受。
 
@@ -53,7 +56,7 @@
   - 行情行 `axisQuoteRow`（约 3571 行）按光标索引读 KlineItem；数值栏经 `legendValue(_:)`（约 931 行）读 `arr[idx]`。
   - `priceRange`（约 1406 行）：含 5% padding；合成 K 线 OHLC 必在真实完整大 K 线范围内 → **价格域不变**。
   - 镜像辅助：`mir(_:)`（约 885 行）、`mirroredSlice`（约 902 行）、`mirroredRange`（约 924 行）。
-- `KlineData.swift`：`KlinePeriod.granularityRank`（日0<周1<月2<季3<年4）、`periodDateRange(_:date:)` 给出大周期 [start,end]（周一固定 Monday）。
+- `KlineData.swift`：`KlinePeriod.granularityRank`（日0<周1<月2<季3<年4）、`periodDateRange(_:date:)` 给出大周期 \[start,end]（周一固定 Monday）。
 - `DatabaseManager.fetchBars(metaId:period:)`（DatabaseManager.swift 221 行）：同步本地查询，来源周期序列走它（与 tile 加载同一线程模型：后台队列查、主线程提交）。
 - `LinkedKlineTile.swift`：tile 持有 `view.metaID` / `view.period`，向 KlineChartView 传参；共享 `DualLinkSync`。
 
@@ -90,7 +93,7 @@ linkReplay: (idx: Int, synthetic: KlineItem?, dimFrom: Int)?
 2. 在 S 中二分：`lo = lowerBound(periodStart)`，`hi = upperBound(D)`（首个 date > D 的下标 -1）；
    - 复用范围框同款严格二分骨架（现有 `lowerBound(_:)` 约 948 行 + 对称实现 upperBound）；
 3. 区间为空 → `synthetic = nil`（D3 兜底：淡化仍生效）；
-4. 区间非空 → 聚合 S[lo...hi]：
+4. 区间非空 → 聚合 S\[lo...hi]：
    - `open = first.open`、`close = S 中 date 最大者（≤ D 末根）.close`、`high = max`、`low = min`、
      `volume = sum`、`amount = sum`（KlineItem 实际字段名实施时对齐）；
    - `date = sortedData[idx].date`（沿用目标周期 K 线的起始日期，保证标签/坐标不变）；
@@ -127,7 +130,7 @@ dimAlpha: CGFloat = 1.0/3.0
 
 - 竖线 `mainCursorVLine`/`subCursorVLine` 无需改（idx 不变）；
 - 横线已由 2026-09-14 的 `linkedCursorClose` + `fixedPrice` 机制处理；阶段 A 把其取值源从"真实 K 线 close"改为 `synthetic?.close ?? 真实close`；
-- `axisQuoteRow` 与任何按 idx 读 item 的位置：新增统一派生 `displayCursorItem: KlineItem?`（= synthetic ?? sortedData[idx]），全部改读它（单点改动，避免漏改）。
+- `axisQuoteRow` 与任何按 idx 读 item 的位置：新增统一派生 `displayCursorItem: KlineItem?`（= synthetic ?? sortedData\[idx]），全部改读它（单点改动，避免漏改）。
 
 ### 4.5 指标 as-of 重算（阶段 B 主体）
 
@@ -214,14 +217,14 @@ cursorDate 变化
 
 ## 7. 风险与对策
 
-| 风险 | 等级 | 对策 |
-| --- | --- | --- |
-| 拖动中 as-of 重算卡顿（代码已有"拖拽禁止重算"的明确教训） | 高 | 严格异步 + ticket + 缓存（D4）；退路：月/季/年等短序列（目标总根数通常 < 1000）评估改为同步算，日→年（≤250 根来源/次）实测后定 |
-| Canvas 入参增多导致 Equatable 失效、全量重绘 | 中 | 新增入参为值类型且默认 nil；用结构化 equatable 比较；合成 item 变化频率 = 光标移动频率（本就重绘），无额外负担 |
-| override 漏接到某处读数（行情行/第三副图/第二光标统计） | 中 | 阶段 B 开工前全局 grep 所有 `sortedData[.*idx` / `[renderCursorIndex]` / `[selectedIndex]` 读数点，统一走 displayCursorItem / override 通道，列清单逐个过 |
-| 污染 ChartCacheStore / prefetch 结果串扰 | 中 | as-of 产物只存独立 @State + 独立缓存类，绝不写 ChartCacheStore；引擎调用使用独立数据组 |
-| 跨周期自定义公式 | 低 | 排查后有则该输出行不覆盖（保留原值） |
-| 缓存内存膨胀 | 低 | LRU 上限 + 签名失效 |
+| 风险                                 | 等级 | 对策                                                                                                                               |
+| ---------------------------------- | -- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 拖动中 as-of 重算卡顿（代码已有"拖拽禁止重算"的明确教训）  | 高  | 严格异步 + ticket + 缓存（D4）；退路：月/季/年等短序列（目标总根数通常 < 1000）评估改为同步算，日→年（≤250 根来源/次）实测后定                                                   |
+| Canvas 入参增多导致 Equatable 失效、全量重绘    | 中  | 新增入参为值类型且默认 nil；用结构化 equatable 比较；合成 item 变化频率 = 光标移动频率（本就重绘），无额外负担                                                              |
+| override 漏接到某处读数（行情行/第三副图/第二光标统计）  | 中  | 阶段 B 开工前全局 grep 所有 `sortedData[.*idx` / `[renderCursorIndex]` / `[selectedIndex]` 读数点，统一走 displayCursorItem / override 通道，列清单逐个过 |
+| 污染 ChartCacheStore / prefetch 结果串扰 | 中  | as-of 产物只存独立 @State + 独立缓存类，绝不写 ChartCacheStore；引擎调用使用独立数据组                                                                      |
+| 跨周期自定义公式                           | 低  | 排查后有则该输出行不覆盖（保留原值）                                                                                                               |
+| 缓存内存膨胀                             | 低  | LRU 上限 + 签名失效                                                                                                                    |
 
 ## 8. 验证（编译 + CI + 真机手测）
 
