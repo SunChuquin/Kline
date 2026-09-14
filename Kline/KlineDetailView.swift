@@ -506,7 +506,17 @@ struct KlineDetailView: View {
             if effectiveDual {
                 // 联动：永远显示「边」
                 Button(action: {
-                    edgeAdjust.toggle()
+                    let turningOn = !edgeAdjust
+                    edgeAdjust = turningOn
+                    // 开启边线调节即「清场」：终止当前联动光标会话。
+                    // 各图表的本地光标由 onChange(of: suppressCrosshair) 清除；
+                    // 但联动派生光标/双竖轴范围框由共享 cursorDate/sourceRange 驱动、
+                    // 不依赖本地状态，必须在此显式清空——否则它们会在边线调节期间残留显示，
+                    // 且期间点击被 suppressCrosshair 拦截、用户无法取消。关闭「边」不恢复。
+                    if turningOn {
+                        linkSync.cursorDate = nil
+                        linkSync.sourceRange = nil
+                    }
                 }) {
                     Text("边")
                         .font(.system(size: textSize, weight: .bold))
