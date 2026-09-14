@@ -995,7 +995,7 @@ struct KlineChartView: View {
         // 更大周期源的联动范围模式下不显示单一十字光标（改由双竖轴框范围）
         if linkRangeIndices != nil { return nil }
         if cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging {
-            if let d = linkSync.cursorDate { return nearestIndex(to: d) }
+            if let d = linkSync.cursorDate { return linkedTargetIndex(for: d) }
             return nil
         }
         return selectedIndex
@@ -1034,7 +1034,7 @@ struct KlineChartView: View {
               linkRangeIndices == nil,
               let date = linkSync.cursorDate,
               self.period.granularityRank > linkSync.sourcePeriod.granularityRank,
-              let idx = nearestIndex(to: date),
+              let idx = linkedTargetIndex(for: date),
               idx >= 0, idx < sortedData.count else { return nil }
         var synth: KlineItem?
         if self.period.granularityRank > linkSync.sourcePeriod.granularityRank, let meta = linkedMetaID {
@@ -2308,7 +2308,7 @@ struct KlineChartView: View {
         // 被联动视图的 renderCursorIndex 直接由 linkSync.cursorDate 派生、恒等于该 date，
         // 若用它判断会永远 return，导致联动光标无法居中。
         if let li = selectedIndex, li < sortedData.count, sortedData[li].date == date { return }
-        guard let date, let idx = nearestIndex(to: date) else {
+        guard let date, let idx = linkedTargetIndex(for: date) else {
             // 来源光标消失 → 本次联动会话结束，下次出现再居中
             linkCursorActive = false
             notifyHasCursor()
@@ -2351,6 +2351,38 @@ struct KlineChartView: View {
             refreshCurves()
             startPrefetch()
         }
+    }
+
+    /// 联动接收态下，光标日期在本视图应定位到的 K 线索引：
+    /// - 本视图周期**严格大于**来源周期（复盘态，如周→季）：取「**包含该日期的那根大周期 K 线**」
+    ///   （containingIndex）——大周期 K 线日期是区间起始日，6/3 属于 Q2 就必须落在 Q2，
+    ///   不能用几何最近（6/3 距 7/1 仅 28 天、距 4/1 有 63 天，最近匹配会错误跳到 Q3，
+    ///   导致合成区间为空而回退显示真实完整季 K 线）；
+    /// - 同周期（含跨标的）：保持"时间最近交易日"语义（nearestIndex），兼容一方停牌无当日 K 线。
+    private func linkedTargetIndex(for date: Int) -> Int? {
+        self.period.granularityRank > linkSync.sourcePeriod.granularityRank
+            ? containingIndex(to: date)
+            : nearestIndex(to: date)
+    }
+
+    /// 「所属周期」匹配：最后一个起始日 date <= target 的 K 线下标——
+    /// 即 target 落在该 K 线代表的周期区间内（季线存起始日 4/1，则 4/1~6/30 任意日期都归这根）。
+    /// target 早于数据中第一根 K 线时回退到第一根（与 nearestIndex 的边界兜底一致）。
+    private func containingIndex(to target: Int) -> Int? {
+        guard !sortedData.isEmpty else { return nil }
+        var lo = 0
+        var hi = sortedData.count - 1
+        var ans = 0
+        var found = false
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if sortedData[mid].date <= target {
+                ans = mid; found = true; lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return found ? ans : 0
     }
 
     /// 找到日期与 target 最接近的 K 线索引（日/周视图跨周期联动用）。

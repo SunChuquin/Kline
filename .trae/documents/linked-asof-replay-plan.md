@@ -259,5 +259,6 @@ cursorDate 变化
 6. 调度入口三处：`onChange(of: asOfTrigger)`、`onAppear`（切周期/标的重建补偿）、来源数据到达经 `LinkSourceBarCache.revision` 驱动 trigger 从 nil 变非 nil。
 7. 编译修复一次：`subChart(model:slot:)` 本有 `slot: SubSlot` 参数，阶段 B 新增的同名 Int 局部变量遮蔽导致编译失败（`e97e0bf` 改名 `subSlotIndex`）。
 8. **真机验收后调整（同日）**：D2 原决策"同周期也淡化"被用户推翻——`linkReplayState` 条件由 rank `>=` 收紧为严格大于 `>`，同周期视图回退普通十字光标（不合成、不淡化）；竖线与收盘价横线由既有联动通道继续工作，无需额外处理。
+9. **真机验收 bug 修复（同日，包钢股份复现）**：周线 2014-06-03（属 Q2）在季线视图被定位到 Q3——`nearestIndex` 按几何天数取最近（6/3 距 Q3 起始 7/1 仅 28 天、距 Q2 起始 4/1 有 63 天），选错季线后合成区间 `[≥7/1 … ≤6/3]` 为空，回退显示真实完整 Q3 季 K。修复：新增 `containingIndex(to:)`（最后一个起始日 ≤ 光标日期的 K 线，即"日期所属周期"）与统一入口 `linkedTargetIndex(for:)`：严格大周期用 containing（同季度内移动竖线稳定不跳），同周期保持 nearest（停牌兼容）；`renderCursorIndex` / `applyLinkCursor` / `linkReplayState` 三处统一走该入口。
 
 **待真机验收重点**（对应第 5 节验收清单）：周→月合成随拖动变形、季从自身起始边界聚合、四样式+镜像、跨标的各算各的、清光标复原、快速拖动流畅度与指标值滞后观感。
