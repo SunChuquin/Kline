@@ -306,11 +306,11 @@ struct FavoritesView: View {
             ForEach(currentBinding) { $m in
                 HStack(spacing: 0) {
                     let mm = $m.wrappedValue
-                    let mFaved = fav.isFavorited(mm.id)
+                    // 自选页内容本身即自选结果，无需再用灰底/红字标记，样式与行情页非自选行一致
                     MarketTableRow(page: .favorites, mode: .data(meta: mm), config: colCfg, rowCache: rowCache,
                                    onOpen: { meta in
                         DetailRouter.shared.open(meta, in: currentItems)
-                    }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: mFaved)
+                    }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: false)
                     .contextMenu {
                         Button(role: .destructive) {
                             fav.removeFromGroup(id: gid, metaID: mm.id)
@@ -376,13 +376,12 @@ struct FavoritesView: View {
     /// 行卡片（标准模式）
     private func rowCard(row: MarketRow) -> some View {
         let meta = row.meta
-        let isFaved = fav.isFavorited(meta.id)
         return HStack(spacing: 0) {
-            // 整行单元格（冻结前3列 + 滚动列）；自选高亮由 MarketTableRow.isFaved 呈现
+            // 整行单元格（冻结前3列 + 滚动列）；自选页无需自选高亮，样式与行情页非自选行一致
             MarketTableRow(page: .favorites, mode: .data(meta: meta), config: colCfg, rowCache: rowCache,
                            onOpen: { meta in
                 DetailRouter.shared.open(meta, in: currentItems)
-            }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: isFaved)
+            }, frozenCount: frozenCount, xOffset: hScrollOffset, isFaved: false)
         }
         .padding(.trailing, 8)
         // 长按弹菜单：取消自选 / 加入其它分组 / 移动分组
