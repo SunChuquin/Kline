@@ -1702,13 +1702,15 @@ struct KlineChartView: View {
                 guard !menuIsOpen else { return }
                 // 双指手势进行中：平移/缩放由双指手势统一处理，单指手势跳过，避免重复平移/误触发
                 if drag.twoFingerActive { return }
-                // 手势作用域固定为起点所在区域：主图/副图1/副图2/副图3；滑出起点区域后仍以起点区域处理
+                // 手势作用域固定为起点所在区域：主图/副图1/副图2；滑出起点区域后仍以起点区域处理。
+                // 副图3（最下方副图）面板触摸手势**整体禁用**（单指点击/拖动/平移都不响应）：
+                // 该区域预留给后续类手游虚拟按钮使用。副图三仍正常显示指标曲线与贯穿光标竖线，
+                // 其指标名称/参数按钮在面板外的 legend 行，不受影响（单图/联动多图均走同一图表，同时生效）。
                 let sy = value.startLocation.y
                 let startInMain = isInPanel(sy, mainTop, mainBottom)
                 let startInS1 = isInPanel(sy, s1Top, s1Bottom)
                 let startInS2 = isInPanel(sy, s2Top, s2Bottom)
-                let startInS3 = isInPanel(sy, s3Top, s3Bottom)
-                guard startInMain || startInS1 || startInS2 || startInS3 else { return }
+                guard startInMain || startInS1 || startInS2 else { return }
                 drag.isDragging = true
                 // 记录最近触摸位置，作为双指缩放时的锚点（双指质心）
                 drag.lastTouchX = value.location.x
@@ -1829,7 +1831,8 @@ struct KlineChartView: View {
                 }
                 if drag.cursorDragging { drag.cursorDragging = false; return }
                 let y = value.location.y
-                let inPanel = isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom) || isInPanel(y, s3Top, s3Bottom)
+                // 轻点放置/取消光标的作用域同样不含副图3（面板手势已禁用，预留给虚拟按钮）
+                let inPanel = isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom)
                 let isTap = abs(value.translation.width) < 6 && abs(value.translation.height) < 6
                 // 「边」调节分割线时禁止产生/清除十字光标
                 if suppressCrosshair { return }
@@ -2041,7 +2044,7 @@ struct KlineChartView: View {
                 if !mainFullscreen {
                     twoFingerLayer(width: width, rect: CGRect(x: 0, y: s1Top, width: width, height: sub1Height))
                     twoFingerLayer(width: width, rect: CGRect(x: 0, y: s2Top, width: width, height: sub2Height))
-                    twoFingerLayer(width: width, rect: CGRect(x: 0, y: s3Top, width: width, height: sub3Height))
+                    // 副图3 不挂双指层：面板手势整体禁用（虚拟按钮预留区）
                 }
             }
             .contentShape(Rectangle())
@@ -3375,7 +3378,10 @@ struct KlineChartView: View {
         .frame(width: width, height: height)
         .clipped()
         .overlay {
-            swipeOverlay(slot: slot, width: width, height: height)
+            // 副图3 不挂滑动反馈层（面板手势整体禁用，预留给虚拟按钮）；副图1/2 保留左右滑动切换
+            if slot != .third {
+                swipeOverlay(slot: slot, width: width, height: height)
+            }
         }
     }
 
@@ -3390,8 +3396,9 @@ struct KlineChartView: View {
         }
     }
 
-    /// 副图左右滑动切换反馈：拖动时才显示方向箭头 + 滑轨/滑块/阈值动画
-    /// 副图三不参与左右滑动切换，不显示任何切换提示
+    /// 副图左右滑动切换反馈：拖动时才显示方向箭头 + 滑轨/滑块/阈值动画。
+    /// 仅副图1/2 调用挂载；副图三面板手势整体禁用（虚拟按钮预留区），不会进入本函数，
+    /// 此处 `slot != .third` 为双保险。
     @ViewBuilder
     private func swipeOverlay(slot: SubSlot, width: CGFloat, height: CGFloat) -> some View {
         if slot != .third {
