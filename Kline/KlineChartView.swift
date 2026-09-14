@@ -602,6 +602,12 @@ struct KlineChartView: View {
     @ObservedObject private var linkSourceCache = LinkSourceBarCache.shared
     /// 联动：本视图是否正由用户直接拖动光标（用于区分「右侧用户操作」与「左侧拖动回声」）
     @State private var linkUserDragging = false
+    /// 联动复盘 as-of 结果：主图曲线按数组下标的合成点值（仅合成索引一个点）
+    @State private var asOfMain: [Int: Double] = [:]
+    /// 联动复盘 as-of 结果：三个副图各自按曲线数组下标的合成点值
+    @State private var asOfSubs: [[Int: Double]] = [[:], [:], [:]]
+    /// as-of 后台任务序号：只接受最新一次调度的结果，快速拖动时过期结果直接丢弃
+    @State private var asOfTicket = 0
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
     /// 联动多图模式：本视图在联动布局里的下标（用于判定「谁是当前激活公式编辑器的视图」）
@@ -1104,6 +1110,97 @@ struct KlineChartView: View {
             if src[mid].date <= target { ans = mid; lo = mid + 1 } else { hi = mid - 1 }
         }
         return ans
+    }
+
+    // MARK: 复盘指标 as-of 调度
+
+    /// as-of 重算触发签名：光标日期/位置、合成OHLCV内容、指标配置任一变化都重新求值；
+    /// 同周期（synthetic=nil）/范围框/无光标时为 nil（真实库值即显示值，无需重算）
+    private struct AsOfTrigger: Equatable {
+        let date: Int
+        let idx: Int
+        let sourcePeriod: KlinePeriod
+        let open, high, low, close, volume, turnover: Double
+        let fingerprint: String
+        let targetCount: Int
+    }
+
+    private var asOfTrigger: AsOfTrigger? {
+        guard let r = linkReplayState, let s = r.synthetic else { return nil }
+        return AsOfTrigger(date: linkSync.cursorDate ?? s.date, idx: r.idx,
+                           sourcePeriod: linkSync.sourcePeriod,
+                           open: s.open, high: s.high, low: s.low, close: s.close,
+                           volume: s.volume, turnover: s.turnover,
+                           fingerprint: Self.currentConfigFingerprint(period: period),
+                           targetCount: sortedData.count)
+    }
+
+    /// 主图某条曲线在当前复盘光标处的 as-of 值（仅合成态、光标索引匹配时返回）
+    private func asOfMainOverride(_ lineIndex: Int) -> Double? {
+        guard let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
+        return asOfMain[lineIndex]
+    }
+
+    /// 某副图槽位某条曲线在当前复盘光标处的 as-of 值
+    private func asOfSubOverride(slot: Int, lineIndex: Int) -> Double? {
+        guard slot >= 0, slot < asOfSubs.count,
+              let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
+        return asOfSubs[slot][lineIndex]
+    }
+
+    /// 按 trigger 调度 as-of 重算（缓存命中即时应用；否则后台求值、序号防过期）。
+    /// trigger 为 nil 时清空所有 override（同周期/范围框/无光标/退联动）。
+    private func scheduleAsOf(_ t: AsOfTrigger?) {
+        asOfTicket += 1
+        guard let t else {
+            asOfMain = [:]
+            asOfSubs = [[:], [:], [:]]
+            return
+        }
+        let metaID = linkedMetaID ?? metaId ?? 0
+        let key = AsOfKey(metaID: metaID, targetPeriod: period, sourcePeriod: t.sourcePeriod,
+                          date: t.date, fingerprint: t.fingerprint)
+        if let cached = AsOfValueCache.shared.get(key) {
+            asOfMain = cached.main
+            asOfSubs = cached.subs
+            return
+        }
+        guard t.idx >= 0, t.idx < sortedData.count else { return }
+        // 主线程构造请求：取齐公式文本与[0...idx]截断数据（末项替换为合成K线）
+        let synth = KlineItem(date: sortedData[t.idx].date, open: t.open, high: t.high, low: t.low,
+                              close: t.close, volume: t.volume, turnover: t.turnover)
+        var data = Array(sortedData[0...t.idx])
+        data[data.count - 1] = synth
+        let customFormula = activeCustomIndicator?.formula
+        let entries = mainIndicatorEntries(store: SystemIndicatorStore.shared,
+                                           customStore: customStore, config: config,
+                                           customFormula: customFormula, period: period)
+        var subs: [AsOfRequest.Sub?] = []
+        for m in [subTop, subBottom, subThird] {
+            if m.kind == "VOL" || m.kind == "AMO" {
+                subs.append(nil)   // 合成量/额走阶段 A 通道
+            } else if let cid = m.activeCustomID,
+                      let c = customStore.indicators.first(where: { $0.id == cid }) {
+                subs.append(.init(formula: c.formula, isCustom: true))
+            } else if let f = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: period) {
+                subs.append(.init(formula: f, isCustom: false))
+            } else {
+                subs.append(nil)
+            }
+        }
+        let req = AsOfRequest(key: key, data: data,
+                              mainFormulas: entries.map(\.formula), subs: subs)
+        let ticket = asOfTicket
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = evaluateAsOf(req)
+            DispatchQueue.main.async {
+                // 期间已有更新的调度（或光标消失/清场）→ 丢弃本次结果
+                guard ticket == self.asOfTicket else { return }
+                AsOfValueCache.shared.put(key, result)
+                self.asOfMain = result.main
+                self.asOfSubs = result.subs
+            }
+        }
     }
 
     // MARK: - 指标序列计算
@@ -2059,6 +2156,8 @@ struct KlineChartView: View {
             // 联动复盘：切周期/标的导致 .id 重建后，若联动光标仍在（cursorDate 未变、
             // 不会再收到 onChange），立即补一次来源数据加载请求，命中缓存则当帧即可合成
             ensureLinkSourceBars()
+            // as-of 同理：重建后若合成态成立，直接按缓存恢复/调度指标点重算
+            scheduleAsOf(asOfTrigger)
             // 把主图指标按钮标题/点击行为同步给外层信息栏
             syncMainLegendPortal()
             // 副图配置已持久化在共享仓库，无需重置
@@ -2097,6 +2196,10 @@ struct KlineChartView: View {
         }
         .onChange(of: linkSync.cursorDate) { date in
             applyLinkCursor(date)
+        }
+        .onChange(of: asOfTrigger) { t in
+            // 合成内容/光标日期/指标配置变化 → 调度（或清空）as-of 单点重算
+            scheduleAsOf(t)
         }
         .onChange(of: suppressCrosshair) { on in
             // 「边」开启时清除可能残留的十字光标（含固定光标），并同步联动/上报
@@ -3143,9 +3246,24 @@ struct KlineChartView: View {
             let d = r.dimFrom - startIndex
             return (d >= 0 && d < localCount) ? d : nil
         }
+        // 主图曲线可见切片：合成索引处用 as-of 重算值单点替换（历史段/未来段数组值不动）
+        func mainCurveValues(_ line: IndicatorLine, lineIndex: Int) -> [Double] {
+            var values = mirroredSliceArr(line.values)
+            if let r = replay, r.synthetic != nil,
+               r.idx >= startIndex, r.idx <= endIndex,
+               let v = asOfMain[lineIndex] {
+                let local = r.idx - startIndex
+                if local >= 0, local < values.count { values[local] = mainMirrored ? -v : v }
+            }
+            return values
+        }
         return MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
-                        curves: isBareK ? [] : mainCurves.map { CanvasCurve(color: $0.color, values: mirroredSliceArr($0.values), style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor, markerColors: sliceColors($0.markerColors)) },
+                        curves: isBareK ? [] : mainCurves.enumerated().map { li, line in
+                            CanvasCurve(color: line.color, values: mainCurveValues(line, lineIndex: li),
+                                        style: line.style, lineWidth: line.lineWidth, barColor: line.barColor,
+                                        markerColors: sliceColors(line.markerColors))
+                        },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
@@ -3179,6 +3297,7 @@ struct KlineChartView: View {
             let d = r.dimFrom - startIndex
             return (d >= 0 && d < localCount) ? d : nil
         }
+        let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
         let synthStick: SyntheticStick? = {
             guard let r = replay, let s = r.synthetic,
                   r.idx >= startIndex, r.idx <= endIndex,
@@ -3188,12 +3307,24 @@ struct KlineChartView: View {
                                   value: config.mainMirrored ? -v : v,
                                   isUp: s.isUp)
         }()
+        // 副图曲线可见切片：合成索引处用 as-of 重算值单点替换（VOL/AMO 均量线等同样适用）
+        func subCurveValues(_ line: IndicatorLine, lineIndex: Int) -> [Double] {
+            var values = subMirroredSliceArr(line.values)
+            if let r = replay, r.synthetic != nil,
+               r.idx >= startIndex, r.idx <= endIndex,
+               let v = asOfSubs[slot][lineIndex] {
+                let local = r.idx - startIndex
+                if local >= 0, local < values.count { values[local] = config.mainMirrored ? -v : v }
+            }
+            return values
+        }
         return ZStack(alignment: .topLeading) {
             Color.white
             SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
-                           curves: m.curves.map { CanvasCurve(color: $0.color,
-                                                              values: subMirroredSliceArr($0.values),
-                                                              style: $0.style, lineWidth: $0.lineWidth, barColor: $0.barColor) },
+                           curves: m.curves.enumerated().map { li, line in
+                               CanvasCurve(color: line.color, values: subCurveValues(line, lineIndex: li),
+                                           style: line.style, lineWidth: line.lineWidth, barColor: line.barColor)
+                           },
                            rangeMin: range.min, rangeMax: range.max,
                            upColor: upColor, downColor: downColor, gridColor: gridColor,
                            dimFromIndex: dimLocal, syntheticStick: synthStick)
@@ -3313,10 +3444,11 @@ struct KlineChartView: View {
                     withAnimation { showSubSheet.toggle() }
                 })
                 // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式；
-                // 联动复盘时光标所在大周期K线的量/额为来源周期累加值，显式覆盖读数
+                // 联动复盘：VOL/AMO 柱线读合成累加量/额，其余指标行读 as-of 重算值；同图 MA 均量线走 as-of
                 let isVolAmo = (m.kind == "VOL" || m.kind == "AMO")
-                ForEach(Array(m.curves.enumerated()), id: \.offset) { _, line in
-                    // 仅 stick 柱线（VOL/AMO 本体）取合成量/额；同图的 MA 均量线不覆盖
+                let legendSlot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
+                ForEach(Array(m.curves.enumerated()), id: \.offset) { lineOffset, line in
+                    // 仅 stick 柱线（VOL/AMO 本体）取合成量/额
                     let volAmoOverride: Double? = {
                         guard isVolAmo, line.style == .stick,
                               let r = linkReplayState, let s = r.synthetic,
@@ -3325,7 +3457,7 @@ struct KlineChartView: View {
                     }()
                     legendItem(line, mirrored: config.mainMirrored,
                                formatter: isVolAmo ? { formatVolume($0) } : nil,
-                               valueOverride: volAmoOverride)
+                               valueOverride: volAmoOverride ?? asOfSubOverride(slot: legendSlot, lineIndex: lineOffset))
                 }
                 Spacer()
                 // 副图1：最右侧「回到最新」按钮（右指带尾单箭头）。
@@ -3400,8 +3532,10 @@ struct KlineChartView: View {
                 }
                 if isBareK { legendText("裸K") }
                 if !isBareK {
-                    ForEach(Array(mainCurves.enumerated()), id: \.offset) { _, line in
-                        legendItem(line, mirrored: config.mainMirrored)
+                    ForEach(Array(mainCurves.enumerated()), id: \.offset) { li, line in
+                        // 联动复盘：合成点指标读数用 as-of 重算值（镜像取负仍由 legendItem 处理）
+                        legendItem(line, mirrored: config.mainMirrored,
+                                   valueOverride: asOfMainOverride(li))
                     }
                 }
                 Spacer()
@@ -4549,6 +4683,109 @@ final class LinkSourceBarCache: ObservableObject {
             }
         }
     }
+}
+
+// MARK: - 联动复盘：合成点指标 as-of 单点重算（后台异步 + 进程内缓存）
+
+/// 一次 as-of 结果的缓存键：同一(标的,目标周期,来源周期,光标日期,指标配置)只算一次，
+/// 拖回去时零开销；配置/周期/标的变化自动 miss
+struct AsOfKey: Hashable {
+    let metaID: Int
+    let targetPeriod: KlinePeriod
+    let sourcePeriod: KlinePeriod
+    let date: Int
+    let fingerprint: String
+}
+
+/// as-of 求值结果：主图与三个副图分别按「曲线数组下标 → 合成点值」存储。
+/// 下标与 mainCurves / SubChartModel.curves 的行顺序严格同源（同过滤规则），只覆盖合成点一个值。
+struct AsOfResult {
+    var main: [Int: Double] = [:]
+    var subs: [[Int: Double]] = [[:], [:], [:]]
+}
+
+/// as-of 结果进程内缓存（LRU 上限保护，光标来回拖动命中零计算；不写入 ChartCacheStore，
+/// 避免污染正常指标体系与后台预计算）
+final class AsOfValueCache {
+    static let shared = AsOfValueCache()
+    private var storage: [AsOfKey: AsOfResult] = [:]
+    private var order: [AsOfKey] = []
+    private let limit = 240
+    private let lock = NSLock()
+
+    func get(_ key: AsOfKey) -> AsOfResult? {
+        lock.lock(); defer { lock.unlock() }
+        return storage[key]
+    }
+
+    func put(_ key: AsOfKey, _ result: AsOfResult) {
+        lock.lock(); defer { lock.unlock() }
+        if storage[key] == nil {
+            order.append(key)
+            while order.count > limit, let old = order.first {
+                order.removeFirst()
+                storage[old] = nil
+            }
+        }
+        storage[key] = result
+    }
+}
+
+/// as-of 后台求值请求（主线程构造：公式文本与数据在此取齐，后台只做纯计算，不碰任何 ObservableObject）
+private struct AsOfRequest {
+    let key: AsOfKey
+    /// [0...合成索引] 的K线，末项已替换为合成K线
+    let data: [KlineItem]
+    /// 主图启用指标公式（顺序与 mainIndicatorEntries 一致：.tdx defs → 自定义）
+    let mainFormulas: [String]
+    /// 副图三槽：VOL/AMO/无指标为 nil；自定义/系统公式带 isCustom 标记
+    struct Sub {
+        let formula: String
+        let isCustom: Bool
+    }
+    let subs: [Sub?]
+}
+
+/// 后台执行 as-of 求值：逐指标用截断（末项替换）序列重算，**只取每条输出行末点值**。
+/// 行的保留/跳过规则必须与前台 recomputeMainCurves / recomputeSub 严格一致，
+/// 结果下标才能与当前 curves 数组一一对齐：
+/// - 主图：formula → splitOutputUnits → 逐单元 evaluate，out 非全 NaN（buildMainLine 的唯一过滤条件）才占一个曲线位；
+/// - 副图自定义：evaluate(formula:) 的全部输出行；
+/// - 副图系统指标：过滤全 NaN 行（recomputeSub 的 guard !allNaN）；
+/// - VOL/AMO：不入此通道（合成量/额在阶段 A 处理）。
+private func evaluateAsOf(_ req: AsOfRequest) -> AsOfResult {
+    var result = AsOfResult()
+
+    // 主图
+    var mainIndex = 0
+    for formula in req.mainFormulas {
+        guard let units = try? TDXFormulaEngine.splitOutputUnits(formula: formula) else { continue }
+        for unit in units {
+            // 与 mainRows 同源：每个 unit 成功（out 非全 NaN）才占一个 mainCurves 位，失败不占位
+            if let outs = try? TDXFormulaEngine.evaluate(statements: unit.statements, data: req.data),
+               let out = outs.last,
+               !prefetchAllNaN(out.values),
+               let v = out.values.last, !v.isNaN {
+                result.main[mainIndex] = v
+                mainIndex += 1
+            }
+        }
+    }
+
+    // 副图三槽
+    for (slot, sub) in req.subs.enumerated() {
+        guard let sub, let lines = try? TDXFormulaEngine.evaluate(formula: sub.formula, data: req.data) else { continue }
+        var curveIndex = 0
+        for line in lines {
+            // 自定义行全部保留；系统行过滤全 NaN（与前台同一规则）
+            guard sub.isCustom || !prefetchAllNaN(line.values) else { continue }
+            if let v = line.values.last, !v.isNaN {
+                result.subs[slot][curveIndex] = v
+            }
+            curveIndex += 1
+        }
+    }
+    return result
 }
 
 // MARK: - 副图 Canvas（VOL/AMO/MACD/KDJ/RSI/自定义通用）
