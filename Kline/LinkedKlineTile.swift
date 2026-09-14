@@ -19,7 +19,8 @@ struct LinkedKlineTile: View {
     var view: LinkedViewConfig
     /// 所属主标的（用于把本视图的周期/标的变更持久化到该标的名下）
     let ownerMetaID: Int
-    /// 是否第一个视图，仅保留用作身份标记（光标联动新语义下所有视图一律居中，不再依赖左右不对称）
+    /// 历史保留参数：早期左右不对称联动时仅第一个（左）视图据此居中。当前所有视图联动一律居中，
+    /// 该值图表内部已不读取，仅沿调用链透传（仍按 v.index == 0 传入以保持调用形态）
     let linkAutoCenter: Bool
     /// 当前是否处于「边」边线调节（禁止十字光标）
     let suppressCrosshair: Bool

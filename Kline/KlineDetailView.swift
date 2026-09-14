@@ -108,11 +108,13 @@ final class DetailRouter: ObservableObject {
     }
 }
 
-/// 双视图联动同步对象：左右两个 K 线图（左日线/右周线）通过它按日期（YYYYMMDD 整数）同步十字光标
+/// 多视图联动同步对象：联动多图中的 2~4 个 K 线图通过它按日期（YYYYMMDD 整数）同步十字光标。
+/// 所有视图共用同一个实例（KlineDetailView.linkSync → LinkedKlineTile.sharedLinkSync）。
 final class DualLinkSync: ObservableObject {
+    /// 当前联动光标所指K线的日期（nil = 无活动联动光标）：来源视图 publish、其余视图 onChange 接收
     @Published var cursorDate: Int? = nil
-    /// 最近一次 cursorDate 是否由「右侧视图用户直接操作」产生。
-    /// 左视图据此决定是否把联动K线居中显示；左视图自身拖动产生的回声不算
+    /// 【遗留字段】早期「左日线 / 右周线」双视图不对称联动时，标记 cursorDate 是否由右侧用户操作
+    /// 产生、左视图据此决定是否居中。当前对称联动下所有视图一律居中，该字段已无读写方，仅保留定义。
     var lastCursorFromRightUser = false
     /// 产生当前 cursorDate 的「来源窗口期」：由来源视图在 publish 时写入。
     /// 更小周期视图据此用两根竖轴框出来源周期K线覆盖的时间范围（无需十字光标）。

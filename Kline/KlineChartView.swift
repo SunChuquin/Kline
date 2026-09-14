@@ -557,8 +557,8 @@ struct KlineChartView: View {
     private let hideMainZoomButton: Bool
     /// 是否为联动多图 tile（影响时间轴周期数显示等联动专属样式）
     private let isLinkedTile: Bool
-    /// 接收联动光标并自动滚动到窗口外K线时，是否把该K线居中显示。
-    /// 在联动模式 cursorLinkEnabled 开启且对称联动下，所有视图联动一律居中，本字段仅用于光标来源标记。
+    /// 历史保留的透传参数：早期左右视图不对称联动时，仅部分视图据此决定是否居中。
+    /// 当前对称联动语义下，所有视图每次收到联动都一律滚动居中，本字段已无读取方，仅沿调用链透传。
     private let linkAutoCenter: Bool
     /// 光标联动开关（详情页顶部「联」字按钮的联动态）：
     ///   true  → 本视图光标主动 publish 到 linkSync，并 apply 其它视图的联动
@@ -616,8 +616,10 @@ struct KlineChartView: View {
     @State private var selectedIndex: Int? = nil
     /// 副图三「裸」按钮控制的主图裸K：仅隐藏主图指标显示，不触发重算、不清除 mainCurves 缓存
     @State private var bareFromSub = false
-    /// 联动接收过程中，被联动视图在「本次十字光标第一次出现」时才居中一次；
-    /// 之后来源端拖动光标时仅移动光标位置、不再反复居中（避免拖动时窗口被不停拖走）。
+    /// 联动光标会话标记：收到有效联动光标/范围时置 true，来源光标消失时置 false。
+    /// 当前实现下每次 applyLinkCursor 都无条件把目标K线（或范围）滚动居中，居中不再依赖本标记
+    /// （旧「仅第一次出现时居中、之后拖动只移动不居中」的语义已废弃）；目前只写不读，
+    /// 保留以便日后需要区分「首次出现 / 持续拖动」时复用。
     @State private var linkCursorActive = false
     /// 📌 开启时固定下来的第一个光标（不可被点击清除；只随 pinEnabled 关闭而清除）
     @State private var pinnedIndex: Int? = nil
@@ -2030,8 +2032,9 @@ struct KlineChartView: View {
 
     /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象。
     /// 仅当 cursorLinkEnabled 为 true（用户显式开启了联动态的光标联动）才真正发布。
-    /// lastCursorFromRightUser 在新的对称联动下仅保留历史兼容语义：
-    /// 只要 linkUserDragging=true（任一视图的用户直接操作）就视为来源端，用于所有被联动视图统一做居中显示。
+    /// 对称联动语义：任一视图只要 linkUserDragging=true（用户手指直接操作）即为来源端，
+    /// 其余所有视图收到后一律滚动居中（DualLinkSync.lastCursorFromRightUser 为早期左右不对称
+    /// 联动的遗留字段，当前已无任何读写方）。
     private func publishLinkCursor(index: Int?) {
         guard cursorLinkEnabled else { return }
         // 只有"用户直接操作"的视图（即来源）才真正对外发布联动光标。
@@ -2051,8 +2054,9 @@ struct KlineChartView: View {
 
     /// 应用另一视图发布的联动光标：把本视图光标移动到对应日期最近的 K 线。
     /// 仅当 cursorLinkEnabled=true 才响应；拖动中/同日期防回声守卫保持不变。
-    /// 被联动视图的光标**始终保持在屏幕内**：若该K线滑出当前可视窗口就滚动窗口让它重新进入
-    /// （居中）；如果仍在窗口内则不动，避免拖动时整个窗口被反复拖走（保持上下文观察）。
+    /// 当前居中语义：每次联动到达（含来源端持续拖动）都把目标K线滚动到屏幕水平中央，
+    /// 不再判断它是否原本就在可视窗口内——保证多个视图的同一时间点始终横向对齐。
+    /// （newOffset 与当前窗口恰好一致时自然跳过滚动，不会无意义重算。）
     private func applyLinkCursor(_ date: Int?) {
         // 总开关：未开启光标联动时直接忽略
         guard cursorLinkEnabled else { return }
