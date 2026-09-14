@@ -503,10 +503,16 @@ struct KlineDetailView: View {
                     .foregroundColor(.gray)
                     .lineLimit(1)
             } else {
-                // 联动多图：返回按钮右侧显示「联动模式 - 主标的名称」
-                Text("联动模式 - \(item.name)")
+                // 联动多图：返回按钮右侧显示「联动模式 - 主标的名称 + 标的代码」，样式对齐单图态（名称黑色加粗、代码灰色小字）
+                (Text("联动模式 - ")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.black)
+                + Text(item.name)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.black)
+                + Text("  \(item.code)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.gray))
                     .lineLimit(1)
             }
 
