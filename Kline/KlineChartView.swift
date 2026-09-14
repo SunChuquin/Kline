@@ -1755,9 +1755,10 @@ struct KlineChartView: View {
                 // 联动会话中非来源的大周期复盘/同周期视图：忽略一切单指操作
                 // （不接管来源、不平移缩放、不放光标；双指缩放在独立手势层，不受影响）
                 if isLinkedFrozenView { return }
-                // 联动会话中非来源的小周期范围框视图：单指只操作纯本地「第二个十字光标」，
-                // 不发布联动、不接管来源、不平移缩放窗口
-                if isLinkedSecondCursorView {
+                // 联动会话中非来源的小周期范围框视图：
+                // - 本地第二光标**已存在** → 单指拖动只移动第二光标（不接管来源、不平移缩放）；
+                // - 第二光标**不存在** → 不拦截，单指照常走下方 pan/zoom 与副图滑动逻辑（双指缩放在独立手势层，始终可用）。
+                if isLinkedSecondCursorView && secondCursorIndex != nil {
                     drag.isDragging = true
                     drag.lastTouchX = value.location.x
                     if abs(value.translation.width) > 6 || abs(value.translation.height) > 6 {
@@ -1845,11 +1846,11 @@ struct KlineChartView: View {
                     drag.secondCursorDragging = false
                     return
                 }
-                // 联动非来源小周期范围框视图：只结算本地第二光标——
-                // 拖动结束复位；轻点为 toggle：第二光标不存在时在落点放置，已存在时只在本地
-                // 取消它（不发布、不影响来源视图的合成/范围框与其他视图；整组联动的取消仍由
-                // 来源视图再点一下负责，那时所有视图的第二光标一并清除）
-                if isLinkedSecondCursorView {
+                // 联动非来源小周期范围框视图且本地第二光标**已存在**：
+                // 拖动结束复位标记；轻点则只在本地取消第二光标（不发布、不影响来源视图的
+                // 合成/范围框与其他视图；整组联动的取消仍由来源视图再点一下负责）。
+                // 第二光标不存在时不走这里——拖动是正常 pan/zoom，轻点在下方放置第二光标。
+                if isLinkedSecondCursorView && secondCursorIndex != nil {
                     let wasSecondDragging = drag.secondCursorDragging
                     drag.isDragging = false
                     drag.secondCursorDragging = false
@@ -1860,18 +1861,7 @@ struct KlineChartView: View {
                         let inPanel = isInPanel(y, mainTop, mainBottom)
                             || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom)
                         let isTap = abs(value.translation.width) < 6 && abs(value.translation.height) < 6
-                        if isTap && inPanel {
-                            if secondCursorIndex != nil {
-                                clearSecondCursor()
-                            } else {
-                                let col = Int((value.location.x / candleSpacing).rounded(.down))
-                                let idx = startIndex + col
-                                if idx >= startIndex && idx <= endIndex {
-                                    secondCursorIndex = idx
-                                    secondCursorY = y
-                                }
-                            }
-                        }
+                        if isTap && inPanel { clearSecondCursor() }
                     }
                     return
                 }
@@ -1889,6 +1879,20 @@ struct KlineChartView: View {
                 guard !menuIsOpen else { drag.cursorDragging = false; return }
                 // 副图滑动切换结算：超过阈值触发切换，否则回弹取消（动画由 overlay 呈现）
                 if let fb = swipeFeedback {
+                    // 非来源小周期范围框视图在副图区的**轻点**（第二光标不存在时手势才会走到这里）：
+                    // 回弹滑动反馈后放置本地第二光标，不触发切周期/标的
+                    if isLinkedSecondCursorView,
+                       abs(value.translation.width) < 6, abs(value.translation.height) < 6 {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { swipeFeedback = nil }
+                        let y = value.location.y
+                        let col = Int((value.location.x / candleSpacing).rounded(.down))
+                        let idx = startIndex + col
+                        if idx >= startIndex && idx <= endIndex {
+                            secondCursorIndex = idx
+                            secondCursorY = y
+                        }
+                        return
+                    }
                     let threshold: CGFloat = 70
                     let dir = fb.offset > 0 ? -1 : 1   // 右滑=更小周期/上一个标的，左滑=更大周期/下一个标的
                     // 副图一（上方副图）作用调转：往左=切换小级别/上一个标的，往右=切换大级别/下一个标的
@@ -1935,16 +1939,25 @@ struct KlineChartView: View {
                 // 「边」调节分割线时禁止产生/清除十字光标
                 if suppressCrosshair { return }
                 if isTap && inPanel {
-                    // 点击（无论放置还是清除光标）都视为用户直接操作（联动来源），
-                    // 让本次取消/放置都能被联动到其它视图
-                    linkUserDragging = true
                     let col = Int((value.location.x / candleSpacing).rounded(.down))
                     let idx = startIndex + col
-                    if selectedIndex != nil {
-                        selectedIndex = nil; crosshairY = nil
-                    } else if idx >= startIndex && idx <= endIndex {
-                        // 点击创建光标也视为用户直接操作（联动来源标记），使右视图点击能同步到左视图
-                        selectedIndex = idx; crosshairY = value.location.y
+                    if isLinkedSecondCursorView {
+                        // 非来源小周期范围框视图：轻点放置纯本地第二光标（走到这里时它必然不存在），
+                        // 不设联动来源标记、不写 selectedIndex，因此不会接管来源/广播给其他视图
+                        if idx >= startIndex && idx <= endIndex {
+                            secondCursorIndex = idx
+                            secondCursorY = y
+                        }
+                    } else {
+                        // 点击（无论放置还是清除光标）都视为用户直接操作（联动来源），
+                        // 让本次取消/放置都能被联动到其它视图
+                        linkUserDragging = true
+                        if selectedIndex != nil {
+                            selectedIndex = nil; crosshairY = nil
+                        } else if idx >= startIndex && idx <= endIndex {
+                            // 点击创建光标也视为用户直接操作（联动来源标记），使右视图点击能同步到左视图
+                            selectedIndex = idx; crosshairY = value.location.y
+                        }
                     }
                 }
             }
