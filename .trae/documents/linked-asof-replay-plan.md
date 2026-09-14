@@ -25,7 +25,7 @@
 | # | 决策点 | 结论 |
 | --- | --- | --- |
 | D1 | 淡化覆盖范围 | **全部元素统一 1/3**：主图蜡烛（四种样式）、VOL/AMO 柱、主图与全部副图指标曲线、最新价虚线等参考线；只改 alpha，不改数值 |
-| D2 | 同周期目标（日→日等，含跨标的） | **也淡化**光标之后的 K 线；但不合成（光标那根本就是真实 K 线） |
+| D2 | 同周期目标（日→日等，含跨标的） | ~~也淡化~~ → **2026-09-14 真机验收后调整：同周期不进入复盘，不淡化、不合成**，只保留普通十字光标（竖线+收盘价横线）。代码上 `linkReplayState` 生效条件由 rank `>=` 收紧为严格大于 `>` |
 | D3 | 跨标的 | **也淡化、也合成**，但各视图用**自己标的**的来源周期数据合成（B 的月线用 B 的周线，绝不借 A 的数据） |
 | D4 | 拖动时指标重算策略 | **后台异步重算 + 缓存**：合成 K 线图形实时跟手；指标点允许极短暂显示上一次结果，算出后刷新 |
 
@@ -65,11 +65,12 @@ linkReplay: (idx: Int, synthetic: KlineItem?, dimFrom: Int)?
 
 - 生效条件（与范围框互斥）：`cursorLinkEnabled && !drag.cursorDragging && !linkUserDragging
   && linkSync.cursorDate != nil && linkRangeIndices == nil
-  && self.period.granularityRank >= linkSync.sourcePeriod.granularityRank`；
+  && self.period.granularityRank > linkSync.sourcePeriod.granularityRank`
+  （**严格大于**；2026-09-14 D2 调整，原为 `>=`，同周期现在直接不进入复盘）；
 - `idx = renderCursorIndex`（同一次派生内复用，避免两次最近查找不一致）；
-- `dimFrom = idx + 1`（即使 synthetic 为 nil 也淡化，D3 停牌兜底）；
-- `synthetic`：仅当 `self.period.rank > sourcePeriod.rank` 且聚合区间非空时存在（严格大于才合成；同周期 nil）；
-- `renderCursorIndex` 现有"范围框时返回 nil"的总闸保持不动，复盘态正常返回 `idx`，现有竖线/行情行/数值栏通道继续工作。
+- `dimFrom = idx + 1`（synthetic 为 nil 的停牌兜底场景仍淡化）；
+- `synthetic`：严格大于来源周期且聚合区间非空时存在；同周期不进入本派生；
+- `renderCursorIndex` 现有"范围框时返回 nil"的总闸保持不动；同周期由普通十字光标通道（竖线/行情行/收盘价横线）照常工作。
 
 ### 4.2 来源周期数据缓存（新增轻量共享类，不改 LinkedViewStore 落盘）
 
@@ -93,7 +94,7 @@ linkReplay: (idx: Int, synthetic: KlineItem?, dimFrom: Int)?
    - `date = sortedData[idx].date`（沿用目标周期 K 线的起始日期，保证标签/坐标不变）；
    - 其余字段（涨跌幅等派生显示字段）按现有 KlineItem 显示惯例由 OHLC 推导；
 5. 性能：聚合长度 = 一个大周期内的来源根数（日→月 ≤23、周→季 ≤14、日→年 ≤250），每次 cursorDate 变化一次遍历，可忽略；**不做增量**，简单优先。
-6. 同周期（rank 相等）跳过 2-5，`synthetic = nil`。
+6. 同周期（rank 相等）整体不进入 `linkReplayState`（D2 调整后），根本不执行 2-5。
 
 ### 4.4 渲染层改造（阶段 A 主体）
 
@@ -168,7 +169,7 @@ cursorDate 变化
 
 1. 周线源→月线：月线光标 K 线随周线光标在月内移动实时变形（OHLC/量符合聚合规则、红绿翻转），其后全部月 K 淡化 1/3；
 2. 周线源→季线：10 月中触发时 Q4 合成包含 10 月初至光标周（验证"季起始边界"）；
-3. 日→日（两视图同标的/不同标的）：无合成、其后淡化；
+3. 日→日（两视图同标的/不同标的）：仅普通十字光标，无合成、无淡化（D2 调整后）；
 4. 跨标的：B 的月线用 B 自己的周线合成（数值与 A 无关）；
 5. 标的整段停牌：光标那根回退真实 K 线，淡化仍在，不崩溃；
 6. 四种主图样式（空心/实心/收盘线/OHLC）+ 多/空镜像下合成与淡化均正确；
@@ -194,7 +195,7 @@ cursorDate 变化
 
 - [x] 光标在最后一根：dimFrom 越界 → 无淡化、synthetic 与库值一致（自然退化）
 - [x] 聚合区间为空（停牌/无行情）：synthetic=nil，淡化生效，横线取真实 close
-- [x] 同周期：不合成，淡化生效
+- [x] 同周期：**不合成、不淡化**（2026-09-14 调整：linkReplayState 条件改 rank 严格大于，同周期回退普通十字光标）
 - [x] 跨标的：各自取数
 - [x] 范围框模式（rank <）互斥，不受影响
 - [x] 镜像模式：合成 OHLC/量取负路径与真实 K 线一致
@@ -257,5 +258,6 @@ cursorDate 变化
 5. as-of 曲线替换在**可见切片数组**上单点改值后再入 Canvas（未新增 Canvas override 入参），配合阶段 A 的分段淡化绘制，合成点自动以原色落在历史段末端。
 6. 调度入口三处：`onChange(of: asOfTrigger)`、`onAppear`（切周期/标的重建补偿）、来源数据到达经 `LinkSourceBarCache.revision` 驱动 trigger 从 nil 变非 nil。
 7. 编译修复一次：`subChart(model:slot:)` 本有 `slot: SubSlot` 参数，阶段 B 新增的同名 Int 局部变量遮蔽导致编译失败（`e97e0bf` 改名 `subSlotIndex`）。
+8. **真机验收后调整（同日）**：D2 原决策"同周期也淡化"被用户推翻——`linkReplayState` 条件由 rank `>=` 收紧为严格大于 `>`，同周期视图回退普通十字光标（不合成、不淡化）；竖线与收盘价横线由既有联动通道继续工作，无需额外处理。
 
 **待真机验收重点**（对应第 5 节验收清单）：周→月合成随拖动变形、季从自身起始边界聚合、四样式+镜像、跨标的各算各的、清光标复原、快速拖动流畅度与指标值滞后观感。

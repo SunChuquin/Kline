@@ -1025,14 +1025,15 @@ struct KlineChartView: View {
     }
 
     /// 当前是否处于复盘态及其内容。与双竖轴范围框（rank <）互斥：
-    /// - rank 严格大于来源周期：合成"形成中K线"（需本标的来源周期数据，已懒加载则即时合成）；
-    /// - rank 相等（同周期，含跨标的）：不合成，synthetic=nil，但淡化仍生效；
+    /// - rank 严格大于来源周期：合成"形成中K线"（需本标的来源周期数据，已懒加载则即时合成），其后K线淡化；
+    /// - rank 相等（同周期，含跨标的）：**不进入复盘**（返回 nil），保持普通十字光标联动——
+    ///   光标那根本就是真实K线，不合成、其后K线也不淡化（2026-09-14 用户确认调整，推翻早期"同周期也淡化"）；
     /// - 来源数据未加载/区间无K线（停牌）：synthetic=nil，回退真实K线显示，淡化仍生效。
     private var linkReplayState: LinkReplay? {
         guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
               linkRangeIndices == nil,
               let date = linkSync.cursorDate,
-              self.period.granularityRank >= linkSync.sourcePeriod.granularityRank,
+              self.period.granularityRank > linkSync.sourcePeriod.granularityRank,
               let idx = nearestIndex(to: date),
               idx >= 0, idx < sortedData.count else { return nil }
         var synth: KlineItem?
