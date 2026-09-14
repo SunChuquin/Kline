@@ -3171,8 +3171,10 @@ struct KlineChartView: View {
             // 两行标签更高，中心点整体下移使其完全落在主图内，避免顶部被裁剪
             .position(x: width / 2, y: cursorTopLabelY(hasSecondLine: compareStats != nil, height: height))
             // 主图竖线下方（底部）：距今涨幅（光标K线收盘 → 整个数据集最后一根K线收盘）+ 距今周期数，白字、背景红涨绿跌；
-            // 第二个光标时第二行显示 两光标间成交量之和 与 成交额之和；宽度按最宽一行（第二行）贴边判定
-            if let last = sortedData.last, last.close > 0 {
+            // 第二个光标时第二行显示 两光标间成交量之和 与 成交额之和；宽度按最宽一行（第二行）贴边判定。
+            // 联动「历史时点复盘」态（本视图周期严格大于来源周期）不显示：数据末根属于光标之后的
+            // 「未来淡化区」（站在光标时点尚未发生），"距今涨幅/周期数"在复盘语义下不成立
+            if linkReplayState?.idx != index, let last = sortedData.last, last.close > 0 {
                 let pct = (last.close - item.close) / item.close * 100
                 let periodCount = max(0, (sortedData.count - 1) - index)
                 let pctSecondLine = compareStats.map { String(format: "%@  %@", formatVolume($0.volSum), formatAmount($0.amoSum)) }
