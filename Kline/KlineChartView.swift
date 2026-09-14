@@ -2054,9 +2054,11 @@ struct KlineChartView: View {
             .overlay {
                 // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
                 ZStack(alignment: .topLeading) {
-                    // 更大周期源的联动范围：两根无标签竖轴框出来源周期K线覆盖的范围（此时 renderCursorIndex 为 nil，不画十字光标）
+                    // 更大周期源的联动范围：两根无标签竖轴框出来源周期K线覆盖的范围（此时 renderCursorIndex 为 nil，不画十字光标）。
+                    // 纵向只覆盖图表面板区（主图顶 → 最下副图底），在时间轴顶端截停，不贯穿底部时间轴/行情数据栏
                     if let rg = linkRangeIndices {
-                        linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing, height: geometry.size.height)
+                        linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing,
+                                             top: mainTop, bottom: mainFullscreen ? mainBottom : s3Bottom)
                     }
                     // 可交互光标横线 y：
                     //   联动接收态 → 按联动K线收盘价反算（fixedPrice 同步传入，标签精确显示收盘价）；
@@ -3072,25 +3074,28 @@ struct KlineChartView: View {
         }
     }
 
-    /// 更大周期源的联动范围：在 [left, right] 两根K线处画两根全高无标签竖轴（含两轴间的淡色填充示意范围）。
-    /// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing），横贯主图与全部副图。
+    /// 更大周期源的联动范围：在 [left, right] 两根K线处画两根无标签竖轴（含两轴间的淡色填充示意范围）。
+    /// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing）；纵向只覆盖 [top, bottom]
+    /// 图表面板区（主图顶 → 最下副图底），在时间轴顶端截停，不贯穿底部时间轴与行情数据栏。
     @ViewBuilder
-    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat, height: CGFloat) -> some View {
-        if left >= startIndex, left <= endIndex, right >= startIndex, right <= endIndex {
+    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat, top: CGFloat, bottom: CGFloat) -> some View {
+        if left >= startIndex, left <= endIndex, right >= startIndex, right <= endIndex, bottom > top {
             let xL = (CGFloat(left - startIndex) + 0.5) * candleSpacing
             let xR = (CGFloat(right - startIndex) + 0.5) * candleSpacing
+            let regionHeight = bottom - top
+            let midY = (top + bottom) / 2
             // 两轴之间淡色填充，示意被框住的范围
             if xR > xL {
                 Rectangle()
                     .fill(Color.blue.opacity(0.06))
-                    .frame(width: max(0, xR - xL), height: height)
-                    .position(x: (xL + xR) / 2, y: height / 2)
+                    .frame(width: max(0, xR - xL), height: regionHeight)
+                    .position(x: (xL + xR) / 2, y: midY)
             }
             // 两根竖轴（无标签）
-            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: height)
-                .position(x: xL, y: height / 2)
-            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: height)
-                .position(x: xR, y: height / 2)
+            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                .position(x: xL, y: midY)
+            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                .position(x: xR, y: midY)
         }
     }
 
