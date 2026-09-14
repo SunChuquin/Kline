@@ -2175,6 +2175,7 @@ struct KlineChartView: View {
                     // 不贯穿三个副图指标栏、底部时间轴与行情数据栏
                     if let rg = linkRangeIndices {
                         linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing,
+                                             width: width,
                                              panels: mainFullscreen
                                                 ? [(mainTop, mainBottom)]
                                                 : [(mainTop, mainBottom),
@@ -3246,28 +3247,43 @@ struct KlineChartView: View {
     /// 更大周期源的联动范围：在 [left, right] 两根K线处画两根无标签竖轴（含两轴间的淡色填充示意范围）。
     /// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing）；纵向按 panels 给出的
     /// 图表面板区间分段绘制（与十字光标竖线一样被指标栏自然断开），不覆盖指标栏、时间轴与行情数据栏。
+    /// 水平方向按可见窗口裁剪：只要范围与窗口有重叠就绘制屏内部分——某一根竖轴被平移出屏时，
+    /// 另一根轴与底纹（贴屏幕边缘截断）仍然显示，而不是整个范围框消失。
     @ViewBuilder
-    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat,
+    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat, width: CGFloat,
                                       panels: [(top: CGFloat, bottom: CGFloat)]) -> some View {
-        if left >= startIndex, left <= endIndex, right >= startIndex, right <= endIndex {
+        // 范围与可见窗口的重叠部分（全局索引）；完全无重叠则不绘制
+        let visL = max(left, startIndex)
+        let visR = min(right, endIndex)
+        if visR >= visL {
             let xL = (CGFloat(left - startIndex) + 0.5) * candleSpacing
             let xR = (CGFloat(right - startIndex) + 0.5) * candleSpacing
+            // 底纹裁剪到屏幕内（轴在屏外时底纹从屏幕边缘起填，避免矩形越界画到相邻 tile）
+            let fillL = min(max(xL, 0), width)
+            let fillR = min(max(xR, 0), width)
+            // 两根轴各自只在仍位于可见窗口内时绘制
+            let showLAxis = left >= startIndex && left <= endIndex
+            let showRAxis = right >= startIndex && right <= endIndex
             ForEach(Array(panels.enumerated()), id: \.offset) { _, panel in
                 if panel.bottom > panel.top {
                     let regionHeight = panel.bottom - panel.top
                     let midY = (panel.top + panel.bottom) / 2
-                    // 两轴之间淡色填充，示意被框住的范围
-                    if xR > xL {
+                    // 两轴之间淡色填充（屏内截断部分），示意被框住的范围
+                    if fillR > fillL {
                         Rectangle()
                             .fill(Color.blue.opacity(0.06))
-                            .frame(width: max(0, xR - xL), height: regionHeight)
-                            .position(x: (xL + xR) / 2, y: midY)
+                            .frame(width: fillR - fillL, height: regionHeight)
+                            .position(x: (fillL + fillR) / 2, y: midY)
                     }
                     // 两根竖轴（无标签）
-                    Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
-                        .position(x: xL, y: midY)
-                    Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
-                        .position(x: xR, y: midY)
+                    if showLAxis {
+                        Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                            .position(x: xL, y: midY)
+                    }
+                    if showRAxis {
+                        Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                            .position(x: xR, y: midY)
+                    }
                 }
             }
         }
