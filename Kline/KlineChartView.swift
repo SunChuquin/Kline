@@ -2165,7 +2165,10 @@ struct KlineChartView: View {
                                       s1Top: s1Top, s1Bottom: s1Bottom, s2Top: s2Top, s2Bottom: s2Bottom,
                                       s3Top: s3Top, s3Bottom: s3Bottom))
             .overlay {
-                // 可交互光标（pin 开启时即第二个光标）与固定光标（pin 开启时的第一个）都绘制
+                // 本层全部是纯装饰覆盖（范围框蓝轴/底纹、十字光标横竖线与标签、联动第二光标），
+                // 不含任何可点击控件；整体禁用命中测试，避免大面积 Rectangle（尤其范围框底纹）
+                // 截走触摸导致点在范围框区域内无法触发放置/取消第二光标。
+                // 所有触摸统一由下层 chartDragGesture 处理。
                 ZStack(alignment: .topLeading) {
                     // 更大周期源的联动范围：两根无标签竖轴框出来源周期K线覆盖的范围（此时 renderCursorIndex 为 nil，不画十字光标）。
                     // 纵向按图表面板分段（参考十字光标竖线）：跳过主图/各副图之间的指标栏，且在时间轴顶端截停，
@@ -2211,6 +2214,7 @@ struct KlineChartView: View {
                                                        s3Top: s3Top, s3Bottom: s3Bottom, s3Height: sub3Height)
                     }
                 }
+                .allowsHitTesting(false)
             }
             // 公式编辑器：用 fullScreenCover（窗口级、不受联动 tile 半屏 frame 限制）呈现，做到真全屏。
             // 联动时多 tile 共享 showCustomEditor，只有「激活者」tile（selfIndex == editorOwnerIndex）真正弹出。
@@ -3283,9 +3287,10 @@ struct KlineChartView: View {
             // 可交互光标（pin 开启时即第二个光标）与固定光标的竖线/标签都绘制
             mainCursorVLine(index: renderCursorIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
             mainCursorVLine(index: pinnedIndex, compare: nil, width: width, candleSpacing: candleSpacing, height: height)
-            // 联动小周期范围框视图的本地「第二个十字光标」：蓝色、只保留顶部日期标签
+            // 联动小周期范围框视图的本地「第二个十字光标」：蓝色、只保留顶部日期标签（纯装饰，不参与命中测试）
             mainCursorVLine(index: secondCursorIndex, compare: nil, width: width, candleSpacing: candleSpacing, height: height,
                             secondary: true)
+                .allowsHitTesting(false)
         }
         .frame(width: width, height: height)
         .clipped()
@@ -3562,9 +3567,10 @@ struct KlineChartView: View {
             // 可交互光标（pin 开启时即第二个光标）与固定光标的副图竖线都绘制
             subCursorVLine(index: renderCursorIndex, compare: pinnedIndex, candleSpacing: candleSpacing, height: height)
             subCursorVLine(index: pinnedIndex, compare: nil, candleSpacing: candleSpacing, height: height)
-            // 联动小周期范围框视图的本地「第二个十字光标」副图竖线（蓝色）
+            // 联动小周期范围框视图的本地「第二个十字光标」副图竖线（蓝色，纯装饰不参与命中测试）
             subCursorVLine(index: secondCursorIndex, compare: nil, candleSpacing: candleSpacing, height: height,
                            secondary: true)
+                .allowsHitTesting(false)
         }
         .frame(width: width, height: height)
         .clipped()
