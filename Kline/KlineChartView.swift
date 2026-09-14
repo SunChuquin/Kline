@@ -2175,7 +2175,7 @@ struct KlineChartView: View {
                     // 不贯穿三个副图指标栏、底部时间轴与行情数据栏
                     if let rg = linkRangeIndices {
                         linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing,
-                                             width: width,
+                                             panOffset: panOffset,
                                              panels: mainFullscreen
                                                 ? [(mainTop, mainBottom)]
                                                 : [(mainTop, mainBottom),
@@ -2216,6 +2216,9 @@ struct KlineChartView: View {
                     }
                 }
                 .allowsHitTesting(false)
+                // 范围框底纹/竖轴跟随 panOffset 亚像素平移时可能暂时越出视图边界，
+                // 统一裁剪在本视图内，避免画到相邻 tile
+                .clipped()
             }
             // 公式编辑器：用 fullScreenCover（窗口级、不受联动 tile 半屏 frame 限制）呈现，做到真全屏。
             // 联动时多 tile 共享 showCustomEditor，只有「激活者」tile（selfIndex == editorOwnerIndex）真正弹出。
@@ -3250,7 +3253,8 @@ struct KlineChartView: View {
     /// 水平方向按可见窗口裁剪：只要范围与窗口有重叠就绘制屏内部分——某一根竖轴被平移出屏时，
     /// 另一根轴与底纹（贴屏幕边缘截断）仍然显示，而不是整个范围框消失。
     @ViewBuilder
-    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat, width: CGFloat,
+    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat,
+                                      panOffset: CGFloat,
                                       panels: [(top: CGFloat, bottom: CGFloat)]) -> some View {
         // 范围与可见窗口的重叠部分（全局索引）；完全无重叠则不绘制
         let visL = max(left, startIndex)
@@ -3258,34 +3262,35 @@ struct KlineChartView: View {
         if visR >= visL {
             let xL = (CGFloat(left - startIndex) + 0.5) * candleSpacing
             let xR = (CGFloat(right - startIndex) + 0.5) * candleSpacing
-            // 底纹裁剪到屏幕内（轴在屏外时底纹从屏幕边缘起填，避免矩形越界画到相邻 tile）
-            let fillL = min(max(xL, 0), width)
-            let fillR = min(max(xR, 0), width)
-            // 两根轴各自只在仍位于可见窗口内时绘制
+            // 两根轴各自只在仍位于可见窗口内时绘制（贴边时随 panOffset 自然移出并被外层裁剪）
             let showLAxis = left >= startIndex && left <= endIndex
             let showRAxis = right >= startIndex && right <= endIndex
-            ForEach(Array(panels.enumerated()), id: \.offset) { _, panel in
-                if panel.bottom > panel.top {
-                    let regionHeight = panel.bottom - panel.top
-                    let midY = (panel.top + panel.bottom) / 2
-                    // 两轴之间淡色填充（屏内截断部分），示意被框住的范围
-                    if fillR > fillL {
-                        Rectangle()
-                            .fill(Color.blue.opacity(0.06))
-                            .frame(width: fillR - fillL, height: regionHeight)
-                            .position(x: (fillL + fillR) / 2, y: midY)
-                    }
-                    // 两根竖轴（无标签）
-                    if showLAxis {
-                        Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
-                            .position(x: xL, y: midY)
-                    }
-                    if showRAxis {
-                        Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
-                            .position(x: xR, y: midY)
+            ZStack {
+                ForEach(Array(panels.enumerated()), id: \.offset) { _, panel in
+                    if panel.bottom > panel.top {
+                        let regionHeight = panel.bottom - panel.top
+                        let midY = (panel.top + panel.bottom) / 2
+                        // 两轴之间淡色填充，示意被框住的范围（越界部分由外层 .clipped() 裁掉）
+                        if xR > xL {
+                            Rectangle()
+                                .fill(Color.blue.opacity(0.06))
+                                .frame(width: xR - xL, height: regionHeight)
+                                .position(x: (xL + xR) / 2, y: midY)
+                        }
+                        // 两根竖轴（无标签）
+                        if showLAxis {
+                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                                .position(x: xL, y: midY)
+                        }
+                        if showRAxis {
+                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                                .position(x: xR, y: midY)
+                        }
                     }
                 }
             }
+            // 跟随亚像素平移，与蜡烛 Canvas 的 .offset(x: panOffset) 同基准
+            .offset(x: panOffset)
         }
     }
 
