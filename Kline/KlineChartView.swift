@@ -1846,8 +1846,9 @@ struct KlineChartView: View {
                     return
                 }
                 // 联动非来源小周期范围框视图：只结算本地第二光标——
-                // 拖动结束复位；轻点则在落点放置/移动第二光标（再点别处只移动，不能本地取消；
-                // 取消整组只能由来源视图再点一下）
+                // 拖动结束复位；轻点为 toggle：第二光标不存在时在落点放置，已存在时只在本地
+                // 取消它（不发布、不影响来源视图的合成/范围框与其他视图；整组联动的取消仍由
+                // 来源视图再点一下负责，那时所有视图的第二光标一并清除）
                 if isLinkedSecondCursorView {
                     let wasSecondDragging = drag.secondCursorDragging
                     drag.isDragging = false
@@ -1860,11 +1861,15 @@ struct KlineChartView: View {
                             || isInPanel(y, s1Top, s1Bottom) || isInPanel(y, s2Top, s2Bottom)
                         let isTap = abs(value.translation.width) < 6 && abs(value.translation.height) < 6
                         if isTap && inPanel {
-                            let col = Int((value.location.x / candleSpacing).rounded(.down))
-                            let idx = startIndex + col
-                            if idx >= startIndex && idx <= endIndex {
-                                secondCursorIndex = idx
-                                secondCursorY = y
+                            if secondCursorIndex != nil {
+                                clearSecondCursor()
+                            } else {
+                                let col = Int((value.location.x / candleSpacing).rounded(.down))
+                                let idx = startIndex + col
+                                if idx >= startIndex && idx <= endIndex {
+                                    secondCursorIndex = idx
+                                    secondCursorY = y
+                                }
                             }
                         }
                     }
