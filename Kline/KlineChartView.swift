@@ -780,12 +780,12 @@ struct KlineChartView: View {
     private var maxVisibleCount: Int { sortedData.count }
     /// 可见 K 线数上限：非放大与放大模式都允许显示全部 K 线（不限制）
     var capVisibleCount: Int { maxVisibleCount }
-    private var endIndex: Int {
+    var endIndex: Int {
         let maxEnd = sortedData.count - 1
         let minEnd = max(0, count - 1)
         return min(maxEnd, max(minEnd, maxEnd - endOffset))
     }
-    private var startIndex: Int { max(0, endIndex - count + 1) }
+    var startIndex: Int { max(0, endIndex - count + 1) }
     private var slice: [KlineItem] {
         guard startIndex <= endIndex, startIndex >= 0, endIndex < sortedData.count else { return [] }
         return Array(sortedData[startIndex...endIndex])
