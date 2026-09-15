@@ -480,7 +480,7 @@ struct KlineChartView: View {
 
     var menuIsOpen: Bool { editorUI.showMainSheet || editorUI.showSubSheet || showCustomEditor || showSystemEditor }
 
-    private func clamp<V: Comparable>(_ v: V, _ lo: V, _ hi: V) -> V { min(max(v, lo), hi) }
+    func clamp<V: Comparable>(_ v: V, _ lo: V, _ hi: V) -> V { min(max(v, lo), hi) }
 
     /// 标签文本实际渲染宽度（含左右各 4pt 内边距）：用于贴边判定，避免用估算半宽导致提前贴边
     private func labelTextWidth(_ text: String, fontSize: CGFloat, bold: Bool = true) -> CGFloat {
