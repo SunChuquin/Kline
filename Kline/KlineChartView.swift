@@ -1023,11 +1023,18 @@ struct KlineChartView: View {
         isLinkedNonSource && !isLinkedSecondCursorView
     }
 
+    /// 非来源复盘 / 范围框视图中本地第二光标已存在：指标数值栏与底部行情行一律读
+    /// 第二光标所指 K 线的**真实数据**（复盘视图此时不读联动复盘光标的合成 as-of 值）。
+    private var legendFollowsSecondCursor: Bool {
+        isLinkedSecondCursorView && secondCursorIndex != nil
+    }
+
     /// 指标数值栏 / 底部行情行读数所用光标索引：
-    /// 小周期范围框视图没有联动十字光标（renderCursorIndex=nil），本地第二光标存在时读第二光标。
+    /// - 复盘 / 范围框视图第二光标存在 → 优先读第二光标；
+    /// - 否则复盘 / 同周期视图读联动光标（renderCursorIndex），无光标时为 nil。
     private var legendCursorIndex: Int? {
+        if legendFollowsSecondCursor, let sIdx = secondCursorIndex { return sIdx }
         if let idx = renderCursorIndex { return idx }
-        if linkRangeIndices != nil { return secondCursorIndex }
         return nil
     }
 
@@ -3724,9 +3731,12 @@ struct KlineChartView: View {
                               r.idx == renderCursorIndex else { return nil }
                         return m.kind == "AMO" ? s.turnover : s.volume
                     }()
+                    // 本地第二光标存在时数值栏跟随第二光标读真实量额/指标，关闭合成 / as-of 覆盖
                     legendItem(line, mirrored: config.mainMirrored,
                                formatter: isVolAmo ? { formatVolume($0) } : nil,
-                               valueOverride: volAmoOverride ?? asOfSubOverride(slot: legendSlot, lineIndex: lineOffset))
+                               valueOverride: legendFollowsSecondCursor
+                                   ? nil
+                                   : volAmoOverride ?? asOfSubOverride(slot: legendSlot, lineIndex: lineOffset))
                 }
                 Spacer()
                 // 副图1：最右侧「回到最新」按钮（右指带尾单箭头）。
@@ -3802,9 +3812,10 @@ struct KlineChartView: View {
                 if isBareK { legendText("裸K") }
                 if !isBareK {
                     ForEach(Array(mainCurves.enumerated()), id: \.offset) { li, line in
-                        // 联动复盘：合成点指标读数用 as-of 重算值（镜像取负仍由 legendItem 处理）
+                        // 联动复盘：合成点指标读数用 as-of 重算值（镜像取负仍由 legendItem 处理）；
+                        // 本地第二光标存在时数值栏跟随第二光标读真实值，必须关闭 as-of 覆盖
                         legendItem(line, mirrored: config.mainMirrored,
-                                   valueOverride: asOfMainOverride(li))
+                                   valueOverride: legendFollowsSecondCursor ? nil : asOfMainOverride(li))
                     }
                 }
                 Spacer()
@@ -4139,11 +4150,11 @@ struct KlineChartView: View {
     private func axisQuoteRow(width: CGFloat, height: CGFloat) -> some View {
         ZStack {
             // 光标出现时取光标所在K线，否则取屏幕最右边那根K线
-            // （联动小周期范围框视图里取本地「第二个十字光标」所指K线）
+            // （联动复盘/范围框视图里本地「第二个十字光标」存在时取第二光标所指K线）
             let quoteIndex = legendCursorIndex ?? endIndex
             if quoteIndex >= startIndex, quoteIndex <= endIndex, quoteIndex >= 0, quoteIndex < sortedData.count {
-                // 联动复盘：光标索引处读合成K线（开收高低/量额随合成变化）；其余位置读真实K线
-                let item = cursorDisplayItem(at: quoteIndex)
+                // 第二光标一律读真实K线；联动复盘光标索引处才读合成K线（开收高低/量额随合成变化）
+                let item = legendFollowsSecondCursor ? sortedData[quoteIndex] : cursorDisplayItem(at: quoteIndex)
                 let prev = prevClose(of: quoteIndex)
                 let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
                 // 空头镜像：开/收/高/低取负显示；涨跌幅取负后数值不变（分子分母同号）
