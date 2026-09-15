@@ -2635,8 +2635,12 @@ struct KlineChartView: View {
                 .offset(x: panOffset)
             // 主图价格坐标：网格线仍为5条，数值只显示顶底两个（中间三个不显示）；
             // 已启用的主图 .tdx 指标全部声明 COORD=0（且无激活自定义主图指标）时不显示
-            overlayPriceLabels(width: width, height: height, min: priceRange.lowerBound, max: priceRange.upperBound,
-                               ratios: mainCoordHidden ? [] : [0, 1], formatter: { String(format: "%.2f", $0) })
+            PriceLabelsAxis(width: width, height: height, axisColor: axisTextColor,
+                            labels: (mainCoordHidden ? [] : [0, 1]).map { r in
+                                AxisLabel(ratio: r, text: String(format: "%.2f",
+                                    priceRange.upperBound - (priceRange.upperBound - priceRange.lowerBound) * Double(r)))
+                            })
+                .equatable()
             // 最新价：只保留虚线（在 Canvas 中绘制），不显示数值，避免与虚线重叠
             // 可交互光标（pin 开启时即第二个光标）与固定光标的竖线/标签都绘制
             mainCursorVLine(index: renderCursorIndex, compare: pinnedIndex, width: width, candleSpacing: candleSpacing, height: height)
@@ -2915,8 +2919,11 @@ struct KlineChartView: View {
                 .equatable()
                 .offset(x: panOffset)
             // 顶底坐标值（是否显示由上方 labelRatios 决定）
-            overlayPriceLabels(width: width, height: height, min: range.min, max: range.max,
-                               ratios: labelRatios, formatter: subFmt)
+            PriceLabelsAxis(width: width, height: height, axisColor: axisTextColor,
+                            labels: labelRatios.map { r in
+                                AxisLabel(ratio: r, text: subFmt(range.max - (range.max - range.min) * Double(r)))
+                            })
+                .equatable()
 
             // 可交互光标（pin 开启时即第二个光标）与固定光标的副图竖线都绘制
             SubCursorVLine(startIndex: startIndex, endIndex: endIndex, index: renderCursorIndex, compare: pinnedIndex,
@@ -3206,28 +3213,11 @@ struct KlineChartView: View {
         }
     }
 
-    private func overlayPriceLabels(width: CGFloat, height: CGFloat, min: Double, max: Double, ratios: [CGFloat], formatter: @escaping (Double) -> String) -> some View {
-        ZStack {
-            ForEach(ratios, id: \.self) { ratio in
-                let value = max - (max - min) * Double(ratio)
-                Text(formatter(value))
-                    .font(.system(size: 9))
-                    .foregroundColor(axisTextColor)
-                    .position(x: 22, y: clampedAxisY(height * CGFloat(ratio), in: height))
-            }
-        }
-        .frame(width: width, height: height)
-    }
     private func formatVolume(_ v: Double) -> String {
         if v >= 1000000000000 { return String(format: "%.2f万亿", v / 1000000000000) }
         else if v >= 100000000 { return String(format: "%.2f亿", v / 100000000) }
         else if v >= 10000 { return String(format: "%.2f万", v / 10000) }
         else { return String(format: "%.0f", v) }
-    }
-
-    private func clampedAxisY(_ y: CGFloat, in height: CGFloat) -> CGFloat {
-        let half: CGFloat = 8
-        return min(max(y, half), max(half, height - half))
     }
 
     /// 主图竖轴顶部标签的垂直位置：单行时保持原轴顶对齐；两行（第二个光标）时整体下移，让标签完全落在主图内、顶部不外溢

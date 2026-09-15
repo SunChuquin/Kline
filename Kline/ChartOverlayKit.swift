@@ -13,6 +13,42 @@ import SwiftUI
 /// 判断 y 是否落在 [top, bottom] 面板区间内（覆盖层/手势共用的几何判定）
 func isInPanel(_ y: CGFloat, _ top: CGFloat, _ bottom: CGFloat) -> Bool { y >= top && y <= bottom }
 
+/// 坐标轴标签的垂直位置夹取：两端留 8pt 边距，避免标签越出面板顶部/底部被裁剪
+func clampedAxisY(_ y: CGFloat, in height: CGFloat) -> CGFloat {
+    let half: CGFloat = 8
+    return min(max(y, half), max(half, height - half))
+}
+
+// MARK: - 价格坐标轴标签
+
+/// 坐标轴单个标签：ratio 为 [0,1] 区间内的归一化位置（0=顶部/最高价，1=底部/最低价），text 为调用点已格式化好的文本。
+/// 用具名 struct（而非元组）承载，保证 [AxisLabel] 可自动合成 Equatable。
+struct AxisLabel: Equatable {
+    let ratio: CGFloat
+    let text: String
+}
+
+/// 面板左侧/右侧的价格坐标值标签层：按归一化位置纵向排布在固定 x=22 处。
+/// 文本由调用点按 min/max 与 formatter 提前算好（props 驱动），本组件只做布局，纯 Equatable。
+struct PriceLabelsAxis: View, Equatable {
+    let width: CGFloat
+    let height: CGFloat
+    let axisColor: Color
+    let labels: [AxisLabel]
+
+    var body: some View {
+        ZStack {
+            ForEach(labels, id: \.ratio) { label in
+                Text(label.text)
+                    .font(.system(size: 9))
+                    .foregroundColor(axisColor)
+                    .position(x: 22, y: clampedAxisY(height * label.ratio, in: height))
+            }
+        }
+        .frame(width: width, height: height)
+    }
+}
+
 // MARK: - 十字光标横线 + 数值标签
 
 /// 十字光标横线 + 背景数值标签（横线从数值背景的最左边开始画起，贯穿全宽）
