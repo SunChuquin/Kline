@@ -1,9 +1,9 @@
 //
-  ChartCursorKit.swift
-  Kline
+//  ChartCursorKit.swift
+//  Kline
 //
-  十字光标域：读数文本、光标覆盖层（横线/标签/涨幅）、主图光标竖线、双光标区间统计、
-  价格与像素互算、标签几何与横线避让区间。从 KlineChartView.swift 拆分（方法平移）。
+//  十字光标域：读数文本、光标覆盖层（横线/标签/涨幅）、主图光标竖线、双光标区间统计、
+//  价格与像素互算、标签几何与横线避让区间。从 KlineChartView.swift 拆分（方法平移）。
 //
 
 import SwiftUI
