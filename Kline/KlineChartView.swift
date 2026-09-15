@@ -1000,16 +1000,27 @@ struct KlineChartView: View {
         cursorLinkEnabled && linkSync.cursorDate != nil && linkSync.sourceID != selfIndex
     }
 
-    /// 非来源的**小周期范围框视图**：单指轻点/拖动只操作纯本地「第二个十字光标」，
-    /// 不发布联动、不接管来源、不平移/缩放窗口（双指缩放仍可用）。
-    private var isLinkedSecondCursorView: Bool {
-        isLinkedNonSource && linkRangeIndices != nil
+    /// 非来源的**大周期复盘视图**（本视图周期严格大于来源周期）：
+    /// 单指拖动恢复为正常平移 / 上下缩放窗口；主图区域轻点可放纯本地「第二个十字光标」；
+    /// 不发布联动、不接管来源，再点也不会取消整组联动（只有来源视图再点一下才能取消）。
+    private var isLinkedReplayView: Bool {
+        isLinkedNonSource
+            && linkRangeIndices == nil
+            && self.period.granularityRank > linkSync.sourcePeriod.granularityRank
     }
 
-    /// 非来源的**大周期复盘视图 / 同周期视图**：忽略一切单指点击与拖动，
-    /// 保持复盘合成/淡化或联动十字光标的既有画面（双指缩放仍可用）。
+    /// 非来源且支持本地「第二个十字光标」的视图：**小周期范围框视图**（linkRangeIndices 非空）
+    /// 或 **大周期复盘视图**（isLinkedReplayView）。
+    /// 第二光标不存在时单指拖动照常平移 / 上下缩放；存在时拖动只移动第二光标；
+    /// 主图区域轻点放置 / 取消第二光标；不发布联动、不接管来源。
+    private var isLinkedSecondCursorView: Bool {
+        isLinkedNonSource && (linkRangeIndices != nil || isLinkedReplayView)
+    }
+
+    /// 非来源的**同周期视图**：忽略一切单指点击与拖动，
+    /// 保持联动十字光标的既有画面（双指平移 / 缩放照常）。
     private var isLinkedFrozenView: Bool {
-        isLinkedNonSource && linkRangeIndices == nil
+        isLinkedNonSource && !isLinkedSecondCursorView
     }
 
     /// 指标数值栏 / 底部行情行读数所用光标索引：
@@ -1752,10 +1763,10 @@ struct KlineChartView: View {
                 let startInS1 = isInPanel(sy, s1Top, s1Bottom)
                 let startInS2 = isInPanel(sy, s2Top, s2Bottom)
                 guard startInMain || startInS1 || startInS2 else { return }
-                // 联动会话中非来源的大周期复盘/同周期视图：忽略一切单指操作
-                // （不接管来源、不平移缩放、不放光标；双指缩放在独立手势层，不受影响）
+                // 联动会话中非来源的**同周期**视图：忽略一切单指操作
+                // （不接管来源、不平移缩放、不放光标；双指平移/缩放在独立手势层，不受影响）
                 if isLinkedFrozenView { return }
-                // 联动会话中非来源的小周期范围框视图：
+                // 联动会话中非来源的小周期范围框 / 大周期复盘视图：
                 // - 本地第二光标**已存在** → 单指拖动只移动第二光标（不接管来源、不平移缩放）；
                 // - 第二光标**不存在** → 不拦截，单指照常走下方 pan/zoom 与副图滑动逻辑（双指缩放在独立手势层，始终可用）。
                 if isLinkedSecondCursorView && secondCursorIndex != nil {
@@ -1839,17 +1850,17 @@ struct KlineChartView: View {
                 panOffset = 0
                 // 兜底：无论手势如何结束（含双指手势被中断），都清除双指状态，避免残留拦截后续单指拖动
                 drag.twoFingerActive = false
-                // 联动非来源大周期复盘/同周期视图：单指手势全程忽略，不产生任何光标/窗口变化
+                // 联动非来源的**同周期**视图：单指手势全程忽略，不产生任何光标/窗口变化
                 if isLinkedFrozenView {
                     drag.isDragging = false
                     drag.cursorDragging = false
                     drag.secondCursorDragging = false
                     return
                 }
-                // 联动非来源小周期范围框视图且本地第二光标**已存在**：
+                // 联动非来源的小周期范围框 / 大周期复盘视图且本地第二光标**已存在**：
                 // 拖动结束复位标记；轻点则只在本地取消第二光标（不发布、不影响来源视图的
                 // 合成/范围框与其他视图；整组联动的取消仍由来源视图再点一下负责）。
-                // 第二光标不存在时不走这里——拖动是正常 pan/zoom，轻点在下方放置第二光标。
+                // 第二光标不存在时不走这里——复盘/范围框视图的拖动是正常 pan/zoom，轻点在下方放置第二光标。
                 if isLinkedSecondCursorView && secondCursorIndex != nil {
                     let wasSecondDragging = drag.secondCursorDragging
                     drag.isDragging = false
@@ -1879,7 +1890,7 @@ struct KlineChartView: View {
                 guard !menuIsOpen else { drag.cursorDragging = false; return }
                 // 副图滑动切换结算：超过阈值触发切换，否则回弹取消（动画由 overlay 呈现）
                 if let fb = swipeFeedback {
-                    // 非来源小周期范围框视图在副图区的**轻点**（第二光标不存在时手势才会走到这里）：
+                    // 非来源复盘/范围框视图在副图区的**轻点**（第二光标不存在时手势才会走到这里）：
                     // 第二光标只允许在主图区域放置，副图一/副图二区域轻点仅回弹滑动反馈，
                     // 不放置第二光标、不触发切周期/标的（副图三面板手势本就整体禁用）
                     if isLinkedSecondCursorView,
@@ -1936,8 +1947,9 @@ struct KlineChartView: View {
                     let col = Int((value.location.x / candleSpacing).rounded(.down))
                     let idx = startIndex + col
                     if isLinkedSecondCursorView {
-                        // 非来源小周期范围框视图：轻点放置纯本地第二光标（走到这里时它必然不存在），
-                        // 不设联动来源标记、不写 selectedIndex，因此不会接管来源/广播给其他视图。
+                        // 非来源复盘/范围框视图：轻点放置纯本地第二光标（走到这里时它必然不存在），
+                        // 不设联动来源标记、不写 selectedIndex，因此不会接管来源/广播给其他视图，
+                        // 复盘视图里再点也只取消本地第二光标，绝无可能取消整组联动。
                         // 仅限主图区域轻点放置：副图一/副图二区域轻点不放（副图三面板手势整体禁用）。
                         if isInPanel(y, mainTop, mainBottom), idx >= startIndex && idx <= endIndex {
                             secondCursorIndex = idx
@@ -2129,17 +2141,17 @@ struct KlineChartView: View {
                 VStack(spacing: 0) {
                     mainLegendRow(height: legendHeight).zIndex(30)
                     mainChart(width: width, candleSpacing: candleSpacing, height: mainHeight,
-                              secondCursorIndex: linkRangeIndices != nil ? secondCursorIndex : nil)
+                              secondCursorIndex: isLinkedSecondCursorView ? secondCursorIndex : nil)
                     if !mainFullscreen {
                         subLegendRow(model: subTop, height: legendHeight).zIndex(30)
                         subChart(model: subTop, width: width, candleSpacing: candleSpacing, height: sub1Height,
-                                 slot: .top, secondCursorIndex: linkRangeIndices != nil ? secondCursorIndex : nil)
+                                 slot: .top, secondCursorIndex: isLinkedSecondCursorView ? secondCursorIndex : nil)
                         subLegendRow(model: subBottom, height: legendHeight).zIndex(30)
                         subChart(model: subBottom, width: width, candleSpacing: candleSpacing, height: sub2Height,
-                                 slot: .bottom, secondCursorIndex: linkRangeIndices != nil ? secondCursorIndex : nil)
+                                 slot: .bottom, secondCursorIndex: isLinkedSecondCursorView ? secondCursorIndex : nil)
                         subLegendRow(model: subThird, height: legendHeight).zIndex(30)
                         subChart(model: subThird, width: width, candleSpacing: candleSpacing, height: sub3Height,
-                                 slot: .third, secondCursorIndex: linkRangeIndices != nil ? secondCursorIndex : nil)
+                                 slot: .third, secondCursorIndex: isLinkedSecondCursorView ? secondCursorIndex : nil)
                     }
                     // 底部两行顺序：时间轴在上（倒数第二行）、行情数据行贴底（倒数第一行）
                     timeAxis(width: width, candleSpacing: candleSpacing, height: timeHeight)
@@ -2198,10 +2210,10 @@ struct KlineChartView: View {
                                   s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
                                   s2Top: s2Top, s2Bottom: s2Bottom, s2Height: sub2Height,
                                   s3Top: s3Top, s3Bottom: s3Bottom, s3Height: sub3Height)
-                    // 联动小周期范围框视图的本地「第二个十字光标」：横线 + 左侧数值标签。
+                    // 非来源的小周期范围框 / 大周期复盘视图的本地「第二个十字光标」：横线 + 左侧数值标签。
                     // 竖线（分段贯穿主图/副图）与顶部日期标签由各面板内 secondary 竖线绘制；
-                    // 不发布联动、不影响来源与其他视图
-                    if linkRangeIndices != nil, let sIdx = secondCursorIndex, let sY = secondCursorY {
+                    // 不发布联动、不影响来源与其他视图（复盘画面下与联动复盘十字光标并存）
+                    if isLinkedSecondCursorView, let sIdx = secondCursorIndex, let sY = secondCursorY {
                         secondCursorHorizontalOverlay(index: sIdx, y: sY, width: width, height: geometry.size.height,
                                                        candleSpacing: candleSpacing,
                                                        mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
@@ -2440,9 +2452,10 @@ struct KlineChartView: View {
         if drag.cursorDragging { return }
         // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
         linkUserDragging = false
-        // 本视图不再处于小周期范围框形态（来源取消整组光标、来源周期变化使大小关系改变）时，
-        // 撤销纯本地第二光标；仍是范围框形态时保留——来源在其视图内移动光标不应清掉它
-        if linkRangeIndices == nil { clearSecondCursor() }
+        // 本视图不再属于「可承载第二光标」的形态（小周期范围框 / 大周期复盘）——
+        // 如来源取消整组光标、变为同周期画面、关闭联动等——时撤销纯本地第二光标；
+        // 仍是范围框 / 复盘形态时保留：来源在其视图内移动光标不应清掉它
+        if !isLinkedSecondCursorView { clearSecondCursor() }
         // 更大周期源的联动范围：本视图不显示十字光标，改为自动放大可见窗口让「双竖轴」框范围并居中
         if let rg = linkRangeIndices {
             linkCursorActive = true
