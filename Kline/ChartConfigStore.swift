@@ -1,9 +1,9 @@
 //
-  ChartConfigStore.swift
-  Kline
+//  ChartConfigStore.swift
+//  Kline
 //
-  图表配置持久化仓库：指标启用集合/裸K/镜像/分栏位置等跨页面持久化。
-  从 KlineChartView.swift 拆分而来（纯类型移动）。
+//  图表配置持久化仓库：指标启用集合/裸K/镜像/分栏位置等跨页面持久化。
+//  从 KlineChartView.swift 拆分而来（纯类型移动）。
 //
 
 import SwiftUI

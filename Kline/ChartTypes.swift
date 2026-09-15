@@ -1,9 +1,9 @@
 //
-  ChartTypes.swift
-  Kline
+//  ChartTypes.swift
+//  Kline
 //
-  图表共享类型：显示枚举、指标线/画布曲线模型、副图模型与选择记忆、序列工具、缺口信息。
-  从 KlineChartView.swift 拆分而来（纯类型移动，同 module 内引用不变）。
+//  图表共享类型：显示枚举、指标线/画布曲线模型、副图模型与选择记忆、序列工具、缺口信息。
+//  从 KlineChartView.swift 拆分而来（纯类型移动，同 module 内引用不变）。
 //
 
 import SwiftUI
