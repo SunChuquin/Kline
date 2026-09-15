@@ -33,101 +33,6 @@ enum ChartStyle: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// 无光标时的拖动模式：水平=平移，垂直=缩放
-enum DragMode {
-    case none, pan, zoom
-}
-
-/// 拖动手势过程变量容器：改用 class 引用存储，避免手势 onChanged 频繁写入 @State 触发整页重绘导致缓慢拖动卡顿
-final class DragState {
-    var lastTouchX: CGFloat = 0
-    var lastPanWidth: CGFloat = 0
-    var lastPanHeight: CGFloat = 0
-    var dragMode: DragMode = .none
-    var cursorDragging: Bool = false
-    var isDragging = false
-    var needsRefreshAfterDrag = false
-    /// 双指手势进行中：平移/缩放由双指手势统一处理，单指手势应跳过，避免重复平移/误触发
-    var twoFingerActive = false
-    /// 联动非来源小周期（范围框）视图中：正在拖动纯本地「第二个十字光标」
-    var secondCursorDragging = false
-}
-
-// MARK: - 双指手势（UIKit）
-
-/// 双指手势层：一个只覆盖「单个图表面板区域」的 UIKit 视图，挂 UIPinchGestureRecognizer。
-/// SwiftUI 的 MagnificationGesture 只在「捏合（距离变化）」时激活、DragGesture 多指时不可靠，
-/// 无法在双指固定距离平移时拿到整体横向位移；UIPinchGestureRecognizer 原生跟踪双指质心
-/// （location(in:)）与缩放（scale），固定距离平移时质心移动也会持续触发。
-/// 该视图按面板分片放置（主图/各副图各一块），不覆盖 legend 行的按钮；
-/// 面板上的单指触摸沿 UIKit 响应链同时派发给祖先上的 SwiftUI 手势（chartDragGesture），
-/// 因此单指平移/缩放/光标/副图切换不受影响。
-struct TwoFingerGestureHook: UIViewRepresentable {
-    let onBegin: (CGFloat) -> Void       // 手势起始：双指质心 x
-    let onChange: (CGFloat, CGFloat) -> Void // 手势中：缩放 scale、质心横向位移增量 dx
-    let onEnd: () -> Void
-
-    func makeUIView(context: Context) -> TwoFingerHookView {
-        let v = TwoFingerHookView()
-        v.onBegin = onBegin
-        v.onChange = onChange
-        v.onEnd = onEnd
-        return v
-    }
-    func updateUIView(_ uiView: TwoFingerHookView, context: Context) {
-        uiView.onBegin = onBegin
-        uiView.onChange = onChange
-        uiView.onEnd = onEnd
-    }
-}
-
-final class TwoFingerHookView: UIView, UIGestureRecognizerDelegate {
-    var onBegin: ((CGFloat) -> Void)?
-    var onChange: ((CGFloat, CGFloat) -> Void)?
-    var onEnd: (() -> Void)?
-    private var lastCentroidX: CGFloat = 0
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = true
-        let p = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
-        p.delegate = self
-        addGestureRecognizer(p)
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
-        let c = g.location(in: self)
-        switch g.state {
-        case .began:
-            lastCentroidX = c.x
-            onBegin?(c.x)
-        case .changed:
-            let dx = c.x - lastCentroidX
-            lastCentroidX = c.x
-            onChange?(g.scale, dx)
-        case .ended, .cancelled, .failed:
-            lastCentroidX = 0
-            onEnd?()
-        default:
-            break
-        }
-    }
-
-    func gestureRecognizer(_ g: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        true
-    }
-}
-
-/// 副图左右滑动切换的拖动反馈动画状态
-struct SwipeFeedback: Equatable {
-    let slot: SubSlot
-    var offset: CGFloat      // 当前横向位移（右正左负）
-    let canLeft: Bool        // 左滑方向是否可切换
-    let canRight: Bool       // 右滑方向是否可切换
-}
-
 /// 公式编辑器针对的目标图表
 enum EditorTarget {
     case main, sub
@@ -401,7 +306,7 @@ struct MainIndicatorEntry {
 }
 
 /// 计算当前启用的主图指标条目（顺序：.tdx 主图 defs → 自定义）
-private func mainIndicatorEntries(store: SystemIndicatorStore,
+func mainIndicatorEntries(store: SystemIndicatorStore,
                                   customStore: CustomIndicatorStore,
                                   config: ChartConfigStore,
                                   customFormula: String?,
@@ -599,15 +504,15 @@ struct KlineChartView: View {
     /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
     @ObservedObject var linkSync: DualLinkSync
     /// 联动复盘：观察来源周期数据缓存，目标大周期视图在来源数据到达后重绘合成K线
-    @ObservedObject private var linkSourceCache = LinkSourceBarCache.shared
+    @ObservedObject var linkSourceCache = LinkSourceBarCache.shared
     /// 联动：本视图是否正由用户直接拖动光标（用于区分「右侧用户操作」与「左侧拖动回声」）
-    @State private var linkUserDragging = false
+    @State var linkUserDragging = false
     /// 联动复盘 as-of 结果：主图曲线按数组下标的合成点值（仅合成索引一个点）
-    @State private var asOfMain: [Int: Double] = [:]
+    @State var asOfMain: [Int: Double] = [:]
     /// 联动复盘 as-of 结果：三个副图各自按曲线数组下标的合成点值
-    @State private var asOfSubs: [[Int: Double]] = [[:], [:], [:]]
+    @State var asOfSubs: [[Int: Double]] = [[:], [:], [:]]
     /// as-of 后台任务序号：只接受最新一次调度的结果，快速拖动时过期结果直接丢弃
-    @State private var asOfTicket = 0
+    @State var asOfTicket = 0
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
     /// 联动多图模式：本视图在联动布局里的下标（用于判定「谁是当前激活公式编辑器的视图」）
@@ -624,19 +529,19 @@ struct KlineChartView: View {
     var onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil
 
     // 交互状态
-    @State private var selectedIndex: Int? = nil
+    @State var selectedIndex: Int? = nil
     /// 联动开启后、非来源的**小周期范围框视图**里的「第二个十字光标」：纯本地状态，
     /// 不发布到 linkSync、不影响来源视图的合成/淡化、也不会让其他视图出现第二份光标；
     /// 各视图相互独立。仅来源视图再点一下（或任何全局清场）时才清除。
-    @State private var secondCursorIndex: Int? = nil
-    @State private var secondCursorY: CGFloat? = nil
+    @State var secondCursorIndex: Int? = nil
+    @State var secondCursorY: CGFloat? = nil
     /// 副图三「裸」按钮控制的主图裸K：仅隐藏主图指标显示，不触发重算、不清除 mainCurves 缓存
     @State private var bareFromSub = false
     /// 联动光标会话标记：收到有效联动光标/范围时置 true，来源光标消失时置 false。
     /// 当前实现下每次 applyLinkCursor 都无条件把目标K线（或范围）滚动居中，居中不再依赖本标记
     /// （旧「仅第一次出现时居中、之后拖动只移动不居中」的语义已废弃）；目前只写不读，
     /// 保留以便日后需要区分「首次出现 / 持续拖动」时复用。
-    @State private var linkCursorActive = false
+    @State var linkCursorActive = false
     /// 📌 开启时固定下来的第一个光标（不可被点击清除；只随 pinEnabled 关闭而清除）
     @State private var pinnedIndex: Int? = nil
     @State private var pinnedY: CGFloat? = nil
@@ -647,17 +552,17 @@ struct KlineChartView: View {
     /// 重置内置指标前的确认对话框
     @State private var showResetBuiltinConfirm = false
     @State private var editingSlot: SubSlot = .top
-    @State private var visibleCount: CGFloat = 100
-    @State private var endOffset: Int = 0
+    @State var visibleCount: CGFloat = 100
+    @State var endOffset: Int = 0
     @State private var zoomBase: CGFloat = 100
     // 缩放锚点：以双指位置对应的K线为基线缩放（而非屏幕最右端）
     @State private var zoomAnchorIndex: Int? = nil
     @State private var zoomAnchorOffset: CGFloat = 0
-    @State private var drag = DragState()
+    @State var drag = DragState()
     /// 亚像素平移偏移（px）：缓慢拖动时画面平滑跟手，累计满一根K线间距才进位移动可见窗口
     @State private var panOffset: CGFloat = 0
     /// 副图左右滑动切换的拖动反馈动画状态（nil = 未在拖动副图）
-    @State private var swipeFeedback: SwipeFeedback? = nil
+    @State var swipeFeedback: SwipeFeedback? = nil
     /// 「副图滑动回调外层 onPeriodSwitch / onSwitchItem」的一次性触发守卫。
     ///
     /// 解决联动态的致命双触发问题：用户在副图二上完成一次阈值滑动后，onEnded 回调会触发一次
@@ -676,8 +581,8 @@ struct KlineChartView: View {
     @State private var crosshairY: CGFloat? = nil
     /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
     @State private var gaps: [GapInfo] = []
-    @ObservedObject private var customStore = CustomIndicatorStore.shared
-    @ObservedObject private var config = ChartConfigStore.shared
+    @ObservedObject var customStore = CustomIndicatorStore.shared
+    @ObservedObject var config = ChartConfigStore.shared
 
     // 主图叠加指标（配置来自共享仓库，跨页面持久化）
     @State private var mainCurves: [IndicatorLine] = []
@@ -702,9 +607,9 @@ struct KlineChartView: View {
     private let prefetchBlockSize = 500
 
     // 三个副图（同一实例跨页面复用，配置不重置）
-    @StateObject private var subTop: SubChartModel
-    @StateObject private var subBottom: SubChartModel
-    @StateObject private var subThird: SubChartModel
+    @StateObject var subTop: SubChartModel
+    @StateObject var subBottom: SubChartModel
+    @StateObject var subThird: SubChartModel
 
     /// 自定义指标公式编辑器是否打开（由详情页持有状态，打开时隐藏顶部栏实现真全屏）
     @Binding var showCustomEditor: Bool
@@ -840,7 +745,7 @@ struct KlineChartView: View {
     }
 
     /// 当前主图自定义指标（从共享仓库中按当前周期激活的 ID 派生）
-    private var activeCustomIndicator: CustomIndicator? {
+    var activeCustomIndicator: CustomIndicator? {
         customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) && availableInCurrentPeriod($0) }
     }
 
@@ -861,7 +766,7 @@ struct KlineChartView: View {
         return colors[i % colors.count]
     }
 
-    private var sortedData: [KlineItem] { sortedAll }
+    var sortedData: [KlineItem] { sortedAll }
     private var closes: [Double] { baseCloses }
     private var highs: [Double] { baseHighs }
     private var lows: [Double] { baseLows }
@@ -871,10 +776,10 @@ struct KlineChartView: View {
 
     // MARK: - 可见窗口
 
-    private var count: Int { min(max(20, Int(visibleCount.rounded())), capVisibleCount) }
+    var count: Int { min(max(20, Int(visibleCount.rounded())), capVisibleCount) }
     private var maxVisibleCount: Int { sortedData.count }
     /// 可见 K 线数上限：非放大与放大模式都允许显示全部 K 线（不限制）
-    private var capVisibleCount: Int { maxVisibleCount }
+    var capVisibleCount: Int { maxVisibleCount }
     private var endIndex: Int {
         let maxEnd = sortedData.count - 1
         let minEnd = max(0, count - 1)
@@ -897,10 +802,10 @@ struct KlineChartView: View {
     // MARK: - 镜像（多/空）
 
     /// 主图是否开启空头镜像（纯取负）
-    private var mainMirrored: Bool { config.mainMirrored }
+    var mainMirrored: Bool { config.mainMirrored }
 
     /// 取负：主图开启镜像时把数值取负
-    private func mir(_ v: Double) -> Double { mainMirrored ? -v : v }
+    func mir(_ v: Double) -> Double { mainMirrored ? -v : v }
 
     /// 可见窗口曲线的取负版本（用于画布），未镜像时原样返回
     private func mirroredSliceArr(_ values: [Double]) -> [Double] {
@@ -961,305 +866,6 @@ struct KlineChartView: View {
     }
     private func legendValueFor(_ line: IndicatorLine) -> Double? { legendValue(line.values) }
     private func displayName(_ raw: String) -> String { raw.replacingOccurrences(of: "NOTEXT_", with: "") }
-
-    /// 二分下界：第一个 date >= target 的下标；找不到返回 nil。
-    /// 与 nearestIndex 不同，它不做「更近者」回退 —— 只返回严格下界，
-    /// 用于精确框出 [range.0, range.1] 两竖轴各自对应的 K 线下标。
-    private func lowerBound(_ target: Int) -> Int? {
-        guard !sortedData.isEmpty else { return nil }
-        var lo = 0
-        var hi = sortedData.count - 1
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if sortedData[mid].date < target { lo = mid + 1 } else { hi = mid }
-        }
-        return sortedData[lo].date >= target ? lo : nil
-    }
-
-    /// 联动来源为「更大周期」时，本视图（更小周期）要框出来的日期范围对应的两个 K 线下标。
-    /// 仅当开启光标联动、非本地拖动、来源日期存在、来源周期严格大于本视图周期时才生效。
-    /// 生效时本视图不显示十字光标，而由 linkRangeAxisOverlay 画两根无标签竖轴框住该范围。
-    private var linkRangeIndices: (left: Int, right: Int)? {
-        guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
-              linkSync.cursorDate != nil,
-              let rng = linkSync.sourceRange,
-              self.period.granularityRank < linkSync.sourcePeriod.granularityRank else { return nil }
-        let left = lowerBound(rng.0) ?? 0
-        guard let rb = lowerBound(rng.1 + 1) else { return nil }   // 范围右边界越出本视图数据 → 无法框出
-        let right = rb - 1
-        guard right >= left else { return nil }                     // 本视图完全没有落在范围内的K线
-        return (left, right)
-    }
-
-    /// 联动会话进行中（已有来源光标）且本视图**不是来源视图**：本视图的点击/拖动不得接管来源。
-    /// 注意必须用 linkSync.sourceID 判定来源身份，而非"谁的 selectedIndex 非空"——
-    /// 被联动视图不写 selectedIndex，且来源切换/取消后来源身份只由共享对象唯一维护。
-    private var isLinkedNonSource: Bool {
-        cursorLinkEnabled && linkSync.cursorDate != nil && linkSync.sourceID != selfIndex
-    }
-
-    /// 非来源的**大周期复盘视图**（本视图周期严格大于来源周期）：
-    /// 单指拖动恢复为正常平移 / 上下缩放窗口；主图区域轻点可放纯本地「第二个十字光标」；
-    /// 不发布联动、不接管来源，再点也不会取消整组联动（只有来源视图再点一下才能取消）。
-    private var isLinkedReplayView: Bool {
-        isLinkedNonSource
-            && linkRangeIndices == nil
-            && self.period.granularityRank > linkSync.sourcePeriod.granularityRank
-    }
-
-    /// 非来源且支持本地「第二个十字光标」的视图：**小周期范围框视图**（linkRangeIndices 非空）
-    /// 或 **大周期复盘视图**（isLinkedReplayView）。
-    /// 第二光标不存在时单指拖动照常平移 / 上下缩放；存在时拖动只移动第二光标；
-    /// 主图区域轻点放置 / 取消第二光标；不发布联动、不接管来源。
-    private var isLinkedSecondCursorView: Bool {
-        isLinkedNonSource && (linkRangeIndices != nil || isLinkedReplayView)
-    }
-
-    /// 非来源的**同周期视图**：忽略一切单指点击与拖动，
-    /// 保持联动十字光标的既有画面（双指平移 / 缩放照常）。
-    private var isLinkedFrozenView: Bool {
-        isLinkedNonSource && !isLinkedSecondCursorView
-    }
-
-    /// 非来源复盘 / 范围框视图中本地第二光标已存在：指标数值栏与底部行情行一律读
-    /// 第二光标所指 K 线的**真实数据**（复盘视图此时不读联动复盘光标的合成 as-of 值）。
-    private var legendFollowsSecondCursor: Bool {
-        isLinkedSecondCursorView && secondCursorIndex != nil
-    }
-
-    /// 指标数值栏 / 底部行情行读数所用光标索引：
-    /// - 复盘 / 范围框视图第二光标存在 → 优先读第二光标；
-    /// - 否则复盘 / 同周期视图读联动光标（renderCursorIndex），无光标时为 nil。
-    private var legendCursorIndex: Int? {
-        if legendFollowsSecondCursor, let sIdx = secondCursorIndex { return sIdx }
-        if let idx = renderCursorIndex { return idx }
-        return nil
-    }
-
-    /// 清除本视图纯本地的「第二个十字光标」
-    private func clearSecondCursor() {
-        secondCursorIndex = nil
-        secondCursorY = nil
-        drag.secondCursorDragging = false
-    }
-
-    /// 当前用于渲染十字光标/行情信息/时序数值栏的索引。
-    /// 联动接收态（开启联动且非本地拖动）时，直接由共享 linkSync.cursorDate 解析：
-    ///   联动的被联动视图无需再把联动日期写回本地 selectedIndex（那会在 @ObservedObject 触发整树
-    ///   重绘之后，再叠一次 setState 重绘 → 联动拖动卡顿的根源）。改为纯渲染派生，每帧只重绘一次。
-    /// 本地拖动中 / 单图模式（cursorLinkEnabled=false）时，退回本地 selectedIndex，行为与原来一致。
-    private var renderCursorIndex: Int? {
-        // 更大周期源的联动范围模式下不显示单一十字光标（改由双竖轴框范围）
-        if linkRangeIndices != nil { return nil }
-        if cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging {
-            if let d = linkSync.cursorDate { return linkedTargetIndex(for: d) }
-            return nil
-        }
-        return selectedIndex
-    }
-
-    /// 联动接收态下，可交互光标横线应对准的价格 = 联动到的那根K线**收盘价**
-    /// （复盘合成时为合成K线收盘价，即光标所指来源K线收盘价）。
-    /// 手指不在本视图，横线不再固定主图垂直中点（中点价格没有指向意义），而是精确落在该K线收盘价位。
-    /// 镜像（"空"）模式下随 mir() 取负，与镜像后的价格域、蜡烛绘制保持一致；
-    /// 本地手指拖动 / 单图 / 双竖轴范围框模式下返回 nil（保持原有手指跟手行为）。
-    private var linkedCursorClose: Double? {
-        guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
-              let idx = renderCursorIndex, idx >= 0, idx < sortedData.count else { return nil }
-        let close = cursorDisplayItem(at: idx).close
-        return close > 0 ? mir(close) : nil
-    }
-
-    // MARK: - 联动「历史时点复盘」（目标周期 ≥ 来源周期）
-
-    /// 一次复盘的核心状态：光标所在的本周期K线全局索引 + 该索引的合成K线（同周期/数据未就绪为 nil）。
-    /// 纯渲染派生：cursorDate 消失即整体为 nil，合成/淡化零残留。
-    private struct LinkReplay: Equatable {
-        let idx: Int
-        let synthetic: KlineItem?
-        /// 未来淡化起始全局索引（合成/光标K线的下一根）
-        var dimFrom: Int { idx + 1 }
-    }
-
-    /// 当前是否处于复盘态及其内容。与双竖轴范围框（rank <）互斥：
-    /// - rank 严格大于来源周期：合成"形成中K线"（需本标的来源周期数据，已懒加载则即时合成），其后K线淡化；
-    /// - rank 相等（同周期，含跨标的）：**不进入复盘**（返回 nil），保持普通十字光标联动——
-    ///   光标那根本就是真实K线，不合成、其后K线也不淡化（2026-09-14 用户确认调整，推翻早期"同周期也淡化"）；
-    /// - 来源数据未加载/区间无K线（停牌）：synthetic=nil，回退真实K线显示，淡化仍生效。
-    private var linkReplayState: LinkReplay? {
-        guard cursorLinkEnabled, !drag.cursorDragging, !linkUserDragging,
-              linkRangeIndices == nil,
-              let date = linkSync.cursorDate,
-              self.period.granularityRank > linkSync.sourcePeriod.granularityRank,
-              let idx = linkedTargetIndex(for: date),
-              idx >= 0, idx < sortedData.count else { return nil }
-        var synth: KlineItem?
-        if self.period.granularityRank > linkSync.sourcePeriod.granularityRank, let meta = linkedMetaID {
-            synth = synthesizeBar(targetIndex: idx, asOf: date,
-                                  source: linkSourceCache.bars(metaID: meta, period: linkSync.sourcePeriod))
-        }
-        return LinkReplay(idx: idx, synthetic: synth)
-    }
-
-    /// 可交互光标在某索引处用于显示/读数的 K 线：复盘合成态取合成K线，其余取真实K线。
-    /// 固定光标（pinned）索引与复盘 idx 不可能相同（联动态无 pin），故该函数可被共用读数点直接调用。
-    private func cursorDisplayItem(at index: Int) -> KlineItem {
-        if let r = linkReplayState, r.idx == index, let s = r.synthetic { return s }
-        return sortedData[index]
-    }
-
-    /// 确保复盘所需的（本标的, 来源周期）数据已发起加载；命中/在途时不重复查询。
-    /// 在光标日期到达与图表 onAppear（切周期/标的后重建）两个入口调用。
-    private func ensureLinkSourceBars() {
-        // cursorDate 为 nil（无活动光标）时绝不请求，否则 onAppear 会用默认 sourcePeriod 误取
-        guard cursorLinkEnabled, linkSync.cursorDate != nil,
-              self.period.granularityRank > linkSync.sourcePeriod.granularityRank,
-              let meta = linkedMetaID else { return }
-        linkSourceCache.request(metaID: meta, period: linkSync.sourcePeriod)
-    }
-
-    /// 用来源周期K线合成目标大周期光标所在那根"形成中K线"。
-    /// 聚合区间 = [本目标K线所属大周期的起始边界 …… ≤asOf 的最后一根来源K线]：
-    /// 开=首根开、收=末根收、高/低=包络、量/额=累加；合成K线日期沿用目标周期K线起始日。
-    /// source 为空（未加载/无数据）或区间内无K线时返回 nil。
-    private func synthesizeBar(targetIndex idx: Int, asOf date: Int, source src: [KlineItem]) -> KlineItem? {
-        guard !src.isEmpty, idx >= 0, idx < sortedData.count else { return nil }
-        let target = sortedData[idx]
-        let (periodStart, _) = KlinePeriod.periodDateRange(self.period, date: target.date)
-        guard let lo = lowerBoundSorted(src, periodStart),
-              let hi = lastIndexNotAfter(src, date), hi >= lo else { return nil }
-        var open = 0.0
-        var close = 0.0
-        var high = -Double.greatestFiniteMagnitude
-        var low = Double.greatestFiniteMagnitude
-        var volume = 0.0
-        var turnover = 0.0
-        for k in lo...hi {
-            let it = src[k]
-            if k == lo { open = it.open }
-            close = it.close
-            if it.high > high { high = it.high }
-            if it.low < low { low = it.low }
-            volume += it.volume
-            turnover += it.turnover
-        }
-        return KlineItem(date: target.date, open: open, high: high, low: low,
-                         close: close, volume: volume, turnover: turnover)
-    }
-
-    /// 升序 K 线序列中第一个 date >= target 的下标（无则 nil）
-    private func lowerBoundSorted(_ src: [KlineItem], _ target: Int) -> Int? {
-        var lo = 0
-        var hi = src.count - 1
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if src[mid].date < target { lo = mid + 1 } else { hi = mid }
-        }
-        return src[lo].date >= target ? lo : nil
-    }
-
-    /// 升序 K 线序列中最后一个 date <= target 的下标（无则 nil）
-    private func lastIndexNotAfter(_ src: [KlineItem], _ target: Int) -> Int? {
-        var lo = 0
-        var hi = src.count - 1
-        var ans: Int?
-        while lo <= hi {
-            let mid = (lo + hi) / 2
-            if src[mid].date <= target { ans = mid; lo = mid + 1 } else { hi = mid - 1 }
-        }
-        return ans
-    }
-
-    // MARK: 复盘指标 as-of 调度
-
-    /// as-of 重算触发签名：光标日期/位置、合成OHLCV内容、指标配置任一变化都重新求值；
-    /// 同周期（synthetic=nil）/范围框/无光标时为 nil（真实库值即显示值，无需重算）
-    private struct AsOfTrigger: Equatable {
-        let date: Int
-        let idx: Int
-        let sourcePeriod: KlinePeriod
-        let open, high, low, close, volume, turnover: Double
-        let fingerprint: String
-        let targetCount: Int
-    }
-
-    private var asOfTrigger: AsOfTrigger? {
-        guard let r = linkReplayState, let s = r.synthetic else { return nil }
-        return AsOfTrigger(date: linkSync.cursorDate ?? s.date, idx: r.idx,
-                           sourcePeriod: linkSync.sourcePeriod,
-                           open: s.open, high: s.high, low: s.low, close: s.close,
-                           volume: s.volume, turnover: s.turnover,
-                           fingerprint: Self.currentConfigFingerprint(period: period),
-                           targetCount: sortedData.count)
-    }
-
-    /// 主图某条曲线在当前复盘光标处的 as-of 值（仅合成态、光标索引匹配时返回）
-    private func asOfMainOverride(_ lineIndex: Int) -> Double? {
-        guard let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
-        return asOfMain[lineIndex]
-    }
-
-    /// 某副图槽位某条曲线在当前复盘光标处的 as-of 值
-    private func asOfSubOverride(slot: Int, lineIndex: Int) -> Double? {
-        guard slot >= 0, slot < asOfSubs.count,
-              let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
-        return asOfSubs[slot][lineIndex]
-    }
-
-    /// 按 trigger 调度 as-of 重算（缓存命中即时应用；否则后台求值、序号防过期）。
-    /// trigger 为 nil 时清空所有 override（同周期/范围框/无光标/退联动）。
-    private func scheduleAsOf(_ t: AsOfTrigger?) {
-        asOfTicket += 1
-        guard let t else {
-            asOfMain = [:]
-            asOfSubs = [[:], [:], [:]]
-            return
-        }
-        let metaID = linkedMetaID ?? metaId ?? 0
-        let key = AsOfKey(metaID: metaID, targetPeriod: period, sourcePeriod: t.sourcePeriod,
-                          date: t.date, fingerprint: t.fingerprint)
-        if let cached = AsOfValueCache.shared.get(key) {
-            asOfMain = cached.main
-            asOfSubs = cached.subs
-            return
-        }
-        guard t.idx >= 0, t.idx < sortedData.count else { return }
-        // 主线程构造请求：取齐公式文本与[0...idx]截断数据（末项替换为合成K线）
-        let synth = KlineItem(date: sortedData[t.idx].date, open: t.open, high: t.high, low: t.low,
-                              close: t.close, volume: t.volume, turnover: t.turnover)
-        var data = Array(sortedData[0...t.idx])
-        data[data.count - 1] = synth
-        let customFormula = activeCustomIndicator?.formula
-        let entries = mainIndicatorEntries(store: SystemIndicatorStore.shared,
-                                           customStore: customStore, config: config,
-                                           customFormula: customFormula, period: period)
-        var subs: [AsOfRequest.Sub?] = []
-        for m in [subTop, subBottom, subThird] {
-            if m.kind == "VOL" || m.kind == "AMO" {
-                subs.append(nil)   // 合成量/额走阶段 A 通道
-            } else if let cid = m.activeCustomID,
-                      let c = customStore.indicators.first(where: { $0.id == cid }) {
-                subs.append(.init(formula: c.formula, isCustom: true))
-            } else if let f = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: period) {
-                subs.append(.init(formula: f, isCustom: false))
-            } else {
-                subs.append(nil)
-            }
-        }
-        let req = AsOfRequest(key: key, data: data,
-                              mainFormulas: entries.map(\.formula), subs: subs)
-        let ticket = asOfTicket
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = evaluateAsOf(req)
-            DispatchQueue.main.async {
-                // 期间已有更新的调度（或光标消失/清场）→ 丢弃本次结果
-                guard ticket == self.asOfTicket else { return }
-                AsOfValueCache.shared.put(key, result)
-                self.asOfMain = result.main
-                self.asOfSubs = result.subs
-            }
-        }
-    }
 
     // MARK: - 指标序列计算
 
@@ -1731,7 +1337,7 @@ struct KlineChartView: View {
 
     private var menuIsOpen: Bool { showMainSheet || showSubSheet || showCustomEditor || showSystemEditor }
 
-    private func isInPanel(_ y: CGFloat, _ top: CGFloat, _ bottom: CGFloat) -> Bool { y >= top && y <= bottom }
+    func isInPanel(_ y: CGFloat, _ top: CGFloat, _ bottom: CGFloat) -> Bool { y >= top && y <= bottom }
 
     private func clamp<V: Comparable>(_ v: V, _ lo: V, _ hi: V) -> V { min(max(v, lo), hi) }
 
@@ -1997,7 +1603,7 @@ struct KlineChartView: View {
     }
 
     /// 某方向是否存在可切换的周期（-1 更小 / +1 更大），用于副图滑动方向提示
-    private func canSwitchPeriod(_ dir: Int) -> Bool {
+    func canSwitchPeriod(_ dir: Int) -> Bool {
         let cases = KlinePeriod.allCases
         guard let cur = cases.firstIndex(of: period) else { return false }
         let target = cur + dir
@@ -2415,170 +2021,11 @@ struct KlineChartView: View {
     }
 
     /// 屏幕上是否有任意光标（固定光标或可交互光标），通知详情页用于控制 📌 按钮
-    private func notifyHasCursor() {
+    func notifyHasCursor() {
         onHasCursorChange?(renderCursorIndex != nil || pinnedIndex != nil)
     }
 
-    /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象。
-    /// 仅当 cursorLinkEnabled 为 true（用户显式开启了联动态的光标联动）才真正发布。
-    /// 对称联动语义：任一视图只要 linkUserDragging=true（用户手指直接操作）即为来源端，
-    /// 其余所有视图收到后一律滚动居中（DualLinkSync.lastCursorFromRightUser 为早期左右不对称
-    /// 联动的遗留字段，当前已无任何读写方）。
-    private func publishLinkCursor(index: Int?) {
-        guard cursorLinkEnabled else { return }
-        // 只有"用户直接操作"的视图（即来源）才真正对外发布联动光标。
-        // 联动接收端在 applyLinkCursor 里同步了光标位置后，会经 onChange(selectedIndex)
-        // 再次走到这里；若也发布，会形成回声：接收端按各自更小周期解析出的不同 date 回传，
-        // 导致来源视图收到与自己日期不一致的回声而在自己的视图里多此一举地居中。
-        // 只要 linkUserDragging == false（非用户手势触发），就视为回声、直接跳过发布。
-        guard linkUserDragging else { return }
-        linkUserDragging = false
-        let date: Int?
-        if let index, index < sortedData.count { date = sortedData[index].date } else { date = nil }
-        // 记录来源周期与范围：更小周期的联动视图据此用双竖轴框出来源K线覆盖的时间范围
-        linkSync.sourcePeriod = self.period
-        linkSync.sourceRange = date.map { KlinePeriod.periodDateRange(self.period, date: $0) }
-        // 记录来源视图身份：非来源小周期视图据此放置本地第二光标、大周期/同周期视图据此忽略手势；
-        // 来源视图「再点一下」发布 nil（取消整组联动）时同步清空
-        linkSync.sourceID = date == nil ? nil : selfIndex
-        if linkSync.cursorDate != date { linkSync.cursorDate = date }
-    }
-
-    /// 应用另一视图发布的联动光标：把本视图光标移动到对应日期最近的 K 线。
-    /// 仅当 cursorLinkEnabled=true 才响应；拖动中/同日期防回声守卫保持不变。
-    /// 当前居中语义：每次联动到达（含来源端持续拖动）都把目标K线滚动到屏幕水平中央，
-    /// 不再判断它是否原本就在可视窗口内——保证多个视图的同一时间点始终横向对齐。
-    /// （newOffset 与当前窗口恰好一致时自然跳过滚动，不会无意义重算。）
-    private func applyLinkCursor(_ date: Int?) {
-        // 总开关：未开启光标联动时直接忽略
-        guard cursorLinkEnabled else { return }
-        // 本视图正在被用户直接拖动光标（手势进行中）：忽略联动。
-        // 否则回声会把光标拽到别的K线，下一帧手指又拉回，产生闪烁
-        if drag.cursorDragging { return }
-        // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
-        linkUserDragging = false
-        // 本视图不再属于「可承载第二光标」的形态（小周期范围框 / 大周期复盘）——
-        // 如来源取消整组光标、变为同周期画面、关闭联动等——时撤销纯本地第二光标；
-        // 仍是范围框 / 复盘形态时保留：来源在其视图内移动光标不应清掉它
-        if !isLinkedSecondCursorView { clearSecondCursor() }
-        // 更大周期源的联动范围：本视图不显示十字光标，改为自动放大可见窗口让「双竖轴」框范围并居中
-        if let rg = linkRangeIndices {
-            linkCursorActive = true
-            centerLinkRange(left: rg.left, right: rg.right)
-            notifyHasCursor()
-            return
-        }
-        // 该日期正是本视图**本地**光标所在日期（自己发布的）→ 忽略，避免回环。
-        // 注意必须用本地 selectedIndex 判断，而不能用 renderCursorIndex：
-        // 被联动视图的 renderCursorIndex 直接由 linkSync.cursorDate 派生、恒等于该 date，
-        // 若用它判断会永远 return，导致联动光标无法居中。
-        if let li = selectedIndex, li < sortedData.count, sortedData[li].date == date { return }
-        guard let date, let idx = linkedTargetIndex(for: date) else {
-            // 来源光标消失 → 本次联动会话结束，下次出现再居中
-            linkCursorActive = false
-            notifyHasCursor()
-            return
-        }
-        // 复盘态（本视图周期严格大于来源周期）：确保本标的来源周期数据已加载，
-        // 到达后经 LinkSourceBarCache.revision 驱动合成K线重绘（同周期无需来源数据）
-        ensureLinkSourceBars()
-        // 被联动视图始终居中显示联动光标：每次联动更新都滚动窗口让该K线居中。
-        let half = count / 2
-        let targetEnd = min(sortedData.count - 1, max(count - 1, idx + half))
-        let newOffset = max(0, (sortedData.count - 1) - targetEnd)
-        if newOffset != endOffset {
-            endOffset = newOffset
-            refreshCurves()
-            startPrefetch()
-        }
-        linkCursorActive = true
-        notifyHasCursor()
-    }
-
-    /// 让 [left, right] 两根竖轴范围内的K线全部进入屏幕并尽量居中。
-    /// 若范围大于当前可见数量则自动放大可见数（封顶全部K线）；否则沿用当前可见数只做居中。
-    /// 双指缩放进行中时忽略（避免与手指锚定冲突）。
-    private func centerLinkRange(left: Int, right: Int) {
-        guard !drag.twoFingerActive else { return }
-        let maxEnd = sortedData.count - 1
-        guard left >= 0, right >= left, right <= maxEnd else { return }
-        let span = right - left + 1
-        // 目标可见数：至少能容纳整个范围，但不超过本视图全部K线
-        let need = min(max(span, count), capVisibleCount)
-        // 范围中心对准屏幕中心：目标 end = right + (need - span) / 2，再夹到合法区间
-        let slack = need - span
-        let targetEnd = min(maxEnd, max(need - 1, right + slack / 2))
-        let newOffset = max(0, maxEnd - targetEnd)
-        // 只在有变化时刷新，避免每次来源移动都无意义重算
-        if Int(visibleCount.rounded()) != need || newOffset != endOffset {
-            visibleCount = CGFloat(need)
-            endOffset = newOffset
-            refreshCurves()
-            startPrefetch()
-        }
-    }
-
-    /// 联动接收态下，光标日期在本视图应定位到的 K 线索引：
-    /// - 本视图周期**严格大于**来源周期（复盘态，如周→季）：取「**包含该日期的那根大周期 K 线**」
-    ///   （containingIndex）——大周期 K 线日期是区间起始日，6/3 属于 Q2 就必须落在 Q2，
-    ///   不能用几何最近（6/3 距 7/1 仅 28 天、距 4/1 有 63 天，最近匹配会错误跳到 Q3，
-    ///   导致合成区间为空而回退显示真实完整季 K 线）；
-    /// - 同周期（含跨标的）：保持"时间最近交易日"语义（nearestIndex），兼容一方停牌无当日 K 线。
-    private func linkedTargetIndex(for date: Int) -> Int? {
-        self.period.granularityRank > linkSync.sourcePeriod.granularityRank
-            ? containingIndex(to: date)
-            : nearestIndex(to: date)
-    }
-
-    /// 「所属周期」匹配：最后一个起始日 date <= target 的 K 线下标——
-    /// 即 target 落在该 K 线代表的周期区间内（季线存起始日 4/1，则 4/1~6/30 任意日期都归这根）。
-    /// target 早于数据中第一根 K 线时回退到第一根（与 nearestIndex 的边界兜底一致）。
-    private func containingIndex(to target: Int) -> Int? {
-        guard !sortedData.isEmpty else { return nil }
-        var lo = 0
-        var hi = sortedData.count - 1
-        var ans = 0
-        var found = false
-        while lo <= hi {
-            let mid = (lo + hi) / 2
-            if sortedData[mid].date <= target {
-                ans = mid; found = true; lo = mid + 1
-            } else {
-                hi = mid - 1
-            }
-        }
-        return found ? ans : 0
-    }
-
-    /// 找到日期与 target 最接近的 K 线索引（日/周视图跨周期联动用）。
-    /// sortedData 已按 date 升序排序 → 用二分查找定位（O(log n)），代替拖动十字光标时每帧的全量线性扫描，
-    /// 显著降低联动小周期视图在持续拖动时的卡顿。
-    private func nearestIndex(to target: Int) -> Int? {
-        guard !sortedData.isEmpty else { return nil }
-        var lo = 0
-        var hi = sortedData.count - 1
-        // 二分找第一个 date >= target 的下标
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if sortedData[mid].date < target {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
-        }
-        let idx = lo
-        // 精确命中直接返回
-        if sortedData[idx].date == target { return idx }
-        // 未命中：在 idx(>=target) 与 idx-1(<target) 中取更近者
-        if idx > 0 {
-            if abs(sortedData[idx - 1].date - target) <= abs(sortedData[idx].date - target) {
-                return idx - 1
-            }
-        }
-        return idx
-    }
-
-    private func refreshCurves(force: Bool = false) {
+    func refreshCurves(force: Bool = false) {
         klineDebug("[KlineDebug] refreshCurves force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) cursor=\(selectedIndex == nil ? "无" : "有")")
         recomputeMainCurves(force: force)
         recomputeSub(subTop, force: force)
@@ -2591,7 +2038,7 @@ struct KlineChartView: View {
     /// 随后后台从数据开头（最左）向右逐块推进计算，EMA/SMA 等递归指标从第一根开始累积，
     /// 数值最正确；覆盖到当前可见窗口末端后才替换前台近似曲线（最新部分被重算为正确值）。
     /// 用户交互（拖动/缩放）或切换周期/标的/指标时 token 失效，任务自动停止
-    private func startPrefetch() {
+    func startPrefetch() {
         guard !sortedData.isEmpty, !mainFullscreen, prefetchToken == nil else { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
         // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
@@ -3053,7 +2500,7 @@ struct KlineChartView: View {
     // MARK: - 主图
 
     /// 根据光标 y 所在面板计算对应的数值文本（主图价格 / 副图指标值）
-    private func crosshairValueText(at y: CGFloat, mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat,
+    func crosshairValueText(at y: CGFloat, mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat,
                                     s1Top: CGFloat, s1Bottom: CGFloat, s1Height: CGFloat,
                                     s2Top: CGFloat, s2Bottom: CGFloat, s2Height: CGFloat,
                                     s3Top: CGFloat, s3Bottom: CGFloat, s3Height: CGFloat) -> String {
@@ -3086,7 +2533,7 @@ struct KlineChartView: View {
     /// 十字光标横线 + 背景数值标签（横线从数值背景的最左边开始画起，贯穿全宽）
     /// secondLine 非 nil 时，第二行显示光标对比多出的内容（如两光标间涨幅）；
     /// gapRanges 非 nil 时，横线在这些横向区间断开（不画在竖线顶部日期标签/底部涨幅标签上）
-    private func crosshairLineOverlay(width: CGFloat, height: CGFloat, y: CGFloat, valueText: String,
+    func crosshairLineOverlay(width: CGFloat, height: CGFloat, y: CGFloat, valueText: String,
                                       secondLine: String? = nil,
                                       gapRanges: [ClosedRange<CGFloat>]? = nil,
                                       bgColor: Color = Color(red: 0.35, green: 0.75, blue: 1.0),
@@ -3231,79 +2678,6 @@ struct KlineChartView: View {
                     }
                 }
             }
-        }
-    }
-
-    /// 联动小周期范围框视图的本地「第二个十字光标」横线 + 左侧数值标签：
-    /// 只有横线与左侧标签（无右侧涨幅、无底部距今），颜色统一蓝色，横线在顶部日期标签处断开。
-    /// 竖线（分段贯穿主图与全部副图）与顶部日期标签由 mainCursorVLine/subCursorVLine(secondary:) 绘制。
-    @ViewBuilder
-    private func secondCursorHorizontalOverlay(index: Int, y: CGFloat, width: CGFloat, height: CGFloat,
-                                               candleSpacing: CGFloat,
-                                               mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat,
-                                               s1Top: CGFloat, s1Bottom: CGFloat, s1Height: CGFloat,
-                                               s2Top: CGFloat, s2Bottom: CGFloat, s2Height: CGFloat,
-                                               s3Top: CGFloat, s3Bottom: CGFloat, s3Height: CGFloat) -> some View {
-        if index >= startIndex, index <= endIndex,
-           isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom)
-            || isInPanel(y, s2Top, s2Bottom) || isInPanel(y, s3Top, s3Bottom) {
-            let cy = min(max(y, 0), height)
-            let valueText = crosshairValueText(at: cy, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
-                                                s1Top: s1Top, s1Bottom: s1Bottom, s1Height: s1Height,
-                                                s2Top: s2Top, s2Bottom: s2Bottom, s2Height: s2Height,
-                                                s3Top: s3Top, s3Bottom: s3Bottom, s3Height: s3Height)
-            let lineGap = crosshairLineGap(index: index, compare: nil, otherIndex: nil, otherCompare: nil,
-                                           cy: cy, candleSpacing: candleSpacing, width: width,
-                                           mainTop: mainTop, mainHeight: mainHeight)
-            crosshairLineOverlay(width: width, height: height, y: cy, valueText: valueText,
-                                 gapRanges: lineGap, bgColor: Color.blue, lineColor: Color.blue)
-        }
-    }
-
-    /// 更大周期源的联动范围：在 [left, right] 两根K线处画两根无标签竖轴（含两轴间的淡色填充示意范围）。
-    /// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing）；纵向按 panels 给出的
-    /// 图表面板区间分段绘制（与十字光标竖线一样被指标栏自然断开），不覆盖指标栏、时间轴与行情数据栏。
-    /// 水平方向按可见窗口裁剪：只要范围与窗口有重叠就绘制屏内部分——某一根竖轴被平移出屏时，
-    /// 另一根轴与底纹（贴屏幕边缘截断）仍然显示，而不是整个范围框消失。
-    @ViewBuilder
-    private func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat,
-                                      panOffset: CGFloat,
-                                      panels: [(top: CGFloat, bottom: CGFloat)]) -> some View {
-        // 范围与可见窗口的重叠部分（全局索引）；完全无重叠则不绘制
-        let visL = max(left, startIndex)
-        let visR = min(right, endIndex)
-        if visR >= visL {
-            let xL = (CGFloat(left - startIndex) + 0.5) * candleSpacing
-            let xR = (CGFloat(right - startIndex) + 0.5) * candleSpacing
-            // 两根轴各自只在仍位于可见窗口内时绘制（贴边时随 panOffset 自然移出并被外层裁剪）
-            let showLAxis = left >= startIndex && left <= endIndex
-            let showRAxis = right >= startIndex && right <= endIndex
-            ZStack {
-                ForEach(Array(panels.enumerated()), id: \.offset) { _, panel in
-                    if panel.bottom > panel.top {
-                        let regionHeight = panel.bottom - panel.top
-                        let midY = (panel.top + panel.bottom) / 2
-                        // 两轴之间淡色填充，示意被框住的范围（越界部分由外层 .clipped() 裁掉）
-                        if xR > xL {
-                            Rectangle()
-                                .fill(Color.blue.opacity(0.06))
-                                .frame(width: xR - xL, height: regionHeight)
-                                .position(x: (xL + xR) / 2, y: midY)
-                        }
-                        // 两根竖轴（无标签）
-                        if showLAxis {
-                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
-                                .position(x: xL, y: midY)
-                        }
-                        if showRAxis {
-                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
-                                .position(x: xR, y: midY)
-                        }
-                    }
-                }
-            }
-            // 跟随亚像素平移，与蜡烛 Canvas 的 .offset(x: panOffset) 同基准
-            .offset(x: panOffset)
         }
     }
 
@@ -3627,86 +3001,6 @@ struct KlineChartView: View {
                 .frame(width: 1.0, height: height)
                 .position(x: xPosition, y: height / 2)
         }
-    }
-
-    /// 副图左右滑动切换反馈：拖动时才显示方向箭头 + 滑轨/滑块/阈值动画。
-    /// 仅副图1/2 调用挂载；副图三面板手势整体禁用（虚拟按钮预留区），不会进入本函数，
-    /// 此处 `slot != .third` 为双保险。
-    @ViewBuilder
-    private func swipeOverlay(slot: SubSlot, width: CGFloat, height: CGFloat) -> some View {
-        if slot != .third {
-            let fb = swipeFeedback
-            let isDragging = fb?.slot == slot && (fb?.offset ?? 0).magnitude > 1
-            let off = isDragging ? (fb?.offset ?? 0) : 0
-            // 副图一（上方副图）方向已调转：左=小级别/上一标的，右=大级别/下一标的；副图二保持原方向
-            let canL = slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(1) ?? false)
-            let canR = slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(-1) ?? false)
-            let threshold: CGFloat = 70
-            ZStack {
-            // 方向箭头提示：仅拖动中显示（滑动条出现前不显示），可切换方向高亮，边界方向灰显
-            if isDragging {
-                HStack {
-                    swipeDirectionArrow(system: "chevron.left", can: canL,
-                                        active: off < 0)
-                    Spacer()
-                    swipeDirectionArrow(system: "chevron.right", can: canR,
-                                        active: off > 0)
-                }
-                .padding(.horizontal, 8)
-            }
-
-            // 拖动中的滑轨动画
-            if isDragging {
-                let dir: CGFloat = off > 0 ? 1 : -1
-                let reachable = off > 0 ? canR : canL
-                let dist = min(abs(off), threshold)
-                let cx = width / 2
-                let ready = abs(off) > threshold
-                let color: Color = reachable ? (ready ? Color.green : Color.white.opacity(0.9)) : Color.red
-                // 轨道（从中心向拖动方向延伸）
-                Capsule()
-                    .fill(Color.black.opacity(0.35))
-                    .frame(width: dist, height: 6)
-                    .position(x: cx + dir * dist / 2, y: height / 2)
-                // 阈值刻度线
-                if reachable {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.7))
-                        .frame(width: 1.5, height: 12)
-                        .position(x: cx + dir * threshold, y: height / 2)
-                }
-                // 滑块
-                Circle()
-                    .fill(color)
-                    .frame(width: 16, height: 16)
-                    .overlay(Circle().stroke(Color.white, lineWidth: 1))
-                    .shadow(radius: 1)
-                    .position(x: cx + dir * dist, y: height / 2)
-                // 状态文字：超过阈值提示松手切换，未到阈值提示继续拖动，不可切换方向提示边界
-                let text = reachable ? (ready ? "松开切换" : "继续拖动") : "无法切换"
-                let textColor: Color = (reachable && !ready) ? Color.black : Color.white
-                Text(text)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(textColor)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(color)
-                    .cornerRadius(3)
-                    .position(x: cx + dir * dist, y: height / 2 - 16)
-            }
-            }
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// 副图滑动方向提示箭头
-    private func swipeDirectionArrow(system: String, can: Bool, active: Bool) -> some View {
-        Image(systemName: can ? system : (system + ".circle"))
-            .font(.system(size: 13, weight: .bold))
-            .foregroundColor(can ? (active ? Color.white : Color.black.opacity(0.35)) : Color.gray.opacity(0.25))
-            .frame(width: 22, height: 22)
-            .background(can ? Color.black.opacity(active ? 0.5 : 0.08) : Color.clear)
-            .clipShape(Circle())
     }
 
     private func subLegendRow(model m: SubChartModel, height: CGFloat) -> some View {
@@ -4053,7 +3347,7 @@ struct KlineChartView: View {
 
     /// 横线需要让开的横向区间数组：收集当前光标自己的竖线标签 + 对方光标的竖线标签中与横线重叠的全部区间；
     /// 两个光标的日期标签都在主图顶部、涨幅标签都在底部，横线到达时可能同时穿过多个标签，需全部断开。
-    private func crosshairLineGap(index: Int?, compare: Int?, otherIndex: Int?, otherCompare: Int?,
+    func crosshairLineGap(index: Int?, compare: Int?, otherIndex: Int?, otherCompare: Int?,
                                   cy: CGFloat, candleSpacing: CGFloat, width: CGFloat,
                                   mainTop: CGFloat, mainHeight: CGFloat) -> [ClosedRange<CGFloat>] {
         var gaps: [ClosedRange<CGFloat>] = []
@@ -4648,25 +3942,6 @@ struct MainChartCanvas: View, Equatable {
                            style: StrokeStyle(lineWidth: 0.5, dash: [12, 6]))
             }
         }
-    }
-
-    // MARK: 联动复盘：单点替换 / 未来淡化的绘制辅助（本地索引）
-
-    /// 某本地索引实际用于绘制的 K 线（合成点替换）
-    private func effectiveItem(_ li: Int) -> KlineItem {
-        if let sb = syntheticBar, sb.index == li { return sb.item }
-        return slice[li]
-    }
-
-    /// 未来淡化区索引判定
-    private func isDimmed(_ li: Int) -> Bool {
-        guard let d = dimFromIndex else { return false }
-        return li >= d
-    }
-
-    /// 按淡化状态调整颜色
-    private func dimmed(_ color: Color, _ li: Int) -> Color {
-        isDimmed(li) ? color.opacity(dimAlpha) : color
     }
 
     /// 跳空缺口：使用预计算的缺口列表，仅绘制位于当前可见区间内的缺口。
