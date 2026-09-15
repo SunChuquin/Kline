@@ -287,8 +287,8 @@ struct KlineChartView: View {
 
     var upColor: Color { Color(red: 0.85, green: 0.16, blue: 0.16) }
     var downColor: Color { Color(red: 0.0, green: 0.55, blue: 0.35) }
-    private var gridColor: Color { Color.gray.opacity(0.22) }
-    private var axisTextColor: Color { Color.black.opacity(0.55) }
+    var gridColor: Color { Color.gray.opacity(0.22) }
+    var axisTextColor: Color { Color.black.opacity(0.55) }
     private var bollColor: Color { Color(red: 0.4, green: 0.4, blue: 0.9) }
     private var ma5Color: Color { Color.black.opacity(0.75) }
     private var ma10Color: Color { Color.orange }
@@ -320,7 +320,7 @@ struct KlineChartView: View {
         return min(maxEnd, max(minEnd, maxEnd - endOffset))
     }
     var startIndex: Int { max(0, endIndex - count + 1) }
-    private var slice: [KlineItem] {
+    var slice: [KlineItem] {
         guard startIndex <= endIndex, startIndex >= 0, endIndex < sortedData.count else { return [] }
         return Array(sortedData[startIndex...endIndex])
     }
@@ -328,7 +328,7 @@ struct KlineChartView: View {
         guard !arr.isEmpty, startIndex <= endIndex, endIndex < arr.count else { return [] }
         return Array(arr[startIndex...endIndex])
     }
-    private func sliceColors(_ arr: [Color]?) -> [Color]? {
+    func sliceColors(_ arr: [Color]?) -> [Color]? {
         guard let arr, !arr.isEmpty, startIndex <= endIndex, endIndex < arr.count else { return arr }
         return Array(arr[startIndex...endIndex])
     }
@@ -342,21 +342,21 @@ struct KlineChartView: View {
     func mir(_ v: Double) -> Double { mainMirrored ? -v : v }
 
     /// 可见窗口曲线的取负版本（用于画布），未镜像时原样返回
-    private func mirroredSliceArr(_ values: [Double]) -> [Double] {
+    func mirroredSliceArr(_ values: [Double]) -> [Double] {
         let s = sliceArr(values)
         guard mainMirrored else { return s }
         return s.map { -$0 }
     }
 
     /// 副图可见窗口曲线的取负版本（全局空头镜像开启时）
-    private func subMirroredSliceArr(_ values: [Double]) -> [Double] {
+    func subMirroredSliceArr(_ values: [Double]) -> [Double] {
         let s = sliceArr(values)
         guard config.mainMirrored else { return s }
         return s.map { -$0 }
     }
 
     /// 镜像后的可见 K 线（OHLC 取负；日期/量额不变，仅供画布绘制）
-    private var mirroredSlice: [KlineItem] {
+    var mirroredSlice: [KlineItem] {
         guard mainMirrored else { return slice }
         return slice.map { it in
             KlineItem(date: it.date, open: -it.open, high: -it.high, low: -it.low,
@@ -365,13 +365,13 @@ struct KlineChartView: View {
     }
 
     /// 镜像后的跳空缺口（top/bottom 取负）
-    private var mirroredGaps: [GapInfo] {
+    var mirroredGaps: [GapInfo] {
         guard mainMirrored else { return computation.gaps }
         return computation.gaps.map { g in GapInfo(startIdx: g.startIdx, top: -g.top, bottom: -g.bottom, isUp: g.isUp, filledIdx: g.filledIdx) }
     }
 
     /// 镜像后的最新一根 K 线（最新价线用）
-    private var mirroredLatest: KlineItem? {
+    var mirroredLatest: KlineItem? {
         guard mainMirrored, let last = sortedAll.last else { return sortedAll.last }
         return KlineItem(date: last.date, open: -last.open, high: -last.high, low: -last.low,
                          close: -last.close, volume: last.volume, turnover: last.turnover)
