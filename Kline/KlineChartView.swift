@@ -1880,17 +1880,11 @@ struct KlineChartView: View {
                 // 副图滑动切换结算：超过阈值触发切换，否则回弹取消（动画由 overlay 呈现）
                 if let fb = swipeFeedback {
                     // 非来源小周期范围框视图在副图区的**轻点**（第二光标不存在时手势才会走到这里）：
-                    // 回弹滑动反馈后放置本地第二光标，不触发切周期/标的
+                    // 第二光标只允许在主图区域放置，副图一/副图二区域轻点仅回弹滑动反馈，
+                    // 不放置第二光标、不触发切周期/标的（副图三面板手势本就整体禁用）
                     if isLinkedSecondCursorView,
                        abs(value.translation.width) < 6, abs(value.translation.height) < 6 {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { swipeFeedback = nil }
-                        let y = value.location.y
-                        let col = Int((value.location.x / candleSpacing).rounded(.down))
-                        let idx = startIndex + col
-                        if idx >= startIndex && idx <= endIndex {
-                            secondCursorIndex = idx
-                            secondCursorY = y
-                        }
                         return
                     }
                     let threshold: CGFloat = 70
@@ -1943,8 +1937,9 @@ struct KlineChartView: View {
                     let idx = startIndex + col
                     if isLinkedSecondCursorView {
                         // 非来源小周期范围框视图：轻点放置纯本地第二光标（走到这里时它必然不存在），
-                        // 不设联动来源标记、不写 selectedIndex，因此不会接管来源/广播给其他视图
-                        if idx >= startIndex && idx <= endIndex {
+                        // 不设联动来源标记、不写 selectedIndex，因此不会接管来源/广播给其他视图。
+                        // 仅限主图区域轻点放置：副图一/副图二区域轻点不放（副图三面板手势整体禁用）。
+                        if isInPanel(y, mainTop, mainBottom), idx >= startIndex && idx <= endIndex {
                             secondCursorIndex = idx
                             secondCursorY = y
                         }
