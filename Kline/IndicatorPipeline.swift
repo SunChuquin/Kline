@@ -10,6 +10,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// 指标/预计算状态模型：KlineChartView 每实例一份（@StateObject 持有），
 /// init 内完成跳空缺口一次性计算与 (标的, 周期) 缓存恢复（指纹一致时）。
