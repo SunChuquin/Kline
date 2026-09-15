@@ -425,7 +425,7 @@ struct KlineChartView: View {
 
     // MARK: - 主图价格区间
 
-    private var priceRange: ClosedRange<Double> {
+    var priceRange: ClosedRange<Double> {
         guard !slice.isEmpty else { return 0...100 }
         var minLow = slice.map(\.low).min() ?? 0
         var maxHigh = slice.map(\.high).max() ?? 100
@@ -450,7 +450,7 @@ struct KlineChartView: View {
 
     // MARK: - 副图坐标范围
 
-    private func subRange(_ m: SubChartModel) -> (min: Double, max: Double) {
+    func subRange(_ m: SubChartModel) -> (min: Double, max: Double) {
         let offsets = Array(startIndex...endIndex)
         var values: [Double] = []
         for line in m.curves {
@@ -1245,7 +1245,7 @@ struct KlineChartView: View {
     }
 
     /// 副图坐标数值格式化
-    private func subFormatter(for kind: String) -> (Double) -> String {
+    func subFormatter(for kind: String) -> (Double) -> String {
         // VOL/AMO 按转换单位显示（万/亿/万亿）；其余均为 .tdx 公式输出，统一按量级自适应精度
         guard kind != "VOL", kind != "AMO" else { return { formatVolume($0) } }
         return { v in
