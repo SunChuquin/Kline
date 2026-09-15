@@ -1337,8 +1337,6 @@ struct KlineChartView: View {
 
     private var menuIsOpen: Bool { showMainSheet || showSubSheet || showCustomEditor || showSystemEditor }
 
-    func isInPanel(_ y: CGFloat, _ top: CGFloat, _ bottom: CGFloat) -> Bool { y >= top && y <= bottom }
-
     private func clamp<V: Comparable>(_ v: V, _ lo: V, _ hi: V) -> V { min(max(v, lo), hi) }
 
     /// 标签文本实际渲染宽度（含左右各 4pt 内边距）：用于贴边判定，避免用估算半宽导致提前贴边
@@ -1792,7 +1790,8 @@ struct KlineChartView: View {
                     // 纵向按图表面板分段（参考十字光标竖线）：跳过主图/各副图之间的指标栏，且在时间轴顶端截停，
                     // 不贯穿三个副图指标栏、底部时间轴与行情数据栏
                     if let rg = linkRangeIndices {
-                        linkRangeAxisOverlay(left: rg.left, right: rg.right, candleSpacing: candleSpacing,
+                        LinkRangeAxisOverlay(startIndex: startIndex, endIndex: endIndex,
+                                             left: rg.left, right: rg.right, candleSpacing: candleSpacing,
                                              panOffset: panOffset,
                                              panels: mainFullscreen
                                                 ? [(mainTop, mainBottom)]
@@ -1800,6 +1799,7 @@ struct KlineChartView: View {
                                                    (s1Top, s1Bottom),
                                                    (s2Top, s2Bottom),
                                                    (s3Top, s3Bottom)])
+                            .equatable()
                     }
                     // 可交互光标横线 y：
                     //   联动接收态 → 按联动K线收盘价反算（fixedPrice 同步传入，标签精确显示收盘价）；
@@ -1825,12 +1825,23 @@ struct KlineChartView: View {
                     // 竖线（分段贯穿主图/副图）与顶部日期标签由各面板内 secondary 竖线绘制；
                     // 不发布联动、不影响来源与其他视图（复盘画面下与联动复盘十字光标并存）
                     if isLinkedSecondCursorView, let sIdx = secondCursorIndex, let sY = secondCursorY {
-                        secondCursorHorizontalOverlay(index: sIdx, y: sY, width: width, height: geometry.size.height,
-                                                       candleSpacing: candleSpacing,
-                                                       mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
-                                                       s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
-                                                       s2Top: s2Top, s2Bottom: s2Bottom, s2Height: sub2Height,
-                                                       s3Top: s3Top, s3Bottom: s3Bottom, s3Height: sub3Height)
+                        let cy = min(max(sY, 0), geometry.size.height)
+                        let valueText = crosshairValueText(at: cy, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
+                                                           s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
+                                                           s2Top: s2Top, s2Bottom: s2Bottom, s2Height: sub2Height,
+                                                           s3Top: s3Top, s3Bottom: s3Bottom, s3Height: sub3Height)
+                        let lineGap = crosshairLineGap(index: sIdx, compare: nil, otherIndex: nil, otherCompare: nil,
+                                                       cy: cy, candleSpacing: candleSpacing, width: width,
+                                                       mainTop: mainTop, mainHeight: mainHeight)
+                        SecondCursorHorizontalOverlay(startIndex: startIndex, endIndex: endIndex, index: sIdx, y: cy,
+                                                      width: width, height: geometry.size.height,
+                                                      candleSpacing: candleSpacing,
+                                                      mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
+                                                      s1Top: s1Top, s1Bottom: s1Bottom, s1Height: sub1Height,
+                                                      s2Top: s2Top, s2Bottom: s2Bottom, s2Height: sub2Height,
+                                                      s3Top: s3Top, s3Bottom: s3Bottom, s3Height: sub3Height,
+                                                      valueText: valueText, gapRanges: lineGap)
+                            .equatable()
                     }
                 }
                 .allowsHitTesting(false)
@@ -2530,72 +2541,6 @@ struct KlineChartView: View {
         return ""
     }
 
-    /// 十字光标横线 + 背景数值标签（横线从数值背景的最左边开始画起，贯穿全宽）
-    /// secondLine 非 nil 时，第二行显示光标对比多出的内容（如两光标间涨幅）；
-    /// gapRanges 非 nil 时，横线在这些横向区间断开（不画在竖线顶部日期标签/底部涨幅标签上）
-    func crosshairLineOverlay(width: CGFloat, height: CGFloat, y: CGFloat, valueText: String,
-                                      secondLine: String? = nil,
-                                      gapRanges: [ClosedRange<CGFloat>]? = nil,
-                                      bgColor: Color = Color(red: 0.35, green: 0.75, blue: 1.0),
-                                      lineColor: Color = Color.black.opacity(0.45)) -> some View {
-        // 先算出横线需要绘制的非标签区间（合并重叠的标签区间后，取其余部分；无标签时整条）
-        let segments: [ClosedRange<CGFloat>] = {
-            guard let gaps = gapRanges, !gaps.isEmpty else { return [0...width] }
-            var merged: [ClosedRange<CGFloat>] = []
-            for g in gaps.sorted(by: { $0.lowerBound < $1.lowerBound }) {
-                let g0 = min(max(0, g.lowerBound), width)
-                let g1 = min(max(0, g.upperBound), width)
-                guard g1 > g0 else { continue }
-                if let last = merged.last, g0 <= last.upperBound {
-                    merged[merged.count - 1] = last.lowerBound...max(last.upperBound, g1)
-                } else {
-                    merged.append(g0...g1)
-                }
-            }
-            var result: [ClosedRange<CGFloat>] = []
-            var x: CGFloat = 0
-            for g in merged {
-                if g.lowerBound > x { result.append(x...g.lowerBound) }
-                x = max(x, g.upperBound)
-            }
-            if x < width { result.append(x...width) }
-            return result
-        }()
-        return ZStack(alignment: .topLeading) {
-            // 横轴虚线：从数值背景的最左边（x=0）开始画起；按区间逐段绘制，跳过所有标签区间
-            ForEach(segments, id: \.lowerBound) { seg in
-                Rectangle().fill(lineColor)
-                    .frame(width: max(0, seg.upperBound - seg.lowerBound), height: 1.0)
-                    .position(x: (seg.lowerBound + seg.upperBound) / 2, y: y)
-            }
-            if let secondLine {
-                // 两行：第一行价格/数值，第二行光标对比信息
-                VStack(spacing: 1) {
-                    Text(valueText)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 1)
-                    Text(secondLine)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.bottom, 1)
-                }
-                .background(bgColor)
-                .offset(y: y - 15)
-            } else {
-                // 光标数值：背景矩形（高=字体高度、宽=内容宽度），白字加粗，比主图坐标数值大一号
-                Text(valueText)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 4)
-                    .background(bgColor)
-                    .offset(y: y - 6)
-            }
-        }
-    }
-
     /// 单个十字光标在整图上的绘制：横线 + 左侧数值标签 + 主图横轴右侧涨幅标签
     /// （可交互光标与固定光标共用；只有光标 y 落在任一图表面板内才绘制；
     /// fixedPrice 非 nil 表示固定光标的主图横轴价格已固定，数值与横线位置都按该价格）
@@ -2637,11 +2582,12 @@ struct KlineChartView: View {
                 let lineGap = crosshairLineGap(index: index, compare: compare, otherIndex: otherIndex, otherCompare: otherCompare,
                                                cy: cy, candleSpacing: candleSpacing, width: width,
                                                mainTop: mainTop, mainHeight: mainHeight)
-                crosshairLineOverlay(width: width, height: height, y: cy, valueText: valueText,
+                CrosshairLineOverlay(width: width, height: height, y: cy, valueText: valueText,
                                      secondLine: secondLineText.isEmpty ? nil : secondLineText,
                                      gapRanges: lineGap,
                                      bgColor: bgColor,
                                      lineColor: compare != nil ? Color.blue : Color.black.opacity(0.45))
+                    .equatable()
                 // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
                 // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）。
                 // 联动「历史时点复盘」态（本视图周期严格大于来源周期）同样不显示：屏幕末根属于
@@ -2973,11 +2919,16 @@ struct KlineChartView: View {
                                ratios: labelRatios, formatter: subFmt)
 
             // 可交互光标（pin 开启时即第二个光标）与固定光标的副图竖线都绘制
-            subCursorVLine(index: renderCursorIndex, compare: pinnedIndex, candleSpacing: candleSpacing, height: height)
-            subCursorVLine(index: pinnedIndex, compare: nil, candleSpacing: candleSpacing, height: height)
+            SubCursorVLine(startIndex: startIndex, endIndex: endIndex, index: renderCursorIndex, compare: pinnedIndex,
+                           candleSpacing: candleSpacing, height: height)
+                .equatable()
+            SubCursorVLine(startIndex: startIndex, endIndex: endIndex, index: pinnedIndex, compare: nil,
+                           candleSpacing: candleSpacing, height: height)
+                .equatable()
             // 联动小周期范围框视图的本地「第二个十字光标」副图竖线（蓝色，纯装饰不参与命中测试）
-            subCursorVLine(index: secondCursorIndex, compare: nil, candleSpacing: candleSpacing, height: height,
-                           secondary: true)
+            SubCursorVLine(startIndex: startIndex, endIndex: endIndex, index: secondCursorIndex, compare: nil,
+                           candleSpacing: candleSpacing, height: height, secondary: true)
+                .equatable()
                 .allowsHitTesting(false)
         }
         .frame(width: width, height: height)
@@ -2985,21 +2936,13 @@ struct KlineChartView: View {
         .overlay {
             // 副图3 不挂滑动反馈层（面板手势整体禁用，预留给虚拟按钮）；副图1/2 保留左右滑动切换
             if slot != .third {
-                swipeOverlay(slot: slot, width: width, height: height)
+                // 副图一（上方副图）方向已调转：左=小级别/上一标的，右=大级别/下一标的；副图二保持原方向
+                SwipeOverlay(slot: slot, fb: swipeFeedback,
+                             canL: slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(1) ?? false),
+                             canR: slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(-1) ?? false),
+                             width: width, height: height)
+                    .equatable()
             }
-        }
-    }
-
-    /// 副图单个光标的竖线（可交互光标与固定光标共用；第二个光标蓝色、固定光标黑色；
-    /// secondary=联动范围框视图的本地第二光标，同样蓝色）
-    @ViewBuilder
-    private func subCursorVLine(index: Int?, compare: Int?, candleSpacing: CGFloat, height: CGFloat,
-                                secondary: Bool = false) -> some View {
-        if let index, index >= startIndex, index <= endIndex {
-            let xPosition = (CGFloat(index - startIndex) + 0.5) * candleSpacing
-            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color.black.opacity(0.45))
-                .frame(width: 1.0, height: height)
-                .position(x: xPosition, y: height / 2)
         }
     }
 

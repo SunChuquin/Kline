@@ -662,43 +662,81 @@ extension KlineChartView {
         return idx
     }
 
-    // MARK: - 联动覆盖层：第二光标横线 / 范围框双竖轴（从 KlineChartView.swift 拆分）
+    // MARK: - 联动覆盖层：第二光标横线 / 范围框双竖轴（从 KlineChartView.swift 拆分，纯渲染 struct 在下方）
+}
 
-    /// 联动小周期范围框视图的本地「第二个十字光标」横线 + 左侧数值标签：
-    /// 只有横线与左侧标签（无右侧涨幅、无底部距今），颜色统一蓝色，横线在顶部日期标签处断开。
-    /// 竖线（分段贯穿主图与全部副图）与顶部日期标签由 mainCursorVLine/subCursorVLine(secondary:) 绘制。
-    @ViewBuilder
-    func secondCursorHorizontalOverlay(index: Int, y: CGFloat, width: CGFloat, height: CGFloat,
-                                       candleSpacing: CGFloat,
-                                       mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat,
-                                       s1Top: CGFloat, s1Bottom: CGFloat, s1Height: CGFloat,
-                                       s2Top: CGFloat, s2Bottom: CGFloat, s2Height: CGFloat,
-                                       s3Top: CGFloat, s3Bottom: CGFloat, s3Height: CGFloat) -> some View {
+// MARK: - MainChartCanvas 联动复盘绘制辅助（跨文件 extension，从 KlineChartView.swift 拆分）
+
+extension MainChartCanvas {
+
+    // MARK: 联动复盘：单点替换 / 未来淡化的绘制辅助（本地索引）
+
+    /// 某本地索引实际用于绘制的 K 线（合成点替换）
+    func effectiveItem(_ li: Int) -> KlineItem {
+        if let sb = syntheticBar, sb.index == li { return sb.item }
+        return slice[li]
+    }
+
+    /// 未来淡化区索引判定
+    func isDimmed(_ li: Int) -> Bool {
+        guard let d = dimFromIndex else { return false }
+        return li >= d
+    }
+
+    /// 按淡化状态调整颜色
+    func dimmed(_ color: Color, _ li: Int) -> Color {
+        isDimmed(li) ? color.opacity(dimAlpha) : color
+    }
+}
+
+// MARK: - 联动覆盖层纯渲染组件（props 驱动 + Equatable，配合调用点 .equatable() 跳过无效重绘）
+
+/// 联动小周期范围框视图的本地「第二个十字光标」横线 + 左侧数值标签：
+/// 只有横线与左侧标签（无右侧涨幅、无底部距今），颜色统一蓝色，横线在顶部日期标签处断开。
+/// 竖线（分段贯穿主图与全部副图）与顶部日期标签由 mainCursorVLine/subCursorVLine(secondary:) 绘制。
+/// 数值文本与横线避让区间由调用点计算传入（valueText / gapRanges），本组件保持纯渲染。
+struct SecondCursorHorizontalOverlay: View, Equatable {
+    let startIndex: Int
+    let endIndex: Int
+    let index: Int
+    /// 横线 y（调用点已按 height clamp）
+    let y: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    let candleSpacing: CGFloat
+    let mainTop: CGFloat, mainBottom: CGFloat, mainHeight: CGFloat
+    let s1Top: CGFloat, s1Bottom: CGFloat, s1Height: CGFloat
+    let s2Top: CGFloat, s2Bottom: CGFloat, s2Height: CGFloat
+    let s3Top: CGFloat, s3Bottom: CGFloat, s3Height: CGFloat
+    let valueText: String
+    let gapRanges: [ClosedRange<CGFloat>]
+
+    var body: some View {
         if index >= startIndex, index <= endIndex,
            isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom)
             || isInPanel(y, s2Top, s2Bottom) || isInPanel(y, s3Top, s3Bottom) {
-            let cy = min(max(y, 0), height)
-            let valueText = crosshairValueText(at: cy, mainTop: mainTop, mainBottom: mainBottom, mainHeight: mainHeight,
-                                                s1Top: s1Top, s1Bottom: s1Bottom, s1Height: s1Height,
-                                                s2Top: s2Top, s2Bottom: s2Bottom, s2Height: s2Height,
-                                                s3Top: s3Top, s3Bottom: s3Bottom, s3Height: s3Height)
-            let lineGap = crosshairLineGap(index: index, compare: nil, otherIndex: nil, otherCompare: nil,
-                                           cy: cy, candleSpacing: candleSpacing, width: width,
-                                           mainTop: mainTop, mainHeight: mainHeight)
-            crosshairLineOverlay(width: width, height: height, y: cy, valueText: valueText,
-                                 gapRanges: lineGap, bgColor: Color.blue, lineColor: Color.blue)
+            CrosshairLineOverlay(width: width, height: height, y: y, valueText: valueText,
+                                 gapRanges: gapRanges, bgColor: Color.blue, lineColor: Color.blue)
         }
     }
+}
 
-    /// 更大周期源的联动范围：在 [left, right] 两根K线处画两根无标签竖轴（含两轴间的淡色填充示意范围）。
-    /// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing）；纵向按 panels 给出的
-    /// 图表面板区间分段绘制（与十字光标竖线一样被指标栏自然断开），不覆盖指标栏、时间轴与行情数据栏。
-    /// 水平方向按可见窗口裁剪：只要范围与窗口有重叠就绘制屏内部分——某一根竖轴被平移出屏时，
-    /// 另一根轴与底纹（贴屏幕边缘截断）仍然显示，而不是整个范围框消失。
-    @ViewBuilder
-    func linkRangeAxisOverlay(left: Int, right: Int, candleSpacing: CGFloat,
-                              panOffset: CGFloat,
-                              panels: [(top: CGFloat, bottom: CGFloat)]) -> some View {
+/// 更大周期源的联动范围：在 [left, right] 两根K线处画两根无标签竖轴（含两轴间的淡色填充示意范围）。
+/// 坐标与 mainCursorVLine 一致（(index-startIndex+0.5)*candleSpacing）；纵向按 panels 给出的
+/// 图表面板区间分段绘制（与十字光标竖线一样被指标栏自然断开），不覆盖指标栏、时间轴与行情数据栏。
+/// 水平方向按可见窗口裁剪：只要范围与窗口有重叠就绘制屏内部分——某一根竖轴被平移出屏时，
+/// 另一根轴与底纹（贴屏幕边缘截断）仍然显示，而不是整个范围框消失。
+struct LinkRangeAxisOverlay: View, Equatable {
+    let startIndex: Int
+    let endIndex: Int
+    let left: Int
+    let right: Int
+    let candleSpacing: CGFloat
+    /// 跟随亚像素平移，与蜡烛 Canvas 的 .offset(x: panOffset) 同基准
+    let panOffset: CGFloat
+    let panels: [(top: CGFloat, bottom: CGFloat)]
+
+    var body: some View {
         // 范围与可见窗口的重叠部分（全局索引）；完全无重叠则不绘制
         let visL = max(left, startIndex)
         let visR = min(right, endIndex)
@@ -732,32 +770,7 @@ extension KlineChartView {
                     }
                 }
             }
-            // 跟随亚像素平移，与蜡烛 Canvas 的 .offset(x: panOffset) 同基准
             .offset(x: panOffset)
         }
-    }
-}
-
-// MARK: - MainChartCanvas 联动复盘绘制辅助（跨文件 extension，从 KlineChartView.swift 拆分）
-
-extension MainChartCanvas {
-
-    // MARK: 联动复盘：单点替换 / 未来淡化的绘制辅助（本地索引）
-
-    /// 某本地索引实际用于绘制的 K 线（合成点替换）
-    func effectiveItem(_ li: Int) -> KlineItem {
-        if let sb = syntheticBar, sb.index == li { return sb.item }
-        return slice[li]
-    }
-
-    /// 未来淡化区索引判定
-    func isDimmed(_ li: Int) -> Bool {
-        guard let d = dimFromIndex else { return false }
-        return li >= d
-    }
-
-    /// 按淡化状态调整颜色
-    func dimmed(_ color: Color, _ li: Int) -> Color {
-        isDimmed(li) ? color.opacity(dimAlpha) : color
     }
 }

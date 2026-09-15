@@ -2,9 +2,10 @@
 //  ChartGestureSupport.swift
 //  Kline
 //
-//  图表手势基础设施：拖动状态、双指手势 UIKit 桥接、副图滑动切换反馈。
+//  图表手势基础设施：拖动状态、双指手势 UIKit 桥接。
 //  从 KlineChartView.swift 拆分而来（与联动复盘无关的通用手势组件）；
 //  KlineChartView 的手势处理逻辑仍在其原文件。
+//  副图滑动切换反馈的纯渲染组件（SwipeOverlay/SwipeDirectionArrow）在 ChartOverlayKit.swift。
 //
 
 import SwiftUI
@@ -105,87 +106,3 @@ struct SwipeFeedback: Equatable {
     let canRight: Bool       // 右滑方向是否可切换
 }
 
-// MARK: - 副图滑动切换反馈 UI（KlineChartView 实例方法，从 KlineChartView.swift 拆分）
-
-extension KlineChartView {
-
-    /// 副图左右滑动切换反馈：拖动时才显示方向箭头 + 滑轨/滑块/阈值动画。
-    /// 仅副图1/2 调用挂载；副图三面板手势整体禁用（虚拟按钮预留区），不会进入本函数，
-    /// 此处 `slot != .third` 为双保险。
-    @ViewBuilder
-    func swipeOverlay(slot: SubSlot, width: CGFloat, height: CGFloat) -> some View {
-        if slot != .third {
-            let fb = swipeFeedback
-            let isDragging = fb?.slot == slot && (fb?.offset ?? 0).magnitude > 1
-            let off = isDragging ? (fb?.offset ?? 0) : 0
-            // 副图一（上方副图）方向已调转：左=小级别/上一标的，右=大级别/下一标的；副图二保持原方向
-            let canL = slot == .top ? canSwitchPeriod(-1) : (canSwitchItem?(1) ?? false)
-            let canR = slot == .top ? canSwitchPeriod(1) : (canSwitchItem?(-1) ?? false)
-            let threshold: CGFloat = 70
-            ZStack {
-            // 方向箭头提示：仅拖动中显示（滑动条出现前不显示），可切换方向高亮，边界方向灰显
-            if isDragging {
-                HStack {
-                    swipeDirectionArrow(system: "chevron.left", can: canL,
-                                        active: off < 0)
-                    Spacer()
-                    swipeDirectionArrow(system: "chevron.right", can: canR,
-                                        active: off > 0)
-                }
-                .padding(.horizontal, 8)
-            }
-
-            // 拖动中的滑轨动画
-            if isDragging {
-                let dir: CGFloat = off > 0 ? 1 : -1
-                let reachable = off > 0 ? canR : canL
-                let dist = min(abs(off), threshold)
-                let cx = width / 2
-                let ready = abs(off) > threshold
-                let color: Color = reachable ? (ready ? Color.green : Color.white.opacity(0.9)) : Color.red
-                // 轨道（从中心向拖动方向延伸）
-                Capsule()
-                    .fill(Color.black.opacity(0.35))
-                    .frame(width: dist, height: 6)
-                    .position(x: cx + dir * dist / 2, y: height / 2)
-                // 阈值刻度线
-                if reachable {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.7))
-                        .frame(width: 1.5, height: 12)
-                        .position(x: cx + dir * threshold, y: height / 2)
-                }
-                // 滑块
-                Circle()
-                    .fill(color)
-                    .frame(width: 16, height: 16)
-                    .overlay(Circle().stroke(Color.white, lineWidth: 1))
-                    .shadow(radius: 1)
-                    .position(x: cx + dir * dist, y: height / 2)
-                // 状态文字：超过阈值提示松手切换，未到阈值提示继续拖动，不可切换方向提示边界
-                let text = reachable ? (ready ? "松开切换" : "继续拖动") : "无法切换"
-                let textColor: Color = (reachable && !ready) ? Color.black : Color.white
-                Text(text)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(textColor)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(color)
-                    .cornerRadius(3)
-                    .position(x: cx + dir * dist, y: height / 2 - 16)
-            }
-            }
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// 副图滑动方向提示箭头
-    func swipeDirectionArrow(system: String, can: Bool, active: Bool) -> some View {
-        Image(systemName: can ? system : (system + ".circle"))
-            .font(.system(size: 13, weight: .bold))
-            .foregroundColor(can ? (active ? Color.white : Color.black.opacity(0.35)) : Color.gray.opacity(0.25))
-            .frame(width: 22, height: 22)
-            .background(can ? Color.black.opacity(active ? 0.5 : 0.08) : Color.clear)
-            .clipShape(Circle())
-    }
-}
