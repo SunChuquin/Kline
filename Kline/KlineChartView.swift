@@ -815,7 +815,7 @@ struct KlineChartView: View {
     }
 
 
-    private func model(for slot: SubSlot) -> SubChartModel {
+    func model(for slot: SubSlot) -> SubChartModel {
         switch slot {
         case .top: return subTop
         case .bottom: return subBottom
@@ -823,12 +823,12 @@ struct KlineChartView: View {
         }
     }
 
-    private func activateCustom(_ ind: CustomIndicator?) {
+    func activateCustom(_ ind: CustomIndicator?) {
         config.setActiveCustom(ind?.id, for: self.period)
         recomputeMainCurves(force: true)
     }
 
-    private func activateSubCustom(_ m: SubChartModel, _ ind: CustomIndicator?) {
+    func activateSubCustom(_ m: SubChartModel, _ ind: CustomIndicator?) {
         m.activeCustomID = ind?.id
         ChartConfigStore.shared.recordSubKinds(for: self.period)
         recomputeSub(m, force: true)
