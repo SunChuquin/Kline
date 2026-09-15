@@ -717,7 +717,7 @@ struct AddToGroupSheet: View {
                     Button("取消") { dismiss() }
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text("加入自选分组")
+                    Text("分组管理")
                         .font(.system(size: 16, weight: .semibold))
                     Spacer()
                     Button(action: { onDone?(); dismiss() }) {
@@ -833,6 +833,13 @@ struct AddToGroupSheet: View {
         guard let root = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow?.rootViewController })
             .first else { return }
+        // 本页本身以 sheet 形式 modal 盖在 root 上，直接用 root.present 在 iPad 上会被系统忽略
+        // （"which is already presenting"），需沿呈现链找到当前最顶层控制器再弹窗
+        var top = root
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        if top is UIAlertController { return }
         let vc = UIAlertController(title: "新建自定义分组", message: nil, preferredStyle: .alert)
         vc.addTextField { tf in
             tf.placeholder = "例如：科技龙头"
@@ -844,7 +851,7 @@ struct AddToGroupSheet: View {
             guard !name.isEmpty else { return }
             fav.addGroup(.manual(name: name))
         }))
-        root.present(vc, animated: true)
+        top.present(vc, animated: true)
     }
 }
 
