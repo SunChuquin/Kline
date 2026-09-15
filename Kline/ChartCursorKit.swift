@@ -146,6 +146,7 @@ extension KlineChartView {
 
 // MARK: - 主图光标竖线 / 双光标统计 / 价格反算
 
+    @ViewBuilder
     func mainCursorVLine(index: Int?, compare: Int?, width: CGFloat, candleSpacing: CGFloat, height: CGFloat,
                                  secondary: Bool = false) -> some View {
         if let index, index >= startIndex, index <= endIndex {

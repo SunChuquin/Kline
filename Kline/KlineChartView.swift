@@ -1298,7 +1298,7 @@ struct KlineChartView: View {
         }
     }
 
-    private func formatVolume(_ v: Double) -> String {
+    func formatVolume(_ v: Double) -> String {
         if v >= 1000000000000 { return String(format: "%.2f万亿", v / 1000000000000) }
         else if v >= 100000000 { return String(format: "%.2f亿", v / 100000000) }
         else if v >= 10000 { return String(format: "%.2f万", v / 10000) }
