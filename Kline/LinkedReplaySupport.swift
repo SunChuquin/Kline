@@ -139,6 +139,18 @@ final class AsOfValueCache {
     }
 }
 
+/// 联动复盘 as-of 结算模型：KlineChartView 每实例一份（@StateObject 持有），收敛原本散落的三个 @State。
+/// 主图曲线按数组下标的合成点值（仅合成索引一个点）+ 三个副图各自的结果 + 后台任务序号。
+/// 全部为低频异步写入（合成内容/光标日期/指标配置变化时才调度），写入触发本视图重绘（与原 @State 一致，性能中性）。
+final class ReplayAsOfModel: ObservableObject {
+    /// 主图 as-of 结果：曲线数组下标 → 合成点值（仅合成索引一个点）
+    @Published var main: [Int: Double] = [:]
+    /// 三个副图各自 as-of 结果：槽位下标 → 曲线数组下标 → 合成点值
+    @Published var subs: [[Int: Double]] = [[:], [:], [:]]
+    /// as-of 后台任务序号：只接受最新一次调度的结果，快速拖动时过期结果直接丢弃
+    @Published var ticket = 0
+}
+
 /// as-of 后台求值请求（主线程构造：公式文本与数据在此取齐，后台只做纯计算，不碰任何 ObservableObject）
 struct AsOfRequest {
     let key: AsOfKey
@@ -326,31 +338,31 @@ extension KlineChartView {
     /// 主图某条曲线在当前复盘光标处的 as-of 值（仅合成态、光标索引匹配时返回）
     func asOfMainOverride(_ lineIndex: Int) -> Double? {
         guard let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
-        return asOfMain[lineIndex]
+        return asOfModel.main[lineIndex]
     }
 
     /// 某副图槽位某条曲线在当前复盘光标处的 as-of 值
     func asOfSubOverride(slot: Int, lineIndex: Int) -> Double? {
-        guard slot >= 0, slot < asOfSubs.count,
+        guard slot >= 0, slot < asOfModel.subs.count,
               let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
-        return asOfSubs[slot][lineIndex]
+        return asOfModel.subs[slot][lineIndex]
     }
 
     /// 按 trigger 调度 as-of 重算（缓存命中即时应用；否则后台求值、序号防过期）。
     /// trigger 为 nil 时清空所有 override（同周期/范围框/无光标/退联动）。
     func scheduleAsOf(_ t: AsOfTrigger?) {
-        asOfTicket += 1
+        asOfModel.ticket += 1
         guard let t else {
-            asOfMain = [:]
-            asOfSubs = [[:], [:], [:]]
+            asOfModel.main = [:]
+            asOfModel.subs = [[:], [:], [:]]
             return
         }
         let metaID = linkedMetaID ?? metaId ?? 0
         let key = AsOfKey(metaID: metaID, targetPeriod: period, sourcePeriod: t.sourcePeriod,
                           date: t.date, fingerprint: t.fingerprint)
         if let cached = AsOfValueCache.shared.get(key) {
-            asOfMain = cached.main
-            asOfSubs = cached.subs
+            asOfModel.main = cached.main
+            asOfModel.subs = cached.subs
             return
         }
         guard t.idx >= 0, t.idx < sortedData.count else { return }
@@ -378,15 +390,15 @@ extension KlineChartView {
         }
         let req = AsOfRequest(key: key, data: data,
                               mainFormulas: entries.map(\.formula), subs: subs)
-        let ticket = asOfTicket
+        let ticket = asOfModel.ticket
         DispatchQueue.global(qos: .userInitiated).async {
             let result = evaluateAsOf(req)
             DispatchQueue.main.async {
                 // 期间已有更新的调度（或光标消失/清场）→ 丢弃本次结果
-                guard ticket == self.asOfTicket else { return }
+                guard ticket == self.asOfModel.ticket else { return }
                 AsOfValueCache.shared.put(key, result)
-                self.asOfMain = result.main
-                self.asOfSubs = result.subs
+                self.asOfModel.main = result.main
+                self.asOfModel.subs = result.subs
             }
         }
     }

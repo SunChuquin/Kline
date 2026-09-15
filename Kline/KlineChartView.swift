@@ -503,16 +503,14 @@ struct KlineChartView: View {
     /// 双视图联动同步（左日线/右周线共用；单视图时传入独立空对象，cursorDate 不变化、无副作用）。
     /// 用 @ObservedObject 观察其 cursorDate 变化，触发 .onChange 联动光标
     @ObservedObject var linkSync: DualLinkSync
-    /// 联动复盘：观察来源周期数据缓存，目标大周期视图在来源数据到达后重绘合成K线
+    /// 联动复盘源周期数据缓存：目标大周期视图在来源数据到达后重绘合成K线
     @ObservedObject var linkSourceCache = LinkSourceBarCache.shared
     /// 联动：本视图是否正由用户直接拖动光标（用于区分「右侧用户操作」与「左侧拖动回声」）
     @State var linkUserDragging = false
-    /// 联动复盘 as-of 结果：主图曲线按数组下标的合成点值（仅合成索引一个点）
-    @State var asOfMain: [Int: Double] = [:]
-    /// 联动复盘 as-of 结果：三个副图各自按曲线数组下标的合成点值
-    @State var asOfSubs: [[Int: Double]] = [[:], [:], [:]]
-    /// as-of 后台任务序号：只接受最新一次调度的结果，快速拖动时过期结果直接丢弃
-    @State var asOfTicket = 0
+    /// 联动复盘 as-of 结果模型：主图曲线/三副图按数组下标的合成点值 + 后台任务序号。
+    /// 全部为低频异步写入（合成内容/光标/配置变化时才调度），封装成 ObservableObject 以收敛视图属性区；
+    /// 无 .onChange 挂钩，写入仍触发本视图 body 重绘（与原 @State 行为一致，性能中性）。
+    @StateObject var asOfModel = ReplayAsOfModel()
     @Binding var chartStyle: ChartStyle
     @Binding var displaySettings: ChartDisplaySettings
     /// 联动多图模式：本视图在联动布局里的下标（用于判定「谁是当前激活公式编辑器的视图」）
@@ -2838,7 +2836,7 @@ struct KlineChartView: View {
             var values = mirroredSliceArr(line.values)
             if let r = replay, r.synthetic != nil,
                r.idx >= startIndex, r.idx <= endIndex,
-               let v = asOfMain[lineIndex] {
+               let v = asOfModel.main[lineIndex] {
                 let local = r.idx - startIndex
                 if local >= 0, local < values.count { values[local] = mainMirrored ? -v : v }
             }
@@ -2900,7 +2898,7 @@ struct KlineChartView: View {
             var values = subMirroredSliceArr(line.values)
             if let r = replay, r.synthetic != nil,
                r.idx >= startIndex, r.idx <= endIndex,
-               let v = asOfSubs[subSlotIndex][lineIndex] {
+               let v = asOfModel.subs[subSlotIndex][lineIndex] {
                 let local = r.idx - startIndex
                 if local >= 0, local < values.count { values[local] = config.mainMirrored ? -v : v }
             }
