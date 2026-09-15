@@ -736,6 +736,15 @@ struct LinkRangeAxisOverlay: View, Equatable {
     let panOffset: CGFloat
     let panels: [(top: CGFloat, bottom: CGFloat)]
 
+    // panels 为元组数组，元组不遵循 Equatable，无法自动合成 ==，手动逐面板比较
+    static func == (l: LinkRangeAxisOverlay, r: LinkRangeAxisOverlay) -> Bool {
+        l.startIndex == r.startIndex && l.endIndex == r.endIndex
+            && l.left == r.left && l.right == r.right
+            && l.candleSpacing == r.candleSpacing && l.panOffset == r.panOffset
+            && l.panels.count == r.panels.count
+            && zip(l.panels, r.panels).allSatisfy { $0.top == $1.top && $0.bottom == $1.bottom }
+    }
+
     var body: some View {
         // 范围与可见窗口的重叠部分（全局索引）；完全无重叠则不绘制
         let visL = max(left, startIndex)
