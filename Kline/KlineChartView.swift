@@ -545,11 +545,6 @@ struct KlineChartView: View {
     @State private var pinnedY: CGFloat? = nil
     /// 固定光标固定时刻的横轴价格（仅主图区域有效）：平移/缩放后横轴价格不随可见窗口价格范围变化
     @State private var pinnedPrice: Double? = nil
-    @State private var showMainSheet = false
-    @State private var showSubSheet = false
-    /// 重置内置指标前的确认对话框
-    @State private var showResetBuiltinConfirm = false
-    @State private var editingSlot: SubSlot = .top
     @State var visibleCount: CGFloat = 100
     @State var endOffset: Int = 0
     @State private var zoomBase: CGFloat = 100
@@ -613,14 +608,9 @@ struct KlineChartView: View {
     @Binding var showCustomEditor: Bool
     /// 系统指标公式编辑器是否打开（由详情页持有状态，打开时隐藏顶部栏实现真全屏）
     @Binding var showSystemEditor: Bool
-    @State private var editorTarget: EditorTarget = .main
-    /// 系统指标公式编辑目标：true=主图（可切换），false=副图（编辑 initialSubId）
-    @State private var systemEditorIsMain: Bool? = nil
-    @State private var systemEditorSubId: String = ""
-    /// 指标/设置面板打开期间挂起指标重算：分别记录"主图 / 具体副图"哪些需要重算，
-    /// 关闭返回 K 线页时只重算被改动的对象，避免把未修改的指标也全量重算
-    @State private var pendingMainRefresh = false
-    @State private var pendingSubCharts: [SubChartModel] = []
+    /// 编辑器 / 指标面板的 UI 瞬时状态（sheet 开关、编辑器目标、挂起重算）。
+    /// 全部低频离散、无 .onChange 挂钩，封装成 ObservableObject 以收敛视图属性区；写入触发本视图重绘，性能中性。
+    @StateObject var editorUI = ChartEditorUIState()
 
     // 基础序列一次性缓存（供指标按需计算复用，避免拖拽/重算时反复整表 map）
     private let sortedAll: [KlineItem]
@@ -955,7 +945,7 @@ struct KlineChartView: View {
 
     private func recomputeMainCurves(force: Bool = false) {
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记主图待重算，关闭返回后再算
-        if menuIsOpen { pendingMainRefresh = true; return }
+        if menuIsOpen { editorUI.pendingMainRefresh = true; return }
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
         // force=true 用于用户显式切换/修改指标，确保立即生效
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
@@ -1099,7 +1089,7 @@ struct KlineChartView: View {
         klineDebug("[KlineDebug] recomputeSub调用 \(m.kind) 现curves=\(m.curves.count) force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记该副图待重算，关闭返回后再算
         if menuIsOpen {
-            if !pendingSubCharts.contains(where: { $0 === m }) { pendingSubCharts.append(m) }
+            if !editorUI.pendingSubCharts.contains(where: { $0 === m }) { editorUI.pendingSubCharts.append(m) }
             return
         }
         // 拖拽期间禁止任何指标重算（重算随总 K 数线性增长，是拖拽卡顿根源）；
@@ -1333,7 +1323,7 @@ struct KlineChartView: View {
 
     // MARK: - 手势
 
-    private var menuIsOpen: Bool { showMainSheet || showSubSheet || showCustomEditor || showSystemEditor }
+    private var menuIsOpen: Bool { editorUI.showMainSheet || editorUI.showSubSheet || showCustomEditor || showSystemEditor }
 
     private func clamp<V: Comparable>(_ v: V, _ lo: V, _ hi: V) -> V { min(max(v, lo), hi) }
 
@@ -1853,36 +1843,36 @@ struct KlineChartView: View {
                 FormulaEditorView(data: sortedData) {
                     showCustomEditor = false
                 } onSaved: { ind in
-                    switch editorTarget {
+                    switch editorUI.editorTarget {
                     case .main: activateCustom(ind)
                     case .sub:
-                        let m = model(for: editingSlot)
+                        let m = model(for: editorUI.editingSlot)
                         activateSubCustom(m, ind)
                     }
                 }
             }
             .fullScreenCover(isPresented: systemEditorBinding) {
-                if let isMain = systemEditorIsMain {
-                    SystemIndicatorEditorContainer(data: sortedData, isMain: isMain, period: self.period, initialSubId: systemEditorSubId) {
+                if let isMain = editorUI.systemEditorIsMain {
+                    SystemIndicatorEditorContainer(data: sortedData, isMain: isMain, period: self.period, initialSubId: editorUI.systemEditorSubId) {
                         showSystemEditor = false
                     } onSaved: { _ in
                         if isMain {
                             recomputeMainCurves(force: true)
                         } else {
-                            recomputeSub(model(for: editingSlot), force: true)
+                            recomputeSub(model(for: editorUI.editingSlot), force: true)
                         }
                     }
                 }
             }
             .overlay {
-                if showMainSheet {
+                if editorUI.showMainSheet {
                     bottomSheet(geometry: geometry, heightFraction: 0.8) {
                         mainSheetContent
-                    } onClose: { showMainSheet = false }
-                } else if showSubSheet {
+                    } onClose: { editorUI.showMainSheet = false }
+                } else if editorUI.showSubSheet {
                     bottomSheet(geometry: geometry, heightFraction: 0.8) {
                         subSheetContent
-                    } onClose: { showSubSheet = false }
+                    } onClose: { editorUI.showSubSheet = false }
                 }
             }
             .onChange(of: pinEnabled) { enabled in
@@ -2016,13 +2006,13 @@ struct KlineChartView: View {
             // 被挂起说明用户在面板里改了指标/参数，必须 force 重算；
             // 否则后台已覆盖全量（bgCovered）时 `!force` 会提前 return，导致切换指标无反应
             if !isOpen {
-                if pendingMainRefresh {
-                    pendingMainRefresh = false
+                if editorUI.pendingMainRefresh {
+                    editorUI.pendingMainRefresh = false
                     recomputeMainCurves(force: true)
                 }
-                if !pendingSubCharts.isEmpty {
-                    let subs = pendingSubCharts
-                    pendingSubCharts.removeAll()
+                if !editorUI.pendingSubCharts.isEmpty {
+                    let subs = editorUI.pendingSubCharts
+                    editorUI.pendingSubCharts.removeAll()
                     for m in subs { recomputeSub(m, force: true) }
                 }
             }
@@ -2955,9 +2945,9 @@ struct KlineChartView: View {
         return ZStack {
             HStack(spacing: 8) {
                 IndicatorNameButton(title: m.titleName, onTap: {
-                    editingSlot = (m === subTop) ? .top : (m === subBottom ? .bottom : .third)
-                    showMainSheet = false
-                    withAnimation { showSubSheet.toggle() }
+                    editorUI.editingSlot = (m === subTop) ? .top : (m === subBottom ? .bottom : .third)
+                    editorUI.showMainSheet = false
+                    withAnimation { editorUI.showSubSheet = !editorUI.showSubSheet }
                 })
                 // VOL/AMO 的数值按转换单位显示（万/亿/万亿），其余指标按默认格式；
                 // 联动复盘：VOL/AMO 柱线读合成累加量/额，其余指标行读 as-of 重算值；同图 MA 均量线走 as-of
@@ -3045,8 +3035,8 @@ struct KlineChartView: View {
                 let shouldHideButtonInChart = (mainLegendPortal?.hideInChart ?? false)
                 if !shouldHideButtonInChart {
                     IndicatorNameButton(title: mainLegendTitle, onTap: {
-                        showSubSheet = false
-                        withAnimation { showMainSheet.toggle() }
+                        editorUI.showSubSheet = false
+                        withAnimation { editorUI.showMainSheet = !editorUI.showMainSheet }
                     })
                 }
                 if isBareK { legendText("裸K") }
@@ -3152,8 +3142,8 @@ struct KlineChartView: View {
         guard let portal = mainLegendPortal else { return }
         portal.title = portal.hideInChart ? period.rawValue : mainLegendTitle
         portal.onTap = {
-            self.showSubSheet = false
-            withAnimation { self.showMainSheet.toggle() }
+            self.editorUI.showSubSheet = false
+            withAnimation { self.editorUI.showMainSheet = !self.editorUI.showMainSheet }
         }
     }
 
@@ -3440,7 +3430,7 @@ struct KlineChartView: View {
 
     private var mainSheetContent: some View {
         VStack(spacing: 0) {
-            sheetHeader(title: "主图指标") { showMainSheet = false }
+            sheetHeader(title: "主图指标") { editorUI.showMainSheet = false }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -3456,15 +3446,15 @@ struct KlineChartView: View {
                     // 系统指标公式编辑入口
                     if !mainIndicatorDefsForSheet.isEmpty {
                         paramEntryRow(title: "公式编辑") {
-                            showMainSheet = false
-                            systemEditorIsMain = true
+                            editorUI.showMainSheet = false
+                            editorUI.systemEditorIsMain = true
                             showSystemEditor = true
                         }
                     }
 
                     groupHeader("自定义指标（主图）")
                     HStack {
-                        Button("+ 新增/管理") { showMainSheet = false; editorTarget = .main; showCustomEditor = true }
+                        Button("+ 新增/管理") { editorUI.showMainSheet = false; editorUI.editorTarget = .main; showCustomEditor = true }
                             .font(.system(size: 13)).foregroundColor(.blue)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
@@ -3529,7 +3519,7 @@ struct KlineChartView: View {
             }
             Spacer()
             Button {
-                showMainSheet = false; editorTarget = .main; showCustomEditor = true
+                editorUI.showMainSheet = false; editorUI.editorTarget = .main; showCustomEditor = true
             } label: {
                 Image(systemName: "pencil").font(.system(size: 13)).foregroundColor(.gray)
             }
@@ -3540,9 +3530,9 @@ struct KlineChartView: View {
     // MARK: - 副图选择页（紧凑分组 + 编辑图标）
 
     private var subSheetContent: some View {
-        let m = model(for: editingSlot)
+        let m = model(for: editorUI.editingSlot)
         return VStack(spacing: 0) {
-            sheetHeader(title: "选择副图指标 · \(slotTitle(editingSlot))") { showSubSheet = false }
+            sheetHeader(title: "选择副图指标 · \(slotTitle(editorUI.editingSlot))") { editorUI.showSubSheet = false }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -3565,16 +3555,16 @@ struct KlineChartView: View {
                     if !m.isCustom,
                        SystemIndicatorStore.shared.template(for: m.kind, period: self.period) != nil {
                         paramEntryRow(title: "\(m.kind) 公式编辑") {
-                            showSubSheet = false
-                            systemEditorIsMain = false
-                            systemEditorSubId = m.kind
+                            editorUI.showSubSheet = false
+                            editorUI.systemEditorIsMain = false
+                            editorUI.systemEditorSubId = m.kind
                             showSystemEditor = true
                         }
                     }
 
                     groupHeader("自定义指标（副图）")
                     HStack {
-                        Button("+ 新增/管理") { showSubSheet = false; editorTarget = .sub; showCustomEditor = true }
+                        Button("+ 新增/管理") { editorUI.showSubSheet = false; editorUI.editorTarget = .sub; showCustomEditor = true }
                             .font(.system(size: 13)).foregroundColor(.blue)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
@@ -3653,7 +3643,7 @@ struct KlineChartView: View {
             }
             Spacer()
             Button {
-                showSubSheet = false; editorTarget = .sub; showCustomEditor = true
+                editorUI.showSubSheet = false; editorUI.editorTarget = .sub; showCustomEditor = true
             } label: {
                 Image(systemName: "pencil").font(.system(size: 13)).foregroundColor(.gray)
             }
@@ -3697,12 +3687,13 @@ struct KlineChartView: View {
         HStack {
             Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.black)
             Spacer()
-            Button("重置内置指标") { showResetBuiltinConfirm = true }
+            Button("重置内置指标") { editorUI.showResetBuiltinConfirm = true }
                 .font(.system(size: 13)).foregroundColor(.red)
             Button("完成") { onClose() }.font(.system(size: 14)).foregroundColor(.blue)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .alert("重置内置指标", isPresented: $showResetBuiltinConfirm) {
+        .alert("重置内置指标", isPresented: Binding(get: { editorUI.showResetBuiltinConfirm },
+                                              set: { editorUI.showResetBuiltinConfirm = $0 })) {
             Button("重置", role: .destructive) { performResetBuiltin() }
             Button("取消", role: .cancel) {}
         } message: {
