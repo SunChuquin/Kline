@@ -5,7 +5,9 @@
 //  单只股票一行的字段值模型（subscript 取值 + 最近 N 根日线缓存 + 格式化）。从 MarketFieldKit.swift 拆分。
 //
 
-import Foundation import SwiftUI import UIKit
+import Foundation
+import SwiftUI
+import UIKit
 
 // MARK: - 单只股票的一行数据（包含值缓存）
 

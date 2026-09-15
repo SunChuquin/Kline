@@ -5,7 +5,9 @@
 //  字段行缓存与后台预取器：惰性拉取每只标的最近 N 根日线并转成 MarketRow（@MainActor 单例）。从 MarketFieldKit.swift 拆分。
 //
 
-import Foundation import SwiftUI import Combine
+import Foundation
+import SwiftUI
+import Combine
 
 // MARK: - 缓存 + 后台预取器
 

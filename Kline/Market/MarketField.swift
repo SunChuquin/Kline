@@ -5,7 +5,9 @@
 //  行情表单字段定义：key/表头/对齐/宽度/颜色/排序方向（行情与自选共用）。从 MarketFieldKit.swift 拆分。
 //
 
-import Foundation import SwiftUI import UIKit
+import Foundation
+import SwiftUI
+import UIKit
 
 // MARK: - 字段定义
 
