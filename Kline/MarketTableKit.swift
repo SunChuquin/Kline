@@ -717,7 +717,7 @@ struct AddToGroupSheet: View {
                     Button("取消") { dismiss() }
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text("分组管理")
+                    Text("加入分组")
                         .font(.system(size: 16, weight: .semibold))
                     Spacer()
                     Button(action: { onDone?(); dismiss() }) {
