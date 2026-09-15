@@ -373,6 +373,9 @@ struct TDXParser {
 
 // MARK: - 求值
 
+/// 输出行值全为 NaN 判断（行保留/曲线占位的基础判定，KlineChartView 与 LinkedReplaySupport 共用）
+func tdxAllNaN(_ values: [Double]) -> Bool { values.allSatisfy { $0.isNaN } }
+
 struct TDXOutputLine {
     let name: String
     let values: [Double]
