@@ -572,32 +572,15 @@ struct KlineChartView: View {
     /// swipeFeedback 被创建（nil→非nil）才解锁。
     @State private var swipeSubSlotTriggered = false
     @State private var crosshairY: CGFloat? = nil
-    /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
-    @State private var gaps: [GapInfo] = []
+    /// 指标/预计算状态域（跳空缺口、主图曲线、覆盖区间、预计算 token 等）：
+    /// 从 7 个散落 @State 收敛为 ObservableObject（IndicatorPipeline.swift）。
+    /// 全部低频写入、无 .onChange 挂钩，写入触发本视图重绘（与原 @State 行为一致，性能中性）
+    @StateObject var computation: IndicatorComputationStore
     @ObservedObject var customStore = CustomIndicatorStore.shared
     @ObservedObject var config = ChartConfigStore.shared
 
-    // 主图叠加指标（配置来自共享仓库，跨页面持久化）
-    @State private var mainCurves: [IndicatorLine] = []
-    /// 主图各指标结果缓存（class 引用，修改内部属性不触发重绘；周期/标的切换重建页面时自动重置）
-    @State private var mainCache = MainIndicatorCache()
     /// 主图放大模式：隐藏三个副图 K 线区域（副图名称/指标栏保留并挤到最下方），主图占满剩余空间
     @State private var mainFullscreen = false
-    /// 指标已计算的覆盖区间（绝对索引，随滑动/缩放单调扩展）：
-    /// 左右滑动时，只要可见窗口仍落在已覆盖范围内就复用曲线不重算，保证"已经计算过的部分不丢失"。
-    /// 覆盖区间跨度超上限时（超大幅滑动）重置为当前需要区间，避免退化为全量计算
-    @State private var indicatorCoverageStart = 0
-    @State private var indicatorCoverageEnd = -1
-    /// 指标覆盖区间最大跨度：防止一次滑到很老的历史后覆盖区间扩展到全量
-    private let maxCoverageSpan = 2000
-    /// 历史指标预计算任务 token（nil = 无任务）：打开标的后分块向更久远历史预计算指标，
-    /// 切换周期/标的/指标或用户交互时更新使其失效
-    @State private var prefetchToken: UUID? = nil
-    /// 后台正确计算的覆盖末端（绝对索引）：从数据开头（最左）向右逐块推进，
-    /// 保证 EMA/SMA 等递归指标从第一根开始累积、数值最正确；覆盖到可见窗口末端后才替换前台近似结果
-    @State private var bgCoverageEnd = 0
-    /// 预计算每块向右推进的根数（单块毫秒级，块间让出主线程，不阻塞 UI）
-    private let prefetchBlockSize = 500
 
     // 三个副图（同一实例跨页面复用，配置不重置）
     @StateObject var subTop: SubChartModel
@@ -687,8 +670,9 @@ struct KlineChartView: View {
         self.baseOpens = all.map(\.open)
         self.baseVolumes = all.map(\.volume)
         self.baseTurnovers = all.map(\.turnover)
-        // 全数据集预计算跳空缺口（一次计算，绘制时只按可见区间过滤）
-        self._gaps = State(initialValue: Self.computeGaps(all))
+        // 指标/预计算状态域：缺口一次性计算 + (标的, 周期) 缓存恢复在 store init 内完成
+        self._computation = StateObject(wrappedValue: IndicatorComputationStore(
+            all: all, metaId: metaId, period: period))
         // 副图复用共享仓库中的同一实例，保证切换周期/重新进入后指标不重置；
         // 双联动（isolatedSubs）时改用独立实例，复制共享配置，曲线各自按本视图数据计算，互不覆盖
         let store = ChartConfigStore.shared
@@ -708,25 +692,12 @@ struct KlineChartView: View {
             self._subBottom = StateObject(wrappedValue: store.subBottom)
             self._subThird = StateObject(wrappedValue: store.subThird)
         }
-        // 同一标的内切换周期：从 (标的, 周期) 缓存恢复上次的计算结果与覆盖状态，
-        // 保证切回该周期时已算过的部分不重算、不丢失（LRU 保留最近 3 个标的的所有周期）。
-        // 仅当缓存所用指标配置指纹与当前一致时才恢复，否则视为无效、按新配置重新计算
-        if let metaId {
-            let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
-            let fingerprint = Self.currentConfigFingerprint(period: self.period)
-            if entry.configFingerprint == fingerprint {
-                _mainCurves = State(initialValue: entry.mainCurves)
-                _mainCache = State(initialValue: entry.mainCache)
-                _indicatorCoverageStart = State(initialValue: entry.coverageStart)
-                _indicatorCoverageEnd = State(initialValue: entry.coverageEnd)
-                _bgCoverageEnd = State(initialValue: entry.bgCoverageEnd)
-            }
-            // 注：副图曲线（subTop/subBottom/subThird）的恢复/清空不在此 init 做。
-            // 这些是跨页面共享的 @ObservedObject 模型，而 KlineChartView 会因 body 重算被
-            // SwiftUI 反复 init；若在 init 里按缓存清空/覆盖共享模型，会在光标变化等重算
-            // 时把未切换副图的现有曲线清空（切指标后后台未完成时尤其明显）。
-            // 副图曲线的正确性由 recomputeSub（其内部已含 bgCovered 时的缓存恢复路径）统一负责。
-        }
+        // 注：指标/预计算域（主图曲线/覆盖/缺口）的缓存恢复已移入 IndicatorComputationStore.init。
+        // 注：副图曲线（subTop/subBottom/subThird）的恢复/清空不在此 init 做。
+        // 这些是跨页面共享的 @ObservedObject 模型，而 KlineChartView 会因 body 重算被
+        // SwiftUI 反复 init；若在 init 里按缓存清空/覆盖共享模型，会在光标变化等重算
+        // 时把未切换副图的现有曲线清空（切指标后后台未完成时尤其明显）。
+        // 副图曲线的正确性由 recomputeSub（其内部已含 bgCovered 时的缓存恢复路径）统一负责。
         // 周期签名校验（声明周期 vs K 线尾部日期间距推断周期）放在 onAppear 执行，
         // 不在 init 阶段跑：避免 Xcode Debug 模式在 init 阶段执行 Calendar/日期相关代码
         // 或 Main Thread Checker / Swift Concurrency 检查时触发断言，出现详情页崩溃。
@@ -820,8 +791,8 @@ struct KlineChartView: View {
 
     /// 镜像后的跳空缺口（top/bottom 取负）
     private var mirroredGaps: [GapInfo] {
-        guard mainMirrored else { return gaps }
-        return gaps.map { g in GapInfo(startIdx: g.startIdx, top: -g.top, bottom: -g.bottom, isUp: g.isUp, filledIdx: g.filledIdx) }
+        guard mainMirrored else { return computation.gaps }
+        return computation.gaps.map { g in GapInfo(startIdx: g.startIdx, top: -g.top, bottom: -g.bottom, isUp: g.isUp, filledIdx: g.filledIdx) }
     }
 
     /// 镜像后的最新一根 K 线（最新价线用）
@@ -885,13 +856,8 @@ struct KlineChartView: View {
 
     // MARK: - 指标计算区间（裁剪）
 
-    /// 指标预热长度：往前多算这一段历史，保证 MA（需前 N 根）与 EMA/SMA 等递归指标
-    /// 在可见窗口内已收敛、数值准确；也避免每次拖动/缩放后全量重算。
-    /// 取 50 使前台近似总计算量 ≈ 可见窗口(默认100) + 预热(50) ≈ 150 根，降低打开标的时的卡顿；
-    /// 长周期指标在可见窗口前段的收敛精度会略降，由后台分块预计算随后覆盖为正确值
-    private let indicatorWarmup = 50
     /// 指标计算区间的起点索引（绝对，需要区间）：可见窗口起点往前推预热长度，最小为 0
-    private var indicatorCalcStart: Int { max(0, startIndex - indicatorWarmup) }
+    private var indicatorCalcStart: Int { max(0, startIndex - computation.indicatorWarmup) }
     /// 指标计算区间的终点索引（绝对，需要区间）：覆盖到可见窗口末端即可
     private var indicatorCalcEnd: Int { max(indicatorCalcStart, endIndex) }
 
@@ -899,23 +865,23 @@ struct KlineChartView: View {
     /// 可见窗口落在已覆盖范围内时直接复用已覆盖区间 → 缓存键不变 → 不重算、不倒退；
     /// 需要区间超出已覆盖且扩展后跨度超上限时保持已覆盖区间，避免丢弃已算的全量历史
     private func mergedCalcRange(needStart: Int, needEnd: Int) -> (start: Int, end: Int) {
-        if indicatorCoverageEnd >= 0 {
+        if computation.indicatorCoverageEnd >= 0 {
             // 需要区间完全落在已覆盖范围内：直接复用已覆盖区间（不重算、不倒退）
-            if needStart >= indicatorCoverageStart && needEnd <= indicatorCoverageEnd {
-                return (indicatorCoverageStart, indicatorCoverageEnd)
+            if needStart >= computation.indicatorCoverageStart && needEnd <= computation.indicatorCoverageEnd {
+                return (computation.indicatorCoverageStart, computation.indicatorCoverageEnd)
             }
             // 需要区间超出已覆盖：尝试扩展（只扩不缩）；扩展后跨度超上限时保持已覆盖区间
-            let mergedStart = min(indicatorCoverageStart, needStart)
-            let mergedEnd = max(indicatorCoverageEnd, needEnd)
-            if mergedEnd - mergedStart + 1 <= maxCoverageSpan {
-                indicatorCoverageStart = mergedStart
-                indicatorCoverageEnd = mergedEnd
+            let mergedStart = min(computation.indicatorCoverageStart, needStart)
+            let mergedEnd = max(computation.indicatorCoverageEnd, needEnd)
+            if mergedEnd - mergedStart + 1 <= computation.maxCoverageSpan {
+                computation.indicatorCoverageStart = mergedStart
+                computation.indicatorCoverageEnd = mergedEnd
                 return (mergedStart, mergedEnd)
             }
-            return (indicatorCoverageStart, indicatorCoverageEnd)
+            return (computation.indicatorCoverageStart, computation.indicatorCoverageEnd)
         }
-        indicatorCoverageStart = needStart
-        indicatorCoverageEnd = needEnd
+        computation.indicatorCoverageStart = needStart
+        computation.indicatorCoverageEnd = needEnd
         return (needStart, needEnd)
     }
 
@@ -950,27 +916,27 @@ struct KlineChartView: View {
         // force=true 用于用户显式切换/修改指标，确保立即生效
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         // 主图放大（全屏裸K）：不计算任何主图指标
-        if mainFullscreen { mainCurves = []; return }
+        if mainFullscreen { computation.mainCurves = []; return }
         // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
         // 直接从缓存恢复完整曲线，避免在主线程全量重算所有主图指标造成明显卡顿。
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
-        if bgCoverageEnd >= endIndex, let metaId = metaId {
+        if computation.bgCoverageEnd >= endIndex, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
                entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty {
-                mainCurves = entry.mainCurves
-                mainCache = entry.mainCache
+                computation.mainCurves = entry.mainCurves
+                computation.mainCache = entry.mainCache
                 return
             }
         }
         // 后台正确计算已覆盖整个可见窗口（从数据开头起算，数值最正确）：
         // 未强制重算时直接复用后台结果；指标配置变化（force）时用正确覆盖区间重算，避免退化为近似
-        let bgCovered = bgCoverageEnd >= endIndex
-        if bgCovered, !force, !mainCurves.isEmpty { return }
+        let bgCovered = computation.bgCoverageEnd >= endIndex
+        if bgCovered, !force, !computation.mainCurves.isEmpty { return }
         // 后台尚未覆盖可见窗口（如缩放到全部 / 滑到未算区域）：不在此同步计算近似指标，
         // 同步计算量随可见 K 数线性增长，显示全部时会阻塞主线程卡顿；保持当前已覆盖曲线，
         // 未覆盖部分渲染时因 NaN 自然显示裸K，由后台 prefetch 继续推进覆盖后替换
-        if !force, !bgCovered, !mainCurves.isEmpty { return }
+        if !force, !bgCovered, !computation.mainCurves.isEmpty { return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
             let store = SystemIndicatorStore.shared
@@ -985,7 +951,7 @@ struct KlineChartView: View {
                 calcEnd = sortedData.count - 1
             } else if bgCovered {
                 calcStart = 0
-                calcEnd = bgCoverageEnd
+                calcEnd = computation.bgCoverageEnd
             } else {
                 (calcStart, calcEnd) = mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
             }
@@ -1006,14 +972,14 @@ struct KlineChartView: View {
                                    })
             }
             // 清理已禁用/不再使用的指标缓存，避免残留占用
-            for key in mainCache.units.keys where !activeIDs.contains(key) {
-                mainCache.units[key] = nil
+            for key in computation.mainCache.units.keys where !activeIDs.contains(key) {
+                computation.mainCache.units[key] = nil
             }
         } else {
             // 裸K：不显示指标，清空自定义缓存（其余指标缓存保留，切回裸K时复用）
-            mainCache.units[MainIndicatorCache.customKey] = nil
+            computation.mainCache.units[MainIndicatorCache.customKey] = nil
         }
-        mainCurves = curves
+        computation.mainCurves = curves
         // 写回 (标的, 周期) 缓存：切走再回来时恢复主图曲线与覆盖状态，不重复计算
         if let metaId = metaId {
             let store = ChartCacheStore.shared
@@ -1021,20 +987,20 @@ struct KlineChartView: View {
             // 配置已变：先失效旧缓存（清完成标记/覆盖/曲线），避免旧配置的“已完成”被误用
             if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
                 // 本视图预计算进度也归零，避免写回 max 把缓存覆盖末端顶回旧值（否则恢复后 bgCovered 误判、副图空白）
-                bgCoverageEnd = 0
+                computation.bgCoverageEnd = 0
                 // 取消仍在跑的旧后台任务（其 request/增量状态属于旧配置），并立即用新配置重启，
                 // 否则旧任务会以旧配置结果覆盖新配置曲线（切换指标后点击主图副图被清空/错乱）
                 klineDebug("[KlineDebug] 主图配置变化 bgCoverageEnd=0 重启prefetch")
-                prefetchToken = nil
+                computation.prefetchToken = nil
                 startPrefetch()
             }
             let e = store.entry(for: metaId, period: period)
-            e.mainCurves = mainCurves
-            e.mainCache = mainCache
-            e.coverageStart = indicatorCoverageStart
-            e.coverageEnd = indicatorCoverageEnd
+            e.mainCurves = computation.mainCurves
+            e.mainCache = computation.mainCache
+            e.coverageStart = computation.indicatorCoverageStart
+            e.coverageEnd = computation.indicatorCoverageEnd
             // 覆盖末端只增不减，避免后台/旧任务已算得更远时被本次写回往回推
-            e.bgCoverageEnd = max(e.bgCoverageEnd, bgCoverageEnd)
+            e.bgCoverageEnd = max(e.bgCoverageEnd, computation.bgCoverageEnd)
             e.configFingerprint = fp
         }
     }
@@ -1047,7 +1013,7 @@ struct KlineChartView: View {
                           calcStart: Int, calcEnd: Int,
                           build: (Int, TDXOutputLine) -> IndicatorLine?) -> [IndicatorLine] {
         guard enabled, let formula else { return [] }
-        var cache = mainCache.units[id] ?? MainIndicatorCache.UnitSet()
+        var cache = computation.mainCache.units[id] ?? MainIndicatorCache.UnitSet()
         // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元；计算区间变化也须重建
         let formulaKey = "\(formula)|\(calcStart)|\(calcEnd)"
         if cache.formulaKey != formulaKey {
@@ -1071,7 +1037,7 @@ struct KlineChartView: View {
             }
             if let line = cache.rows[i].line { lines.append(line) }
         }
-        mainCache.units[id] = cache
+        computation.mainCache.units[id] = cache
         return lines
     }
 
@@ -1086,7 +1052,7 @@ struct KlineChartView: View {
 
     private func recomputeSub(_ m: SubChartModel, force: Bool = false) {
         // 诊断：每次调用都打印（含调用来源栈），定位曲线被清空的具体路径
-        klineDebug("[KlineDebug] recomputeSub调用 \(m.kind) 现curves=\(m.curves.count) force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
+        klineDebug("[KlineDebug] recomputeSub调用 \(m.kind) 现curves=\(m.curves.count) force=\(force) bgEnd=\(computation.bgCoverageEnd) endIdx=\(endIndex) mainFS=\(mainFullscreen) 栈:\(Thread.callStackSymbols.prefix(3).joined(separator:" < "))")
         // 指标/设置面板打开期间不计算（全量计算开销大），只标记该副图待重算，关闭返回后再算
         if menuIsOpen {
             if !editorUI.pendingSubCharts.contains(where: { $0 === m }) { editorUI.pendingSubCharts.append(m) }
@@ -1103,11 +1069,11 @@ struct KlineChartView: View {
             return
         }
         // 诊断：进入 recomputeSub 时曲线已为空（说明之前被某路径清空）
-        if m.curves.isEmpty { klineDebug("[KlineDebug] recomputeSub进入时空: \(m.kind) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) force=\(force)") }
+        if m.curves.isEmpty { klineDebug("[KlineDebug] recomputeSub进入时空: \(m.kind) bgEnd=\(computation.bgCoverageEnd) endIdx=\(endIndex) force=\(force)") }
         // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
         // 直接从缓存恢复该槽位完整曲线，避免在主线程全量重算副图指标造成明显卡顿。
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
-        if bgCoverageEnd >= endIndex, let metaId = metaId {
+        if computation.bgCoverageEnd >= endIndex, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
             if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
@@ -1126,7 +1092,7 @@ struct KlineChartView: View {
         // 注意：m.curves 是跨周期共享的副图模型曲线，切换周期/配置变更后可能残留其它周期的旧曲线
         // （长度与当前数据不一致）。此时绝不能因 bgCovered 提前返回，必须按当前周期数据重算，
         // 否则副图曲线空白、十字光标不更新副图指标值
-        let bgCovered = bgCoverageEnd >= endIndex
+        let bgCovered = computation.bgCoverageEnd >= endIndex
         let curvesMatchCurrentData = m.curves.allSatisfy { $0.values.count == sortedData.count }
         if bgCovered, !force, !m.curves.isEmpty, curvesMatchCurrentData {
             klineDebug("[KlineDebug] return(bgCovered) \(m.kind) curves=\(m.curves.count)")
@@ -1154,7 +1120,7 @@ struct KlineChartView: View {
             calcEnd = sortedData.count - 1
         } else if bgCovered {
             calcStart = 0
-            calcEnd = bgCoverageEnd
+            calcEnd = computation.bgCoverageEnd
         } else {
             (calcStart, calcEnd) = mergedCalcRange(needStart: indicatorCalcStart, needEnd: indicatorCalcEnd)
         }
@@ -1216,8 +1182,8 @@ struct KlineChartView: View {
             // 否则本地 bgCoverageEnd 保持旧大值会导致 startPrefetch 误判已算完而跳过重算
             if store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp) {
                 klineDebug("[KlineDebug] 副图配置变化(\(m.kind)) bgCoverageEnd=0 重启prefetch | 三副图count=[\(subTop.curves.count),\(subBottom.curves.count),\(subThird.curves.count)] 当前m=\(m.curves.count)")
-                bgCoverageEnd = 0
-                prefetchToken = nil
+                computation.bgCoverageEnd = 0
+                computation.prefetchToken = nil
                 startPrefetch()
             }
             let e = store.entry(for: metaId, period: period)
@@ -1229,47 +1195,6 @@ struct KlineChartView: View {
 
     // MARK: - 主图价格区间
 
-    /// 全数据集扫描，预计算所有跳空缺口及回补位置（数据加载时计算一次）。
-    /// 采用维护缺口列表的线性算法：缺口形成后，某根后续K线价格触及缺口区间即视为回补，
-    /// 记录该K线索引为 filledIdx；从未被回补的缺口 filledIdx 为 nil（持续显示）。
-    static func computeGaps(_ items: [KlineItem]) -> [GapInfo] {
-        guard items.count > 1 else { return [] }
-        struct Pending {
-            let startIdx: Int
-            let top: Double
-            let bottom: Double
-            let isUp: Bool
-        }
-        var pending: [Pending] = []
-        var result: [GapInfo] = []
-        for (i, cur) in items.enumerated() {
-            // 当前K线触及缺口区间即回补完成，记录回补位置
-            var filled: [Pending] = []
-            pending.removeAll { g in
-                let isFilled = cur.high >= g.bottom && cur.low <= g.top
-                if isFilled { filled.append(g) }
-                return isFilled
-            }
-            for g in filled {
-                result.append(GapInfo(startIdx: g.startIdx, top: g.top, bottom: g.bottom, isUp: g.isUp, filledIdx: i))
-            }
-            // 与上一根K线之间形成新缺口
-            if i > 0 {
-                let prev = items[i - 1]
-                if cur.low > prev.high {
-                    pending.append(Pending(startIdx: i, top: cur.low, bottom: prev.high, isUp: true))
-                } else if cur.high < prev.low {
-                    pending.append(Pending(startIdx: i, top: prev.low, bottom: cur.high, isUp: false))
-                }
-            }
-        }
-        // 遍历结束后仍未回补的缺口（一直显示）
-        for g in pending {
-            result.append(GapInfo(startIdx: g.startIdx, top: g.top, bottom: g.bottom, isUp: g.isUp, filledIdx: nil))
-        }
-        return result
-    }
-
     private var priceRange: ClosedRange<Double> {
         guard !slice.isEmpty else { return 0...100 }
         var minLow = slice.map(\.low).min() ?? 0
@@ -1278,7 +1203,7 @@ struct KlineChartView: View {
         if !displaySettings.indicatorNotSqueezeKline {
             let offsets = Array(startIndex...endIndex).filter { $0 < closes.count }
             var all: [Double] = []
-            for line in mainCurves {
+            for line in computation.mainCurves {
                 for idx in offsets where idx < line.values.count {
                     let v = line.values[idx]
                     if !v.isNaN { all.append(v) }
@@ -1943,7 +1868,7 @@ struct KlineChartView: View {
             // 视图被移除（切换周期/退出详情页）时停止本视图的预计算任务：
             // 否则任务会继续向「共享的副图模型」写曲线，与切换后的新视图抢写，
             // 导致副图曲线错位/变空。其它周期由后台 prefetchOtherPeriod 独立补齐
-            prefetchToken = nil
+            computation.prefetchToken = nil
         }
         .onChange(of: selectedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
@@ -2025,7 +1950,7 @@ struct KlineChartView: View {
     }
 
     func refreshCurves(force: Bool = false) {
-        klineDebug("[KlineDebug] refreshCurves force=\(force) bgEnd=\(bgCoverageEnd) endIdx=\(endIndex) cursor=\(selectedIndex == nil ? "无" : "有")")
+        klineDebug("[KlineDebug] refreshCurves force=\(force) bgEnd=\(computation.bgCoverageEnd) endIdx=\(endIndex) cursor=\(selectedIndex == nil ? "无" : "有")")
         recomputeMainCurves(force: force)
         recomputeSub(subTop, force: force)
         recomputeSub(subBottom, force: force)
@@ -2038,7 +1963,7 @@ struct KlineChartView: View {
     /// 数值最正确；覆盖到当前可见窗口末端后才替换前台近似曲线（最新部分被重算为正确值）。
     /// 用户交互（拖动/缩放）或切换周期/标的/指标时 token 失效，任务自动停止
     func startPrefetch() {
-        guard !sortedData.isEmpty, !mainFullscreen, prefetchToken == nil else { return }
+        guard !sortedData.isEmpty, !mainFullscreen, computation.prefetchToken == nil else { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
         // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
         // 防止「完成标记」与「实际覆盖/配置」不一致时进度条卡住或指标不更新
@@ -2052,7 +1977,7 @@ struct KlineChartView: View {
             ChartCacheStore.shared.entry(for: metaId, period: period).isPrefetching = true
         }
         let token = UUID()
-        prefetchToken = token
+        computation.prefetchToken = token
         // 完整基础序列只构建一次，各块共享引用（避免每块重复 map 全部基础数据）
         let series = TDXSharedSeries(data: sortedData)
         // 上一块算完后的增量状态（供下一块只算新增区间、复用前缀，避免每块从数据开头整段重算）；
@@ -2062,7 +1987,7 @@ struct KlineChartView: View {
         var lastMainFormulas: [String] = []
         var lastSubFormulas: [String?] = []
         Task { @MainActor in
-            while self.prefetchToken == token {
+            while self.computation.prefetchToken == token {
                 // 指标/设置面板打开期间暂停预计算，避免空转与干扰面板操作
                 if self.menuIsOpen {
                     await Task.yield()
@@ -2071,8 +1996,8 @@ struct KlineChartView: View {
                 // 从数据开头（最左）向右推进：块大小随覆盖推进呈几何增长（每次约翻倍）。
                 // 结合增量求值（上一块状态延续，每块只算新增区间）使总计算量 ≈ O(N)，
                 // 接近一次全量，大幅缩短总耗时
-                let currentEnd = max(0, self.bgCoverageEnd)
-                let step = max(self.prefetchBlockSize, currentEnd)
+                let currentEnd = max(0, self.computation.bgCoverageEnd)
+                let step = max(self.computation.prefetchBlockSize, currentEnd)
                 let bgEnd = min(self.sortedData.count - 1, currentEnd + step)
                 guard bgEnd > currentEnd else {
                     // 已全部算完：标记周期预计算完成，并让外层继续预计算其它未计算周期
@@ -2091,7 +2016,7 @@ struct KlineChartView: View {
                 // 否则保持前台近似的立即显示（避免后台未覆盖时指标变空白）。
                 // 拖动/缩放进行中跳过曲线组装（只推进 bgCoverageEnd/进度条），
                 // 避免全量曲线组装占用主线程影响手势流畅度；松手后下一块会补上
-                guard self.prefetchToken == token else { break }
+                guard self.computation.prefetchToken == token else { break }
                 let shouldCommit = bgEnd >= self.endIndex && !self.drag.isDragging
                 // 拖动中会跳过曲线提交；但若这一整块已覆盖到数据末尾（prefetch 即将结束），
                 // 即使在拖动中也强制提交，否则覆盖末端已到末尾、曲线却因拖动中跳过提交而陈旧，
@@ -2099,7 +2024,7 @@ struct KlineChartView: View {
                 let isLastBlock = bgEnd >= self.sortedData.count - 1
                 klineDebug("[KlineDebug] 后台块: bgEnd=\(bgEnd)/\(self.sortedData.count-1) shouldCommit=\(shouldCommit) isLast=\(isLastBlock) endIdx=\(self.endIndex) dragging=\(self.drag.isDragging)")
                 self.commitPrefetch(request, result, updateCurves: shouldCommit || isLastBlock)
-                self.bgCoverageEnd = bgEnd
+                self.computation.bgCoverageEnd = bgEnd
                 // 诊断：每块推进后副图状态（排查曲线是否在 bgEnd 更新后被清空）
                 klineDebug("[KlineDebug] 块后快照(bgEnd=\(bgEnd)) | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)]")
                 // 仅在曲线真正提交时推进缓存的覆盖末端，保证缓存 bgCoverageEnd 与实际存储曲线
@@ -2126,8 +2051,8 @@ struct KlineChartView: View {
             // 仅当仍是自己在运行时才清理 token / 占用标记：
             // 拖动等交互会把 prefetchToken 置 nil 或让后续 startPrefetch 换成新 token，
             // 此时绝不能清掉新任务的 token，否则会把新任务误杀，导致进度条卡死不再推进
-            if self.prefetchToken == token {
-                self.prefetchToken = nil
+            if self.computation.prefetchToken == token {
+                self.computation.prefetchToken = nil
                 if let metaId = self.metaId {
                     ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
                 }
@@ -2211,7 +2136,7 @@ struct KlineChartView: View {
     private func commitPrefetch(_ req: PrefetchCalcRequest, _ result: PrefetchCalcResult, updateCurves: Bool) {
         guard updateCurves else { return }
         // ===== 进入commit时的副图快照（任何修改前，诊断用）=====
-        klineDebug("[KlineDebug] commit进入快照 | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] cursor=\(selectedIndex == nil ? "无" : "有") bgEnd=\(bgCoverageEnd)")
+        klineDebug("[KlineDebug] commit进入快照 | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] cursor=\(selectedIndex == nil ? "无" : "有") bgEnd=\(computation.bgCoverageEnd)")
         let cs = req.calcStart, ce = req.calcEnd
         // ---- 主图（数据驱动，与 makePrefetchRequest 的 mainFormulas/mainIDs 一一对应）----
         var curves: [IndicatorLine] = []
@@ -2227,7 +2152,7 @@ struct KlineChartView: View {
                 }
             }
         }
-        mainCurves = curves
+        computation.mainCurves = curves
         // ---- 副图 ----
         for (i, m) in [subTop, subBottom, subThird].enumerated() {
             guard i < req.subs.count, i < result.subs.count else { continue }
@@ -2290,12 +2215,12 @@ struct KlineChartView: View {
             let fp = Self.currentConfigFingerprint(period: self.period)
             store.invalidateIfConfigChanged(metaId: metaId, period: period, currentFingerprint: fp)
             let e = store.entry(for: metaId, period: period)
-            e.mainCurves = mainCurves
-            e.mainCache = mainCache
-            e.coverageStart = indicatorCoverageStart
-            e.coverageEnd = indicatorCoverageEnd
+            e.mainCurves = computation.mainCurves
+            e.mainCache = computation.mainCache
+            e.coverageStart = computation.indicatorCoverageStart
+            e.coverageEnd = computation.indicatorCoverageEnd
             // 覆盖末端只增不减
-            e.bgCoverageEnd = max(e.bgCoverageEnd, bgCoverageEnd)
+            e.bgCoverageEnd = max(e.bgCoverageEnd, computation.bgCoverageEnd)
             e.configFingerprint = fp
             for (i, m) in [subTop, subBottom, subThird].enumerated() {
                 e.subCurves[i] = m.curves
@@ -2834,7 +2759,7 @@ struct KlineChartView: View {
         }
         return MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
-                        curves: isBareK ? [] : mainCurves.enumerated().map { li, line in
+                        curves: isBareK ? [] : computation.mainCurves.enumerated().map { li, line in
                             CanvasCurve(color: line.color, values: mainCurveValues(line, lineIndex: li),
                                         style: line.style, lineWidth: line.lineWidth, barColor: line.barColor,
                                         markerColors: sliceColors(line.markerColors))
@@ -2842,7 +2767,7 @@ struct KlineChartView: View {
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
-                        gaps: mainMirrored ? mirroredGaps : gaps, sliceStart: startIndex,
+                        gaps: mainMirrored ? mirroredGaps : computation.gaps, sliceStart: startIndex,
                         latest: mirroredLatest,
                         syntheticBar: syntheticBar, dimFromIndex: dimFromLocal)
             .equatable()
@@ -3041,7 +2966,7 @@ struct KlineChartView: View {
                 }
                 if isBareK { legendText("裸K") }
                 if !isBareK {
-                    ForEach(Array(mainCurves.enumerated()), id: \.offset) { li, line in
+                    ForEach(Array(computation.mainCurves.enumerated()), id: \.offset) { li, line in
                         // 联动复盘：合成点指标读数用 as-of 重算值（镜像取负仍由 legendItem 处理）；
                         // 本地第二光标存在时数值栏跟随第二光标读真实值，必须关闭 as-of 覆盖
                         legendItem(line, mirrored: config.mainMirrored,
@@ -3090,7 +3015,7 @@ struct KlineChartView: View {
                     drag.needsRefreshAfterDrag = false
                     // 放大模式主图裸K、副图隐藏，无需预计算；退出放大后恢复预计算
                     if mainFullscreen {
-                        prefetchToken = nil
+                        computation.prefetchToken = nil
                     } else {
                         startPrefetch()
                     }
@@ -3336,7 +3261,7 @@ struct KlineChartView: View {
 
     /// 是否显示指标覆盖进度条：后台正确计算尚未覆盖全部历史（非放大模式），算完（bgCoverageEnd 到末尾）后消失
     private var showCoverageBar: Bool {
-        !mainFullscreen && !sortedData.isEmpty && bgCoverageEnd < sortedData.count - 1
+        !mainFullscreen && !sortedData.isEmpty && computation.bgCoverageEnd < sortedData.count - 1
     }
 
     /// 时间轴栏中间的指标覆盖进度条：高亮段表示后台已正确计算的覆盖范围 [0...bgCoverageEnd]
@@ -3344,7 +3269,7 @@ struct KlineChartView: View {
     /// 已"精确计算"了多少历史；与普通从左往右推动的进度条不同，它反映的是真实计算覆盖范围
     private func coverageProgressBar(width: CGFloat, height: CGFloat) -> some View {
         let total = CGFloat(max(1, sortedData.count))
-        let endRatio = CGFloat(min(bgCoverageEnd, sortedData.count - 1) + 1) / total
+        let endRatio = CGFloat(min(computation.bgCoverageEnd, sortedData.count - 1) + 1) / total
         let barWidth = min(width * 0.72, 340)
         let barHeight: CGFloat = 4
         return ZStack(alignment: .leading) {
@@ -3355,7 +3280,7 @@ struct KlineChartView: View {
         }
         .frame(width: barWidth, height: barHeight)
         .position(x: width / 2, y: height / 2)
-        .animation(.easeInOut(duration: 0.15), value: bgCoverageEnd)
+        .animation(.easeInOut(duration: 0.15), value: computation.bgCoverageEnd)
     }
 
     /// 时间轴上方新增的行情数据行：十字光标出现时显示光标所在K线 开/收/高/低/涨/额（涨为百分比），
