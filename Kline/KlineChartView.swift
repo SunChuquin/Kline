@@ -34,9 +34,9 @@ struct KlineChartView: View {
     /// 是否使用独立的副图模型实例（双联动左右视图各用一套，避免共享模型被不同数据长度的曲线互相覆盖）
     let isolatedSubs: Bool
     /// 隐藏主图指标数值栏右侧的「放大/缩放」按钮（联动多视图场景不提供主图放大）
-    private let hideMainZoomButton: Bool
+    let hideMainZoomButton: Bool
     /// 是否为联动多图 tile（影响时间轴周期数显示等联动专属样式）
-    private let isLinkedTile: Bool
+    let isLinkedTile: Bool
     /// 历史保留的透传参数：早期左右视图不对称联动时，仅部分视图据此决定是否居中。
     /// 当前对称联动语义下，所有视图每次收到联动都一律滚动居中，本字段已无读取方，仅沿调用链透传。
     private let linkAutoCenter: Bool
@@ -109,7 +109,7 @@ struct KlineChartView: View {
     @State var secondCursorIndex: Int? = nil
     @State var secondCursorY: CGFloat? = nil
     /// 副图三「裸」按钮控制的主图裸K：仅隐藏主图指标显示，不触发重算、不清除 mainCurves 缓存
-    @State private var bareFromSub = false
+    @State var bareFromSub = false
     /// 联动光标会话标记：收到有效联动光标/范围时置 true，来源光标消失时置 false。
     /// 当前实现下每次 applyLinkCursor 都无条件把目标K线（或范围）滚动居中，居中不再依赖本标记
     /// （旧「仅第一次出现时居中、之后拖动只移动不居中」的语义已废弃）；目前只写不读，
@@ -311,7 +311,7 @@ struct KlineChartView: View {
     // MARK: - 可见窗口
 
     var count: Int { min(max(20, Int(visibleCount.rounded())), capVisibleCount) }
-    private var maxVisibleCount: Int { sortedData.count }
+    var maxVisibleCount: Int { sortedData.count }
     /// 可见 K 线数上限：非放大与放大模式都允许显示全部 K 线（不限制）
     var capVisibleCount: Int { maxVisibleCount }
     var endIndex: Int {
