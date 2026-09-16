@@ -86,25 +86,47 @@ extension KlineChartView {
     /// 为保证停在整数根K线上，速度会按抬手时的亚像素残差做不可察觉的等比修正；
     /// 途中 endOffset 到数据边界则立即停，无过冲、无回弹。
     @discardableResult
-    func startPanInertia(velocity velocityIn: CGFloat, width: CGFloat, candleSpacing: CGFloat) -> Bool {
+    func startPanInertia(velocity velocityIn: CGFloat, width: CGFloat, candleSpacing: CGFloat, source: String = "单指") -> Bool {
         cancelPanInertia()
-        guard !menuIsOpen else { return false }
-        guard abs(velocityIn) >= ChartMomentumAnimator.minVelocity, candleSpacing > 0, !sortedData.isEmpty else { return false }
+        if menuIsOpen {
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=菜单打开 (\(source))")
+            return false
+        }
+        if abs(velocityIn) < ChartMomentumAnimator.minVelocity {
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=速度不足 |v|=\(String(format: "%.1f", Double(velocityIn))) < 阈值\(ChartMomentumAnimator.minVelocity) (\(source))")
+            return false
+        }
+        if candleSpacing <= 0 {
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=candleSpacing<=0 (\(source))")
+            return false
+        }
+        if sortedData.isEmpty {
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=无数据 (\(source))")
+            return false
+        }
 
         let sp = candleSpacing
         let maxEndOffset = max(0, sortedData.count - count)
         let sgn: CGFloat = velocityIn >= 0 ? 1 : -1
         // 沿运动方向还剩多少根K线可走；连一根都没有则不惯性（调用方立即对齐）
         let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
-        guard candlesAhead >= 1 else { return false }
+        if candlesAhead < 1 {
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=前方无K线空间 方向=\(sgn > 0 ? "右(更早)" : "左(更新)") endOffset=\(endOffset) maxOffset=\(maxEndOffset) (\(source))")
+            return false
+        }
 
         // 期望位移：2 屏宽 − 抬手亚像素残差（沿运动方向折算），使 2 秒终点恰为整数根K线对齐点。
         // 速度 = 位移 / 2 秒 ≈ 1 屏宽/秒（残差修正 ≤ 半根间距，肉眼不可察）。
         let residueAlong = sgn > 0 ? panOffset : -panOffset
         let travel = ChartMomentumAnimator.travelScreens * width - residueAlong
-        guard travel > 0 else { return false }
+        if travel <= 0 {
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=travel<=0 travel=\(String(format: "%.1f", travel)) panOffset=\(String(format: "%.1f", panOffset)) (\(source))")
+            return false
+        }
         let v = sgn * travel / CGFloat(ChartMomentumAnimator.fixedDuration)
+        DebugLogger.shared.log("[惯性启动] ✅启动 方向=\(sgn > 0 ? "右" : "左") 固定v=\(String(format: "%.0f", Double(abs(v))))px/s 抬手v=\(String(format: "%.0f", Double(velocityIn))) travel=\(String(format: "%.0f", travel))px 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset) (\(source))")
 
+        var stoppedByBoundary = false
         let animator = ChartMomentumAnimator()
         animator.velocity = v
         animator.onAdvance = { [self] dx in
@@ -113,6 +135,8 @@ extension KlineChartView {
                 ? CGFloat(maxEndOffset - endOffset) * sp - panOffset
                 : CGFloat(endOffset) * sp + panOffset
             if abs(dx) >= room {
+                stoppedByBoundary = true
+                DebugLogger.shared.log("[惯性启动] 触边立即停 room=\(String(format: "%.1f", room)) dx=\(String(format: "%.1f", dx)) endOffset=\(endOffset)/\(maxEndOffset)")
                 if room > 0 {
                     panOffset += sgn * room
                     let shift = Int((panOffset / sp).rounded())
@@ -132,10 +156,15 @@ extension KlineChartView {
             endOffset = newOffset
             panOffset -= CGFloat(applied) * sp
             // applied != shift = endOffset 已到数据边界：惯性立即结束，无过冲无回弹
+            if applied != shift {
+                stoppedByBoundary = true
+                DebugLogger.shared.log("[惯性启动] 进位触边停 endOffset=\(endOffset)/\(maxEndOffset)")
+            }
             return applied == shift
         }
         animator.onFinish = { [self] in
             drag.momentum = nil
+            DebugLogger.shared.log("[惯性启动] 结束 方式=\(stoppedByBoundary ? "触边即停" : "2秒到点") endOffset=\(endOffset)/\(maxEndOffset) panOffset残差=\(String(format: "%.2f", panOffset))")
             // 直接停在对齐位置（自然到点时残差理论为 0；触边帧兜底清零，跳变 ≤ 本帧位移）
             if panOffset != 0 { panOffset = 0 }
             refreshCurves()
@@ -150,6 +179,7 @@ extension KlineChartView {
     /// 未在惯性中时为空操作。
     func cancelPanInertia() {
         guard drag.momentum != nil else { return }
+        DebugLogger.shared.log("[惯性启动] 惯性被新手势/双指打断，立即终止")
         drag.momentum?.cancel()
         drag.momentum = nil
         panOffset = 0

@@ -35,6 +35,8 @@ final class DragState {
     var flingSamples: [(t: Double, x: CGFloat)] = []
     /// 进行中的横向惯性滑动动画器（nil = 无）
     var momentum: ChartMomentumAnimator? = nil
+    /// 调试用：本次手势是否已记录起点日志（onEnded 复位）
+    var beginLogged = false
 
     /// 开始一段新的平移（单指模式切换为 .pan / 双指开始）：清空速度采样
     func resetFlingSamples() {
@@ -57,7 +59,26 @@ final class DragState {
     /// 采样过期（>0.1s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
     func flingVelocity() -> CGFloat {
         let now = CACurrentMediaTime()
-        guard let last = flingSamples.last, now - last.t <= 0.1, flingSamples.count >= 2 else { return 0 }
+        // 最近 8 个采样点 dump（相对末点的毫秒偏移:累计位移px），用于排查事件频率/间隔
+        func dumpSamples() -> String {
+            guard let last = flingSamples.last else { return "[]" }
+            return "[" + flingSamples.suffix(8).map {
+                String(format: "%.0fms@%.1f", ($0.t - last.t) * 1000, Double($0.x))
+            }.joined(separator: " ") + "]"
+        }
+        guard let last = flingSamples.last else {
+            DebugLogger.shared.log("[惯性采样] v=0 原因=无采样点（本次手势从未进入 pan 分支）")
+            return 0
+        }
+        let ageMs = (now - last.t) * 1000
+        guard ageMs <= 100 else {
+            DebugLogger.shared.log("[惯性采样] v=0 原因=末点过期 ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
+            return 0
+        }
+        guard flingSamples.count >= 2 else {
+            DebugLogger.shared.log("[惯性采样] v=0 原因=总采样点<2 ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
+            return 0
+        }
         var pts: [(t: Double, x: Double)] = []
         for s in flingSamples.reversed() {
             if last.t - s.t > 0.07 { break }
@@ -65,7 +86,10 @@ final class DragState {
             if pts.count >= 4 { break }
         }
         pts.reverse()
-        guard pts.count >= 2 else { return 0 }
+        guard pts.count >= 2 else {
+            DebugLogger.shared.log("[惯性采样] v=0 原因=0.07s窗口内仅1点（末两事件间隔>70ms？） ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
+            return 0
+        }
         let n = Double(pts.count)
         let t0 = pts[0].t
         var st = 0.0, sx = 0.0, stt = 0.0, stx = 0.0
@@ -74,8 +98,17 @@ final class DragState {
             st += ti; sx += p.x; stt += ti * ti; stx += ti * p.x
         }
         let denom = stt - st * st / n
-        guard denom > 1e-6 else { return 0 }
-        return CGFloat((stx - sx * st / n) / denom)
+        guard denom > 1e-6 else {
+            DebugLogger.shared.log("[惯性采样] v=0 原因=时间戳重合 \(dumpSamples())")
+            return 0
+        }
+        let v = CGFloat((stx - sx * st / n) / denom)
+        // 末两点瞬时斜率作对照，识别拟合窗口跨度过大导致的低估
+        let spanMs = (pts.last!.t - pts[0].t) * 1000
+        let tailV: CGFloat = pts.count >= 2 && pts[pts.count - 1].t > pts[pts.count - 2].t
+            ? CGFloat((pts[pts.count - 1].x - pts[pts.count - 2].x) / (pts[pts.count - 1].t - pts[pts.count - 2].t)) : 0
+        DebugLogger.shared.log("[惯性采样] v=\(String(format: "%.0f", Double(v))) 末两点=\(String(format: "%.0f", Double(tailV))) n=\(flingSamples.count) pts=\(pts.count) ageMs=\(String(format: "%.1f", ageMs)) spanMs=\(String(format: "%.1f", spanMs)) \(dumpSamples())")
+        return v
     }
 }
 

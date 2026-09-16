@@ -32,6 +32,10 @@ extension KlineChartView {
                 let startInS1 = isInPanel(sy, s1Top, s1Bottom)
                 let startInS2 = isInPanel(sy, s2Top, s2Bottom)
                 guard startInMain || startInS1 || startInS2 else { return }
+                if !drag.beginLogged {
+                    drag.beginLogged = true
+                    DebugLogger.shared.log("[惯性手势] 开始 起点y=\(String(format: "%.0f", sy)) 面板=\(startInMain ? "主图" : (startInS1 ? "副图1" : "副图2")) twoFinger=\(drag.twoFingerActive) frozen=\(isLinkedFrozenView) 光标=\(selectedIndex != nil)")
+                }
                 // 联动会话中非来源的**同周期**视图：忽略一切单指操作
                 // （不接管来源、不平移缩放、不放光标；双指平移/缩放在独立手势层，不受影响）
                 if isLinkedFrozenView { return }
@@ -65,7 +69,10 @@ extension KlineChartView {
                                                   canLeft: canL, canRight: canR)
                     // 一次新手势开始（nil → 非 nil）解锁「一次切换只允许回调外层一次」的锁。
                     // 见 swipeSubSlotTriggered 注释。
-                    if wasNil { swipeSubSlotTriggered = false }
+                    if wasNil {
+                        swipeSubSlotTriggered = false
+                        DebugLogger.shared.log("[惯性手势] 进入副图滑动分支（该手势不产生横向平移惯性）slot=\(slot)")
+                    }
                     return
                 }
 
@@ -85,9 +92,11 @@ extension KlineChartView {
                 } else if startInMain && drag.dragMode == .none {
                     if abs(value.translation.height) > abs(value.translation.width) && abs(value.translation.height) > 4 {
                         drag.dragMode = .zoom
+                        DebugLogger.shared.log("[惯性手势] 模式判定 → zoom（垂直主导 w=\(String(format: "%.1f", value.translation.width)) h=\(String(format: "%.1f", value.translation.height))，该手势不产生横向惯性）")
                     } else if abs(value.translation.width) > 4 {
                         drag.dragMode = .pan
                         drag.resetFlingSamples()   // 惯性速度采样从本次平移起点重新累计
+                        DebugLogger.shared.log("[惯性手势] 模式判定 → pan（水平平移，开始采样）")
                     }
                     drag.lastPanWidth = 0; drag.lastPanHeight = 0
                 }
@@ -120,7 +129,11 @@ extension KlineChartView {
             .onEnded { value in
                 // 惯性判定：仅「主图区平移拖动」抬手时触发；先取抬手速度再复位手势状态。
                 // 光标拖动（dragMode == .none）、副图滑动切换、垂直缩放均不产生惯性。
-                let flingVelocity: CGFloat = drag.dragMode == .pan ? drag.flingVelocity() : 0
+                let wasPan = drag.dragMode == .pan
+                let flingVelocity: CGFloat = wasPan ? drag.flingVelocity() : 0
+                let endStartMain = isInPanel(value.startLocation.y, mainTop, mainBottom)
+                DebugLogger.shared.log("[惯性手势] 抬手 pan=\(wasPan) v=\(String(format: "%.0f", Double(flingVelocity))) 起点主图=\(endStartMain) menu=\(menuIsOpen) frozen=\(isLinkedFrozenView) 光标=\(selectedIndex != nil) 副图滑动=\(swipeFeedback != nil) endOffset=\(endOffset) maxOffset=\(max(0, sortedData.count - count)) panOffset=\(String(format: "%.1f", panOffset)) count=\(count) data=\(sortedData.count)")
+                drag.beginLogged = false
                 drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
                 // 兜底：无论手势如何结束（含双指手势被中断），都清除双指状态，避免残留拦截后续单指拖动
                 drag.twoFingerActive = false
@@ -358,7 +371,7 @@ extension KlineChartView {
         // 联动冻结视图（非来源同周期视图）不产生惯性
         if !isLinkedFrozenView {
             let spacing = width / CGFloat(max(1, count))
-            if startPanInertia(velocity: v, width: width, candleSpacing: spacing) { return }
+            if startPanInertia(velocity: v, width: width, candleSpacing: spacing, source: "双指") { return }
         }
         startPrefetch()
     }
