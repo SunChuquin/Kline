@@ -130,6 +130,71 @@ struct MarketColumnConfigPanel: View {
         _draft = State(initialValue: configStore.config(for: page))
     }
 
+    /// 固定列字段（代码/名称）：置顶、恒显示，不参与显隐与拖动
+    private var fixedFields: [MarketField] {
+        MarketField.fixedColumns.filter { f in draft.columns.contains { $0.field == f } }
+    }
+
+    /// 表头设置里可显隐、可拖动排序的字段（固定列之外的其余可配置列）
+    private var movableFields: [MarketField] {
+        draft.columns.map(\.field).filter { $0.isConfigurable && !$0.isFixedColumn }
+    }
+
+    /// 取草稿中某字段对应的列绑定
+    private func columnBinding(for field: MarketField) -> Binding<MarketColumnPref>? {
+        guard let idx = draft.columns.firstIndex(where: { $0.field == field }) else { return nil }
+        return $draft.columns[idx]
+    }
+
+    /// 拖动排序：只在「非固定列」子集内重排，固定列（代码/名称）保持置顶不动
+    private func applyMove(from: IndexSet, to: Int) {
+        var fields = movableFields
+        fields.move(fromOffsets: from, toOffset: to)
+        var byField: [MarketField: MarketColumnPref] = [:]
+        for c in draft.columns { byField[c.field] = c }
+        var iter = fields.compactMap { byField[$0] }.makeIterator()
+        var newCols: [MarketColumnPref] = []
+        for c in draft.columns {
+            // 固定列 / 历史遗留的不可配置项：原位保留
+            newCols.append(c.field.isConfigurable && !c.field.isFixedColumn ? (iter.next() ?? c) : c)
+        }
+        draft.columns = newCols
+    }
+
+    /// 表头设置单行：固定列（代码/名称）开关置灰、无拖动手柄
+    private func fieldRow(field: MarketField, col: Binding<MarketColumnPref>) -> some View {
+        let isFixed = field.isFixedColumn
+        return HStack(spacing: 8) {
+            Text(field.title)
+                .font(.system(size: 15))
+                .lineLimit(1)
+            Spacer()
+            // 可筛选字段：自定义多选下拉（点选项不收起，点「完成」或外部才收起）
+            if let opts = field.rangeFilterOptions {
+                ColumnFilterButton(
+                    field: field,
+                    filterLabels: col.filterLabels,
+                    isOpen: Binding(
+                        get: { openFilterField == field },
+                        set: { open in
+                            if open {
+                                openFilterField = field
+                            } else if openFilterField == field {
+                                openFilterField = nil
+                            }
+                        }
+                    )
+                )
+            }
+            Toggle("", isOn: isFixed ? Binding.constant(true) : col.visible)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(isFixed)
+        }
+        .frame(minHeight: 36)
+        .zIndex(openFilterField == field ? 100 : 0)
+    }
+
     /// 快捷操作卡片组：进入单元格宽度调整模式（关闭面板，由右上角按钮接管）
     private var quickActionSection: some View {
         Section {
@@ -260,46 +325,27 @@ struct MarketColumnConfigPanel: View {
 
                     // === 卡片组 3：表头设置（原表头配置功能） ===
                     Section {
-                        ForEach($draft.columns) { $col in
-                            if col.field.isConfigurable {
-                            HStack(spacing: 8) {
-                                Text(col.field.title)
-                                    .font(.system(size: 15))
-                                    .lineLimit(1)
-                                Spacer()
-                                // 可筛选字段：自定义多选下拉（点选项不收起，点「完成」或外部才收起）
-                                if let opts = col.field.rangeFilterOptions {
-                                    ColumnFilterButton(
-                                        field: col.field,
-                                        filterLabels: $col.filterLabels,
-                                        isOpen: Binding(
-                                            get: { openFilterField == col.field },
-                                            set: { open in
-                                                if open {
-                                                    openFilterField = col.field
-                                                } else if openFilterField == col.field {
-                                                    openFilterField = nil
-                                                }
-                                            }
-                                        )
-                                    )
-                                }
-                                Toggle("", isOn: $col.visible)
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
+                        // 固定列（代码/名称）：恒显示且置顶 → 单独成组，无拖动手柄、开关置灰
+                        ForEach(fixedFields, id: \.self) { f in
+                            if let col = columnBinding(for: f) {
+                                fieldRow(field: f, col: col)
                             }
-                            .frame(minHeight: 36)
-                            .zIndex(openFilterField == col.field ? 100 : 0)
+                        }
+                        // 其余可配置列：可显隐、可拖动排序（只在固定列之后的范围内重排）
+                        ForEach(movableFields, id: \.self) { f in
+                            if let col = columnBinding(for: f) {
+                                fieldRow(field: f, col: col)
                             }
                         }
                         .onMove { from, to in
-                            draft.columns.move(fromOffsets: from, toOffset: to)
+                            applyMove(from: from, to: to)
                         }
                     } header: {
                         Text("表头设置")
                     } footer: {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("• 拖动右侧手柄调整列顺序，开关控制显示/隐藏")
+                            Text("• 代码/名称恒显示且固定在最前，不可隐藏或拖动")
                             Text("• 数值字段可设置范围筛选，多字段同时生效（取交集）")
                             Text("• 点击表头切换排序：降→升→取消（三击循环）")
                         }

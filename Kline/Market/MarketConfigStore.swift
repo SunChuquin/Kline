@@ -119,7 +119,7 @@ final class MarketConfigStore: ObservableObject {
             let box = try decoder.decode([String: MarketPageConfig].self, from: data)
             var out: [MarketConfigPage: MarketPageConfig] = [:]
             for (k, v) in box {
-                if let p = MarketConfigPage(rawValue: k) { out[p] = v }
+                if let p = MarketConfigPage(rawValue: k) { out[p] = Self.normalized(v) }
             }
             configs = out
             return !configs.isEmpty
@@ -153,9 +153,10 @@ final class MarketConfigStore: ObservableObject {
     }
 
     /// 返回可见列数组（按配置顺序过滤），保证字段顺序与用户设置一致
+    /// 固定列（代码/名称）不受 visible 影响，恒可见
     func visibleColumns(for page: MarketConfigPage) -> [MarketColumnPref] {
         let c = config(for: page)
-        return c.columns.filter { $0.visible && $0.field.isConfigurable }
+        return c.columns.filter { ($0.visible || $0.field.isFixedColumn) && $0.field.isConfigurable }
     }
 
     func sortRule(for page: MarketConfigPage) -> MarketSortRule? {
@@ -196,8 +197,22 @@ final class MarketConfigStore: ObservableObject {
 
     /// 更新整个页面配置（列显隐/顺序/宽度 / 排序一次全存）
     func update(_ page: MarketConfigPage, config: MarketPageConfig) {
-        configs[page] = config
+        configs[page] = Self.normalized(config)
         saveToDisk()
+    }
+
+    /// 固定列收敛：代码/名称恒置顶、恒可见。旧数据/面板草稿都走这里，
+    /// 保证表格首列始终是（相邻合并的）代码+名称单元格，且用户无法把它们藏起来或拖走
+    private static func normalized(_ cfg: MarketPageConfig) -> MarketPageConfig {
+        var out = cfg
+        var fixedCols: [MarketColumnPref] = []
+        for f in MarketField.fixedColumns {
+            var col = out.columns.first { $0.field == f } ?? MarketColumnPref(field: f, visible: true)
+            col.visible = true
+            fixedCols.append(col)
+        }
+        out.columns = fixedCols + out.columns.filter { !$0.field.isFixedColumn }
+        return out
     }
 
     /// 设置单列显隐

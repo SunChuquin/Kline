@@ -132,6 +132,15 @@ enum MarketField: String, CaseIterable, Codable, Identifiable, Hashable {
         !Self.nonConfigurable.contains(self)
     }
 
+    /// 固定列（代码/名称）：恒显示、恒置顶，表头设置里不给可操作的显隐开关，也不给拖动手柄。
+    /// 表格渲染时相邻的「代码+名称」会合并成一个单元格，锁定两者置顶可保证首列稳定
+    static let fixedColumns: [MarketField] = [.code, .name]
+
+    /// 是否为固定列（代码/名称）
+    var isFixedColumn: Bool {
+        Self.fixedColumns.contains(self)
+    }
+
     /// 仅展示文本（不需要 K 线计算的字段）
     var isMetadataOnly: Bool {
         switch self {
