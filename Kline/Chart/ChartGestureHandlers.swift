@@ -158,8 +158,9 @@ extension KlineChartView {
                 // 平移/缩放会改变可见窗口，指标裁剪区间需跟随；这里无条件重算一次。
                 // 无窗口变化（如轻点）时裁剪区间缓存键不变，直接复用缓存，开销几乎为零
                 drag.needsRefreshAfterDrag = false
-                // 快速滑动抬手 → 启动横向惯性滑动（保持方向、预设初速滑行倒计时后减速、平滑停在目标位置）。
-                // 惯性期间 panOffset 的亚像素残差由动画器继续推进；对齐归零/重算/预取延迟到惯性结束。
+                // 快速滑动抬手 → 启动横向惯性滑动：固定沿抬手方向匀速滑行 2 秒、走 2 屏K线，
+                // 到点（或撞到数据边界）直接停在对齐位置，与甩手力度/缩放级别无关。
+                // 惯性期间平移推进与本 pan 分支同构；对齐归零/重算/预取延迟到惯性结束。
                 // 慢速拖动抬手：不启动惯性，维持原行为（panOffset 立即对齐归零）
                 if startPanInertia(velocity: flingVelocity, width: width, candleSpacing: candleSpacing) { return }
                 panOffset = 0

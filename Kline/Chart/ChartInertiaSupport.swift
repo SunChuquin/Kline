@@ -2,14 +2,12 @@
 //  ChartInertiaSupport.swift
 //  Kline
 //
-//  K线主图横向惯性滑动：抬手速度采样 → CADisplayLink 驱动的指数衰减动量动画。
-//  观感对齐原生 UIScrollView 抬手后的惯性运动：
-//  - 初速取自手指最后 ~0.07s 的瞬时末速度（短窗口最小二乘），保持抬手前方向；
-//  - 速度按 v(t)=v0·e^(−t/τ) 指数衰减（无匀速段、无加速度拐点），力度越大滑得越远、越久；
-//  - 启动前预测全程滑行距离，把终点吸附到整数根K线：曲线停稳的位置就是对齐位置，
-//    不存在停稳后再挪一下的二次收尾；
-//  - 滑到数据边界后进入 rubber-band 阻尼（越拉越重，硬钳制只兜底），衰减结束再用
-//    spring 轻微回弹对齐（带一点原生式过冲）。
+//  K线主图横向惯性滑动：CADisplayLink 驱动的**固定匀速直线**动画。
+//  规则刻意简单，只有两种结果：
+//  - 不惯性：抬手速度低于阈值（慢速拖动），立即对齐停止；
+//  - 惯性：一旦触发，行为完全固定——沿抬手方向以「一屏/秒」匀速滑行，
+//    2 秒走 2 个屏幕的K线数，到点直接停在对齐的K线位置；
+//    与甩手力度、缩放级别均无关。途中撞到数据边界就立即停（无过冲、无回弹）。
 //
 //  惯性中的平移推进与拖动手势 pan 分支同构（panOffset 亚像素累计、满一根K线
 //  间距进位 endOffset），因此每帧画面与手指拖动无差异，不会出现卡顿或跳跃。
@@ -19,62 +17,33 @@ import SwiftUI
 import UIKit
 import QuartzCore
 
-/// 横向惯性滑动动画器：CADisplayLink 每帧按位移曲线推进。
+/// 横向惯性滑动动画器：CADisplayLink 每帧按固定匀速推进固定时长。
 ///
-/// 指数衰减模型（v0 = 抬手速度，右为正，τ = 时间常数）：
-/// - v(t) = v0·e^(−t/τ)；
-/// - s(t) = k·v0·τ·(1−e^(−t/τ))，k 为终点吸附用的距离微调系数（≈1）；
-/// - 速度降到 stopVelocity 即结束：T = τ·ln(|v0|/vStop)，总距离 S = τ·(|v0|−vStop)。
-/// 距离/时长都与初速成正比，全程速度、加速度连续（无匀速→减速拐点）。
+/// 位移 s(t) = v·t（v 为带符号常量速度，右正左负），t ∈ [0, fixedDuration]。
 /// 每帧位移按绝对时间 s(t) - s(t-帧) 计算，不依赖固定帧率，掉帧不产生漂移。
 final class ChartMomentumAnimator: NSObject {
-    /// 触发惯性的最低抬手速度（px/s）：低于该值视为慢速拖动，抬手直接对齐停止
+    /// 触发惯性的最低抬手速度（px/s）：低于该值不惯性，抬手直接对齐停止
     static let minVelocity: CGFloat = 350
-    /// 初速上限（px/s）：极快甩动封顶，保证「力度 → 滑行距离」合理关联
-    static let maxVelocity: CGFloat = 3500
-    /// 衰减时间常数 τ（s）：越大滑得越远（原生滚动约 0.25~0.4）
-    static let timeConstant: Double = 0.3
-    /// 结束速度（px/s）：瞬时速度低于此值即停（此时每帧位移已不可察觉）
-    static let stopVelocity: CGFloat = 30
-    /// 边界回弹 spring 参数（近似原生 UIScrollView 触边回弹，带轻微过冲）
-    static let bounceResponse: Double = 0.3
-    static let bounceDamping: Double = 0.82
-    /// 触边过冲小于该幅度（px）时直接对齐，不起 spring（避免微幅抖动）
-    static let bounceMinStretch: CGFloat = 1.5
+    /// 惯性固定时长（s）
+    static let fixedDuration: Double = 2.0
+    /// 惯性固定滑行距离（屏幕数）
+    static let travelScreens: CGFloat = 2
 
-    /// 抬手速度（px/s，右正左负），start() 前赋值
+    /// 带符号匀速（px/s，右正左负），start() 前赋值
     var velocity: CGFloat = 0
-    /// 终点吸附距离系数：实际位移曲线 = k × 自然衰减曲线（k≈1），start() 前赋值
-    var displacementScale: CGFloat = 1
-    /// 每帧推进：把位移增量应用到图表平移
-    var onAdvance: ((CGFloat) -> Void)?
-    /// 衰减结束后的收尾（边界回弹 / 重算 / 预取，由调用方按是否触边区分处理）
+    /// 每帧推进：把位移增量应用到图表平移。返回 false = 撞到数据边界，立即结束
+    var onAdvance: ((CGFloat) -> Bool)?
+    /// 结束收尾（自然到点 / 触边立即停，对齐 + 重算/预取）
     var onFinish: (() -> Void)?
 
     private var link: CADisplayLink?
     private var startTime: CFTimeInterval = 0
     private var lastPosition: CGFloat = 0
-    private var totalDuration: Double = 0
     private var finished = false
-
-    /// 自然衰减总时长：T = τ·ln(|v0|/vStop)
-    private func duration(for v: CGFloat) -> Double {
-        Self.timeConstant * log(Double(abs(v) / Self.stopVelocity))
-    }
-
-    /// 位移曲线：s(t) = k·v0·τ·(1−e^(−t/τ))
-    private func displacement(at t: Double) -> CGFloat {
-        let v = velocity
-        guard v != 0, t > 0 else { return 0 }
-        let decay = 1.0 - exp(-t / Self.timeConstant)
-        return displacementScale * v * CGFloat(Self.timeConstant) * CGFloat(decay)
-    }
 
     /// 启动动画（主线程调用）。时间基准立即生效，第一帧 link 回调即有位移，无起步空档
     func start() {
         guard !finished, velocity != 0 else { return }
-        totalDuration = duration(for: velocity)
-        guard totalDuration > 0, totalDuration.isFinite else { return }
         startTime = CACurrentMediaTime()
         lastPosition = 0
         let l = CADisplayLink(target: self, selector: #selector(step(_:)))
@@ -94,12 +63,13 @@ final class ChartMomentumAnimator: NSObject {
     @objc private func step(_ l: CADisplayLink) {
         guard !finished else { return }
         let now = l.timestamp
-        let t = min(now - startTime, totalDuration)
-        let target = displacement(at: t)
+        let t = min(now - startTime, Self.fixedDuration)
+        let target = velocity * CGFloat(t)
         let dx = target - lastPosition
         lastPosition = target
-        if dx != 0 { onAdvance?(dx) }
-        if t >= totalDuration {
+        var hitBoundary = false
+        if dx != 0 { hitBoundary = !(onAdvance?(dx) ?? true) }
+        if t >= Self.fixedDuration || hitBoundary {
             cancel()
             onFinish?()
         }
@@ -110,124 +80,64 @@ final class ChartMomentumAnimator: NSObject {
 
 extension KlineChartView {
 
-    /// 抬手启动横向惯性滑动。返回是否启动（false = 速度不足/无滑行空间等，调用方走原对齐路径）。
+    /// 抬手启动横向惯性滑动。返回是否启动（false = 速度不足/前方无K线空间等，调用方走原对齐路径）。
     ///
-    /// - 速度方向保持抬手前方向，幅值取抬手实测末速度并按预设 [min, max] 封顶；
-    /// - 预测指数衰减全程距离：不会触边时把距离吸附为整数根K线（k 微调），曲线终点即
-    ///   对齐点，停稳后零二次动画；会触边时 k=1，自由段走完后转 rubber-band 阻尼，
-    ///   结束再 spring 回弹；
-    /// - 推进复用拖动手势的亚像素累计进位平移（panOffset 累计满一根K线间距进位 endOffset）。
+    /// 一旦触发行为固定：速度 = ±1 屏宽/秒（即 2 秒走 2 屏K线），与甩手力度、缩放级别无关；
+    /// 为保证停在整数根K线上，速度会按抬手时的亚像素残差做不可察觉的等比修正；
+    /// 途中 endOffset 到数据边界则立即停，无过冲、无回弹。
     @discardableResult
-    func startPanInertia(velocity: CGFloat, width: CGFloat, candleSpacing: CGFloat) -> Bool {
+    func startPanInertia(velocity velocityIn: CGFloat, width: CGFloat, candleSpacing: CGFloat) -> Bool {
         cancelPanInertia()
         guard !menuIsOpen else { return false }
-        let vMax = ChartMomentumAnimator.maxVelocity
-        let v = clamp(velocity, -vMax, vMax)
-        guard abs(v) >= ChartMomentumAnimator.minVelocity, candleSpacing > 0, !sortedData.isEmpty else { return false }
+        guard abs(velocityIn) >= ChartMomentumAnimator.minVelocity, candleSpacing > 0, !sortedData.isEmpty else { return false }
 
         let sp = candleSpacing
         let maxEndOffset = max(0, sortedData.count - count)
-        let maxOver = width / 10   // 与拖动一致：数据边界最多滑出屏幕宽度 1/10 的空白
-        let sgn: CGFloat = v >= 0 ? 1 : -1
-        // rubber-band：y = r·x/(x+r)，导数随越界深入单调趋零（越拉越重），渐近线 r = maxOver
-        let rubberRate = maxOver
-        // 自然衰减全程距离 S = τ·(|v0|−vStop)
-        let freeDistance = ChartMomentumAnimator.timeConstant * Double(abs(v) - ChartMomentumAnimator.stopVelocity)
-        guard freeDistance > 0 else { return false }
+        let sgn: CGFloat = velocityIn >= 0 ? 1 : -1
+        // 沿运动方向还剩多少根K线可走；连一根都没有则不惯性（调用方立即对齐）
+        let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
+        guard candlesAhead >= 1 else { return false }
 
-        /// 当前位置沿 sgn 方向到「边界整数K线对齐点」的自由空间（px，可为负）
-        func roomToEdge() -> CGFloat {
-            if sgn > 0 {
-                return CGFloat(maxEndOffset - endOffset) * sp - panOffset
-            } else {
-                return CGFloat(endOffset) * sp + panOffset
+        // 期望位移：2 屏宽 − 抬手亚像素残差（沿运动方向折算），使 2 秒终点恰为整数根K线对齐点。
+        // 速度 = 位移 / 2 秒 ≈ 1 屏宽/秒（残差修正 ≤ 半根间距，肉眼不可察）。
+        let residueAlong = sgn > 0 ? panOffset : -panOffset
+        let travel = ChartMomentumAnimator.travelScreens * width - residueAlong
+        guard travel > 0 else { return false }
+        let v = sgn * travel / CGFloat(ChartMomentumAnimator.fixedDuration)
+
+        let animator = ChartMomentumAnimator()
+        animator.velocity = v
+        animator.onAdvance = { [self] dx in
+            // 触边帧把本帧位移截到「恰好到边界对齐点」，停得干脆且残差清零无可视跳变
+            let room: CGFloat = sgn > 0
+                ? CGFloat(maxEndOffset - endOffset) * sp - panOffset
+                : CGFloat(endOffset) * sp + panOffset
+            if abs(dx) >= room {
+                if room > 0 {
+                    panOffset += sgn * room
+                    let shift = Int((panOffset / sp).rounded())
+                    if shift != 0 {
+                        endOffset = clamp(endOffset + shift, 0, maxEndOffset)
+                        panOffset -= CGFloat(shift) * sp
+                    }
+                }
+                return false
             }
-        }
-
-        let initialRoom = roomToEdge()
-        let willReachEdge = CGFloat(freeDistance) > initialRoom
-        // 终点吸附：自然结束场景把总距离圆整为整数根K线，且不超过剩余空间
-        var scale: CGFloat = 1
-        if !willReachEdge {
-            let maxSteps = max(0, Int((initialRoom / sp).rounded(.down)))
-            let steps = min(max(0, Int((CGFloat(freeDistance) / sp).rounded())), maxSteps)
-            guard steps > 0 else { return false }
-            scale = CGFloat(steps) * sp / CGFloat(freeDistance)
-        }
-
-        // 触边段状态：reachedEdge=已进入 rubber-band；overIn=原始越界输入累计；
-        // maxStretch=实际产生过的最大拉伸（决定结束时要不要 spring 回弹）
-        var reachedEdge = false
-        var overIn: CGFloat = 0
-        var maxStretch: CGFloat = 0
-
-        /// 自由段推进：与拖动手势 pan 分支完全相同的亚像素累计进位平移
-        func applyFree(_ d: CGFloat) {
-            panOffset += d
-            panOffset = clamp(panOffset, -maxOver, maxOver)
+            // 与拖动手势 pan 分支完全相同的亚像素累计进位平移
+            panOffset += dx
             let shift = Int((panOffset / sp).rounded())
-            guard shift != 0 else { return }
+            guard shift != 0 else { return true }
             let newOffset = clamp(endOffset + shift, 0, maxEndOffset)
             let applied = newOffset - endOffset
             endOffset = newOffset
             panOffset -= CGFloat(applied) * sp
-        }
-
-        /// 越界段推进：把本帧原始增量 x 经 rubber-band 压缩后加到 panOffset（endOffset 已在边界）
-        func applyRubber(_ x: CGFloat) {
-            overIn += x
-            let y = rubberRate * overIn / (overIn + rubberRate)
-            maxStretch = max(maxStretch, y)
-            panOffset = clamp(sgn * y, -maxOver, maxOver)
-        }
-
-        let animator = ChartMomentumAnimator()
-        animator.velocity = v
-        animator.displacementScale = scale
-        animator.onAdvance = { [self] dx in
-            if !reachedEdge {
-                let room = roomToEdge()
-                if abs(dx) <= room + 0.001 {
-                    // 整帧都在自由空间
-                    applyFree(dx)
-                } else {
-                    // 本帧跨边界：自由段精确走到 panOffset=0 的边界对齐点，剩余进入阻尼
-                    let freePart = sgn * max(0, room)
-                    if freePart != 0 { applyFree(freePart) }
-                    reachedEdge = true
-                    overIn = 0
-                    // 抬手时若已有同向亚像素残差越过对齐点（room<0），把它折算成 rubber 输入初值，
-                    // 视觉位置不跳变
-                    if room < 0 {
-                        let y0 = min(abs(panOffset), rubberRate * 0.9)
-                        if y0 > 0 {
-                            overIn = rubberRate * y0 / (rubberRate - y0)
-                            maxStretch = y0
-                        }
-                    }
-                    applyRubber(max(0, abs(dx) - max(0, room)))
-                }
-            } else {
-                applyRubber(abs(dx))
-            }
+            // applied != shift = endOffset 已到数据边界：惯性立即结束，无过冲无回弹
+            return applied == shift
         }
         animator.onFinish = { [self] in
             drag.momentum = nil
-            if reachedEdge {
-                // 数据边界：spring 回弹对齐（轻微过冲，近似原生触边手感）；拉伸过小则直接对齐
-                if maxStretch >= ChartMomentumAnimator.bounceMinStretch {
-                    withAnimation(.spring(response: ChartMomentumAnimator.bounceResponse,
-                                          dampingFraction: ChartMomentumAnimator.bounceDamping)) {
-                        panOffset = 0
-                    }
-                } else {
-                    panOffset = 0
-                }
-            } else {
-                // 自然衰减：曲线终点已吸附在整数根K线，panOffset 理论上恰为 0，兜底清浮点残差，
-                // 不需要任何二次对齐动画
-                if abs(panOffset) > 0.01 { panOffset = 0 }
-            }
+            // 直接停在对齐位置（自然到点时残差理论为 0；触边帧兜底清零，跳变 ≤ 本帧位移）
+            if panOffset != 0 { panOffset = 0 }
             refreshCurves()
             startPrefetch()
         }
