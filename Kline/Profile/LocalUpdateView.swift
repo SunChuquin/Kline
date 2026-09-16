@@ -7,7 +7,8 @@
 
 import SwiftUI
 
-/// 本地更新面板：扫描公共 Downloads 目录的 IPA 文件，支持共享到 TrollStore 安装。
+/// 更新面板：扫描公共 Downloads 目录的 IPA 文件（支持共享到 TrollStore 安装），
+/// 以及远程更新（GitHub Release 最新构建：检查新版 → 下载 → 自动拉起 TrollStore，免 USB）。
 /// 需要 no-sandbox 权限才能访问 /var/mobile/Media/Downloads（TrollStore 版可用，
 /// Xcode 调试版降级显示错误，不崩溃）。
 struct LocalUpdateView: View {
@@ -18,6 +19,12 @@ struct LocalUpdateView: View {
     @State private var entitlementCheckResult: String = ""
     /// 本地 HTTP 服务是否在线（供状态标签显示，点击可重连）
     @State private var serverOK = false
+    /// 远程更新（GitHub Release 最新构建）状态
+    @State private var ghChecking = false
+    @State private var ghMessage = ""
+    @State private var ghDownloading = false
+    @State private var ghProgress: Double = 0
+    @State private var ghHasNewer = false
 
     /// 沙盒 Documents 根路径
     private var sandboxRoot: String {
@@ -123,6 +130,72 @@ struct LocalUpdateView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            // 远程更新（GitHub Release 最新构建）：免 USB，iPad 联网即可拉取 CI 最新 IPA 安装
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "icloud.and.arrow.down")
+                        .foregroundColor(.purple)
+                    Text("远程更新（GitHub 最新构建）")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text("当前 #\(GitHubUpdateService.currentBuildNumber.map(String.init) ?? "?")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if !ghMessage.isEmpty {
+                    Text(ghMessage)
+                        .font(.caption)
+                        .foregroundColor(ghHasNewer ? .green : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack(spacing: 10) {
+                    Button(action: checkGitHubUpdate) {
+                        HStack {
+                            if ghChecking {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text(ghChecking ? "检查中..." : "检查新版")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.purple.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .disabled(ghChecking)
+
+                    Button(action: downloadAndInstallLatest) {
+                        HStack {
+                            if ghDownloading {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "arrow.down.circle")
+                            }
+                            Text(ghDownloading ? "下载中..." : "下载并安装")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .disabled(ghDownloading)
+                }
+
+                if ghDownloading {
+                    ProgressView(value: ghProgress)
+                    Text("\(Int(ghProgress * 100))% · 下载完成后自动拉起 TrollStore")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .background(Color(.tertiarySystemBackground))
+            .cornerRadius(8)
 
             // 分隔线
             Divider()
@@ -239,6 +312,64 @@ struct LocalUpdateView: View {
             DispatchQueue.main.async {
                 self.logScanResult = result
             }
+        }
+    }
+
+    // MARK: - 远程更新（GitHub Release 最新构建）：检查最新版 + 下载安装
+
+    /// 查询 GitHub 最新 release，与当前构建号比对并提示
+    private func checkGitHubUpdate() {
+        ghChecking = true
+        ghMessage = "正在检查 GitHub 最新构建..."
+        ghHasNewer = false
+        GitHubUpdateService.fetchLatestRelease { info, err in
+            self.ghChecking = false
+            if let err = err {
+                self.ghMessage = "❌ 检查失败：\(err)"
+                return
+            }
+            let pub = info?.publishedText.map { " · \($0)" } ?? ""
+            let cur = GitHubUpdateService.currentBuildNumber
+            if let n = info?.buildNumber {
+                if let c = cur {
+                    if n > c {
+                        self.ghHasNewer = true
+                        self.ghMessage = "✅ 发现新版本 #\(n)（当前 #\(c)）\(pub)"
+                    } else if n == c {
+                        self.ghMessage = "当前已是最新版本 #\(n)\(pub)"
+                    } else {
+                        self.ghMessage = "远程 #\(n) 不高于当前 #\(c)，可重新安装\(pub)"
+                    }
+                } else {
+                    self.ghMessage = "远程最新版 #\(n)\(pub)（当前构建号未知，可下载覆盖安装）"
+                }
+            } else {
+                self.ghMessage = "远程最新版可用\(pub)（构建号未知，可下载覆盖安装）"
+            }
+        }
+    }
+
+    /// 下载最新 IPA 到公共 Downloads，再经本地 HTTP + opener 拉起 TrollStore 安装
+    private func downloadAndInstallLatest() {
+        ghDownloading = true
+        ghProgress = 0
+        ghMessage = "正在下载最新 IPA ..."
+        GitHubUpdateService.downloadLatestIPA(progress: { p in
+            self.ghProgress = p
+        }) { size, err in
+            self.ghDownloading = false
+            if let err = err {
+                self.ghMessage = "❌ 下载失败：\(err)"
+                return
+            }
+            let sizeText = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "?"
+            self.ghMessage = "✅ 已下载 \(sizeText)，正在拉起 TrollStore 安装..."
+            // 与 /install-local 同一链路：KlineHTTP 本地供 IPA + opener 装完自动打开新版
+            KlineHTTPServer.shared.start()
+            let trollURL = KlineHTTPServer.trollStoreInstallURL(
+                localFile: "Kline.ipa", port: KlineHTTPServer.shared.port)
+            KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
+            self.ghMessage += "\n(弹「在 TrollStore 中打开？」→ 打开 → Install；装完自动回到新版)"
         }
     }
 

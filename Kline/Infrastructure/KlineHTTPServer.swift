@@ -413,18 +413,9 @@ final class KlineHTTPServer {
             respond(connection, status: 400, body: "{\"error\":\"bad body\"}")
             return
         }
-        // 方案A「装完自动打开新版」：先以 root spawn 一个 opener 守护（独立于 App 生命周期，
-        // 装完检测到版本与当前不同后自动拉起新版 Kline），再触发 TrollStore 安装。
-        // 当前版本号作为 首个 argv 传给 opener，供其判定"已装新版本"。
-        let curVer = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
-        DebugLogger.shared.log("install-local received body=\(String(decoding: body, as: UTF8.self)) curVer=\(curVer)")
-        let srOpen = RootRunner.spawnDetached(
-            executable: Bundle.main.bundlePath + "/opener",
-            arguments: [curVer])
-        DebugLogger.shared.log("install-local spawned opener => sr=\(srOpen)")
-        DispatchQueue.main.async {
-            UIApplication.shared.open(url)
-        }
+        DebugLogger.shared.log("install-local received body=\(String(decoding: body, as: UTF8.self))")
+        // 方案A「装完自动打开新版」：opener 守护 + apple-magnifier URL，见 triggerTrollStoreInstall
+        triggerTrollStoreInstall(trollURL: url.absoluteString)
         respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
     }
 
@@ -432,6 +423,24 @@ final class KlineHTTPServer {
     static func trollStoreInstallURL(localFile: String, port: UInt16) -> String {
         let downloadURL = "http://127.0.0.1:\(port)/download/\(localFile.percentEncodedForQuery)"
         return "apple-magnifier://install?url=\(downloadURL.percentEncodedForQuery)"
+    }
+
+    /// 触发 TrollStore 安装：先以 root spawn 一个 opener 守护（独立于 App 生命周期，
+    /// 装完检测到版本与当前不同后自动拉起新版 Kline），再打开 apple-magnifier URL。
+    /// 当前版本号作为首个 argv 传给 opener，供其判定"已装新版本"。
+    /// /install-local 与 App 内远程更新（LocalUpdateView）共用此链路。
+    func triggerTrollStoreInstall(trollURL: String) {
+        let curVer = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
+        DebugLogger.shared.log("triggerTrollStoreInstall trollURL=\(trollURL) curVer=\(curVer)")
+        let srOpen = RootRunner.spawnDetached(
+            executable: Bundle.main.bundlePath + "/opener",
+            arguments: [curVer])
+        DebugLogger.shared.log("triggerTrollStoreInstall spawned opener => sr=\(srOpen)")
+        DispatchQueue.main.async {
+            if let url = URL(string: trollURL) {
+                UIApplication.shared.open(url)
+            }
+        }
     }
 
     /// POST /spawnroot-test：以 root（persona 99）spawn /usr/bin/id，验证 persona-mgmt 生效（方案A 阶段1冒烟）

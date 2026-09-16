@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# 发布 latest Release 需要写仓库权限（App 内远程更新的下载源）
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build .app + .ipa (ad-hoc signed)
@@ -115,3 +119,20 @@ jobs:
         with:
           name: Kline-unsigned-app
           path: ./build/Build/Products/Release-iphoneos/Kline.app
+
+      # App 内远程更新的下载源：维护单一 latest Release（tag=latest）。
+      # 首次 create，之后 --clobber 覆盖 IPA 并刷新说明，避免删除重建的竞态；
+      # Release 说明写入构建号（run number），App 端经 GET /releases/latest 解析出"最新版"，
+      # 稳定下载地址：https://github.com/SunChuquin/Kline/releases/latest/download/Kline.ipa（公开免鉴权）
+      - name: Publish latest build to GitHub Release
+        run: |
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest ./Kline.ipa --clobber
+            gh release edit latest --title "CI Build #${GITHUB_RUN_NUMBER}" \
+              --notes "Build #${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7}"
+          else
+            gh release create latest ./Kline.ipa --title "CI Build #${GITHUB_RUN_NUMBER}" \
+              --notes "Build #${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7}"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
