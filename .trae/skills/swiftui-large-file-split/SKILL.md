@@ -58,6 +58,7 @@ description: "ORCHESTRATOR for SwiftUI/iOS large-file split tasks. Invoke when u
 
 ## 调度纪律
 - 每阶段结束把**结论**（非过程）写回主线：地图表格、分域方案、每轮 CI 结果
+- **提交/构建/部署一律调用 `kline-build-deploy` skill**：前台一条命令运行 `TrollRestore/build_and_deploy.py` 跑到终态（timeout 拉满 600000），禁止 run_in_background + 另起 sleep/轮询等待；按退出码决策表分支（exit 1 修码重跑、exit 6 凭 run_id 续跑）
 - 任何阶段发现任务实际是"目录重组"而非"单文件拆分"→ 切换 `swift-split-reorganize`
 - 全部轮次完成后执行 `swift-split-verify` 的自更新协议：本次实战的新坑/更优做法回写到**对应碎片**（坑归哪个阶段就更新哪个碎片），本调度器只在决策树/判据变化时更新
 - 碎片更新以 `skill: <摘要>` 单独提交，与代码提交分离
