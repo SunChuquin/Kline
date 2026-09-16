@@ -108,8 +108,8 @@ extension KlineChartView {
                 } else if drag.dragMode == .pan {
                     let delta = value.translation.width - drag.lastPanWidth
                     drag.lastPanWidth = value.translation.width
-                    // 惯性意图：只记录最后移动时间与本帧水平增量（方向用），抬手时只看停顿，不做速度拟合
-                    drag.markPanMove(deltaX: delta)
+                    // 记录轨迹（停顿计时 + 末段/峰值速度比较 + 净滑动距离）
+                    drag.markPanMove(deltaX: delta, totalX: value.translation.width)
                     // 亚像素平滑平移：先累计像素偏移，累计满一根K线间距才进位移动窗口，保证缓慢拖动也平滑跟手
                     panOffset += delta
                     // 到达数据边界时最多滑出屏幕宽度 1/10 的空白，避免把 K 线拖出大片空白
@@ -127,14 +127,10 @@ extension KlineChartView {
                 // 松开后 startPrefetch 会因 token 仍在（任务在跑）而直接跳过，不会重复启动
             }
             .onEnded { value in
-                // 惯性判定：仅「主图区平移拖动」抬手时触发；不看速度，只看抬手前有没有停住。
+                // 惯性判定：仅「主图区平移拖动」抬手时触发；四条件（停顿/距离/末段同向/末段未明显减速）见 releaseDirection。
                 // 光标拖动（dragMode == .none）、副图滑动切换、垂直缩放均不产生惯性。
                 let wasPan = drag.dragMode == .pan
-                let flingDir: CGFloat = drag.releaseDirection(isPanGesture: wasPan, source: "单指")
-                // 系统运动预测交叉验证：停住抬手时预测余量≈0，甩动抬手时显著（基于内核触摸时间戳，不受主线程积压影响）
-                let transX = value.translation.width
-                let predX = value.predictedEndTranslation.width
-                DebugLogger.shared.log("[惯性判定] 系统预测：实际累计=\(String(format: "%.1f", transX)) 预测终态=\(String(format: "%.1f", predX)) 预测余量=\(String(format: "%.1f", predX - transX))")
+                let flingDir: CGFloat = drag.releaseDirection(isPanGesture: wasPan, width: width, source: "单指")
                 let endStartMain = isInPanel(value.startLocation.y, mainTop, mainBottom)
                 DebugLogger.shared.log("[惯性手势] 抬手 pan=\(wasPan) 方向=\(flingDir) 起点主图=\(endStartMain) menu=\(menuIsOpen) frozen=\(isLinkedFrozenView) 光标=\(selectedIndex != nil) 副图滑动=\(swipeFeedback != nil) endOffset=\(endOffset) maxOffset=\(max(0, sortedData.count - count)) panOffset=\(String(format: "%.1f", panOffset)) count=\(count) data=\(sortedData.count)")
                 drag.beginLogged = false
@@ -175,9 +171,9 @@ extension KlineChartView {
                 // 平移/缩放会改变可见窗口，指标裁剪区间需跟随；这里无条件重算一次。
                 // 无窗口变化（如轻点）时裁剪区间缓存键不变，直接复用缓存，开销几乎为零
                 drag.needsRefreshAfterDrag = false
-                // 甩动直接抬手（抬手前没停住）→ 启动横向惯性滑动：沿最后移动方向匀速
+                // 四条件全部满足的甩动抬手 → 启动横向惯性滑动：沿滑动主方向匀速
                 // 滑行 2 秒、走 2 屏K线，到点（或撞到数据边界）直接停在对齐位置。
-                // 停住再抬手：不启动惯性，维持原行为（panOffset 立即对齐归零）。
+                // 停顿/短距微调/末段减速或反向回位：不启动惯性（panOffset 立即对齐归零）。
                 // 惯性期间平移推进与本 pan 分支同构；对齐归零/重算/预取延迟到惯性结束。
                 if startPanInertia(direction: flingDir, width: width, candleSpacing: candleSpacing) { return }
                 panOffset = 0
@@ -342,8 +338,9 @@ extension KlineChartView {
     /// 双指手势中：质心横向位移 dx → 平移（锚点K线随双指移动）；缩放 scale → 围绕锚点缩放
     func handleTwoFingerChange(scale: CGFloat, centroidDeltaX: CGFloat, width: CGFloat) {
         guard drag.twoFingerActive else { return }
-        // 惯性意图：与单指同源记录最后移动时间/方向（纯缩放 deltaX=0 时不刷新）
-        drag.markPanMove(deltaX: centroidDeltaX)
+        // 记录轨迹（与单指同源；纯缩放 deltaX=0 时不刷新不计轨迹）
+        drag.twoFingerTravelX += centroidDeltaX
+        drag.markPanMove(deltaX: centroidDeltaX, totalX: drag.twoFingerTravelX)
         // 平移：锚点屏幕位置随双指质心整体横向位移移动
         zoomAnchorOffset += centroidDeltaX
         // 缩放：围绕锚点缩放（锚点K线保持在同一屏幕位置）
@@ -369,8 +366,8 @@ extension KlineChartView {
         zoomAnchorIndex = nil
         zoomAnchorOffset = 0
         drag.twoFingerActive = false
-        // 与单指同一判定：只看抬手前有没有停住，方向取最后质心移动方向
-        let dir = drag.releaseDirection(isPanGesture: true, source: "双指")
+        // 与单指同一判定（停顿/距离/末段同向/末段未明显减速），方向取滑动主方向
+        let dir = drag.releaseDirection(isPanGesture: true, width: width, source: "双指")
         drag.resetPanIntent()
         // 联动冻结视图（非来源同周期）不产生惯性
         if !isLinkedFrozenView {
