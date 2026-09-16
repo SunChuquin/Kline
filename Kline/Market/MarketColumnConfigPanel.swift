@@ -226,9 +226,10 @@ struct MarketColumnConfigPanel: View {
 
     /// 表格冻结卡片组：第 1 列恒冻结（不可取消），第 2/3 列可开关。
     /// 冻结为连续前 N 列（frozenCount 1~3）：打开第 3 列自动带上第 2 列；
-    /// 关闭第 2 列连带解除第 3 列。列名取当前渲染列顺序（与表格实际冻结一致）。
+    /// 关闭第 2 列连带解除第 3 列。列名取「草稿」的渲染列顺序，
+    /// 这样在表头设置里拖动/显隐字段时，这里的列名会即时跟随（不必先点完成保存）
     private var frozenConfigSection: some View {
-        let renderCols = MarketTableRow.renderedColumns(for: page, config: configStore)
+        let renderCols = MarketTableRow.renderedColumns(draft: draft.columns)
         return Section {
             // 第 1 列：恒冻结，开关置灰不可操作
             if renderCols.count >= 1 {

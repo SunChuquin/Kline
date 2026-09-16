@@ -155,8 +155,12 @@ final class MarketConfigStore: ObservableObject {
     /// 返回可见列数组（按配置顺序过滤），保证字段顺序与用户设置一致
     /// 固定列（代码/名称）不受 visible 影响，恒可见
     func visibleColumns(for page: MarketConfigPage) -> [MarketColumnPref] {
-        let c = config(for: page)
-        return c.columns.filter { ($0.visible || $0.field.isFixedColumn) && $0.field.isConfigurable }
+        Self.visibleColumns(in: config(for: page).columns)
+    }
+
+    /// 由一份列配置筛出可见列（固定列恒可见）：store 与设置面板的「草稿预览」共用同一规则
+    static func visibleColumns(in columns: [MarketColumnPref]) -> [MarketColumnPref] {
+        columns.filter { ($0.visible || $0.field.isFixedColumn) && $0.field.isConfigurable }
     }
 
     func sortRule(for page: MarketConfigPage) -> MarketSortRule? {

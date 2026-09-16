@@ -89,6 +89,12 @@ struct MarketTableRow: View {
         renderColumns(config.visibleColumns(for: page))
     }
 
+    /// 由「未保存的草稿列配置」算渲染列：表头设置面板里边改边看（如冻结列名）时用，
+    /// 保证与保存后表格的真实列顺序一致
+    static func renderedColumns(draft columns: [MarketColumnPref]) -> [ColumnLayout] {
+        renderColumns(MarketConfigStore.visibleColumns(in: columns))
+    }
+
     /// 某列第一次超过「默认宽 ± 阈值」前，不写入覆盖值（保持 widthOverride = nil，可随默认宽联动）
     static func shouldClearOverride(_ width: CGFloat, col: ColumnLayout) -> Bool {
         let base = col.isNameCode ? mergedDefaultWidth : colW
