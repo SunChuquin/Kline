@@ -39,6 +39,14 @@ enum GitHubUpdateService {
         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String).flatMap(Int.init)
     }
 
+    /// 下载产物落地路径：沙盒 Documents/Downloads/Kline.ipa（App 容器内必然可写）。
+    /// 与 USB 部署链路 /install-local(scope=sandbox) 及本地更新页 shareIPA 的
+    /// `/sandbox/Downloads` 一致；不要写公共 Downloads（跨容器 rename 会 EPERM）。
+    static var targetIpaPath: String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+        return docs + "/Downloads/Kline.ipa"
+    }
+
     /// 查询最新 release。completion 在主线程回调：(info, errorMessage) 互斥，主线程无需再切。
     static func fetchLatestRelease(completion: @escaping (GitHubReleaseInfo?, String?) -> Void) {
         var req = URLRequest(url: latestReleaseURL, timeoutInterval: 15)
@@ -78,15 +86,14 @@ enum GitHubUpdateService {
         }.resume()
     }
 
-    /// 下载最新 IPA 到公共 Downloads（/var/mobile/Media/Downloads/Kline.ipa，no-sandbox 可写）。
+    /// 下载最新 IPA 到沙盒 Documents/Downloads（App 容器内，必然可写）。
     /// progress 在主线程回调 0~1；completion:(sizeBytes, errorMessage) 互斥，主线程回调。
     static func downloadLatestIPA(progress: @escaping (Double) -> Void,
                                   completion: @escaping (Int64?, String?) -> Void) {
-        let downloadsDir = "/var/mobile/Media/Downloads"
-        let target = "\(downloadsDir)/Kline.ipa"
-        if !FileManager.default.fileExists(atPath: downloadsDir) {
-            try? FileManager.default.createDirectory(
-                atPath: downloadsDir, withIntermediateDirectories: true)
+        let target = targetIpaPath
+        let parent = (target as NSString).deletingLastPathComponent
+        if !FileManager.default.fileExists(atPath: parent) {
+            try? FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
         }
         if FileManager.default.fileExists(atPath: target) {
             try? FileManager.default.removeItem(atPath: target)
@@ -107,7 +114,14 @@ enum GitHubUpdateService {
                     return
                 }
                 do {
-                    try FileManager.default.moveItem(at: tmp, to: URL(fileURLWithPath: target))
+                    // tmp（CFNetwork 临时文件）与目标同在 App 容器内，rename 应成功；极端情况退回拷贝
+                    let targetURL = URL(fileURLWithPath: target)
+                    do {
+                        try FileManager.default.moveItem(at: tmp, to: targetURL)
+                    } catch {
+                        try FileManager.default.copyItem(at: tmp, to: targetURL)
+                        try? FileManager.default.removeItem(at: tmp)   // 拷贝成功后清理临时文件
+                    }
                     let size = (try? FileManager.default.attributesOfItem(atPath: target))?[.size] as? Int64 ?? 0
                     completion(size, nil)
                 } catch {

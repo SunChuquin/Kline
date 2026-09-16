@@ -364,10 +364,11 @@ struct LocalUpdateView: View {
             }
             let sizeText = size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "?"
             self.ghMessage = "✅ 已下载 \(sizeText)，正在拉起 TrollStore 安装..."
-            // 与 /install-local 同一链路：KlineHTTP 本地供 IPA + opener 装完自动打开新版
+            // 与 /install-local(scope=sandbox)、shareIPA 同一链路：
+            // KlineHTTP /sandbox/Downloads 供 IPA + opener 装完自动打开新版（沙盒路径，避开公共目录写权限）
             KlineHTTPServer.shared.start()
-            let trollURL = KlineHTTPServer.trollStoreInstallURL(
-                localFile: "Kline.ipa", port: KlineHTTPServer.shared.port)
+            let dlURL = "http://127.0.0.1:\(KlineHTTPServer.shared.port)/sandbox/Downloads/Kline.ipa"
+            let trollURL = "apple-magnifier://install?url=\(dlURL.percentEncodedForQuery)"
             KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
             self.ghMessage += "\n(弹「在 TrollStore 中打开？」→ 打开 → Install；装完自动回到新版)"
         }
