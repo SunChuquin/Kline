@@ -130,11 +130,6 @@ struct MarketColumnConfigPanel: View {
         _draft = State(initialValue: configStore.config(for: page))
     }
 
-    /// 固定列字段（代码/名称）：置顶、恒显示，不参与显隐与拖动
-    private var fixedFields: [MarketField] {
-        MarketField.fixedColumns.filter { f in draft.columns.contains { $0.field == f } }
-    }
-
     /// 表头设置里可显隐、可拖动排序的字段（固定列之外的其余可配置列）
     private var movableFields: [MarketField] {
         draft.columns.map(\.field).filter { $0.isConfigurable && !$0.isFixedColumn }
@@ -161,9 +156,8 @@ struct MarketColumnConfigPanel: View {
         draft.columns = newCols
     }
 
-    /// 表头设置单行：固定列（代码/名称）开关置灰、无拖动手柄
+    /// 表头设置单行：字段名 + （可筛选字段的）筛选按钮 + 显隐开关
     private func fieldRow(field: MarketField, col: Binding<MarketColumnPref>) -> some View {
-        let isFixed = field.isFixedColumn
         return HStack(spacing: 8) {
             Text(field.title)
                 .font(.system(size: 15))
@@ -186,10 +180,9 @@ struct MarketColumnConfigPanel: View {
                     )
                 )
             }
-            Toggle("", isOn: isFixed ? Binding.constant(true) : col.visible)
+            Toggle("", isOn: col.visible)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .disabled(isFixed)
         }
         .frame(minHeight: 36)
         .zIndex(openFilterField == field ? 100 : 0)
@@ -326,12 +319,15 @@ struct MarketColumnConfigPanel: View {
 
                     // === 卡片组 3：表头设置（原表头配置功能） ===
                     Section {
-                        // 固定列（代码/名称）：恒显示且置顶 → 单独成组，无拖动手柄、开关置灰
-                        ForEach(fixedFields, id: \.self) { f in
-                            if let col = columnBinding(for: f) {
-                                fieldRow(field: f, col: col)
-                            }
+                        // 固定列（代码/名称）：表格里本就是合并单元格 → 面板内合成一行「名称/代码」，
+                        // 无显隐开关、无拖动手柄，仅作说明
+                        HStack(spacing: 8) {
+                            Text("名称/代码")
+                                .font(.system(size: 15))
+                                .lineLimit(1)
+                            Spacer()
                         }
+                        .frame(minHeight: 36)
                         // 其余可配置列：可显隐、可拖动排序（只在固定列之后的范围内重排）
                         ForEach(movableFields, id: \.self) { f in
                             if let col = columnBinding(for: f) {
@@ -346,7 +342,7 @@ struct MarketColumnConfigPanel: View {
                     } footer: {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("• 拖动右侧手柄调整列顺序，开关控制显示/隐藏")
-                            Text("• 代码/名称恒显示且固定在最前，不可隐藏或拖动")
+                            Text("• 名称/代码恒显示且固定在最前，不可隐藏或拖动")
                             Text("• 数值字段可设置范围筛选，多字段同时生效（取交集）")
                             Text("• 点击表头切换排序：降→升→取消（三击循环）")
                         }
