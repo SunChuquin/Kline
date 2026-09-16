@@ -44,19 +44,23 @@ final class DragState {
         twoFingerTravelX = 0
     }
 
-    /// 追加速度采样，仅保留最近 ~0.1s 窗口
+    /// 追加速度采样，仅保留最近 ~0.25s 窗口。
+    /// 注意：mini 4 上拖动每帧触发 SwiftUI body 求值 + Canvas 重绘，主线程负载使
+    /// onChanged 事件实际间隔约 70~90ms（~12Hz，远低于 60Hz），窗口必须按这个
+    /// 真机事件率设置，否则拟合窗口内凑不够 2 个点会把高速甩动误判为 v=0。
     func appendFlingSample(x: CGFloat) {
         let now = CACurrentMediaTime()
         flingSamples.append((now, x))
-        while flingSamples.count > 2, now - flingSamples[0].t > 0.1 { flingSamples.removeFirst() }
-        if flingSamples.count > 32 { flingSamples.removeFirst(flingSamples.count - 32) }
+        while flingSamples.count > 2, now - flingSamples[0].t > 0.25 { flingSamples.removeFirst() }
+        if flingSamples.count > 16 { flingSamples.removeFirst(flingSamples.count - 16) }
     }
 
-    /// 抬手速度估计（px/s，右为正）：最近 0.07s 内最多 4 个采样点对 (t, x) 做
+    /// 抬手速度估计（px/s，右为正）：最近 0.2s 内最多 5 个采样点对 (t, x) 做
     /// 最小二乘线性拟合，取斜率。惯性行为本身为固定匀速（不沿用该速度大小），
     /// 此值只用于两件事：① 是否超过阈值触发惯性；② 惯性方向（符号）。
     /// 多点拟合仅为抑制单点触摸抖动造成的误触发/误判向。
-    /// 采样过期（>0.1s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
+    /// 真机事件间隔 70~90ms，0.2s 窗口稳定覆盖 2~3 个点；2 点时即取两点斜率。
+    /// 采样过期（>0.25s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
     func flingVelocity() -> CGFloat {
         let now = CACurrentMediaTime()
         // 最近 8 个采样点 dump（相对末点的毫秒偏移:累计位移px），用于排查事件频率/间隔
@@ -71,7 +75,7 @@ final class DragState {
             return 0
         }
         let ageMs = (now - last.t) * 1000
-        guard ageMs <= 100 else {
+        guard ageMs <= 250 else {
             DebugLogger.shared.log("[惯性采样] v=0 原因=末点过期 ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
             return 0
         }
@@ -81,13 +85,13 @@ final class DragState {
         }
         var pts: [(t: Double, x: Double)] = []
         for s in flingSamples.reversed() {
-            if last.t - s.t > 0.07 { break }
+            if last.t - s.t > 0.2 { break }
             pts.append((s.t, Double(s.x)))
-            if pts.count >= 4 { break }
+            if pts.count >= 5 { break }
         }
         pts.reverse()
         guard pts.count >= 2 else {
-            DebugLogger.shared.log("[惯性采样] v=0 原因=0.07s窗口内仅1点（末两事件间隔>70ms？） ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
+            DebugLogger.shared.log("[惯性采样] v=0 原因=0.2s窗口内仅1点（事件极端稀疏？） ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
             return 0
         }
         let n = Double(pts.count)
