@@ -34,7 +34,17 @@ Kline 项目（Windows 写码 / GitHub Actions 构建 / TrollStore 零触碰部�
 
 ## 闭环命令（强制要求：使用前台阻塞方式执行）
 
-`python c:\Users\sunck\home\projects\ios\TrollRestore\build_and_deploy.py "<提交描述>"`
+`python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "<提交描述>"`
+
+### 退出码 7：GitHub API 轮询连试 3 次仍失败（瞬时网络故障）
+
+[build_and_deploy.py](c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py) 轮询 run 状态时若遇瞬时网络故障（如 `TLS handshake timeout`），
+自动间隔 5s 重试，连试 3 次仍失败即返回 **退出码 7**。此时构建尚未结束/结论未知，**不代表代码存在编译错误**：
+先 `gh run view <run_id>` / `gh run watch <run_id>` 确认 run 结论——
+- 仍 `in_progress`：继续等待后复查；
+- `failure`：按正常构建失败流程处理（`gh run view <id> --log-failed`）；
+- `success`：部署助手会自动轮询到该 run 并部署；如需立即部署，直接重新运行闭环命令
+  （无新改动时换用 `POST :5052/notify {"run_id": ...}` 续跑）。
 
 ## 提交规范
 
