@@ -712,6 +712,14 @@ struct KlineChartView: View {
             // 否则任务会继续向「共享的副图模型」写曲线，与切换后的新视图抢写，
             // 导致副图曲线错位/变空。其它周期由后台 prefetchOtherPeriod 独立补齐
             computation.prefetchToken = nil
+            // 同时终止惯性滑动：CADisplayLink 持有动画器 target，不终止会随悬空闭包
+            // 继续写已销毁视图的 @State（白耗帧且可能掩盖新视图的初始状态）
+            cancelPanInertia()
+        }
+        .onChange(of: sortedData.count) { _ in
+            // 数据刷新（实时K线追加/历史预取落盘等）：终止惯性——动画器闭包持有旧的
+            // 数据副本，边界钳制（sortedData.count - count）会与新数据失真
+            cancelPanInertia()
         }
         .onChange(of: selectedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")

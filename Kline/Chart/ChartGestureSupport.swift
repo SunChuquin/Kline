@@ -29,6 +29,38 @@ final class DragState {
     var twoFingerActive = false
     /// 联动非来源小周期（范围框）视图中：正在拖动纯本地「第二个十字光标」
     var secondCursorDragging = false
+    /// 双指质心累计横向位移（惯性速度采样用，双指开始时清零）
+    var twoFingerTravelX: CGFloat = 0
+    /// 惯性滑动速度采样：(时间戳, 水平累计位移)。单指 pan / 双指平移时持续追加
+    var flingSamples: [(t: Double, x: CGFloat)] = []
+    /// 进行中的横向惯性滑动动画器（nil = 无）
+    var momentum: ChartMomentumAnimator? = nil
+
+    /// 开始一段新的平移（单指模式切换为 .pan / 双指开始）：清空速度采样
+    func resetFlingSamples() {
+        flingSamples.removeAll(keepingCapacity: true)
+        twoFingerTravelX = 0
+    }
+
+    /// 追加速度采样，仅保留最近 ~0.12s 窗口
+    func appendFlingSample(x: CGFloat) {
+        let now = CACurrentMediaTime()
+        flingSamples.append((now, x))
+        while flingSamples.count > 2, now - flingSamples[0].t > 0.12 { flingSamples.removeFirst() }
+        if flingSamples.count > 32 { flingSamples.removeFirst(flingSamples.count - 32) }
+    }
+
+    /// 抬手速度（px/s，右为正）：最近 0.1s 窗口的水平平均速度。
+    /// 采样过期（>0.12s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
+    func flingVelocity() -> CGFloat {
+        let now = CACurrentMediaTime()
+        guard let last = flingSamples.last, now - last.t <= 0.12, flingSamples.count >= 2 else { return 0 }
+        var first = flingSamples[0]
+        for s in flingSamples where now - s.t <= 0.1 { first = s; break }
+        let dt = last.t - first.t
+        guard dt > 0.004 else { return 0 }
+        return CGFloat((last.x - first.x) / dt)
+    }
 }
 
 // MARK: - 双指手势（UIKit）
