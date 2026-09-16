@@ -23,7 +23,7 @@ import QuartzCore
 /// 每帧位移按绝对时间 s(t) - s(t-帧) 计算，不依赖固定帧率，掉帧不产生漂移。
 final class ChartMomentumAnimator: NSObject {
     /// 触发惯性的最低抬手速度（px/s）：低于该值不惯性，抬手直接对齐停止
-    static let minVelocity: CGFloat = 100
+    static let minVelocity: CGFloat = 10
     /// 惯性固定时长（s）
     static let fixedDuration: Double = 2.0
     /// 惯性固定滑行距离（屏幕数）
