@@ -42,24 +42,40 @@ final class DragState {
         twoFingerTravelX = 0
     }
 
-    /// 追加速度采样，仅保留最近 ~0.12s 窗口
+    /// 追加速度采样，仅保留最近 ~0.1s 窗口
     func appendFlingSample(x: CGFloat) {
         let now = CACurrentMediaTime()
         flingSamples.append((now, x))
-        while flingSamples.count > 2, now - flingSamples[0].t > 0.12 { flingSamples.removeFirst() }
+        while flingSamples.count > 2, now - flingSamples[0].t > 0.1 { flingSamples.removeFirst() }
         if flingSamples.count > 32 { flingSamples.removeFirst(flingSamples.count - 32) }
     }
 
-    /// 抬手速度（px/s，右为正）：最近 0.1s 窗口的水平平均速度。
-    /// 采样过期（>0.12s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
+    /// 抬手瞬时末速度（px/s，右为正）：最近 0.07s 内最多 4 个采样点对 (t, x) 做
+    /// 最小二乘线性拟合，取斜率。相比固定长窗口平均速度，短窗口拟合逼近手指抬手瞬间
+    /// 的真实末速度（甩手末期通常已在减速），惯性初速与手指速度连续，松手不窜不顿；
+    /// 多点拟合同步抑制单点触摸抖动。
+    /// 采样过期（>0.1s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
     func flingVelocity() -> CGFloat {
         let now = CACurrentMediaTime()
-        guard let last = flingSamples.last, now - last.t <= 0.12, flingSamples.count >= 2 else { return 0 }
-        var first = flingSamples[0]
-        for s in flingSamples where now - s.t <= 0.1 { first = s; break }
-        let dt = last.t - first.t
-        guard dt > 0.004 else { return 0 }
-        return CGFloat((last.x - first.x) / dt)
+        guard let last = flingSamples.last, now - last.t <= 0.1, flingSamples.count >= 2 else { return 0 }
+        var pts: [(t: Double, x: Double)] = []
+        for s in flingSamples.reversed() {
+            if last.t - s.t > 0.07 { break }
+            pts.append((s.t, Double(s.x)))
+            if pts.count >= 4 { break }
+        }
+        pts.reverse()
+        guard pts.count >= 2 else { return 0 }
+        let n = Double(pts.count)
+        let t0 = pts[0].t
+        var st = 0.0, sx = 0.0, stt = 0.0, stx = 0.0
+        for p in pts {
+            let ti = p.t - t0
+            st += ti; sx += p.x; stt += ti * ti; stx += ti * p.x
+        }
+        let denom = stt - st * st / n
+        guard denom > 1e-6 else { return 0 }
+        return CGFloat((stx - sx * st / n) / denom)
     }
 }
 
