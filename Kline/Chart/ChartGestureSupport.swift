@@ -29,90 +29,56 @@ final class DragState {
     var twoFingerActive = false
     /// 联动非来源小周期（范围框）视图中：正在拖动纯本地「第二个十字光标」
     var secondCursorDragging = false
-    /// 双指质心累计横向位移（惯性速度采样用，双指开始时清零）
-    var twoFingerTravelX: CGFloat = 0
-    /// 惯性滑动速度采样：(时间戳, 水平累计位移)。单指 pan / 双指平移时持续追加
-    var flingSamples: [(t: Double, x: CGFloat)] = []
+    /// 惯性判定不做速度采样，只看「抬手前手指有没有停住」：
+    /// 最后一次平移 onChanged 的时间戳；0 = 本次手势尚未发生平移
+    var lastPanMoveTime: CFTimeInterval = 0
+    /// 最后一次水平增量（带符号，右正左负）：仅用于决定惯性方向
+    var lastPanDeltaX: CGFloat = 0
     /// 进行中的横向惯性滑动动画器（nil = 无）
     var momentum: ChartMomentumAnimator? = nil
     /// 调试用：本次手势是否已记录起点日志（onEnded 复位）
     var beginLogged = false
 
-    /// 开始一段新的平移（单指模式切换为 .pan / 双指开始）：清空速度采样
-    func resetFlingSamples() {
-        flingSamples.removeAll(keepingCapacity: true)
-        twoFingerTravelX = 0
+    /// 抬手前允许的最大停顿（s）：最后一次移动 → 抬手 ≤ 该值 = 甩动抬手 → 惯性；
+    /// 超过 = 滑到位置停住再抬手 → 不惯性。
+    /// 真机拖动事件正常间隔约 70~90ms，取 0.2s 与连续移动拉开余量；主动停住看盘
+    /// 一般 ≥0.3s，两类动作据此可靠区分。
+    static let flingIdleLimit: CFTimeInterval = 0.2
+
+    /// 开始一段新的平移（单指模式切换为 .pan / 双指开始）：清空抬手意图状态
+    func resetPanIntent() {
+        lastPanMoveTime = 0
+        lastPanDeltaX = 0
     }
 
-    /// 追加速度采样，仅保留最近 ~0.25s 窗口。
-    /// 注意：mini 4 上拖动每帧触发 SwiftUI body 求值 + Canvas 重绘，主线程负载使
-    /// onChanged 事件实际间隔约 70~90ms（~12Hz，远低于 60Hz），窗口必须按这个
-    /// 真机事件率设置，否则拟合窗口内凑不够 2 个点会把高速甩动误判为 v=0。
-    func appendFlingSample(x: CGFloat) {
-        let now = CACurrentMediaTime()
-        flingSamples.append((now, x))
-        while flingSamples.count > 2, now - flingSamples[0].t > 0.25 { flingSamples.removeFirst() }
-        if flingSamples.count > 16 { flingSamples.removeFirst(flingSamples.count - 16) }
+    /// 记录一次平移推进（单指 pan 的 delta / 双指质心横向增量同源调用）。
+    /// deltaX=0（双指纯缩放）不刷新移动时间，避免「捏住停顿」被误判成持续移动。
+    func markPanMove(deltaX: CGFloat) {
+        guard deltaX != 0 else { return }
+        lastPanMoveTime = CACurrentMediaTime()
+        lastPanDeltaX = deltaX
     }
 
-    /// 抬手速度估计（px/s，右为正）：最近 0.2s 内最多 5 个采样点对 (t, x) 做
-    /// 最小二乘线性拟合，取斜率。惯性行为本身为固定匀速（不沿用该速度大小），
-    /// 此值只用于两件事：① 是否超过阈值触发惯性；② 惯性方向（符号）。
-    /// 多点拟合仅为抑制单点触摸抖动造成的误触发/误判向。
-    /// 真机事件间隔 70~90ms，0.2s 窗口稳定覆盖 2~3 个点；2 点时即取两点斜率。
-    /// 采样过期（>0.25s 未更新——缓慢拖动后停住再抬手）返回 0，不触发惯性。
-    func flingVelocity() -> CGFloat {
-        let now = CACurrentMediaTime()
-        // 最近 8 个采样点 dump（相对末点的毫秒偏移:累计位移px），用于排查事件频率/间隔
-        func dumpSamples() -> String {
-            guard let last = flingSamples.last else { return "[]" }
-            return "[" + flingSamples.suffix(8).map {
-                String(format: "%.0fms@%.1f", ($0.t - last.t) * 1000, Double($0.x))
-            }.joined(separator: " ") + "]"
-        }
-        guard let last = flingSamples.last else {
-            DebugLogger.shared.log("[惯性采样] v=0 原因=无采样点（本次手势从未进入 pan 分支）")
+    /// 抬手意图判定：返回惯性方向（+1 右 / −1 左），0 = 不惯性。
+    /// 不看滑动速度、不看事件频率，只看「最后一次移动距抬手多久」：
+    /// 甩动直接抬手（≤flingIdleLimit）→ 惯性；停住再抬手 → 立即对齐停止。
+    /// - Parameter isPanGesture: 单指传 dragMode == .pan；双指平移传 true
+    /// - Parameter source: 日志来源标记（单指/双指）
+    @discardableResult
+    func releaseDirection(isPanGesture: Bool, source: String) -> CGFloat {
+        guard isPanGesture else { return 0 }
+        guard lastPanMoveTime > 0 else {
+            DebugLogger.shared.log("[惯性判定] 不惯性 原因=本次无平移记录 (\(source))")
             return 0
         }
-        let ageMs = (now - last.t) * 1000
-        guard ageMs <= 250 else {
-            DebugLogger.shared.log("[惯性采样] v=0 原因=末点过期 ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
+        let idle = CACurrentMediaTime() - lastPanMoveTime
+        if idle > Self.flingIdleLimit {
+            DebugLogger.shared.log("[惯性判定] 不惯性 原因=停住\(String(format: "%.0f", idle * 1000))ms后抬手（>\(Int(Self.flingIdleLimit * 1000))ms） (\(source))")
             return 0
         }
-        guard flingSamples.count >= 2 else {
-            DebugLogger.shared.log("[惯性采样] v=0 原因=总采样点<2 ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
-            return 0
-        }
-        var pts: [(t: Double, x: Double)] = []
-        for s in flingSamples.reversed() {
-            if last.t - s.t > 0.2 { break }
-            pts.append((s.t, Double(s.x)))
-            if pts.count >= 5 { break }
-        }
-        pts.reverse()
-        guard pts.count >= 2 else {
-            DebugLogger.shared.log("[惯性采样] v=0 原因=0.2s窗口内仅1点（事件极端稀疏？） ageMs=\(String(format: "%.1f", ageMs)) n=\(flingSamples.count) \(dumpSamples())")
-            return 0
-        }
-        let n = Double(pts.count)
-        let t0 = pts[0].t
-        var st = 0.0, sx = 0.0, stt = 0.0, stx = 0.0
-        for p in pts {
-            let ti = p.t - t0
-            st += ti; sx += p.x; stt += ti * ti; stx += ti * p.x
-        }
-        let denom = stt - st * st / n
-        guard denom > 1e-6 else {
-            DebugLogger.shared.log("[惯性采样] v=0 原因=时间戳重合 \(dumpSamples())")
-            return 0
-        }
-        let v = CGFloat((stx - sx * st / n) / denom)
-        // 末两点瞬时斜率作对照，识别拟合窗口跨度过大导致的低估
-        let spanMs = (pts.last!.t - pts[0].t) * 1000
-        let tailV: CGFloat = pts.count >= 2 && pts[pts.count - 1].t > pts[pts.count - 2].t
-            ? CGFloat((pts[pts.count - 1].x - pts[pts.count - 2].x) / (pts[pts.count - 1].t - pts[pts.count - 2].t)) : 0
-        DebugLogger.shared.log("[惯性采样] v=\(String(format: "%.0f", Double(v))) 末两点=\(String(format: "%.0f", Double(tailV))) n=\(flingSamples.count) pts=\(pts.count) ageMs=\(String(format: "%.1f", ageMs)) spanMs=\(String(format: "%.1f", spanMs)) \(dumpSamples())")
-        return v
+        let dir: CGFloat = lastPanDeltaX >= 0 ? 1 : -1
+        DebugLogger.shared.log("[惯性判定] 甩动抬手 idle=\(String(format: "%.0f", idle * 1000))ms 方向=\(dir > 0 ? "右" : "左") (\(source))")
+        return dir
     }
 }
 

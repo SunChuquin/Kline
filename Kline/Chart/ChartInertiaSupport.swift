@@ -3,9 +3,9 @@
 //  Kline
 //
 //  K线主图横向惯性滑动：CADisplayLink 驱动的**固定匀速直线**动画。
-//  规则刻意简单，只有两种结果：
-//  - 不惯性：抬手速度低于阈值（慢速拖动），立即对齐停止；
-//  - 惯性：一旦触发，行为完全固定——沿抬手方向以「一屏/秒」匀速滑行，
+//  触发不看速度、不做采样，只看「手指滑动后有没有停住再抬起」（见 DragState.releaseDirection）：
+//  - 不惯性：滑到位置停住再抬手，立即对齐停止；
+//  - 惯性：滑动后不停顿直接抬手——沿最后移动方向以「一屏/秒」匀速滑行，
 //    2 秒走 2 个屏幕的K线数，到点直接停在对齐的K线位置；
 //    与甩手力度、缩放级别均无关。途中撞到数据边界就立即停（无过冲、无回弹）。
 //
@@ -22,8 +22,6 @@ import QuartzCore
 /// 位移 s(t) = v·t（v 为带符号常量速度，右正左负），t ∈ [0, fixedDuration]。
 /// 每帧位移按绝对时间 s(t) - s(t-帧) 计算，不依赖固定帧率，掉帧不产生漂移。
 final class ChartMomentumAnimator: NSObject {
-    /// 触发惯性的最低抬手速度（px/s）：低于该值不惯性，抬手直接对齐停止
-    static let minVelocity: CGFloat = 10
     /// 惯性固定时长（s）
     static let fixedDuration: Double = 2.0
     /// 惯性固定滑行距离（屏幕数）
@@ -80,20 +78,19 @@ final class ChartMomentumAnimator: NSObject {
 
 extension KlineChartView {
 
-    /// 抬手启动横向惯性滑动。返回是否启动（false = 速度不足/前方无K线空间等，调用方走原对齐路径）。
+    /// 抬手启动横向惯性滑动。返回是否启动（false = 非甩动抬手/前方无K线空间等，调用方走原对齐路径）。
     ///
+    /// - Parameter direction: 惯性方向 +1（右）/ −1（左），0 = 不惯性（由 DragState.releaseDirection 给出）。
     /// 一旦触发行为固定：速度 = ±1 屏宽/秒（即 2 秒走 2 屏K线），与甩手力度、缩放级别无关；
     /// 为保证停在整数根K线上，速度会按抬手时的亚像素残差做不可察觉的等比修正；
     /// 途中 endOffset 到数据边界则立即停，无过冲、无回弹。
     @discardableResult
-    func startPanInertia(velocity velocityIn: CGFloat, width: CGFloat, candleSpacing: CGFloat, source: String = "单指") -> Bool {
+    func startPanInertia(direction dirIn: CGFloat, width: CGFloat, candleSpacing: CGFloat, source: String = "单指") -> Bool {
         cancelPanInertia()
+        // dirIn == 0 = 停住再抬手/非平移手势：不惯性（原因已由 releaseDirection 记录）
+        guard dirIn != 0 else { return false }
         if menuIsOpen {
             DebugLogger.shared.log("[惯性启动] 未启动 原因=菜单打开 (\(source))")
-            return false
-        }
-        if abs(velocityIn) < ChartMomentumAnimator.minVelocity {
-            DebugLogger.shared.log("[惯性启动] 未启动 原因=速度不足 |v|=\(String(format: "%.1f", Double(velocityIn))) < 阈值\(ChartMomentumAnimator.minVelocity) (\(source))")
             return false
         }
         if candleSpacing <= 0 {
@@ -107,7 +104,7 @@ extension KlineChartView {
 
         let sp = candleSpacing
         let maxEndOffset = max(0, sortedData.count - count)
-        let sgn: CGFloat = velocityIn >= 0 ? 1 : -1
+        let sgn: CGFloat = dirIn > 0 ? 1 : -1
         // 沿运动方向还剩多少根K线可走；连一根都没有则不惯性（调用方立即对齐）
         let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
         if candlesAhead < 1 {
@@ -124,7 +121,7 @@ extension KlineChartView {
             return false
         }
         let v = sgn * travel / CGFloat(ChartMomentumAnimator.fixedDuration)
-        DebugLogger.shared.log("[惯性启动] ✅启动 方向=\(sgn > 0 ? "右" : "左") 固定v=\(String(format: "%.0f", Double(abs(v))))px/s 抬手v=\(String(format: "%.0f", Double(velocityIn))) travel=\(String(format: "%.0f", travel))px 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset) (\(source))")
+        DebugLogger.shared.log("[惯性启动] ✅启动 方向=\(sgn > 0 ? "右" : "左") 固定v=\(String(format: "%.0f", Double(abs(v))))px/s travel=\(String(format: "%.0f", travel))px 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset) (\(source))")
 
         var stoppedByBoundary = false
         let animator = ChartMomentumAnimator()
