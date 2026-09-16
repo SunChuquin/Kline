@@ -221,28 +221,29 @@ struct MarketColumnConfigPanel: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // 顶部栏
-                HStack(spacing: 12) {
-                    Button("取消") { dismiss() }
-                        .foregroundColor(.secondary)
-                    Spacer()
+                // 顶部栏：标题用 ZStack 绝对居中，避免左右按钮宽度不等导致偏左
+                ZStack {
                     Text("行情表设置")
                         .font(.system(size: 16, weight: .semibold))
-                    Spacer()
-                    Button("重置") {
-                        draft = MarketConfigStore.defaultConfig()
-                    }
-                    .foregroundColor(.orange)
-                    Button(action: {
-                        var saved = draft
-                        // 冻结列数做范围收敛（1~3），防止异常值写入
-                        saved.frozenCount = min(3, max(1, saved.frozenCount))
-                        configStore.update(page, config: saved)
-                        dismiss()
-                    }) {
-                        Text("完成")
-                            .foregroundColor(.blue)
-                            .font(.system(size: 16, weight: .bold))
+                    HStack(spacing: 12) {
+                        Button("取消") { dismiss() }
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button("重置") {
+                            draft = MarketConfigStore.defaultConfig()
+                        }
+                        .foregroundColor(.orange)
+                        Button(action: {
+                            var saved = draft
+                            // 冻结列数做范围收敛（1~3），防止异常值写入
+                            saved.frozenCount = min(3, max(1, saved.frozenCount))
+                            configStore.update(page, config: saved)
+                            dismiss()
+                        }) {
+                            Text("完成")
+                                .foregroundColor(.blue)
+                                .font(.system(size: 16, weight: .bold))
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
