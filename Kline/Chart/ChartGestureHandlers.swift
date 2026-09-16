@@ -131,6 +131,10 @@ extension KlineChartView {
                 // 光标拖动（dragMode == .none）、副图滑动切换、垂直缩放均不产生惯性。
                 let wasPan = drag.dragMode == .pan
                 let flingDir: CGFloat = drag.releaseDirection(isPanGesture: wasPan, source: "单指")
+                // 系统运动预测交叉验证：停住抬手时预测余量≈0，甩动抬手时显著（基于内核触摸时间戳，不受主线程积压影响）
+                let transX = value.translation.width
+                let predX = value.predictedEndTranslation.width
+                DebugLogger.shared.log("[惯性判定] 系统预测：实际累计=\(String(format: "%.1f", transX)) 预测终态=\(String(format: "%.1f", predX)) 预测余量=\(String(format: "%.1f", predX - transX))")
                 let endStartMain = isInPanel(value.startLocation.y, mainTop, mainBottom)
                 DebugLogger.shared.log("[惯性手势] 抬手 pan=\(wasPan) 方向=\(flingDir) 起点主图=\(endStartMain) menu=\(menuIsOpen) frozen=\(isLinkedFrozenView) 光标=\(selectedIndex != nil) 副图滑动=\(swipeFeedback != nil) endOffset=\(endOffset) maxOffset=\(max(0, sortedData.count - count)) panOffset=\(String(format: "%.1f", panOffset)) count=\(count) data=\(sortedData.count)")
                 drag.beginLogged = false

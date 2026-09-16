@@ -34,6 +34,8 @@ final class DragState {
     var lastPanMoveTime: CFTimeInterval = 0
     /// 最后一次水平增量（带符号，右正左负）：仅用于决定惯性方向
     var lastPanDeltaX: CGFloat = 0
+    /// 调试用：上一次 markPanMove 的处理时刻（打事件间隔时间线）
+    var lastMarkT: CFTimeInterval = 0
     /// 进行中的横向惯性滑动动画器（nil = 无）
     var momentum: ChartMomentumAnimator? = nil
     /// 调试用：本次手势是否已记录起点日志（onEnded 复位）
@@ -49,13 +51,21 @@ final class DragState {
     func resetPanIntent() {
         lastPanMoveTime = 0
         lastPanDeltaX = 0
+        lastMarkT = 0
     }
 
     /// 记录一次平移推进（单指 pan 的 delta / 双指质心横向增量同源调用）。
     /// deltaX=0（双指纯缩放）不刷新移动时间，避免「捏住停顿」被误判成持续移动。
     func markPanMove(deltaX: CGFloat) {
-        guard deltaX != 0 else { return }
-        lastPanMoveTime = CACurrentMediaTime()
+        guard deltaX != 0 else {
+            DebugLogger.shared.log("[惯性轨迹]   dx=0（本帧无水平增量，不刷新停顿计时）")
+            return
+        }
+        let now = CACurrentMediaTime()
+        let gapMs = lastMarkT > 0 ? (now - lastMarkT) * 1000 : -1
+        DebugLogger.shared.log("[惯性轨迹] 距上一事件\(gapMs < 0 ? "—" : String(format: "%.0fms", gapMs)) dx=\(String(format: "%.1f", deltaX))")
+        lastMarkT = now
+        lastPanMoveTime = now
         lastPanDeltaX = deltaX
     }
 
