@@ -170,7 +170,7 @@ private let prefetchMa10Color = Color.orange
 private let prefetchBollColor = Color(red: 0.4, green: 0.4, blue: 0.9)
 
 private func prefetchMaColor(_ i: Int) -> Color {
-    let colors = [Color.black.opacity(0.75), Color.orange, Color.pink, Color.blue,
+    let colors = [Color(.label).opacity(0.75), Color.orange, Color.pink, Color.blue,
                   Color(red: 0.9, green: 0.6, blue: 0), Color.teal, Color.purple, Color.brown]
     return colors[i % colors.count]
 }

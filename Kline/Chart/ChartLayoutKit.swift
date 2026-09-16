@@ -13,7 +13,7 @@ extension KlineChartView {
     func mainChart(width: CGFloat, candleSpacing: CGFloat, height: CGFloat,
                            secondCursorIndex: Int? = nil) -> some View {
         ZStack(alignment: .topLeading) {
-            Color.white
+            Color(.systemBackground)
             mainCanvas(width: width, candleSpacing: candleSpacing, height: height)
                 .offset(x: panOffset)
             // 主图价格坐标：网格线仍为5条，数值只显示顶底两个（中间三个不显示）；
@@ -151,7 +151,7 @@ extension KlineChartView {
             return values
         }
         return ZStack(alignment: .topLeading) {
-            Color.white
+            Color(.systemBackground)
             SubChartCanvas(slice: slice, candleSpacing: candleSpacing, height: height,
                            curves: m.curves.enumerated().map { li, line in
                                CanvasCurve(color: line.color, values: subCurveValues(line, lineIndex: li),

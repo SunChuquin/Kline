@@ -86,7 +86,7 @@ struct LinkedKlineTile: View {
     var body: some View {
         Group {
             if currentLoading {
-                Color.white
+                Color(.systemBackground)
                     .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
             } else if let series = currentSeries {
                 kline(series: series)
@@ -265,7 +265,7 @@ struct LinkedKlineTile: View {
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     /// 渲染单个 K 线图，并把副图二搜索栏作为 overlay 覆盖
@@ -422,7 +422,7 @@ struct LinkedKlineTile: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -430,7 +430,7 @@ struct LinkedKlineTile: View {
                     .font(.system(size: 14))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.gray.opacity(0.12))
+                    .background(Color(.tertiarySystemFill))
                     .cornerRadius(6)
                     .focused($searchFocused)
                     .autocorrectionDisabled()
@@ -446,7 +446,7 @@ struct LinkedKlineTile: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .background(Color.white)
+            .background(Color(.systemBackground))
             // 实测输入行底部的全局 y（屏幕坐标），供 Full 键盘避让计算
             .background(
                 GeometryReader { g in
@@ -465,7 +465,7 @@ struct LinkedKlineTile: View {
                     .animation(.easeInOut(duration: kbDock.lastAnimDuration), value: searchResultMaxHeight)
             }
         }
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .transition(.opacity)
     }
 
@@ -538,7 +538,7 @@ struct SearchContentView: View {
             HStack {
                 Text(item.name)
                     .font(.system(size: 14))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                 Spacer()
                 Text(item.displayCode)

@@ -280,7 +280,7 @@ struct KlineDetailView: View {
                     chartArea
                 }
                 .frame(maxHeight: .infinity)
-                .background(Color.white.ignoresSafeArea())
+                .background(Color(.systemBackground).ignoresSafeArea())
 
                 // 「边」开启时：可拖分隔线覆盖层从信息栏顶部开始
                 // （工具栏已独立，故固定偏移 = 顶部2留白 + 工具栏行实测高 + 分隔线0.5）
@@ -355,7 +355,7 @@ struct KlineDetailView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -363,7 +363,7 @@ struct KlineDetailView: View {
                     .font(.system(size: 14))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.gray.opacity(0.12))
+                    .background(Color(.tertiarySystemFill))
                     .cornerRadius(6)
                     .focused($searchFocused)
                     .autocorrectionDisabled()
@@ -379,7 +379,7 @@ struct KlineDetailView: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .background(Color.white)
+            .background(Color(.systemBackground))
             // 实测输入行底部全局 y（屏幕坐标，与 LinkedKlineTile 同款、不加任何补偿）
             .background(
                 GeometryReader { g in
@@ -405,7 +405,7 @@ struct KlineDetailView: View {
                 .animation(.easeInOut(duration: kbDock.lastAnimDuration), value: searchResultMaxHeight)
             }
         }
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .transition(.opacity)
     }
 
@@ -485,9 +485,9 @@ struct KlineDetailView: View {
             }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: compact ? 13 : 16, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .frame(width: backSize, height: btnH)
-                    .background(Color.gray.opacity(0.12))
+                    .background(Color(.tertiarySystemFill))
                     .cornerRadius(corner)
             }
             .accessibilityIdentifier("kline.backButton")
@@ -496,7 +496,7 @@ struct KlineDetailView: View {
             if !compact {
                 Text(effectiveName)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                 Text(effectiveCode)
                     .font(.system(size: 11))
@@ -506,10 +506,10 @@ struct KlineDetailView: View {
                 // 联动多图：返回按钮右侧显示「联动模式 - 主标的名称 + 标的代码」，样式对齐单图态（名称黑色加粗、代码灰色小字）
                 (Text("联动模式 - ")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 + Text(item.name)
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 + Text("  \(item.code)")
                     .font(.system(size: 10))
                     .foregroundColor(.gray))
@@ -625,7 +625,7 @@ struct KlineDetailView: View {
         .padding(.leading, hPad)
         .padding(.trailing, hPad)
         .padding(.vertical, vPad)
-        .background(Color.white)
+        .background(Color(.systemBackground))
         // 测量工具栏行高度（供 infoBarTopOffset 对齐）
         .background(
             GeometryReader { proxy in
@@ -649,7 +649,7 @@ struct KlineDetailView: View {
                 HStack(spacing: 6) {
                     Text(item.name)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                         .lineLimit(1)
                     Text(item.displayCode)
                         .font(.system(size: 11))
@@ -666,7 +666,7 @@ struct KlineDetailView: View {
             }
         }
         .frame(width: width, height: dualLink ? 22 : nil, alignment: .leading)
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .overlay(
             // 信息栏与主图之间的分界线
             Rectangle()
@@ -763,7 +763,7 @@ struct KlineDetailView: View {
 
     private var chartArea: some View {
         ZStack {
-            Color.white
+            Color(.systemBackground)
 
             Group {
                 if drillInLoading || (drillIn != nil && drillInSeries == nil && !isLoading) {
@@ -872,7 +872,7 @@ struct KlineDetailView: View {
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     /// 设置面板：底部 3/4 高度，点击顶部 1/4 区域关闭
@@ -993,7 +993,7 @@ struct KlineDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .top)
             .frame(height: geometry.size.height * 0.75)
-            .background(Color.white)
+            .background(Color(.systemBackground))
             // 只圆顶部两角：底边贴紧物理屏幕底边后，底部若保留圆角，两角会露出深色遮罩
             .clipShape(TopRoundedCornerRect(radius: 16))
             // ⚠️ 固定高度面板直接加 .ignoresSafeArea 无效（扩展容器内居中、只下移半个 inset），
@@ -1012,7 +1012,7 @@ struct KlineDetailView: View {
             HStack {
                 Text(title)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 Spacer()
                 Button(action: onClose) {
                     Text("完成")
@@ -1057,7 +1057,7 @@ struct KlineDetailView: View {
             HStack(spacing: 8) {
                 Text(title)
                     .font(.system(size: 16))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 Spacer(minLength: 12)
                 Text(value)
                     .font(.system(size: 15))
@@ -1081,7 +1081,7 @@ struct KlineDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 16))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 Text(subtitle)
                     .font(.system(size: 12))
                     .foregroundColor(.gray)
@@ -1184,7 +1184,7 @@ struct KlineDetailView: View {
         }
         .frame(maxHeight: .infinity)
         .frame(maxWidth: .infinity)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     private func loadData() {
@@ -1304,7 +1304,7 @@ private struct LinkedInfoCell: View {
                 .layoutPriority(2)
             Text(name)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
                 .layoutPriority(1)

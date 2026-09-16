@@ -107,7 +107,7 @@ extension KlineChartView {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: height)
-            .background(Color.white)
+            .background(Color(.systemBackground))
         }
         .frame(height: height)
     }
@@ -204,7 +204,7 @@ extension KlineChartView {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: height)
-            .background(Color.white)
+            .background(Color(.systemBackground))
         }
         .frame(height: height)
     }
@@ -327,23 +327,23 @@ extension KlineChartView {
                 let prev = prevClose(of: pinnedIndex)
                 let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
                 HStack(spacing: 6) {
-                    axisKV("开", String(format: "%.2f", item.open), .black)
+                    axisKV("开", String(format: "%.2f", item.open), .primary)
                     axisKV("收", String(format: "%.2f", item.close), item.isUp ? upColor : downColor)
                     axisKV("高", String(format: "%.2f", item.high), upColor)
                     axisKV("低", String(format: "%.2f", item.low), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
                     if !hideQuoteTurnover {
-                        axisKV("额", item.formattedTurnover, .black)
+                        axisKV("额", item.formattedTurnover, .primary)
                     }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .background(Color.white.opacity(0.95))
+                .background(Color(.systemBackground).opacity(0.95))
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .frame(width: width, height: height)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     /// 是否显示指标覆盖进度条：后台正确计算尚未覆盖全部历史（非放大模式），算完（bgCoverageEnd 到末尾）后消失
@@ -386,13 +386,13 @@ extension KlineChartView {
                 let o = mir(item.open), c = mir(item.close), h = mir(item.high), l = mir(item.low)
                 let isUpMirror = mainMirrored ? !item.isUp : item.isUp
                 HStack(spacing: 6) {
-                    axisKV("开", String(format: "%.2f", o), .black)
+                    axisKV("开", String(format: "%.2f", o), .primary)
                     axisKV("收", String(format: "%.2f", c), isUpMirror ? upColor : downColor)
                     axisKV("高", String(format: "%.2f", h), upColor)
                     axisKV("低", String(format: "%.2f", l), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
                     if !hideQuoteTurnover {
-                        axisKV("额", item.formattedTurnover, .black)
+                        axisKV("额", item.formattedTurnover, .primary)
                     }
                 }
                 .padding(.horizontal, 8)
@@ -401,7 +401,7 @@ extension KlineChartView {
             }
         }
         .frame(width: width, height: height)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     /// 时间轴上紧凑的"标题:值"单元（标题灰色小字、值带色）

@@ -103,7 +103,7 @@ extension KlineChartView {
                                      secondLine: secondLineText.isEmpty ? nil : secondLineText,
                                      gapRanges: lineGap,
                                      bgColor: bgColor,
-                                     lineColor: compare != nil ? Color.blue : Color.black.opacity(0.45))
+                                     lineColor: compare != nil ? Color.blue : Color(.label).opacity(0.45))
                     .equatable()
                 // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
                 // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）。
@@ -156,7 +156,7 @@ extension KlineChartView {
             // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）；第二个光标蓝色、固定光标黑色
             let topCut = clampedAxisY(0, in: height) + 8
             let lineHeight = max(0, height - topCut)
-            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color.black.opacity(0.45)).frame(width: 1.0, height: lineHeight)
+            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color(.label).opacity(0.45)).frame(width: 1.0, height: lineHeight)
                 .position(x: xPosition, y: topCut + lineHeight / 2)
             // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
             // 第二个光标时第二行显示 两光标间振幅 / 最大回撤 / 最大上涨 / 涨幅；宽度按最宽一行（第二行）贴边判定

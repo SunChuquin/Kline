@@ -77,7 +77,7 @@ struct FormulaEditorView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(Color.gray.opacity(0.12)).cornerRadius(8)
             }
@@ -87,7 +87,7 @@ struct FormulaEditorView: View {
 
             Text("自定义指标")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
 
             Spacer()
 
@@ -97,14 +97,14 @@ struct FormulaEditorView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                     .frame(width: 34, height: 34)
                     .background(Color.gray.opacity(0.12)).cornerRadius(8)
             }
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color.white)
+        .background(Color(.systemBackground))
     }
 
     private var emptyView: some View {
@@ -126,7 +126,7 @@ struct FormulaEditorView: View {
                 .frame(width: 22, height: 6)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name)
-                    .font(.system(size: 15, weight: .medium)).foregroundColor(.black)
+                    .font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
                 Text(item.formula.replacingOccurrences(of: "\n", with: " "))
                     .font(.system(size: 11)).foregroundColor(.gray)
                     .lineLimit(1)
@@ -232,7 +232,7 @@ struct IndicatorEditSheet: View {
         VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Text("公式编辑器[\(displayName.isEmpty ? (indicator?.name ?? "新建指标") : displayName)]")
-                        .font(.system(size: 16, weight: .bold)).foregroundColor(.black)
+                        .font(.system(size: 16, weight: .bold)).foregroundColor(.primary)
                     Spacer(minLength: 4)
                     Button("全选") { inputController.selectAll() }
                         .font(.system(size: 12)).foregroundColor(.blue)
@@ -271,7 +271,7 @@ struct IndicatorEditSheet: View {
                         if !isSystemIndicator {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("名称").font(.system(size: 13, weight: .medium)).foregroundColor(.black)
+                                Text("名称").font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
                                 TextField("例如：双均线", text: $name)
                                     .font(.system(size: 14))
                                     .padding(.horizontal, 10).padding(.vertical, 8)
@@ -279,7 +279,7 @@ struct IndicatorEditSheet: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("作用域").font(.system(size: 13, weight: .medium)).foregroundColor(.black)
+                                Text("作用域").font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
                                 HStack(spacing: 8) {
                                     ForEach(IndicatorScope.allCases) { s in
                                         Button {
@@ -287,7 +287,7 @@ struct IndicatorEditSheet: View {
                                         } label: {
                                             Text(s.rawValue)
                                                 .font(.system(size: 12))
-                                                .foregroundColor(scope == s ? .white : .black)
+                                                .foregroundColor(scope == s ? .white : .primary)
                                                 .padding(.horizontal, 12).padding(.vertical, 6)
                                                 .background(scope == s ? Color.blue : Color(uiColor: .systemGray6))
                                                 .cornerRadius(6)
@@ -380,7 +380,7 @@ struct IndicatorEditSheet: View {
                         if let message = testMessage {
                             Text(message)
                                 .font(.system(size: 12))
-                                .foregroundColor(testError ? .red : .black)
+                                .foregroundColor(testError ? .red : .primary)
                                 .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background((testError ? Color.red : Color.green).opacity(0.1)).cornerRadius(6)
@@ -393,7 +393,7 @@ struct IndicatorEditSheet: View {
                 Color.clear.frame(height: 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white)
+        .background(Color(.systemBackground))
         // 表单贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
         .ignoresSafeArea(.container, edges: .bottom)
         .alert("存在修改未保存，是否取消修改？", isPresented: $showCancelConfirm) {
@@ -415,7 +415,7 @@ struct IndicatorEditSheet: View {
 
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundColor(.black)
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
             content()
         }
     }
@@ -492,7 +492,7 @@ struct IndicatorEditSheet: View {
                 .font(.system(size: 11))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundColor(selected ? .white : .black)
+                .foregroundColor(selected ? .white : .primary)
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .background(selected ? Color.blue : Color(uiColor: .systemGray6))
                 .cornerRadius(6)
@@ -509,7 +509,7 @@ struct IndicatorEditSheet: View {
                 .frame(maxWidth: .infinity)
                 .overlay(
                     RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                        .stroke(Color(.label).opacity(0.15), lineWidth: 1)
                 )
         }
     }
@@ -523,7 +523,7 @@ struct IndicatorEditSheet: View {
                 .font(.system(size: 12, design: .monospaced))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .background(Color(uiColor: .systemGray6)).cornerRadius(6)
         }
@@ -660,7 +660,7 @@ struct SystemIndicatorEditorContainer: View {
                         ForEach(mainIds, id: \.self) { mid in
                             Button(mid) { mainId = mid }
                                 .font(.system(size: 13, weight: mainId == mid ? .semibold : .regular))
-                                .foregroundColor(mainId == mid ? .white : .black)
+                                .foregroundColor(mainId == mid ? .white : .primary)
                                 .padding(.horizontal, 14).padding(.vertical, 7)
                                 .background(mainId == mid ? Color.blue : Color(uiColor: .systemGray6))
                                 .cornerRadius(6)
@@ -692,7 +692,7 @@ struct SystemIndicatorEditorContainer: View {
             )
             .id(id)
         }
-        .background(Color.white)
+        .background(Color(.systemBackground))
         // 表单贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
         .ignoresSafeArea(.container, edges: .bottom)
     }

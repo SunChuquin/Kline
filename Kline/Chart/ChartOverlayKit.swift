@@ -62,7 +62,7 @@ struct CrosshairLineOverlay: View, Equatable {
     var secondLine: String? = nil
     var gapRanges: [ClosedRange<CGFloat>]? = nil
     var bgColor: Color = Color(red: 0.35, green: 0.75, blue: 1.0)
-    var lineColor: Color = Color.black.opacity(0.45)
+    var lineColor: Color = Color(.label).opacity(0.45)
 
     /// 先算出横线需要绘制的非标签区间（合并重叠的标签区间后，取其余部分；无标签时整条）
     private var nonLabelSegments: [ClosedRange<CGFloat>] {
@@ -142,7 +142,7 @@ struct SubCursorVLine: View, Equatable {
     var body: some View {
         if let index, index >= startIndex, index <= endIndex {
             let xPosition = (CGFloat(index - startIndex) + 0.5) * candleSpacing
-            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color.black.opacity(0.45))
+            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color(.label).opacity(0.45))
                 .frame(width: 1.0, height: height)
                 .position(x: xPosition, y: height / 2)
         }
@@ -190,7 +190,7 @@ struct SwipeOverlay: View, Equatable {
                 let color: Color = reachable ? (ready ? Color.green : Color.white.opacity(0.9)) : Color.red
                 // 轨道（从中心向拖动方向延伸）
                 Capsule()
-                    .fill(Color.black.opacity(0.35))
+                    .fill(Color(.label).opacity(0.35))
                     .frame(width: dist, height: 6)
                     .position(x: cx + dir * dist / 2, y: height / 2)
                 // 阈值刻度线
@@ -234,9 +234,9 @@ struct SwipeDirectionArrow: View, Equatable {
     var body: some View {
         Image(systemName: can ? system : (system + ".circle"))
             .font(.system(size: 13, weight: .bold))
-            .foregroundColor(can ? (active ? Color.white : Color.black.opacity(0.35)) : Color.gray.opacity(0.25))
+            .foregroundColor(can ? (active ? Color.white : Color(.label).opacity(0.35)) : Color.gray.opacity(0.25))
             .frame(width: 22, height: 22)
-            .background(can ? Color.black.opacity(active ? 0.5 : 0.08) : Color.clear)
+            .background(can ? (active ? Color.black.opacity(0.5) : Color(.label).opacity(0.08)) : Color.clear)
             .clipShape(Circle())
     }
 }

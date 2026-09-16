@@ -23,7 +23,7 @@ extension KlineChartView {
                 content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(width: geometry.size.width, height: min(geometry.size.height * heightFraction, 660))
-            .background(Color.white)
+            .background(Color(.systemBackground))
             // 只圆顶部两角：底边贴紧物理屏幕底边后，底部若保留圆角，两角会露出深色遮罩
             .clipShape(TopRoundedCornerRect(radius: 16))
             // ⚠️ 固定高度面板直接加 .ignoresSafeArea 无效：扩展容器内默认居中放置，
@@ -106,7 +106,7 @@ extension KlineChartView {
                 Image(systemName: on ? "checkmark.square.fill" : "square")
                     .font(.system(size: 14))
                     .foregroundColor(on ? .blue : .gray.opacity(0.6))
-                Text(title).font(.system(size: 13)).foregroundColor(.black)
+                Text(title).font(.system(size: 13)).foregroundColor(.primary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
@@ -124,7 +124,7 @@ extension KlineChartView {
                     Image(systemName: activeCustomIndicator?.id == ind.id ? "checkmark.circle.fill" : "circle")
                         .foregroundColor(activeCustomIndicator?.id == ind.id ? .blue : .gray)
                     RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 14, height: 5)
-                    Text(ind.name).font(.system(size: 14)).foregroundColor(.black)
+                    Text(ind.name).font(.system(size: 14)).foregroundColor(.primary)
                 }
             }
             Spacer()
@@ -219,7 +219,7 @@ extension KlineChartView {
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundColor(selected ? .blue : .black)
+                .foregroundColor(selected ? .blue : .primary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(Color(uiColor: .systemGray6).opacity(selected ? 1 : 0.45))
@@ -245,7 +245,7 @@ extension KlineChartView {
                     Image(systemName: m.activeCustomID == ind.id ? "checkmark.circle.fill" : "circle")
                         .foregroundColor(m.activeCustomID == ind.id ? .blue : .gray)
                     RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 14, height: 5)
-                    Text(ind.name).font(.system(size: 14)).foregroundColor(.black)
+                    Text(ind.name).font(.system(size: 14)).foregroundColor(.primary)
                     if m.activeCustomID == ind.id {
                         Text("当前").font(.system(size: 10)).foregroundColor(.blue)
                     }
@@ -295,7 +295,7 @@ extension KlineChartView {
 
     func sheetHeader(title: String, onClose: @escaping () -> Void) -> some View {
         HStack {
-            Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.black)
+            Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.primary)
             Spacer()
             Button("重置内置指标") { editorUI.showResetBuiltinConfirm = true }
                 .font(.system(size: 13)).foregroundColor(.red)

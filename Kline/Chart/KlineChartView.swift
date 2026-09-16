@@ -288,14 +288,14 @@ struct KlineChartView: View {
     var upColor: Color { Color(red: 0.85, green: 0.16, blue: 0.16) }
     var downColor: Color { Color(red: 0.0, green: 0.55, blue: 0.35) }
     var gridColor: Color { Color.gray.opacity(0.22) }
-    var axisTextColor: Color { Color.black.opacity(0.55) }
+    var axisTextColor: Color { Color(.label).opacity(0.55) }
     private var bollColor: Color { Color(red: 0.4, green: 0.4, blue: 0.9) }
-    private var ma5Color: Color { Color.black.opacity(0.75) }
+    private var ma5Color: Color { Color(.label).opacity(0.75) }
     private var ma10Color: Color { Color.orange }
     private var ma20Color: Color { Color.pink }
 
     func maColor(_ i: Int) -> Color {
-        let colors = [Color.black.opacity(0.75), Color.orange, Color.pink, Color.blue,
+        let colors = [Color(.label).opacity(0.75), Color.orange, Color.pink, Color.blue,
                       Color(red: 0.9, green: 0.6, blue: 0), Color.teal, Color.purple, Color.brown]
         return colors[i % colors.count]
     }
@@ -669,7 +669,7 @@ struct KlineChartView: View {
                 notifyHasCursor()
             }
         }
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .onAppear {
             // 恢复联动持久化的缩放级别（.id 重建后 @State 已回到默认 100，这里写入保存值）
             if let saved = initialVisibleCount {
@@ -1078,7 +1078,8 @@ struct MainChartCanvas: View, Equatable {
         let bodyBottom = yPos(min(open, close), h: h)
         let rect = CGRect(x: x - candleWidth / 2, y: bodyTop, width: candleWidth, height: max(1, bodyBottom - bodyTop))
         if hollow && close >= open {
-            ctx.fill(Path(rect), with: .color(Color.white))
+            // 悬空蜡烛：内部填充画布底色（夜间自适应），只留描边
+            ctx.fill(Path(rect), with: .color(Color(.systemBackground)))
             ctx.stroke(Path(rect), with: .color(color), lineWidth: 1)
         } else {
             ctx.fill(Path(rect), with: .color(color))
@@ -1203,7 +1204,7 @@ struct IndicatorNameButton: View {
         } label: {
             Text(title)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(Color.gray.opacity(0.12)).cornerRadius(4)
         }
