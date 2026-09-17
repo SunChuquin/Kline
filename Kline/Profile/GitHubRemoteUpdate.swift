@@ -40,7 +40,7 @@ enum GitHubUpdateService {
     }
 
     /// 下载产物落地路径：沙盒 Documents/Downloads/Kline.ipa（App 容器内必然可写）。
-    /// 与 USB 部署链路 /install-local(scope=sandbox) 及本地更新页 shareIPA 的
+    /// 与 USB 部署链路 /install-local(scope=sandbox) 的
     /// `/sandbox/Downloads` 一致；不要写公共 Downloads（跨容器 rename 会 EPERM）。
     static var targetIpaPath: String {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
