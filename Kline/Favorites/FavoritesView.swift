@@ -130,8 +130,23 @@ struct FavoritesView: View {
 
     // MARK: - 顶部工具条
 
+    /// 顶部工具条图标按钮：统一 44x44 命中区。
+    /// 纯图标按钮若不加 frame，可点范围只有字形大小（约 16x19），真机上很难点中。
+    private func topIconButton(_ systemName: String, size: CGFloat = 16,
+                               color: Color = .secondary,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: size))
+                .foregroundColor(color)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var topBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             Text("自选")
                 .font(.system(size: 18, weight: .bold))
                 .accessibilityIdentifier("favorites.title")
@@ -162,6 +177,9 @@ struct FavoritesView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                // 胶囊外观不变，只把命中区撑到 44 高
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
             if currentGroup.kind == .formula, fav.groups.first(where: { $0.id == currentGroup.id })?.formula != nil {
                 Button {
@@ -171,37 +189,24 @@ struct FavoritesView: View {
                         .font(.system(size: 13))
                 }
                 .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .padding(.horizontal, 6)
+                .contentShape(Rectangle())
             }
-            Button {
+            topIconButton(showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal",
+                          color: showEditingMode ? .blue : .secondary) {
                 showEditingMode.toggle()
-            } label: {
-                Image(systemName: showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal")
-                    .foregroundColor(showEditingMode ? .blue : .secondary)
-                    .font(.system(size: 16))
             }
-            .buttonStyle(.plain)
-            Button {
+            topIconButton("slider.horizontal.3") {
                 showColumnPanel = true
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .foregroundColor(.secondary).font(.system(size: 16))
             }
-            .buttonStyle(.plain)
-            Button {
+            topIconButton("folder") {
                 showManageSheet = true
-            } label: {
-                Image(systemName: "folder")
-                    .foregroundColor(.secondary).font(.system(size: 16))
             }
-            .buttonStyle(.plain)
-            Button {
+            topIconButton("plus", size: 18, color: .blue) {
                 showAddSheet = true
-            } label: {
-                Image(systemName: "plus")
-                    .foregroundColor(.blue).font(.system(size: 18, weight: .bold))
             }
-            .buttonStyle(.plain)
-            .padding(.trailing, 12)
+            .padding(.trailing, 4)
         }
         .frame(height: 48)
         .background(Color(.systemBackground))
@@ -243,6 +248,10 @@ struct FavoritesView: View {
                                     .padding(.horizontal, 9)
                             }
                         }
+                        // 命中区补充：Tab 本身只有约 31pt 高（真机很难点中），
+                        // 纵向再补 7pt 到约 45pt；padding 加在 overlay 之外，避免下划线跟着下移
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
