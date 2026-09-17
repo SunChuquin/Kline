@@ -493,71 +493,69 @@ struct FavManageSheet: View {
     @ObservedObject var fav: FavoritesStore
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Button("取消") { dismiss() }.foregroundColor(.secondary)
-                    Spacer()
-                    Text("管理分组").font(.system(size: 16, weight: .semibold))
-                    Spacer()
-                    Button(action: { dismiss() }) {
-                        Text("完成").foregroundColor(.blue).fontWeight(.bold)
-                    }
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button("取消") { dismiss() }.foregroundColor(.secondary)
+                Spacer()
+                Text("管理分组").font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Text("完成").foregroundColor(.blue).fontWeight(.bold)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                Divider()
-
-                List {
-                    Section("分组顺序与显隐（长按拖动排序）") {
-                        ForEach(Array(fav.groups.enumerated()), id: \.element.id) { i, _ in
-                            let g = fav.groups[i]
-                            HStack(spacing: 10) {
-                                Image(systemName: g.kind == .manual ? "folder.fill" : "function")
-                                    .foregroundColor(g.kind == .manual ? .orange : .purple)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    TextField("分组名",
-                                              text: Binding(
-                                                get: { fav.groups[i].name },
-                                                set: { nv in fav.groups[i].name = nv }
-                                              ))
-                                        .onSubmit { fav.saveToDisk() }
-                                    HStack(spacing: 8) {
-                                        Text(g.kind == .manual ? "自定义" : "公式选股")
-                                            .font(.system(size: 11))
-                                            .padding(.horizontal, 6).padding(.vertical, 2)
-                                            .background(g.kind == .manual ? Color.orange.opacity(0.15) : Color.purple.opacity(0.15))
-                                            .foregroundColor(g.kind == .manual ? .orange : .purple)
-                                            .cornerRadius(4)
-                                        Text("\(g.manualMetaIDs.count) 只")
-                                            .font(.system(size: 11)).foregroundColor(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Toggle("", isOn: Binding(
-                                    get: { !fav.groups[i].isHidden },
-                                    set: { nv in
-                                        fav.groups[i].isHidden = !nv
-                                        fav.saveToDisk()
-                                    }
-                                )).labelsHidden()
-                            }
-                            .padding(.vertical, 2)
-                        }
-                        .onMove { from, to in
-                            fav.moveGroup(fromOffsets: from, toOffset: to)
-                        }
-                        .onDelete { idx in
-                            idx.forEach { i in
-                                fav.removeGroup(id: fav.groups[i].id)
-                            }
-                        }
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .environment(\.editMode, .constant(.active))
             }
-            .background(Color(.systemGroupedBackground))
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+
+            List {
+                Section("分组顺序与显隐（长按拖动排序）") {
+                    ForEach(Array(fav.groups.enumerated()), id: \.element.id) { i, _ in
+                        let g = fav.groups[i]
+                        HStack(spacing: 10) {
+                            Image(systemName: g.kind == .manual ? "folder.fill" : "function")
+                                .foregroundColor(g.kind == .manual ? .orange : .purple)
+                            VStack(alignment: .leading, spacing: 2) {
+                                TextField("分组名",
+                                          text: Binding(
+                                            get: { fav.groups[i].name },
+                                            set: { nv in fav.groups[i].name = nv }
+                                          ))
+                                    .onSubmit { fav.saveToDisk() }
+                                HStack(spacing: 8) {
+                                    Text(g.kind == .manual ? "自定义" : "公式选股")
+                                        .font(.system(size: 11))
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(g.kind == .manual ? Color.orange.opacity(0.15) : Color.purple.opacity(0.15))
+                                        .foregroundColor(g.kind == .manual ? .orange : .purple)
+                                        .cornerRadius(4)
+                                    Text("\(g.manualMetaIDs.count) 只")
+                                        .font(.system(size: 11)).foregroundColor(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { !fav.groups[i].isHidden },
+                                set: { nv in
+                                    fav.groups[i].isHidden = !nv
+                                    fav.saveToDisk()
+                                }
+                            )).labelsHidden()
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .onMove { from, to in
+                        fav.moveGroup(fromOffsets: from, toOffset: to)
+                    }
+                    .onDelete { idx in
+                        idx.forEach { i in
+                            fav.removeGroup(id: fav.groups[i].id)
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .environment(\.editMode, .constant(.active))
         }
+        .background(Color(.systemGroupedBackground))
         // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
         .ignoresSafeArea(.keyboard)
     }
@@ -578,55 +576,53 @@ struct FavAddGroupSheet: View {
     """
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Button("取消") { dismiss() }.foregroundColor(.secondary)
-                    Spacer()
-                    Text("新建分组").font(.system(size: 16, weight: .semibold))
-                    Spacer()
-                    Button(action: {
-                        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !cleanName.isEmpty else { return }
-                        switch kind {
-                        case .manual:
-                            fav.addGroup(.manual(name: cleanName))
-                        case .formula:
-                            fav.addGroup(.formula(name: cleanName, formula: formula))
-                        }
-                        dismiss()
-                    }) {
-                        Text("创建").foregroundColor(.blue).fontWeight(.bold)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button("取消") { dismiss() }.foregroundColor(.secondary)
+                Spacer()
+                Text("新建分组").font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button(action: {
+                    let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cleanName.isEmpty else { return }
+                    switch kind {
+                    case .manual:
+                        fav.addGroup(.manual(name: cleanName))
+                    case .formula:
+                        fav.addGroup(.formula(name: cleanName, formula: formula))
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    dismiss()
+                }) {
+                    Text("创建").foregroundColor(.blue).fontWeight(.bold)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                Divider()
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
 
-                Form {
-                    Section {
-                        TextField("分组名称（如：科技龙头）", text: $name)
-                            .font(.system(size: 16))
-                        Picker("分组类型", selection: $kind) {
-                            Text("自定义分组").tag(FavoritesGroupKind.manual)
-                            Text("指标公式自动分组").tag(FavoritesGroupKind.formula)
-                        }
-                        .pickerStyle(.segmented)
-                    } header: { Text("基本信息") }
+            Form {
+                Section {
+                    TextField("分组名称（如：科技龙头）", text: $name)
+                        .font(.system(size: 16))
+                    Picker("分组类型", selection: $kind) {
+                        Text("自定义分组").tag(FavoritesGroupKind.manual)
+                        Text("指标公式自动分组").tag(FavoritesGroupKind.formula)
+                    }
+                    .pickerStyle(.segmented)
+                } header: { Text("基本信息") }
 
-                    if kind == .formula {
-                        Section(header: Text("通达信选股公式")) {
-                            TextEditor(text: $formula)
-                                .font(.system(size: 13, design: .monospaced))
-                                .frame(minHeight: 180)
-                            Text("• 公式最近一条输出线的最新值 > 0 即视为命中该组\n• 保存后点击「刷新选股」开始后台跑全市场")
-                                .font(.footnote).foregroundColor(.secondary)
-                        }
+                if kind == .formula {
+                    Section(header: Text("通达信选股公式")) {
+                        TextEditor(text: $formula)
+                            .font(.system(size: 13, design: .monospaced))
+                            .frame(minHeight: 180)
+                        Text("• 公式最近一条输出线的最新值 > 0 即视为命中该组\n• 保存后点击「刷新选股」开始后台跑全市场")
+                            .font(.footnote).foregroundColor(.secondary)
                     }
                 }
             }
-            .background(Color(.systemGroupedBackground))
         }
+        .background(Color(.systemGroupedBackground))
         // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
         .ignoresSafeArea(.keyboard)
     }
@@ -650,48 +646,46 @@ struct FavFormulaEditorSheet: View {
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Button("取消") { dismiss() }.foregroundColor(.secondary)
-                    Spacer()
-                    Text("公式分组：\(group.name)")
-                        .font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                    Spacer()
-                    Button(action: {
-                        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !n.isEmpty else { return }
-                        if let idx = fav.groups.firstIndex(where: { $0.id == group.id }) {
-                            fav.groups[idx].name = n
-                            fav.groups[idx].formula = formula
-                            fav.groups[idx].cachedMatches = nil  // 旧结果作废
-                            fav.saveToDisk()
-                        }
-                        dismiss()
-                    }) {
-                        Text("保存").foregroundColor(.blue).fontWeight(.bold)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button("取消") { dismiss() }.foregroundColor(.secondary)
+                Spacer()
+                Text("公式分组：\(group.name)")
+                    .font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                Spacer()
+                Button(action: {
+                    let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !n.isEmpty else { return }
+                    if let idx = fav.groups.firstIndex(where: { $0.id == group.id }) {
+                        fav.groups[idx].name = n
+                        fav.groups[idx].formula = formula
+                        fav.groups[idx].cachedMatches = nil  // 旧结果作废
+                        fav.saveToDisk()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    dismiss()
+                }) {
+                    Text("保存").foregroundColor(.blue).fontWeight(.bold)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                Divider()
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
 
-                Form {
-                    Section(header: Text("分组名称")) {
-                        TextField("名称", text: $name)
-                    }
-                    Section(header: Text("选股公式（通达信语法）"),
-                            footer: Text("点击保存后会清空旧结果；回到自选页点「刷新选股」后台跑全市场，输出线最后一根值 > 0 即入选")) {
-                        TextEditor(text: $formula)
-                            .font(.system(size: 13, design: .monospaced))
-                            .frame(minHeight: 240)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.characters)
-                    }
+            Form {
+                Section(header: Text("分组名称")) {
+                    TextField("名称", text: $name)
+                }
+                Section(header: Text("选股公式（通达信语法）"),
+                        footer: Text("点击保存后会清空旧结果；回到自选页点「刷新选股」后台跑全市场，输出线最后一根值 > 0 即入选")) {
+                    TextEditor(text: $formula)
+                        .font(.system(size: 13, design: .monospaced))
+                        .frame(minHeight: 240)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.characters)
                 }
             }
-            .background(Color(.systemGroupedBackground))
         }
+        .background(Color(.systemGroupedBackground))
         // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
         .ignoresSafeArea(.keyboard)
     }

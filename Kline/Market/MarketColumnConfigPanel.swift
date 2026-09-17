@@ -278,108 +278,106 @@ struct MarketColumnConfigPanel: View {
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                // 顶部栏：标题用 ZStack 绝对居中，避免左右按钮宽度不等导致偏左
-                ZStack {
-                    Text("行情表设置")
-                        .font(.system(size: 16, weight: .semibold))
-                    HStack(spacing: 12) {
-                        Button("取消") { dismiss() }
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Button("重置") {
-                            draft = MarketConfigStore.defaultConfig()
-                        }
-                        .foregroundColor(.orange)
-                        Button(action: {
-                            var saved = draft
-                            // 冻结列数做范围收敛（1~3），防止异常值写入
-                            saved.frozenCount = min(3, max(1, saved.frozenCount))
-                            configStore.update(page, config: saved)
-                            dismiss()
-                        }) {
-                            Text("完成")
-                                .foregroundColor(.blue)
-                                .font(.system(size: 16, weight: .bold))
-                        }
+        VStack(spacing: 0) {
+            // 顶部栏：标题用 ZStack 绝对居中，避免左右按钮宽度不等导致偏左
+            ZStack {
+                Text("行情表设置")
+                    .font(.system(size: 16, weight: .semibold))
+                HStack(spacing: 12) {
+                    Button("取消") { dismiss() }
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("重置") {
+                        draft = MarketConfigStore.defaultConfig()
+                    }
+                    .foregroundColor(.orange)
+                    Button(action: {
+                        var saved = draft
+                        // 冻结列数做范围收敛（1~3），防止异常值写入
+                        saved.frozenCount = min(3, max(1, saved.frozenCount))
+                        configStore.update(page, config: saved)
+                        dismiss()
+                    }) {
+                        Text("完成")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 16, weight: .bold))
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-
-                Divider()
-
-                List {
-                    // === 卡片组 1：快捷操作（单元格宽度调整） ===
-                    quickActionSection
-
-                    // === 卡片组 2：表格冻结（冻结前 N 列，第 1 列恒冻结） ===
-                    frozenConfigSection
-
-                    // === 卡片组 3：表头设置（原表头配置功能） ===
-                    Section {
-                        // 固定列（代码/名称）：表格里本就是合并单元格 → 面板内合成一行「名称/代码」，
-                        // 无显隐开关、无拖动手柄，仅作说明
-                        HStack(spacing: 8) {
-                            Text("名称/代码")
-                                .font(.system(size: 15))
-                                .lineLimit(1)
-                            Spacer()
-                        }
-                        .frame(minHeight: 36)
-                        // 其余可配置列：可显隐、可拖动排序（只在固定列之后的范围内重排）
-                        ForEach(movableFields, id: \.self) { f in
-                            if let col = columnBinding(for: f) {
-                                fieldRow(field: f, col: col)
-                            }
-                        }
-                        .onMove { from, to in
-                            applyMove(from: from, to: to)
-                        }
-                    } header: {
-                        Text("表头设置")
-                    } footer: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("• 拖动右侧手柄调整列顺序，开关控制显示/隐藏")
-                            Text("• 名称/代码恒显示且固定在最前，不可隐藏或拖动")
-                            Text("• 数值字段可设置范围筛选，多字段同时生效（取交集）")
-                            Text("• 点击表头切换排序：降→升→取消（三击循环）")
-                        }
-                        .font(.footnote)
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .environment(\.editMode, .constant(.active))
             }
-            .background(Color(.systemGroupedBackground))
-            // 容器层浮层：屏幕居中显示多选筛选面板，避免被 List 行裁剪
-            .overlay {
-                if let field = openFilterField,
-                   let opts = field.rangeFilterOptions,
-                   let col = draft.columns.first(where: { $0.field == field }) {
-                    ZStack {
-                        Color.black.opacity(0.25)
-                            .ignoresSafeArea()
-                            .onTapGesture { openFilterField = nil }
-                        FilterOptionsPanel(
-                            options: opts,
-                            filterLabels: Binding(
-                                get: { col.filterLabels },
-                                set: { nv in
-                                    // 显式拷贝数组再写回，确保 @State draft 正确触发更新
-                                    var newCols = draft.columns
-                                    if let idx = newCols.firstIndex(where: { $0.field == field }) {
-                                        newCols[idx].filterLabels = nv
-                                        draft.columns = newCols
-                                    }
-                                }
-                            ),
-                            onClose: { openFilterField = nil }
-                        )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            List {
+                // === 卡片组 1：快捷操作（单元格宽度调整） ===
+                quickActionSection
+
+                // === 卡片组 2：表格冻结（冻结前 N 列，第 1 列恒冻结） ===
+                frozenConfigSection
+
+                // === 卡片组 3：表头设置（原表头配置功能） ===
+                Section {
+                    // 固定列（代码/名称）：表格里本就是合并单元格 → 面板内合成一行「名称/代码」，
+                    // 无显隐开关、无拖动手柄，仅作说明
+                    HStack(spacing: 8) {
+                        Text("名称/代码")
+                            .font(.system(size: 15))
+                            .lineLimit(1)
+                        Spacer()
                     }
-                    .zIndex(1000)
+                    .frame(minHeight: 36)
+                    // 其余可配置列：可显隐、可拖动排序（只在固定列之后的范围内重排）
+                    ForEach(movableFields, id: \.self) { f in
+                        if let col = columnBinding(for: f) {
+                            fieldRow(field: f, col: col)
+                        }
+                    }
+                    .onMove { from, to in
+                        applyMove(from: from, to: to)
+                    }
+                } header: {
+                    Text("表头设置")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("• 拖动右侧手柄调整列顺序，开关控制显示/隐藏")
+                        Text("• 名称/代码恒显示且固定在最前，不可隐藏或拖动")
+                        Text("• 数值字段可设置范围筛选，多字段同时生效（取交集）")
+                        Text("• 点击表头切换排序：降→升→取消（三击循环）")
+                    }
+                    .font(.footnote)
                 }
+            }
+            .listStyle(.insetGrouped)
+            .environment(\.editMode, .constant(.active))
+        }
+        .background(Color(.systemGroupedBackground))
+        // 容器层浮层：屏幕居中显示多选筛选面板，避免被 List 行裁剪
+        .overlay {
+            if let field = openFilterField,
+               let opts = field.rangeFilterOptions,
+               let col = draft.columns.first(where: { $0.field == field }) {
+                ZStack {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                        .onTapGesture { openFilterField = nil }
+                    FilterOptionsPanel(
+                        options: opts,
+                        filterLabels: Binding(
+                            get: { col.filterLabels },
+                            set: { nv in
+                                // 显式拷贝数组再写回，确保 @State draft 正确触发更新
+                                var newCols = draft.columns
+                                if let idx = newCols.firstIndex(where: { $0.field == field }) {
+                                    newCols[idx].filterLabels = nv
+                                    draft.columns = newCols
+                                }
+                            }
+                        ),
+                        onClose: { openFilterField = nil }
+                    )
+                }
+                .zIndex(1000)
             }
         }
     }
