@@ -48,7 +48,9 @@ struct LocalUpdateView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        // 视觉层级上限 = 2 层：页面底（L1）+ 本卡片（L2）。
+        // 卡内一律不再铺第二层底色，内容靠 Divider + 统一行式按钮区分层级。
+        VStack(spacing: 0) {
             // 标题行
             HStack {
                 Image(systemName: "arrow.triangle.2.circlepath")
@@ -60,167 +62,110 @@ struct LocalUpdateView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
+
+            Divider()
 
             // 本地服务连接状态（点击可重连；断开时显示红色）
             Button(action: reconnectServer) {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: serverOK ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundColor(serverOK ? .green : .red)
                     Text(serverOK ? "本地服务在线（点击检测）" : "本地服务离线（点击重连）")
-                        .font(.caption)
+                        .font(.system(size: 15))
                         .foregroundColor(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color(.tertiarySystemBackground))
-                .cornerRadius(6)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+
+            Divider()
 
             // 扫描按钮
-            Button(action: scanDownloads) {
-                HStack {
-                    if isScanning {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    Text(isScanning ? "扫描中..." : "扫描本地 IPA")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(8)
-            }
-            .disabled(isScanning)
+            actionRow(icon: "magnifyingglass",
+                      title: isScanning ? "扫描中..." : "扫描本地 IPA",
+                      busy: isScanning,
+                      action: scanDownloads)
+
+            Divider()
 
             // 扫描本地日志按钮（只显示文件信息，不读内容）
-            Button(action: scanLocalLog) {
-                HStack {
-                    Image(systemName: "doc.text.magnifyingglass")
-                    Text("扫描本地日志")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.teal.opacity(0.12))
-                .cornerRadius(8)
-            }
+            actionRow(icon: "doc.text.magnifyingglass",
+                      title: "扫描本地日志",
+                      action: scanLocalLog)
 
             // 日志扫描结果
-            if !logScanResult.isEmpty {
-                Text(logScanResult)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            infoText(logScanResult)
 
-            // 扫描结果列表
-            if !ipaFiles.isEmpty {
-                ForEach(ipaFiles) { file in
-                    IPACardView(file: file) {
-                        shareIPA(file)
-                    }
+            // 扫描结果列表：每个 IPA 一行（文件名 + 大小/日期 + 右侧安装）
+            ForEach(Array(ipaFiles.enumerated()), id: \.element.id) { index, file in
+                Divider()
+                IPARowView(file: file) {
+                    shareIPA(file)
                 }
+                if index == ipaFiles.count - 1 { Divider() }
             }
 
             // 扫描状态
-            if !scanResult.isEmpty {
-                Text(scanResult)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            infoText(scanResult)
+
+            Divider()
 
             // 远程更新（GitHub Release 最新构建）：免 USB，iPad 联网即可拉取 CI 最新 IPA 安装
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: "icloud.and.arrow.down")
-                        .foregroundColor(.purple)
-                    Text("远程更新（GitHub 最新构建）")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Text("当前 #\(GitHubUpdateService.currentBuildNumber.map(String.init) ?? "?")")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+            HStack {
+                Image(systemName: "icloud.and.arrow.down")
+                    .foregroundColor(.blue)
+                Text("远程更新（GitHub 最新构建）")
+                    .font(.system(size: 15))
+                Spacer()
+                Text("当前 #\(GitHubUpdateService.currentBuildNumber.map(String.init) ?? "?")")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
 
-                if !ghMessage.isEmpty {
-                    Text(ghMessage)
-                        .font(.caption)
-                        .foregroundColor(ghHasNewer ? .green : .secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            infoText(ghMessage, tint: ghHasNewer ? .green : nil)
 
-                HStack(spacing: 10) {
-                    Button(action: checkGitHubUpdate) {
-                        HStack {
-                            if ghChecking {
-                                ProgressView().scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                            }
-                            Text(ghChecking ? "检查中..." : "检查新版")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.purple.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                    .disabled(ghChecking)
+            actionRow(icon: "arrow.triangle.2.circlepath",
+                      title: ghChecking ? "检查中..." : "检查新版",
+                      busy: ghChecking,
+                      action: checkGitHubUpdate)
 
-                    Button(action: downloadAndInstallLatest) {
-                        HStack {
-                            if ghDownloading {
-                                ProgressView().scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "arrow.down.circle")
-                            }
-                            Text(ghDownloading ? "下载中..." : "下载并安装")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                    .disabled(ghDownloading)
-                }
+            Divider()
 
-                if ghDownloading {
+            actionRow(icon: "arrow.down.circle",
+                      title: ghDownloading ? "下载中..." : "下载并安装",
+                      busy: ghDownloading,
+                      action: downloadAndInstallLatest)
+
+            if ghDownloading {
+                VStack(alignment: .leading, spacing: 4) {
                     ProgressView(value: ghProgress)
                     Text("\(Int(ghProgress * 100))% · 下载完成后自动拉起 TrollStore")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .padding(.bottom, 10)
             }
-            .padding()
-            .background(Color(.tertiarySystemBackground))
-            .cornerRadius(8)
 
-            // 分隔线
             Divider()
 
-            // 权限自检
-            Button(action: checkEntitlements) {
-                HStack {
-                    Image(systemName: "shield.checkered")
-                    Text("权限自检（no-sandbox 验证）")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.orange.opacity(0.1))
-                .cornerRadius(8)
-            }
+            // 权限自检（非主流程入口：保留橙色与蓝色主操作区分）
+            actionRow(icon: "shield.checkered",
+                      title: "权限自检（no-sandbox 验证）",
+                      tint: .orange,
+                      action: checkEntitlements)
 
-            if !entitlementCheckResult.isEmpty {
-                Text(entitlementCheckResult)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            infoText(entitlementCheckResult)
         }
-        .padding()
         .background(Color(.secondarySystemBackground))
         .cornerRadius(12)
         .onAppear {
@@ -229,6 +174,50 @@ struct LocalUpdateView: View {
         // 回前台重新探测：服务器此时会自检并可能重建监听，界面要跟着显示真实结果
         .onChange(of: scenePhase) { phase in
             if phase == .active { refreshServerStatus() }
+        }
+    }
+
+    // MARK: - 卡内构建块（统一规格：无自有底色、行高 44、单一强调色）
+
+    /// 行式操作按钮：左图标 + 标题 + 右箭头（忙碌时右箭头换成转圈）
+    private func actionRow(icon: String, title: String, busy: Bool = false,
+                           tint: Color = .blue, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .frame(width: 22, alignment: .leading)
+                Text(title)
+                    .font(.system(size: 15))
+                Spacer(minLength: 8)
+                if busy {
+                    ProgressView().scaleEffect(0.8)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.gray.opacity(0.6))
+                }
+            }
+            .foregroundColor(tint)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+    }
+
+    /// 卡内结果/说明文本（统一缩进与字色；tint 仅用于“有新版本”这类语义强调）
+    @ViewBuilder
+    private func infoText(_ text: String, tint: Color? = nil) -> some View {
+        if !text.isEmpty {
+            Text(text)
+                .font(.caption)
+                .foregroundColor(tint ?? .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
         }
     }
 
@@ -453,47 +442,39 @@ struct IPAFileInfo: Identifiable {
     let modDate: Date
 }
 
-// MARK: - IPA 卡片视图
+// MARK: - IPA 文件行（卡内扁平行，无自有底色）
 
-struct IPACardView: View {
+struct IPARowView: View {
     let file: IPAFileInfo
     let onShare: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "app.badge")
-                    .foregroundColor(.blue)
+        HStack(spacing: 10) {
+            Image(systemName: "app.badge")
+                .font(.system(size: 15))
+                .foregroundColor(.blue)
+                .frame(width: 22, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(file.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-            }
-
-            HStack {
-                Text(formatSize(file.size))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text(formatDate(file.modDate))
-                    .font(.caption)
+                    .font(.system(size: 15))
+                    .lineLimit(1)
+                Text("\(formatSize(file.size)) · \(formatDate(file.modDate))")
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
-
+            Spacer(minLength: 8)
             Button(action: onShare) {
-                HStack {
-                    Image(systemName: "icloud.and.arrow.down")
-                    Text("安装到 TrollStore")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color.green.opacity(0.15))
-                .cornerRadius(6)
+                Text("安装")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 8)
+                    .frame(height: 30)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
-        .padding()
-        .background(Color(.tertiarySystemBackground))
-        .cornerRadius(8)
+        .padding(.horizontal, 16)
+        .frame(minHeight: 48)
     }
 
     private func formatSize(_ bytes: Int64) -> String {
