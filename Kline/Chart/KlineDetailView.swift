@@ -1037,11 +1037,12 @@ struct KlineDetailView: View {
     }
 
     /// 分组卡片：统一浅灰底 + 大圆角，内容垂直排列
+    /// 底色用语义色（等价 iOS 二级背景：浅色 #F2F2F7 / 深色 #1C1C1E），夜间自动跟随
     private func stGroupedCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             content()
         }
-        .background(Color(red: 0.95, green: 0.95, blue: 0.97))
+        .background(Color(.secondarySystemBackground))
         .cornerRadius(10)
         .padding(.horizontal, 16)
     }
