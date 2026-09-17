@@ -84,6 +84,10 @@ struct ContentView: View {
         // 另一侧贴紧物理屏幕边缘。行情/自选表格、K线页、底部导航栏、各覆盖层
         // 全部继承此根布局安全区；页面内禁止重复叠加（二次外扩会越过物理边缘）。
         .notchSideOnlySafeArea()
+        // 隐藏系统状态栏：Info.plist 已用 UIStatusBarHidden +
+        // UIViewControllerBasedStatusBarAppearance=false 做 app 级配置（主手段，全机型/全版本一致），
+        // 这里在根视图再叠一层 SwiftUI 声明，防止某代系统上 app 级配置被宿主控制器覆盖
+        .statusBarHidden(true)
     }
 
     // MARK: - 底部导航栏（VStack 底部固定段）
