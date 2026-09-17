@@ -3,6 +3,11 @@ name: CI Build App (unsigned + ad-hoc for TrollStore)
 on:
   push:
     branches: [ main ]
+    # 仅改动文档/设计/归档目录（.trae、archive、figma）时不触发云端构建
+    paths-ignore:
+      - '.trae/**'
+      - 'archive/**'
+      - 'figma/**'
   workflow_dispatch:
 
 # 发布 latest Release 需要写仓库权限（App 内远程更新的下载源）
