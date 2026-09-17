@@ -70,6 +70,11 @@ final class FavoritesStore: ObservableObject {
     /// 当前选中的分组
     @Published var selectedGroupID: UUID?
 
+    /// 「全部」虚拟分组的固定 id：它不是 groups 里的实体，但 Tab 选中、计数、取数都要靠
+    /// 一个稳定标识反查。若用 `UUID()` 每次新建，`resolveMetaItems` 永远查不到 → 计数恒为 0、
+    /// 内容恒为空、选中态与重启后的选中都会失配
+    static let allGroupID = UUID(uuidString: "00000000-0000-0000-0000-0000000000FF")!
+
     /// 「全部」虚拟分组：所有 manual 分组的去重并集（不持久化，动态计算）
     var allGroup: FavoritesGroup {
         var ids: [Int] = []
@@ -80,9 +85,9 @@ final class FavoritesStore: ObservableObject {
                 ids.append(m)
             }
         }
-        var g = FavoritesGroup.manual(name: "全部")
-        g.manualMetaIDs = ids
-        return g
+        return FavoritesGroup(id: Self.allGroupID, name: "全部", kind: .manual,
+                              manualMetaIDs: ids, formula: nil,
+                              cachedMatches: nil, updatedAt: nil, isHidden: false)
     }
 
     private let fm = FileManager.default
@@ -127,7 +132,7 @@ final class FavoritesStore: ObservableObject {
             // 保持原顺序（上面 sorted 不改变顺序，这里显式按原存储顺序）
             // （JSON 数组本身有顺序，decode 结果顺序已对）
             if let sel = root.selectedGroupID,
-               groups.contains(where: { $0.id == sel }) {
+               sel == Self.allGroupID || groups.contains(where: { $0.id == sel }) {
                 self.selectedGroupID = sel
             } else {
                 self.selectedGroupID = groups.first?.id
@@ -261,7 +266,9 @@ final class FavoritesStore: ObservableObject {
     // MARK: - Manual 分组：一键获取 metaID -> MetaItem 列表（从 DatabaseManager metaList 查找）
 
     func resolveMetaItems(groupID: UUID, allMeta: [MetaItem]) -> [MetaItem] {
-        guard let g = groups.first(where: { $0.id == groupID }) else { return [] }
+        // 「全部」虚拟分组不在 groups 里：直接取所有 manual 分组的去重并集
+        let g = groupID == Self.allGroupID ? allGroup : groups.first(where: { $0.id == groupID })
+        guard let g = g else { return [] }
         switch g.kind {
         case .manual:
             var lookup: [Int: MetaItem] = [:]
