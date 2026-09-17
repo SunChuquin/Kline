@@ -1,0 +1,33 @@
+name: Cleanup old build artifacts
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 每天凌晨 3 点（UTC）自动清理一次
+  workflow_dispatch:      # 也支持手动触发
+
+permissions:
+  actions: write          # 删除 Artifacts 需要 actions: write；Release 不受影响
+
+jobs:
+  cleanup:
+    name: Delete artifacts older than 10 days
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete artifacts older than 10 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          # 距今超过 10 天（864000 秒）的构建产物删除
+          cutoff=$(( $(date +%s) - 864000 ))
+          gh api "repos/$REPO/actions/artifacts?per_page=100" --paginate \
+            --jq '.artifacts[] | select((.artifact_type // "workflow_run") == "workflow_run") | select(.expired == false) | [.id, .created_at, .name] | @tsv' |
+          while IFS=$'\t' read -r id created name; do
+            created_ts=$(date -d "$created" +%s)
+            if (( created_ts < cutoff )); then
+              echo "删除过期产物: $name (id=$id, created_at=$created)"
+              gh api --method DELETE "repos/$REPO/actions/artifacts/$id" --silent || echo "删除失败，跳过: $name"
+            fi
+          done
+          echo "=== 清理完成 ==="
