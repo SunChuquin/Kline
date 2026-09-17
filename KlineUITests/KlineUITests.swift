@@ -33,6 +33,17 @@ final class KlineUITests: XCTestCase {
         return element.exists && element.isHittable
     }
 
+    /// 行情页二级菜单启动默认折叠：点一级菜单「市场」展开（已展开时该项会收起，
+    /// 故仅在对应二级项不可见时才点，保证幂等）
+    private func revealSecondLevel(_ app: XCUIApplication) {
+        let etf = app.staticTexts["ETF"].firstMatch
+        if etf.exists { return }
+        let market = app.buttons["market.topMenu.市场"].firstMatch
+        XCTAssertTrue(market.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
+        market.tap()
+        XCTAssertTrue(etf.waitForExistence(timeout: 8), "点击「市场」后二级菜单未展开")
+    }
+
     // MARK: - 用例 1：冷启动 + 底部菜单完整性
 
     func test01_Launch_ShowsBottomMenu() throws {
@@ -112,7 +123,8 @@ final class KlineUITests: XCTestCase {
         XCTAssertTrue(marketTab.waitForExistence(timeout: 15), "底部菜单未出现")
         marketTab.tap()
 
-        // 2. 二级菜单 ETF（种子库唯一标的在 ETF 分类）
+        // 2. 二级菜单默认折叠：先点一级菜单「市场」展开，再选 ETF（种子库唯一标的在 ETF 分类）
+        revealSecondLevel(app)
         let etfBtn = app.buttons["ETF"].firstMatch
         let etf = etfBtn.exists ? etfBtn : app.staticTexts["ETF"].firstMatch
         XCTAssertTrue(etf.waitForExistence(timeout: 10), "二级菜单未找到 ETF")
@@ -186,7 +198,8 @@ final class KlineUITests: XCTestCase {
                                  "导航栏「模拟」压到指示条侧危险带 maxX=\(sim.frame.maxX)")
         snap(app, "notch.market")
 
-        // 2. 二级菜单 ETF → K线页（单图）：工具栏两端元素断言
+        // 2. 二级菜单默认折叠：先点一级菜单「市场」展开 → ETF → K线页（单图）：工具栏两端元素断言
+        revealSecondLevel(app)
         let etfBtn = app.buttons["ETF"].firstMatch
         let etf = etfBtn.exists ? etfBtn : app.staticTexts["ETF"].firstMatch
         XCTAssertTrue(etf.waitForExistence(timeout: 10), "二级菜单未找到 ETF")

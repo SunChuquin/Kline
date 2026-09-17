@@ -58,6 +58,8 @@ struct MarketView: View {
 
     // 顶部一级/二级菜单（参考测试页2 居中 Tab + 分段胶囊样式）
     @State private var topMenu: TopField = .market
+    /// 二级菜单（胶囊栏）显隐：启动默认隐藏，由一级菜单按钮的上下箭头图标点击控制
+    @State private var secondLevelVisible = false
     // 市场 → 二级：主板/ETF指数（即 MarketTab）
     @State private var pickerSeg: PickerField = .trend
     @State private var favSeg: FavField = .holdings
@@ -272,16 +274,20 @@ struct MarketView: View {
             ZStack(alignment: .center) {
                 HStack(spacing: 22) {
                     ForEach(TopField.allCases) { field in
-                        Button(action: {
-                            topMenu = field
-                            scheduleRefresh()
-                        }) {
-                            Text(field.rawValue)
-                                .font(.system(size: 20, weight: topMenu == field ? .bold : .regular))
-                                .foregroundColor(topMenu == field ? .red : .primary)
-                                .padding(.vertical, 6)
+                        Button(action: { tapTopMenu(field) }) {
+                            HStack(spacing: 3) {
+                                Text(field.rawValue)
+                                    .font(.system(size: 20, weight: topMenu == field ? .bold : .regular))
+                                    .foregroundColor(topMenu == field ? .red : .primary)
+                                // 仅选中项显示「上下箭头」图标（未选中只显示文字）
+                                if topMenu == field {
+                                    menuChevronIcon
+                                }
+                            }
+                            .padding(.vertical, 6)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("market.topMenu.\(field.rawValue)")
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -326,10 +332,46 @@ struct MarketView: View {
             .frame(maxWidth: .infinity)
             .background(Color(.systemBackground))
 
-            // 二级胶囊（根据一级切换）
-            secondLevelBar
+            // 二级胶囊（根据一级切换）：默认隐藏，展开/收起带动画
+            if secondLevelVisible {
+                secondLevelBar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .background(Color(.systemBackground))
+        .clipped()
+    }
+
+    /// 「上下箭头」状态图标：两个无线条箭头（^ / 倒置^）垂直排列；
+    /// 二级菜单展开时高亮下方箭头，折叠时高亮上方箭头。
+    private var menuChevronIcon: some View {
+        VStack(spacing: -3) {
+            Image(systemName: "chevron.up")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(secondLevelVisible ? Color.secondary.opacity(0.45) : .red)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(secondLevelVisible ? .red : Color.secondary.opacity(0.45))
+        }
+        .padding(.leading, 1)
+        .accessibilityHidden(true)
+    }
+
+    /// 一级菜单点击：
+    /// - 二级隐藏时：任意点击均展开对应二级菜单；
+    /// - 二级显示时：点当前选中项收起；点其他项仅切换内容、保持显示。
+    private func tapTopMenu(_ field: TopField) {
+        if secondLevelVisible {
+            if topMenu == field {
+                withAnimation(.easeInOut(duration: 0.18)) { secondLevelVisible = false }
+                return
+            }
+            topMenu = field
+        } else {
+            topMenu = field
+            withAnimation(.easeInOut(duration: 0.18)) { secondLevelVisible = true }
+        }
+        scheduleRefresh()
     }
 
     /// 二级胶囊栏：一级=市场→主板/ETF指数；选股→趋势/震荡/反转/情绪；自选→持仓/股池
