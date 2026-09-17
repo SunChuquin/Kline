@@ -21,6 +21,7 @@ import Darwin
 ///    （如从 Gitee 下载 IPA 的 apple-magnifier 安装 URL）。
 ///
 /// 限制：App 切后台后监听 socket 会被系统冻结，仅前台可用。
+/// 因此回前台时自检一次（verifyOrRebuild），失效则自动重建监听。
 final class KlineHTTPServer {
     static let shared = KlineHTTPServer()
 
@@ -31,15 +32,90 @@ final class KlineHTTPServer {
     private let downloadsPath = "/var/mobile/Media/Downloads"
 
     private let queue = DispatchQueue(label: "com.sunck.Kline.httpserver")
+    /// 自检/探测专用队列（与监听队列隔离，避免上传等长任务把探测请求堵在后面）
+    private let probeQueue = DispatchQueue(label: "com.sunck.Kline.httpserver.probe")
     private var listener: NWListener?
 
     /// 连续绑定失败次数（用于启动时撞上旧进程未释放端口的自动重试）
     private var bindRetry = 0
 
-    /// 服务器是否就绪（监听中）——供 UI 显示连接状态
+    /// 服务器是否就绪（监听中）——仅作提示。
+    /// ⚠️ 不可当作在线判据：它只是 NWListener 最后一次状态回调的快照。
+    /// App 长时间后台被挂起后监听 socket 已被系统冻结/失效，但进程冻结期间收不到
+    /// .failed 回调、回前台也不会补发，本值会一直停在 true（"假在线"）。
+    /// 判定是否真的可用请用 probe(_:)。
     private(set) var isRunning = false
 
-    private init() {}
+    private init() {
+        // 回前台自检一次：探测失败即重建监听，避免"切回前台后本地服务已是死的、
+        // UI 却显示在线、点重连也无效、只能杀 App 重进"。
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.verifyOrRebuild()
+        }
+    }
+
+    // MARK: - 在线自检 / 强制重建
+
+    /// 真实探测：连 127.0.0.1:port 并发一个 HTTP 请求，**收到响应才算在线**。
+    /// 只连上不算：App 被挂起时内核仍会替它完成 TCP 握手（连接能建立但不会有人回包）。
+    /// - Note: completion 在探测队列回调，UI 层需自行切主线程。
+    func probe(_ completion: @escaping (Bool) -> Void) {
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            completion(false)
+            return
+        }
+        let connection = NWConnection(host: "127.0.0.1", port: nwPort, using: .tcp)
+        var finished = false
+        func finish(_ ok: Bool) {
+            guard !finished else { return }
+            finished = true
+            connection.cancel()
+            isRunning = ok
+            completion(ok)
+        }
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let req = Data("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".utf8)
+                connection.send(content: req, completion: .contentProcessed { _ in })
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 2048) { data, _, _, _ in
+                    finish(!(data ?? Data()).isEmpty)
+                }
+            case .failed, .cancelled:
+                finish(false)
+            default:
+                break
+            }
+        }
+        connection.start(queue: probeQueue)
+        probeQueue.asyncAfter(deadline: .now() + 1.5) { finish(false) }
+    }
+
+    /// 前台自检：探测失败则强制重建监听。
+    /// 仅在「自认为是就绪状态」时才重建：启动瞬间 listener 还没到 .ready，此时探测必然失败，
+    /// 若也去重启就会把自己刚开始的绑定砍掉（正常的绑定重试逻辑在 start() 里已覆盖）。
+    func verifyOrRebuild() {
+        let wasRunning = isRunning
+        probe { [weak self] ok in
+            guard let self = self, !ok, wasRunning else { return }
+            DebugLogger.shared.log("KlineHTTPServer 自检失败：监听已失效，重建")
+            self.restart()
+        }
+    }
+
+    /// 强制重建监听。必须在 start() 之前丢弃旧 listener：
+    /// 失效的 listener 其状态可能仍是 .ready，start() 会据此直接跳过，等于什么都没做。
+    func restart() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.listener?.cancel()
+            self.listener = nil
+            self.bindRetry = 0
+            self.isRunning = false
+            self.start()
+        }
+    }
 
     /// 启动/重连服务器（幂等：已就绪则跳过；failed 状态会重建监听）
     func start() {

@@ -12,6 +12,7 @@ import SwiftUI
 /// 需要 no-sandbox 权限才能访问 /var/mobile/Media/Downloads（TrollStore 版可用，
 /// Xcode 调试版降级显示错误，不崩溃）。
 struct LocalUpdateView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var ipaFiles: [IPAFileInfo] = []
     @State private var isScanning = false
     @State private var scanResult: String = ""
@@ -225,21 +226,32 @@ struct LocalUpdateView: View {
         .onAppear {
             refreshServerStatus()
         }
+        // 回前台重新探测：服务器此时会自检并可能重建监听，界面要跟着显示真实结果
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { refreshServerStatus() }
+        }
     }
 
     // MARK: - 本地服务状态（点击重连）
 
     private func refreshServerStatus() {
-        serverOK = KlineHTTPServer.shared.isRunning
+        // 必须真探测：isRunning 只是 NWListener 的状态快照，长时间后台后会失真（假在线）
+        KlineHTTPServer.shared.probe { ok in
+            DispatchQueue.main.async { self.serverOK = ok }
+        }
     }
 
     private func reconnectServer() {
-        KlineHTTPServer.shared.start()
-        // 状态由 stateUpdateHandler 异步更新，稍后轮询一次
         scanResult = "已尝试重连本地服务…"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            refreshServerStatus()
-            self.scanResult = serverOK ? "✅ 本地服务已恢复在线" : "❌ 重连失败，请检查 App 状态"
+        // 强制重建监听：旧 listener 失效后状态可能仍是 .ready，直接 start() 会被跳过（点了没反应）
+        KlineHTTPServer.shared.restart()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            KlineHTTPServer.shared.probe { ok in
+                DispatchQueue.main.async {
+                    self.serverOK = ok
+                    self.scanResult = ok ? "✅ 本地服务已恢复在线" : "❌ 重连失败，请检查 App 状态"
+                }
+            }
         }
     }
 
