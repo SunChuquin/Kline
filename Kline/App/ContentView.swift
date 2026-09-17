@@ -15,6 +15,8 @@ struct ContentView: View {
     @State private var lastHomeTapTime: Date?
     @State private var lastSimulateTapTime: Date?
     @ObservedObject private var detailRouter = DetailRouter.shared
+    /// 全 App 显示主题（个人中心可切换：日间 / 夜间 / 跟随系统）
+    @ObservedObject private var themeStore = KlineThemeStore.shared
     private let doubleTapInterval: TimeInterval = 0.3
 
     // 菜单按钮配置 - 参考通达信手机版风格
@@ -88,6 +90,9 @@ struct ContentView: View {
         // UIViewControllerBasedStatusBarAppearance=false 做 app 级配置（主手段，全机型/全版本一致），
         // 这里在根视图再叠一层 SwiftUI 声明，防止某代系统上 app 级配置被宿主控制器覆盖
         .statusBarHidden(true)
+        // 主题：nil = 跟随系统；.light/.dark = 强制该外观。挂在根视图上，
+        // 主内容区、底部栏、K 线全屏页、个人中心等所有覆盖层一并实时跟随
+        .preferredColorScheme(themeStore.theme.colorScheme)
     }
 
     // MARK: - 底部导航栏（VStack 底部固定段）

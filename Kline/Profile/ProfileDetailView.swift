@@ -9,6 +9,9 @@ import SwiftUI
 
 struct ProfileDetailView: View {
     @Binding var isPresented: Bool
+    /// 主题选择弹窗开合（弹窗本身在页面容器层呈现，避免被 ScrollView 裁剪）
+    @State private var showThemePanel = false
+    @ObservedObject private var themeStore = KlineThemeStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,6 +58,12 @@ struct ProfileDetailView: View {
                         .font(.subheadline)
                         .foregroundColor(.gray)
 
+                    // Kline 显示主题（日间 / 夜间 / 跟随系统）：点右侧下拉弹出选择面板
+                    KlineThemeSettingRow(isOpen: $showThemePanel)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+
                     // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
                     LocalUpdateView()
                 }
@@ -64,6 +73,23 @@ struct ProfileDetailView: View {
         // 内容延伸到物理屏幕底边 + 背景铺满（否则 2018 等机型底部 20pt 露出下层导航栏）
         .background(Color(.systemBackground).ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
+        // 容器层浮层：居中显示主题选择弹窗（与行情表设置的字段筛选弹窗同做法，
+        // 放在页面根而非行内，避免被 ScrollView 裁剪）
+        .overlay {
+            if showThemePanel {
+                ZStack {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.15)) { showThemePanel = false }
+                        }
+                    KlineThemeOptionsPanel(theme: $themeStore.theme,
+                                           onClose: { showThemePanel = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
+        }
     }
 }
 
