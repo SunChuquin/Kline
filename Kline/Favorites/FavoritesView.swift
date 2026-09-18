@@ -248,9 +248,10 @@ struct FavoritesView: View {
                                     .padding(.horizontal, 9)
                             }
                         }
-                        // 命中区补充：Tab 本身只有约 31pt 高（真机很难点中），
-                        // 纵向再补 7pt 到约 45pt；padding 加在 overlay 之外，避免下划线跟着下移
-                        .padding(.vertical, 7)
+                        // 命中区补充：Tab 本身只有约 31pt 高（真机很难点中），纵向补到约 44pt。
+                        // 补的空间全部放在上方：让按钮底边与下划线齐平，下方不再是"看不见的 Tab 热区"，
+                        // 否则点下方表头排序时会误触到 Tab
+                        .padding(.top, 13)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -258,6 +259,8 @@ struct FavoritesView: View {
             }
             .padding(.horizontal, 12)
         }
+        // 与下方表头之间留出明确间隙（含表头排序热区），避免点表头时误触 Tab
+        .padding(.bottom, 8)
         .background(Color(.systemBackground))
     }
 
