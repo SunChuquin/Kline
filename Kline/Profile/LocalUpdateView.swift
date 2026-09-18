@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// 「本地更新」卡片组（个人中心内）：只保留两条状态行，行高固定 48，
 /// 任何状态与点击都只替换右侧状态图标（图标位固定 24x24），
@@ -247,10 +248,36 @@ struct LocalUpdateView: View {
             KlineHTTPServer.shared.start()
             let dlURL = "http://127.0.0.1:\(KlineHTTPServer.shared.port)/sandbox/Downloads/Kline.ipa"
             let trollURL = "apple-magnifier://install?url=\(dlURL.percentEncodedForQuery)"
+            // 拉起 TrollStore 前先申请后台执行时间：否则 App 切后台被挂起后，
+            // TrollStore 从 127.0.0.1 取 IPA 会一直连得上却收不到数据，安装卡死（更谈不上自动打开）
+            keepServingIPAForInstall()
             KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
             self.remoteState = .latest
             DebugLogger.shared.log("已下载最新 IPA，已拉起 TrollStore 安装")
         }
+    }
+
+    // MARK: - 安装期间保持本地服务可服务
+
+    /// 拉起 TrollStore 前申请一段后台执行时间：App 会随 URL scheme 切到后台，
+    /// 若被系统挂起，本地 HTTP 监听虽然还能被连上，但没人回包 →
+    /// TrollStore 取 127.0.0.1 的 IPA 会卡住（部署助手那条路有 USB 转发兜底，故只有手动安装会踩到）。
+    /// 到期自动释放，不影响正常后台行为。
+    private func keepServingIPAForInstall(seconds: Double = 30) {
+        var taskID = UIBackgroundTaskIdentifier.invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "kline-serve-ipa") {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
+            }
+        }
+        DebugLogger.shared.log("已申请后台执行时间 \(Int(seconds))s，确保 TrollStore 能取到沙盒 IPA")
     }
 
     // MARK: - 上一版 IPA 归档与清理（沙盒 Documents/Downloads）

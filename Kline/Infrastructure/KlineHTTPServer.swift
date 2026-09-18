@@ -507,11 +507,20 @@ final class KlineHTTPServer {
     /// /install-local 与 App 内远程更新（LocalUpdateView）共用此链路。
     func triggerTrollStoreInstall(trollURL: String) {
         let curVer = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
+        // 等待窗口给足 600s：用户走完「打开 TrollStore → 下载 IPA → Install」可能远超旧默认 90s，
+        // 到点自退后就再没人把新版拉到前台（表现为"装完了但没自动打开"）
+        let maxWait = "600"
+        // 让 opener 的诊断日志同时落到 App 沙盒（root 可写；跨版本升级容器路径不变，便于事后回看）
+        let openerLog = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+            + "/opener_log.txt"
         DebugLogger.shared.log("triggerTrollStoreInstall trollURL=\(trollURL) curVer=\(curVer)")
         let srOpen = RootRunner.spawnDetached(
             executable: Bundle.main.bundlePath + "/opener",
-            arguments: [curVer])
-        DebugLogger.shared.log("triggerTrollStoreInstall spawned opener => sr=\(srOpen)")
+            arguments: [curVer, maxWait, openerLog])
+        DebugLogger.shared.log("triggerTrollStoreInstall spawned opener => sr=\(srOpen) maxWait=\(maxWait)s")
+        if srOpen != 0 {
+            DebugLogger.shared.log("⚠️ opener spawn 失败（sr=\(srOpen)）：装完不会自动打开新版")
+        }
         DispatchQueue.main.async {
             if let url = URL(string: trollURL) {
                 UIApplication.shared.open(url)
