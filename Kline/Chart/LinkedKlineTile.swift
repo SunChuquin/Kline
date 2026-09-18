@@ -351,6 +351,10 @@ struct LinkedKlineTile: View {
                        initialVisibleCount: linkedStore.zoom(owner: ownerMetaID, meta: view.metaID, period: view.period),
                        onVisibleCountChange: { newZoom in
                            linkedStore.setZoom(newZoom, owner: ownerMetaID, meta: view.metaID, period: view.period)
+                       },
+                       onInfoRowPanned: { panned in
+                           // 信息行被拖动 → 标记该视图重置按钮高亮可点
+                           if panned { linkedStore.markInfoRowPanned(owner: ownerMetaID, index: view.index) }
                        })
             .overlay {
                 // 副图二 🔍 覆盖式搜索栏：顶部锚定，正好落在本视图主图指标数值栏

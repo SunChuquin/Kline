@@ -20,6 +20,8 @@ extension KlineChartView {
             .onChanged { value in
                 // 新触摸立即终止进行中的惯性滑动（含对齐归零）；未在惯性中时为空操作
                 cancelPanInertia()
+                // 本次横向位移增量（相对上一次记录的触摸 x），用于「光标撞到主图边缘后继续同向拖动 → 窗口反向滚动」
+                let cursorDx = value.location.x - drag.lastTouchX
                 guard !menuIsOpen else { return }
                 // 双指手势进行中：平移/缩放由双指手势统一处理，单指手势跳过，避免重复平移/误触发
                 if drag.twoFingerActive { return }
@@ -82,7 +84,23 @@ extension KlineChartView {
                     if abs(value.translation.width) > 6 || abs(value.translation.height) > 6 {
                         let col = Int((value.location.x / candleSpacing).rounded(.down))
                         let idx = startIndex + col
-                        if idx >= startIndex && idx <= endIndex {
+                        let maxOff = max(0, sortedData.count - count)
+                        // 光标撞到主图左缘仍继续向左拖：可见窗口向右滚动（露更新数据），光标贴左缘
+                        if col <= 0 && cursorDx < -0.5 {
+                            linkUserDragging = true
+                            endOffset = min(maxOff, endOffset + 1)
+                            selectedIndex = max(0, startIndex)
+                            crosshairY = value.location.y
+                        }
+                        // 光标撞到主图右缘仍继续向右拖：可见窗口向左滚动（露更早数据），光标贴右缘
+                        else if col >= (count - 1) && cursorDx > 0.5 {
+                            linkUserDragging = true
+                            endOffset = max(0, endOffset - 1)
+                            selectedIndex = min(sortedData.count - 1, endIndex)
+                            crosshairY = value.location.y
+                        }
+                        // 常规：光标在窗口内跟随手指
+                        else if idx >= startIndex && idx <= endIndex {
                             linkUserDragging = true   // 用户直接拖动光标（用于联动来源标记）
                             selectedIndex = idx
                             crosshairY = value.location.y

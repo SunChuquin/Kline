@@ -696,7 +696,12 @@ struct KlineDetailView: View {
                                name: v.name,
                                code: v.displayCode,
                                isModified: isLinkedViewModified(v),
-                               onReset: { resetLinkedView(v) },
+                               onReset: {
+                                    // 重置按钮：先把该视图被拖动的信息行内容恢复默认左对齐，清拖动标记，再重置视图配置
+                                    NotificationCenter.default.post(name: .klineInfoRowReset, object: nil, userInfo: ["idx": v.index])
+                                    linkedStore.clearInfoRowPanned(owner: item.id, index: v.index)
+                                    resetLinkedView(v)
+                               },
                                resetID: "linked.resetButton.\(v.index)",
                                onDrillIn: {
                                     startDrillIn(metaID: v.metaID,
@@ -742,7 +747,10 @@ struct KlineDetailView: View {
     /// 设置页整组重置/改视图数量后各视图回到默认 → 自动变灰，
     /// 天然满足"排除仅重置联动视图配置的情况"；手动改回默认也会自动变灰
     private func isLinkedViewModified(_ v: LinkedViewConfig) -> Bool {
-        v.metaID != item.id || v.period != defaultLinkedPeriod(slot: v.index)
+        // 标的/周期偏离默认，或该视图信息行内容被拖动过 → 重置按钮高亮可点
+        v.metaID != item.id
+            || v.period != defaultLinkedPeriod(slot: v.index)
+            || linkedStore.isInfoRowPanned(owner: item.id, index: v.index)
     }
 
     /// 单视图重置：恢复该视图默认配置（主标的 + 槽位默认周期）并清该内容键的缩放记忆。
