@@ -31,9 +31,9 @@ final class ChartMomentumAnimator: NSObject {
     static let fixedDuration: Double = 2.0
     /// 惯性固定滑行距离（屏幕数）
     static let travelScreens: CGFloat = 2
-    /// 光标贴边「按住持续滚动」速度（屏宽/秒）：按住手指不动时的匀速滚动速度。
-    /// 明显慢于惯性（惯性 = 1 屏/秒），按住期间可精细定位。
-    static let edgeAutoScrollScreensPerSecond: CGFloat = 0.2
+    /// 光标贴边「按住持续滚动」速度（K线根数/秒）：按住手指不动时的匀速滚动速度。
+    /// 1 = 每秒推进一根K线（与惯性「1 屏/秒」相比慢得多，按住期间可逐步定位）。
+    static let edgeAutoScrollCandlesPerSecond: CGFloat = 1
 
     /// 带符号匀速（px/s，右正左负），start() 前赋值
     var velocity: CGFloat = 0
@@ -197,13 +197,13 @@ extension KlineChartView {
     // MARK: - 光标贴边「按住持续滚动」
 
     /// 光标贴边自动拖动：手指把光标推到主图可视边缘最后一根后仍朝同方向推、且停在主图外侧一半区域
-    /// （越过主图中线）期间，可见窗口按固定速度**持续滚动**，与手指是否还在移动无关：
+    /// （越过主图中线）期间，可见窗口按固定速度（每秒一根K线）**持续滚动**，与手指是否还在移动无关：
     /// 手指按住不动也继续滚，直到抬手、手指退回内侧一半、或滚到数据边界自然停住。
     ///
-    /// - Parameter direction: 手指推动方向 +1（光标贴右缘、窗口露更新数据）/ −1（贴左缘、露更早数据）。
+    /// - Parameter direction: 手指推动方向 +1（光标贴右缘、查看更新数据）/ −1（贴左缘、查看更早数据）。
     /// 与抬手的甩动惯性不同：无固定时长，只能被 stopEdgeAutoScroll() 或数据边界终止。
     @discardableResult
-    func startEdgeAutoScroll(direction dirIn: CGFloat, width: CGFloat, candleSpacing: CGFloat) -> Bool {
+    func startEdgeAutoScroll(direction dirIn: CGFloat, candleSpacing: CGFloat) -> Bool {
         guard dirIn != 0, candleSpacing > 0, !menuIsOpen, !sortedData.isEmpty else { return false }
         // 同方向已在滚：沿用当前动画器，触摸事件密集时不重建 display link
         if drag.edgeAutoScrollDir == dirIn, drag.edgeAutoScroller != nil { return true }
@@ -214,7 +214,7 @@ extension KlineChartView {
         let sgn: CGFloat = dirIn > 0 ? -1 : 1
         let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
         guard candlesAhead >= 1 else { return false }
-        let v = sgn * width * ChartMomentumAnimator.edgeAutoScrollScreensPerSecond
+        let v = sgn * candleSpacing * ChartMomentumAnimator.edgeAutoScrollCandlesPerSecond
         let animator = ChartMomentumAnimator()
         animator.duration = nil   // 无限：按住期间一直滚
         animator.velocity = v

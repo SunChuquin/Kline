@@ -108,7 +108,7 @@ extension KlineChartView {
                             endOffset = min(maxOff, endOffset + 1)
                             selectedIndex = max(0, startIndex)
                             crosshairY = value.location.y
-                            startEdgeAutoScroll(direction: -1, width: width, candleSpacing: candleSpacing)
+                            startEdgeAutoScroll(direction: -1, candleSpacing: candleSpacing)
                         }
                         // 光标撞到主图右缘仍继续向右拖：光标越过右缘继续朝更新的K线走
                         //（内容向左滚动、右侧露出更新数据），光标贴右缘；同样转入「按住持续滚动」
@@ -117,7 +117,7 @@ extension KlineChartView {
                             endOffset = max(0, endOffset - 1)
                             selectedIndex = min(sortedData.count - 1, endIndex)
                             crosshairY = value.location.y
-                            startEdgeAutoScroll(direction: 1, width: width, candleSpacing: candleSpacing)
+                            startEdgeAutoScroll(direction: 1, candleSpacing: candleSpacing)
                         }
                         // 常规：光标在窗口内跟随手指
                         else if idx >= startIndex && idx <= endIndex {

@@ -517,7 +517,7 @@ extension KlineChartView {
 
     /// 把本视图光标位置（日期，YYYYMMDD 整数）发布到共享联动对象。
     /// 仅当 cursorLinkEnabled 为 true（用户显式开启了联动态的光标联动）才真正发布。
-    /// 对称联动语义：任一视图只要 linkUserDragging=true（用户手指直接操作）即为来源端，
+    /// 对称联动语义：任一视图只要 linkUserDragging=true 或正由用户拖动光标（drag.cursorDragging）即为来源端，
     /// 其余所有视图收到后一律滚动居中（DualLinkSync.lastCursorFromRightUser 为早期左右不对称
     /// 联动的遗留字段，当前已无任何读写方）。
     func publishLinkCursor(index: Int?) {
@@ -526,8 +526,11 @@ extension KlineChartView {
         // 联动接收端在 applyLinkCursor 里同步了光标位置后，会经 onChange(selectedIndex)
         // 再次走到这里；若也发布，会形成回声：接收端按各自更小周期解析出的不同 date 回传，
         // 导致来源视图收到与自己日期不一致的回声而在自己的视图里多此一举地居中。
-        // 只要 linkUserDragging == false（非用户手势触发），就视为回声、直接跳过发布。
-        guard linkUserDragging else { return }
+        // 只要非用户手势触发，就视为回声、直接跳过发布。
+        // 注意必须同时看 drag.cursorDragging：手指**按住不动**期间（光标贴边自动滚动）
+        // 不会再有触摸事件、linkUserDragging 早已被上一次发布消费为 false，若只看它，
+        // 自动滚动中每根K线的光标推进都不会广播，被联动视图整段不跟随。
+        guard linkUserDragging || drag.cursorDragging else { return }
         linkUserDragging = false
         let date: Int?
         if let index, index < sortedData.count { date = sortedData[index].date } else { date = nil }
