@@ -1,0 +1,55 @@
+flowchart LR
+    %% ============ 配色 ============
+    style GHA fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style USB fill:#fce4ec,stroke:#c62828,stroke-width:2px
+    style REMOTE fill:#eef4ff,stroke:#4a6fa5,stroke-width:2px
+    style LOCAL fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    style ART fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    style REL fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    style TS fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+
+    PUSH["push → main（代码改动触发 CI）"] --> GHA
+
+    subgraph GHA["GitHub Actions · macOS Runner"]
+        direction TB
+        B1["① xcodebuild 未签名构建 .app"]
+        B2["② 编译并嵌入 rootprobe / opener"]
+        B3["③ ad-hoc 签名 + 注入 no-sandbox entitlements"]
+        B4["④ 显示名 Kline-TS · 注入唯一构建号"]
+        B5["⑤ 打包 .ipa · 上传 artifacts"]
+        B1 --> B2 --> B3 --> B4 --> B5
+    end
+
+    B5 --> ART[("CI artifacts")]
+    B5 --> REL[("GitHub Release「latest」<br/>releases/latest/download/Kline.ipa")]
+
+    TS["TrollStore 安装"]
+
+    subgraph USB["A · USB 部署（Windows 主机）"]
+        TR["TrollRestore + pymobiledevice3"]
+        DL["AFC push → /var/mobile/Media/Downloads"]
+        ART -->|下载 IPA| TR
+        REL -->|下载 IPA| TR
+        TR --> DL -->|手动安装| TS
+    end
+
+    subgraph REMOTE["B · App 内远程更新"]
+        APP["Kline App 启动"]
+        CHECK["GET /releases/latest<br/>比对 CFBundleVersion 构建号"]
+        DOWN["下载 IPA → Documents/Downloads"]
+        HTTP["KlineHTTPServer POST /install"]
+        AM["apple-magnifier://install?url=..."]
+        APP --> CHECK
+        REL -->|最新版本信息| CHECK
+        CHECK -->|检测到新版| DOWN
+        REL -->|IPA 下载| DOWN
+        DOWN --> HTTP
+        HTTP --> AM --> TS
+    end
+
+    subgraph LOCAL["C · A2 本地更新（离线）"]
+        DL2["公共 Downloads 目录中的 IPA"]
+        HTTP2["KlineHTTPServer GET /download/<file>"]
+        AM2["apple-magnifier://install?url=http://127.0.0.1:5051/..."]
+        DL2 --> HTTP2 --> AM2 --> TS
+    end

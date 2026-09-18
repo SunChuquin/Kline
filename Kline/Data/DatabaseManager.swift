@@ -88,55 +88,6 @@ class DatabaseManager: ObservableObject {
         loadMetaList()
     }
 
-    /// 只读切换数据库到外部路径（如 Xcode 旧版容器的完整 tdx.db）。
-    /// 不拷贝、不占本容器空间，行情查询即时指向该库。用于 TrollStore 版新容器
-    /// 只有种子库时，直接复用旧版完整数据。
-    /// - Returns: 切换是否成功
-    func switchToExternalReadonly(path: String) -> Bool {
-        // 权限预检：尝试读取文件头，确认可读
-        if let handle = FileHandle(forReadingAtPath: path) {
-            let header = handle.readData(ofLength: 16)
-            try? handle.close()
-            DebugLogger.shared.log("外部库 文件头可读: \(header.count) bytes")
-        } else {
-            DebugLogger.shared.log("外部库 文件无法打开(权限): \(path)")
-            return false
-        }
-
-        let ok = dbQueue.sync {
-            if db != nil {
-                sqlite3_close(db)
-                db = nil
-            }
-            var newDB: OpaquePointer?
-            let rc = sqlite3_open_v2(path, &newDB, SQLITE_OPEN_READONLY, nil)
-            if rc != SQLITE_OK {
-                let msg = newDB.map { String(cString: sqlite3_errmsg($0)) } ?? "null"
-                DebugLogger.shared.log("外部库 sqlite 打开失败 rc=\(rc) msg=\(msg)")
-                if newDB != nil { sqlite3_close(newDB) }
-                // immutable 兜底：把文件视为不可变，跳过锁/WAL 检查（读主库文件快照）
-                var db2: OpaquePointer?
-                let uri = "file:\(path)?immutable=1"
-                let rc2 = sqlite3_open_v2(uri, &db2, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil)
-                guard rc2 == SQLITE_OK, let opened = db2 else {
-                    let msg2 = db2.map { String(cString: sqlite3_errmsg($0)) } ?? "null"
-                    DebugLogger.shared.log("外部库 immutable 也失败 rc2=\(rc2) msg2=\(msg2)")
-                    if db2 != nil { sqlite3_close(db2) }
-                    return false
-                }
-                db = opened
-                return true
-            }
-            db = newDB
-            return true
-        }
-        if ok {
-            // 串行队列外触发 meta 重新加载（避免死锁）
-            loadMetaList()
-        }
-        return ok
-    }
-
     func loadMetaList() {
         dbQueue.async { [weak self] in
             guard let self = self else { return }

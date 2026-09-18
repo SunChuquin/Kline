@@ -1,0 +1,65 @@
+flowchart TB
+    %% ============ 配色 ============
+    style OPEN fill:#eef4ff,stroke:#4a6fa5,stroke-width:2px
+    style FRONT fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style BACK fill:#ede7f6,stroke:#4527a0,stroke-width:2px
+    style RE fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+
+    subgraph OPEN["打开标的 / 切换周期 · 首次进入"]
+        INIT["KlineChartView 构建 → IndicatorComputationStore.init"]
+        GAPS["computeGaps 全量跳空缺口<br/>（一次性 · 线性维护缺口列表）"]
+        RESTORE{"缓存恢复：<br/>entry.configFingerprint == 当前指纹？"}
+        RESTORE -- "一致" --> RECOVER["恢复 mainCurves / mainCache<br/>coverage / bgCoverageEnd · 跳过重算"]
+        RESTORE -- "不一致 / 无缓存" --> FRESH["从零初始化覆盖状态"]
+        INIT --> GAPS
+        INIT --> RESTORE
+        RECOVER --> SHOW["直接显示恢复的曲线"]
+        FRESH --> CALC
+    end
+
+    subgraph FRONT["前台计算（近似 · 立即显示 · 主线程）"]
+        CALC["recomputeMainCurves / recomputeSub"]
+        RANGE["mergedCalcRange<br/>需要区间 = 可见窗口 - 预热50 → 可见末端<br/>与已覆盖区间合并（只扩不缩）"]
+        MAIN["主图 mainRows<br/>公式 → 拆分输出行单元 → 逐行求值<br/>行级缓存复用（公式文本不变直接复用）"]
+        SUB["副图求值<br/>自定义公式 / VOL·AMO 量均线 / .tdx 系统模板"]
+        PAD["padToFull 补齐前后 NaN 占位"]
+        CALC --> RANGE
+        RANGE --> MAIN
+        RANGE --> SUB
+        MAIN --> PAD
+        SUB --> PAD
+        PAD -->|"显示近似曲线"| SHOW2["渲染（未覆盖部分由后台替换）"]
+    end
+
+    subgraph BACK["后台正确计算（分块 · 增量 · 覆盖替换）"]
+        SP["startPrefetch<br/>token = UUID · 一次性构建共享 TDXSharedSeries"]
+        LOOP["while token 有效："]
+        STEP["块大小几何增长<br/>step = max(500, 当前覆盖末端)"]
+        REQ["主线程构造 PrefetchCalcRequest<br/>携带上一块增量状态 resumingMain/Subs"]
+        EVAL["Task.detached 后台 evaluateIncremental<br/>增量求值 · 只算新增区间 · 状态延续"]
+        COMMIT["主线程 commitPrefetch<br/>bgEnd ≥ 可见末端 且 非拖拽<br/>→ 替换近似曲线为正确值"]
+        WRITEBACK["写回缓存 bgCoverageEnd（只增不减）"]
+        DONE["覆盖到数据末尾 → finishPrefetch<br/>prefetchDone = true → onPeriodPrefetched"]
+        CHAIN["prefetchOtherPeriod 链式预热<br/>其它未计算周期（不切换可见周期）"]
+        SP --> LOOP
+        LOOP --> STEP
+        STEP --> REQ
+        REQ --> EVAL
+        EVAL --> COMMIT
+        COMMIT --> WRITEBACK
+        WRITEBACK --> LOOP
+        WRITEBACK --> DONE
+        DONE --> CHAIN
+    end
+
+    subgraph RE["重算触发"]
+        SCROLL["滑动 / 缩放<br/>需要区间超出已覆盖"]
+        CONFIG["修改指标 / 参数 / 切换周期（force）<br/>→ 配置指纹变化"]
+        MENU["指标/设置面板打开<br/>→ 标记 pending 不计算"]
+        DRAG["拖拽中<br/>→ 禁止重算 · 松手后刷新"]
+        SCROLL --> RANGE
+        CONFIG --> INVALIDATE["invalidateIfConfigChanged 失效旧缓存<br/>bgCoverageEnd = 0 · 取消旧 token<br/>startPrefetch 重启"]
+        INVALIDATE --> SP
+        MENU --> PENDING["关闭面板后按标记重算"]
+        DRAG --> REFRESH["needsRefreshAfterDrag · 松手后刷新"]
+    end

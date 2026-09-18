@@ -1,0 +1,111 @@
+flowchart TB
+    %% ============ 分层配色 ============
+    style D1 fill:#eceff1,stroke:#455a64,stroke-width:2px
+    style A1 fill:#eef4ff,stroke:#4a6fa5,stroke-width:2px
+    style A2 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style C1 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style W1 fill:#fce4ec,stroke:#c62828,stroke-width:2px
+    style SEED fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    style DBW fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+
+    subgraph D1["① 数据工具链（仓库内 src/）"]
+        GUI["tdx_gui.py 数据管理界面"]
+        PARSER["tdx_parser.py 通达信库读写封装<br/>meta · daily · weekly · monthly · quarterly · yearly"]
+        SEED[("tdx.db 种子库")]
+        GUI --> PARSER
+        PARSER -->|生成| SEED
+    end
+
+    subgraph A1["② iOS App（Kline · SwiftUI）"]
+        direction TB
+        subgraph A11["入口层"]
+            ENTRY["KlineApp · AppDelegate<br/>清空日志 → 启动本地 HTTP 服务"]
+            CONTENT["ContentView 底部导航<br/>KlineThemeStore · DetailRouter"]
+            ENTRY --> CONTENT
+        end
+        subgraph A12["功能页面层"]
+            HOME["HomeView 首页"]
+            MARKET["MarketView 行情<br/>行表格 · 列配置 · 过滤 · 分组 · 行缓存"]
+            FAV["FavoritesView 自选"]
+            SIM["SimulationView 模拟盘"]
+            PROFILE["ProfileView 个人中心<br/>远程更新 GitHubRemoteUpdate · 本地更新"]
+            SEARCH["SearchPageView 搜索"]
+            EDITOR["FormulaEditorView 指标编辑器"]
+        end
+        subgraph A13["K线图表引擎 Chart"]
+            CHART_V["KlineChartView · KlineDetailView<br/>LinkedKlineTile 联动K线"]
+            CHART_KIT["手势 · 惯性 · 十字光标 · 图例 · 叠加层 · 布局 · Sheet"]
+            PIPELINE["IndicatorPipeline 指标预计算管线<br/>分块后台计算 · 覆盖区间缓存 · 跳空缺口"]
+            CACHE["ChartCacheStore · ChartConfigStore"]
+            CHART_V --> CHART_KIT
+            CHART_V --> PIPELINE
+            CHART_V --> CACHE
+        end
+        subgraph A14["指标公式引擎 Formula"]
+            TMPL["Indicators/ 31 个 .tdx 内置模板"]
+            SYS["SystemIndicatorStore"]
+            CUSTOM["CustomIndicator · IndicatorStyle"]
+            ENGINE["FormulaEngine<br/>通达信公式：词法 → 语法 → 求值"]
+            TMPL --> SYS
+            SYS --> ENGINE
+            CUSTOM --> ENGINE
+        end
+        subgraph A15["数据访问层 Data"]
+            DBMGR["DatabaseManager<br/>SQLite3 · 串行队列 · 种子库拷贝"]
+            KDATA["KlineData 模型 · MockData"]
+            DBMGR --> KDATA
+        end
+        subgraph A16["基础设施 Infrastructure"]
+            LOG["DebugLogger 沙盒日志"]
+            HTTP["KlineHTTPServer（NWListener :5051）<br/>A2 本地更新 · 远程更新触发"]
+        end
+    end
+
+    subgraph A2["③ 设备运行时（iOS / TrollStore）"]
+        DBW[("Documents/tdx.db 可写副本")]
+        DL["/var/mobile/Media/Downloads 公共下载目录"]
+        TS["TrollStore（无沙盒运行）"]
+        AM["apple-magnifier:// 安装协议"]
+        LOGF["沙盒 debug_log.txt"]
+        TS --> AM
+    end
+
+    subgraph C1["④ 云端构建与分发（GitHub）"]
+        GHA["GitHub Actions build.yml<br/>未签名构建 → 嵌入 rootprobe/opener<br/>→ ad-hoc 签名 + no-sandbox entitlements → IPA"]
+        ART[("CI artifacts（.app / .ipa）")]
+        REL[("GitHub Release「latest」Kline.ipa<br/>公开免鉴权稳定地址")]
+        GHA --> ART
+        GHA --> REL
+    end
+
+    subgraph W1["⑤ Windows 主机部署工具（仓库外 ios/）"]
+        TR["TrollRestore + pymobiledevice3<br/>USB · AFC push"]
+    end
+
+    %% ===== 应用内部数据流 =====
+    SEED -->|Bundle 打包| DBMGR
+    DBMGR -->|首次启动复制| DBW
+    DBW -->|SQL 查询| DBMGR
+    KDATA -->|K线数据| CHART_V
+    PIPELINE -->|指标曲线| CHART_V
+    ENGINE -->|计算序列| CHART_V
+    CONTENT -->|全屏 K线详情| CHART_V
+    CONTENT -->|路由| HOME & MARKET & FAV & SIM & PROFILE & SEARCH
+    HOME --> DBMGR
+    MARKET --> DBMGR
+    FAV --> DBMGR
+    EDITOR -->|编辑保存| CUSTOM
+    LOG -->|写入| LOGF
+
+    %% ===== 本地更新 =====
+    HTTP -->|A2 本地更新 GET /download| DL
+    PROFILE -->|远程更新 POST /install| HTTP
+    HTTP -->|apple-magnifier://install 拉起安装| AM
+
+    %% ===== 部署 / 远程更新链路 =====
+    ART -->|下载 IPA| TR
+    REL -->|下载 IPA| TR
+    TR -->|AFC push| DL
+    DL -->|TrollStore 手动安装| TS
+    TS -->|安装并启动| ENTRY
+    REL -->|检查最新版 + 下载 IPA| PROFILE

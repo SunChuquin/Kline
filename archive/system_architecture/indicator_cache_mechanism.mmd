@@ -1,0 +1,46 @@
+flowchart TB
+    %% ============ 配色 ============
+    style STRUCT fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style WRITE fill:#eef4ff,stroke:#4a6fa5,stroke-width:2px
+    style LOAD fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style FREE fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+
+    subgraph STRUCT["缓存结构（ChartCacheStore 全局单例）"]
+        ENTRIES["entries: [CacheKey(metaId, 周期)] → Entry"]
+        ENTRY1["Entry 字段：<br/>mainCurves 主图曲线<br/>mainCache 输出行级缓存<br/>subCurves[0..2] 三副图曲线<br/>coverageStart/End 前台覆盖区间<br/>bgCoverageEnd 后台覆盖末端<br/>prefetchDone 完成标记 · isPrefetching 占用标记<br/>configFingerprint 配置指纹"]
+        MCACHE["MainIndicatorCache<br/>units[指标id] → UnitSet<br/>formulaKey · 输出行单元 units<br/>rows[行缓存 key → line]"]
+        LRU["metaOrder LRU 顺序<br/>最多保留最近 3 个标的的全部周期"]
+        ENTRIES --> ENTRY1
+        ENTRY1 --> MCACHE
+        ENTRIES --> LRU
+    end
+
+    subgraph WRITE["缓存写回"]
+        W1["recomputeMainCurves / recomputeSub<br/>（前台计算后）"]
+        W2["commitPrefetch<br/>（后台正确结果提交后）"]
+        W3["prefetchOtherPeriod<br/>（其它周期全量预热）"]
+        WKEY["写回 (标的, 周期) Entry<br/>mainCurves · subCurves · mainCache<br/>coverage · bgCoverageEnd（只增不减）<br/>configFingerprint = 当前指纹"]
+        W1 --> WKEY
+        W2 --> WKEY
+        W3 --> WKEY3["全量写缓存 + prefetchDone = true"]
+    end
+
+    subgraph LOAD["缓存加载 / 恢复"]
+        L1["打开标的 / 切换周期（init 恢复）"]
+        L2["退出主图放大 / 返回页面<br/>recompute 时 bgCoverageEnd ≥ 可见末端"]
+        L3["切到已预热周期<br/>（prefetchOtherPeriod 提前算好）"]
+        L1 --> CHECKF{"指纹一致？"}
+        CHECKF -- "是" --> RESTORE["恢复 mainCurves · mainCache<br/>subCurves · coverage · bgCoverageEnd<br/>跳过重复计算"]
+        CHECKF -- "否" --> RECALC["按当前配置重新计算"]
+        L2 --> CHECKB{"指纹一致 &&<br/>缓存曲线非空？"}
+        CHECKB -- "是" --> RESTORE2["直接恢复完整曲线<br/>避免主线程全量重算卡顿"]
+        CHECKB -- "否" --> RECALC2["force 重算 + 后台补齐"]
+        L3 --> RESTORE3["init 直接命中 · 无需等待"]
+    end
+
+    subgraph FREE["缓存释放 / 失效"]
+        F1["LRU 淘汰：标的数 > 3<br/>touch 后移除最久未用标的的所有周期缓存"]
+        F2["配置变化：invalidateIfConfigChanged<br/>清 prefetchDone · bgCoverageEnd<br/>mainCurves · mainCache · subCurves"]
+        F3["禁用主图指标 / 裸K<br/>mainCache 清理不活跃 key（裸K清自定义 key）"]
+        F4["切换标的<br/>视图重建 · 数据变化 → 天然全量重算"]
+    end
