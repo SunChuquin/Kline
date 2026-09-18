@@ -335,7 +335,7 @@ final class BinDataStore {
 
     // MARK: - Windows 风格文件名排序（对齐 tdx_parser.windows_sort_key）
 
-    private static func tokens(_ s: String) -> [String] {
+    private nonisolated static func tokens(_ s: String) -> [String] {
         var out: [String] = []
         var cur = ""
         var curIsDigit: Bool?
@@ -353,14 +353,14 @@ final class BinDataStore {
         return out
     }
 
-    private static func compareToken(_ x: String, _ y: String) -> ComparisonResult {
+    private nonisolated static func compareToken(_ x: String, _ y: String) -> ComparisonResult {
         if let xi = Int(x), let yi = Int(y) {
             return xi == yi ? .orderedSame : (xi < yi ? .orderedAscending : .orderedDescending)
         }
         return x.lowercased().compare(y.lowercased())
     }
 
-    static func windowsOrder(_ a: String, _ b: String) -> Bool {
+    nonisolated static func windowsOrder(_ a: String, _ b: String) -> Bool {
         let ta = tokens(a)
         let tb = tokens(b)
         for i in 0..<min(ta.count, tb.count) {

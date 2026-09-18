@@ -94,7 +94,7 @@ enum BinFormat {
         guard n > 0 else { return [] }
         let take = min(count, n)
         let start = n - take
-        fh.seek(toOffset: UInt64(headerSize + start * recordSize))
+        try? fh.seek(toOffset: UInt64(headerSize + start * recordSize))
         let chunk = fh.readData(ofLength: take * recordSize)
         guard chunk.count == take * recordSize else { return [] }
         var out: [KlineItem] = []
@@ -114,7 +114,7 @@ enum BinFormat {
         let size = fh.seekToEndOfFile()
         let n = recordCount(fileSize: Int(size), recordSize: recordSize)
         guard index >= 0, index < n else { return nil }
-        fh.seek(toOffset: UInt64(headerSize + index * recordSize))
+        try? fh.seek(toOffset: UInt64(headerSize + index * recordSize))
         let sub = fh.readData(ofLength: recordSize)
         guard sub.count == recordSize, let item = decodeLayout(sub, offset: 0, recordSize: recordSize) else { return nil }
         return item.date
