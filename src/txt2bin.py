@@ -7,7 +7,10 @@ txt 只有日线；周/月/季/年线由 App 在设备端从日线实时聚合�
 bin 格式契约（Swift 侧 Kline/Kline/Data/BinFormat.swift 为权威定义，两者必须一致）：
   文件头 128B 小端:
     magic "KLNB"(4) | version UInt8(1) | recordSize UInt8(1)
-    | code ASCII(16) | type UTF8(16) | name UTF8(64) | reserve(26)
+    | code ASCII(16) | type UTF8(32) | name UTF8(64) | reserve(10)
+    ⚠️ type 字段 2026-09-18 由 16 字节加宽到 32：最长取值「扩展行情指数」
+      UTF-8 占 18 字节，按旧 16 字节写会被截成残缺 UTF-8（Swift 侧整段解码
+      失败 → type 空串 → 行情/自选按 type 过滤全落空，表呈空）。
   数据区: N × recordSize 定长记录，小端
     Slim(36B)   : date UInt32(4) | open/high/low/close Float32(16) | vol UInt64(8) | amo Float64(8)
     Precise(52B): date UInt32(4) | open/high/low/close Float64(32) | vol UInt64(8) | amo Float64(8)
@@ -44,7 +47,7 @@ PRICE_EPS = 1e-6
 FILTER_PREFIX = ('42', '46', '12')
 FILTER_FILES = {'62#H11014', '62#931265'}
 
-HEADER_FMT = '<4sBB16s16s64s26s'          # 128B
+HEADER_FMT = '<4sBB16s32s64s10s'          # 128B
 SLIM_FMT = '<I4fQd'                        # 36B
 PRECISE_FMT = '<I4dQd'                     # 52B
 
@@ -108,9 +111,9 @@ def make_header(code: str, name: str, ftype: str, record_size: int) -> bytes:
         HEADER_FMT,
         MAGIC, VERSION, record_size,
         pad(code.encode('ascii', 'ignore'), 16),
-        pad(ftype.encode('utf-8'), 16),
+        pad(ftype.encode('utf-8'), 32),
         pad(name.encode('utf-8'), 64),
-        b'\x00' * 26,
+        b'\x00' * 10,
     )
     assert len(record) == HEADER_SIZE, len(record)
     return record

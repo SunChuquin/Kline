@@ -6,7 +6,10 @@
 //  与 PC 侧 Kline/src/txt2bin.py 共同维护，两者必须保持一致：
 //    文件头 128B 小端:
 //      magic "KLNB"(4) | version UInt8(1) | recordSize UInt8(1)
-//      | code ASCII(16) | type UTF8(16) | name UTF8(64) | reserve(26)
+//      | code ASCII(16) | type UTF8(32) | name UTF8(64) | reserve(10)
+//      ⚠️ type 字段 2026-09-18 由 16 字节加宽到 32：最长取值「扩展行情指数」
+//        UTF-8 占 18 字节，按旧 16 字节写会被截成残缺 UTF-8（整段解码失败
+//        → type 空串 → 行情/自选按 type 过滤全部落空，表呈空）。
 //    数据区: N × recordSize 定长小端记录
 //      Slim(36B)   : date UInt32 | open/high/low/close Float32 | vol UInt64 | amo Float64
 //      Precise(52B): date UInt32 | open/high/low/close Float64 | vol UInt64 | amo Float64
@@ -57,8 +60,8 @@ enum BinFormat {
             return String(bytes: bytes, encoding: .utf8) ?? ""
         }
         return Header(code: fixedString(6..<22),
-                      type: fixedString(22..<38),
-                      name: fixedString(38..<102),
+                      type: fixedString(22..<54),
+                      name: fixedString(54..<118),
                       version: version,
                       recordSize: recordSize)
     }
