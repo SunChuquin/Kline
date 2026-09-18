@@ -91,12 +91,43 @@ class DatabaseManager: ObservableObject {
     func loadMetaList() {
         dbQueue.async { [weak self] in
             guard let self = self else { return }
-            let results: [MetaItem]
-            if DataSourceProvider.shared.mode == .bin {
-                results = BinDataStore.shared.rebuildMeta()
-            } else {
-                results = self.buildMetaListFromDB()
+
+            let query = "SELECT id, file, code, name, type, first_date, last_date FROM meta ORDER BY id;"
+
+            var statement: OpaquePointer?
+
+            guard sqlite3_prepare_v2(self.db, query, -1, &statement, nil) == SQLITE_OK else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "准备查询失败"
+                }
+                return
             }
+
+            var results: [MetaItem] = []
+
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int64(statement, 0))
+                let file = String(cString: sqlite3_column_text(statement, 1))
+                let code = String(cString: sqlite3_column_text(statement, 2))
+                let name = String(cString: sqlite3_column_text(statement, 3))
+                let type = String(cString: sqlite3_column_text(statement, 4))
+                let firstDate = sqlite3_column_type(statement, 5) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 5)) : nil
+                let lastDate = sqlite3_column_type(statement, 6) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 6)) : nil
+
+                let item = MetaItem(
+                    id: id,
+                    file: file,
+                    code: code,
+                    name: name,
+                    type: type,
+                    firstDate: firstDate,
+                    lastDate: lastDate
+                )
+                results.append(item)
+            }
+
+            sqlite3_finalize(statement)
+
             DispatchQueue.main.async {
                 self.metaList = results
                 self.isLoaded = true
@@ -104,84 +135,9 @@ class DatabaseManager: ObservableObject {
         }
     }
 
-    /// 按当前数据源模式同步重建 meta 列表（切换数据源用，任意队列可调用；SQLite 走 dbQueue）
-    func rebuildMetaListSync() -> [MetaItem] {
-        if DataSourceProvider.shared.mode == .bin {
-            return BinDataStore.shared.rebuildMeta()
-        }
-        return dbQueue.sync { [weak self] in
-            self?.buildMetaListFromDB() ?? []
-        }
-    }
-
-    /// 主线程发布重建后的 meta 列表（供数据源切换后刷新 UI）
-    func publishMetaList(_ list: [MetaItem]) {
-        metaList = list
-        isLoaded = true
-    }
-
-    /// 必须已在 dbQueue 上执行：从 SQLite 构建 meta 列表
-    private func buildMetaListFromDB() -> [MetaItem] {
-        guard let db = db else { return [] }
-        let query = "SELECT id, file, code, name, type, first_date, last_date FROM meta ORDER BY id;"
-
-        var statement: OpaquePointer?
-
-        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-            DispatchQueue.main.async {
-                self.errorMessage = "准备查询失败"
-            }
-            return []
-        }
-
-        var results: [MetaItem] = []
-
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let id = Int(sqlite3_column_int64(statement, 0))
-            let file = String(cString: sqlite3_column_text(statement, 1))
-            let code = String(cString: sqlite3_column_text(statement, 2))
-            let name = String(cString: sqlite3_column_text(statement, 3))
-            let type = String(cString: sqlite3_column_text(statement, 4))
-            let firstDate = sqlite3_column_type(statement, 5) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 5)) : nil
-            let lastDate = sqlite3_column_type(statement, 6) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 6)) : nil
-
-            let item = MetaItem(
-                id: id,
-                file: file,
-                code: code,
-                name: name,
-                type: type,
-                firstDate: firstDate,
-                lastDate: lastDate
-            )
-            results.append(item)
-        }
-
-        sqlite3_finalize(statement)
-        return results
-    }
-
-    /// bin 模式：按（指定标的后端周期表名）取整史数据；非 bin 模式返回 nil
-    private func binBarsOrNil(metaId: Int, table: String) -> [KlineItem]? {
-        guard DataSourceProvider.shared.mode == .bin else { return nil }
-        return BinDataStore.shared.bars(metaId: metaId, period: Self.period(from: table))
-    }
-
-    /// 周期表名 → KlinePeriod（daily/weekly/monthly/quarterly/yearly）
-    private static func period(from table: String) -> KlinePeriod {
-        switch table {
-        case "weekly": return .weekly
-        case "monthly": return .monthly
-        case "quarterly": return .quarterly
-        case "yearly": return .yearly
-        default: return .daily
-        }
-    }
-
     /// 读取指定标的全量日线数据
     func fetchDailyData(metaId: Int) -> [KlineItem] {
-        if let bin = binBarsOrNil(metaId: metaId, table: "daily") { return bin }
-        return dbQueue.sync {
+        dbQueue.sync {
             guard let db = db else { return [] }
             let query = "SELECT date, open, high, low, close, vol, amo FROM daily WHERE meta_id = ? ORDER BY date DESC;"
             return runBarsQuery(db: db, query: query, metaId: metaId)
@@ -190,8 +146,7 @@ class DatabaseManager: ObservableObject {
 
     /// 读取指定标的全量周线数据
     func fetchWeeklyData(metaId: Int) -> [KlineItem] {
-        if let bin = binBarsOrNil(metaId: metaId, table: "weekly") { return bin }
-        return dbQueue.sync {
+        dbQueue.sync {
             guard let db = db else { return [] }
             let query = "SELECT date, open, high, low, close, vol, amo FROM weekly WHERE meta_id = ? ORDER BY date DESC;"
             return runBarsQuery(db: db, query: query, metaId: metaId)
@@ -226,8 +181,7 @@ class DatabaseManager: ObservableObject {
 
     /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空
     private func fetchPeriodTable(metaId: Int, table: String) -> [KlineItem] {
-        if let bin = binBarsOrNil(metaId: metaId, table: table) { return bin }
-        return dbQueue.sync {
+        dbQueue.sync {
             guard let db = db else { return [] }
             let query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? ORDER BY date DESC;"
             return runBarsQuery(db: db, query: query, metaId: metaId)
@@ -257,10 +211,7 @@ class DatabaseManager: ObservableObject {
     }
 
     func searchMeta(keyword: String) -> [MetaItem] {
-        if DataSourceProvider.shared.mode == .bin {
-            return BinDataStore.shared.search(keyword: keyword)
-        }
-        return dbQueue.sync {
+        dbQueue.sync {
             performSearch(keyword: keyword)
         }
     }
@@ -268,10 +219,7 @@ class DatabaseManager: ObservableObject {
     /// 取某标的某周期表最近 limit 根（ORDER BY date DESC → 结果从新→旧）。
     /// 用于行情/自选列表表单只需要最近 80 根，避免全量读（一次 1K+ 只的话全量读会卡死）。
     func fetchPeriodLimited(metaId: Int, table: String, limit: Int) -> [KlineItem] {
-        if DataSourceProvider.shared.mode == .bin {
-            return BinDataStore.shared.tailDaily(metaId: metaId, limit: limit)
-        }
-        return dbQueue.sync {
+        dbQueue.sync {
             guard let db = self.db else { return [] }
             let query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? ORDER BY date DESC LIMIT ?;"
             var statement: OpaquePointer?
@@ -296,15 +244,6 @@ class DatabaseManager: ObservableObject {
     }
 
     func searchMetaAsync(keyword: String, completion: @escaping ([MetaItem]) -> Void) {
-        if DataSourceProvider.shared.mode == .bin {
-            DispatchQueue.global(qos: .userInitiated).async {
-                let results = BinDataStore.shared.search(keyword: keyword)
-                DispatchQueue.main.async {
-                    completion(results)
-                }
-            }
-            return
-        }
         dbQueue.async { [weak self] in
             guard let self = self else { return }
             let results = self.performSearch(keyword: keyword)
