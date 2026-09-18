@@ -1,0 +1,72 @@
+---
+title: "动态生成 Mermaid 和 Graphviz 图表"
+format: html
+---
+
+## 1. 动态生成 Mermaid
+
+下面的 Mermaid 图完全由 Python 代码生成，节点和标签来自一个字典。
+
+```{python}
+#| output: asis
+
+services = {
+    "前端": ["网关"],
+    "网关": ["用户服务", "订单服务"],
+    "用户服务": ["用户数据库"],
+    "订单服务": ["订单数据库"],
+}
+
+lines = []
+lines.append("```{mermaid}")
+lines.append("graph TD")
+for src, targets in services.items():
+    for tgt in targets:
+        lines.append(f"    {src} --> {tgt}")
+lines.append("```")
+
+print("\n".join(lines))
+```
+
+## 2. 动态生成 Graphviz
+
+下面用 Python 计算出一组依赖关系132213213，再拼成 Graphviz 的 DOT 代码。
+
+```{python}
+#| output: asis
+
+import datetime
+
+modules = ["auth", "api", "db", "cache"]
+deps = [("api", "auth"), ("api", "db"), ("api", "cache")]
+
+today = datetime.date.today().isoformat()
+
+lines = ["```{dot}", "digraph G {"]
+lines.append(f'    label="生成日期吧: {today}";')
+lines.append("    rankdir=LR;")
+for m in modules:
+    lines.append(f'    {m} [shape=box];')
+for a, b in deps:
+    lines.append(f"    {a} -> {b};")
+lines.append("}")
+lines.append("```")
+
+print("\n".join(lines))
+```
+
+``` {mermaid}
+flowchart TB
+    APP["App 启动"] --> INIT["DatabaseManager 单例 init"]
+    INIT --> QUEUE["dbQueue 串行队列"]
+    QUEUE --> LOAD["loadDatabase()"]
+    LOAD --> CHECK{"Documents/tdx.db 存在？"}
+    CHECK -- 否 --> COPY["从种子库 copyItem 复制"]
+    CHECK -- 是 --> DOC[("Documents/tdx.db 可写副本")]
+    COPY --> DOC
+    DOC --> OPEN["sqlite3_open"]
+    OPEN -- 失败 --> ERR["errorMessage + DebugLogger"]
+    OPEN -- 成功 --> META["loadMetaList()"]
+    META --> PUB["主线程更新 @Published"]
+```
+

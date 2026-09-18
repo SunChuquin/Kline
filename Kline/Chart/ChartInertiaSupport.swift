@@ -13,6 +13,10 @@
 //  惯性中的平移推进与拖动手势 pan 分支同构（panOffset 亚像素累计、满一根K线
 //  间距进位 endOffset），因此每帧画面与手指拖动无差异，不会出现卡顿或跳跃。
 //
+//  另含「光标贴边自动拖动」：光标被推到主图可视边缘最后一根后，手指按住停在主图
+//  外侧一半区域（越过中线）期间，复用同一动画器（duration = nil 无限）按较慢的
+//  恒定速度持续滚动可见窗口，抬手或手指退回内侧一半才停（见 startEdgeAutoScroll）。
+//
 
 import SwiftUI
 import UIKit
@@ -27,9 +31,15 @@ final class ChartMomentumAnimator: NSObject {
     static let fixedDuration: Double = 2.0
     /// 惯性固定滑行距离（屏幕数）
     static let travelScreens: CGFloat = 2
+    /// 光标贴边「按住持续滚动」速度（屏宽/秒）：按住手指不动时的匀速滚动速度。
+    /// 明显慢于惯性（惯性 = 1 屏/秒），按住期间可精细定位。
+    static let edgeAutoScrollScreensPerSecond: CGFloat = 0.2
 
     /// 带符号匀速（px/s，右正左负），start() 前赋值
     var velocity: CGFloat = 0
+    /// 本次动画时长（s）：默认 = fixedDuration（抬手甩动惯性）；
+    /// nil = 无限（光标贴边「按住持续滚动」用，只能由 cancel() 或触边结束）
+    var duration: Double? = ChartMomentumAnimator.fixedDuration
     /// 每帧推进：把位移增量应用到图表平移。返回 false = 撞到数据边界，立即结束
     var onAdvance: ((CGFloat) -> Bool)?
     /// 结束收尾（自然到点 / 触边立即停，对齐 + 重算/预取）
@@ -61,14 +71,15 @@ final class ChartMomentumAnimator: NSObject {
 
     @objc private func step(_ l: CADisplayLink) {
         guard !finished else { return }
-        let now = l.timestamp
-        let t = min(now - startTime, Self.fixedDuration)
+        // duration == nil：无限动画，位移随时间线性增长，直到 cancel() 或触边
+        let elapsed = l.timestamp - startTime
+        let t = duration.map { min(elapsed, $0) } ?? elapsed
         let target = velocity * CGFloat(t)
         let dx = target - lastPosition
         lastPosition = target
         var hitBoundary = false
         if dx != 0 { hitBoundary = !(onAdvance?(dx) ?? true) }
-        if t >= Self.fixedDuration || hitBoundary {
+        if hitBoundary || (duration.map { t >= $0 } ?? false) {
             cancel()
             onFinish?()
         }
@@ -180,6 +191,67 @@ extension KlineChartView {
         DebugLogger.shared.log("[惯性启动] 惯性被新手势/双指打断，立即终止")
         drag.momentum?.cancel()
         drag.momentum = nil
+        panOffset = 0
+    }
+
+    // MARK: - 光标贴边「按住持续滚动」
+
+    /// 光标贴边自动拖动：手指把光标推到主图可视边缘最后一根后仍朝同方向推、且停在主图外侧一半区域
+    /// （越过主图中线）期间，可见窗口按固定速度**持续滚动**，与手指是否还在移动无关：
+    /// 手指按住不动也继续滚，直到抬手、手指退回内侧一半、或滚到数据边界自然停住。
+    ///
+    /// - Parameter direction: 手指推动方向 +1（光标贴右缘、窗口露更新数据）/ −1（贴左缘、露更早数据）。
+    /// 与抬手的甩动惯性不同：无固定时长，只能被 stopEdgeAutoScroll() 或数据边界终止。
+    @discardableResult
+    func startEdgeAutoScroll(direction dirIn: CGFloat, width: CGFloat, candleSpacing: CGFloat) -> Bool {
+        guard dirIn != 0, candleSpacing > 0, !menuIsOpen, !sortedData.isEmpty else { return false }
+        // 同方向已在滚：沿用当前动画器，触摸事件密集时不重建 display link
+        if drag.edgeAutoScrollDir == dirIn, drag.edgeAutoScroller != nil { return true }
+        stopEdgeAutoScroll()
+        let maxEndOffset = max(0, sortedData.count - count)
+        // 手指方向 → 平移方向取反：手指朝右推时窗口必须向「更新」方向滚动（endOffset 减小），
+        // 光标才能继续朝右走、始终贴住右缘（左推同理）
+        let sgn: CGFloat = dirIn > 0 ? -1 : 1
+        let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
+        guard candlesAhead >= 1 else { return false }
+        let v = sgn * width * ChartMomentumAnimator.edgeAutoScrollScreensPerSecond
+        let animator = ChartMomentumAnimator()
+        animator.duration = nil   // 无限：按住期间一直滚
+        animator.velocity = v
+        animator.onAdvance = { [self] dx in
+            // 与拖动手势 pan 分支完全相同的亚像素累计进位平移
+            panOffset += dx
+            let shift = Int((panOffset / candleSpacing).rounded())
+            guard shift != 0 else { return true }
+            let newOffset = clamp(endOffset + shift, 0, maxEndOffset)
+            let applied = newOffset - endOffset
+            endOffset = newOffset
+            panOffset -= CGFloat(applied) * candleSpacing
+            // 光标随窗口一起走，始终保持「光标是该主图可视边缘最后一根」
+            selectedIndex = dirIn > 0 ? min(sortedData.count - 1, endIndex) : max(0, startIndex)
+            // applied != shift = 已到数据边界：立即停（无过冲）
+            return applied == shift
+        }
+        animator.onFinish = { [self] in
+            // 触边自然停：只清状态；对齐 + 重算/预取由抬手时的 onEnded 统一处理（拖动中不重算指标）
+            drag.edgeAutoScroller = nil
+            drag.edgeAutoScrollDir = 0
+            panOffset = 0
+            DebugLogger.shared.log("[贴边自动滚动] 结束 方式=触边即停 endOffset=\(endOffset)/\(maxEndOffset)")
+        }
+        drag.edgeAutoScrollDir = dirIn
+        drag.edgeAutoScroller = animator
+        DebugLogger.shared.log("[贴边自动滚动] ✅启动 方向=\(dirIn > 0 ? "贴右缘(露更新)" : "贴左缘(露更早)") v=\(String(format: "%.0f", Double(abs(v))))px/s 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset)")
+        animator.start()
+        return true
+    }
+
+    /// 终止「光标贴边自动滚动」（幂等）：抬手、手指退回主图内侧一半、双指接管、视图销毁时调用
+    func stopEdgeAutoScroll() {
+        guard drag.edgeAutoScrollDir != 0 || drag.edgeAutoScroller != nil else { return }
+        drag.edgeAutoScrollDir = 0
+        drag.edgeAutoScroller?.cancel()   // cancel 不触发 onFinish，状态上面已手动清
+        drag.edgeAutoScroller = nil
         panOffset = 0
     }
 }

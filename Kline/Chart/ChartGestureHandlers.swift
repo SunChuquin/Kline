@@ -85,19 +85,39 @@ extension KlineChartView {
                         let col = Int((value.location.x / candleSpacing).rounded(.down))
                         let idx = startIndex + col
                         let maxOff = max(0, sortedData.count - count)
-                        // 光标撞到主图左缘仍继续向左拖：可见窗口向右滚动（露更新数据），光标贴左缘
+                        // 贴边自动拖动进行中：只要手指仍停在主图外侧一半（越过中线）就保持
+                        // 「光标贴边 + 窗口持续滚动」，与手指是否还在移动无关（动画器在滚）；
+                        // 手指退回内侧一半内才解除，交回下方常规跟随逻辑
+                        if drag.edgeAutoScrollDir != 0 {
+                            let stillOutside = drag.edgeAutoScrollDir > 0
+                                ? value.location.x > width / 2
+                                : value.location.x < width / 2
+                            if stillOutside {
+                                linkUserDragging = true
+                                crosshairY = value.location.y
+                                drag.cursorDragging = true
+                                return
+                            }
+                            stopEdgeAutoScroll()
+                        }
+                        // 光标撞到主图左缘仍继续向左拖：光标越过左缘继续朝更早的K线走
+                        //（内容向右滚动、左侧露出更早数据），光标贴左缘；
+                        // 随后转入「按住持续滚动」——手指停住不动也继续滚，直至抬手或手指退回内侧一半
                         if col <= 0 && cursorDx < -0.5 {
                             linkUserDragging = true
                             endOffset = min(maxOff, endOffset + 1)
                             selectedIndex = max(0, startIndex)
                             crosshairY = value.location.y
+                            startEdgeAutoScroll(direction: -1, width: width, candleSpacing: candleSpacing)
                         }
-                        // 光标撞到主图右缘仍继续向右拖：可见窗口向左滚动（露更早数据），光标贴右缘
+                        // 光标撞到主图右缘仍继续向右拖：光标越过右缘继续朝更新的K线走
+                        //（内容向左滚动、右侧露出更新数据），光标贴右缘；同样转入「按住持续滚动」
                         else if col >= (count - 1) && cursorDx > 0.5 {
                             linkUserDragging = true
                             endOffset = max(0, endOffset - 1)
                             selectedIndex = min(sortedData.count - 1, endIndex)
                             crosshairY = value.location.y
+                            startEdgeAutoScroll(direction: 1, width: width, candleSpacing: candleSpacing)
                         }
                         // 常规：光标在窗口内跟随手指
                         else if idx >= startIndex && idx <= endIndex {
@@ -155,6 +175,9 @@ extension KlineChartView {
                 drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
                 // 兜底：无论手势如何结束（含双指手势被中断），都清除双指状态，避免残留拦截后续单指拖动
                 drag.twoFingerActive = false
+                // 抬手：终止「光标贴边自动拖动」（幂等）；窗口已滚动的收尾（panOffset 归零 +
+                // refreshCurves/startPrefetch）由下方原有流程统一处理
+                stopEdgeAutoScroll()
                 // 联动非来源的**同周期**视图：单指手势全程忽略，不产生任何光标/窗口变化
                 if isLinkedFrozenView {
                     drag.isDragging = false
@@ -336,6 +359,8 @@ extension KlineChartView {
         // 双指接管：终止进行中的惯性滑动，并取消单指 pan 状态（否则抬手时会用
         // 双指接管前的陈旧移动记录误触发一次惯性）；抬手意图状态清零，从双指质心重新累计
         cancelPanInertia()
+        // 同时终止「光标贴边自动拖动」：双指接管后窗口由双指手势统一控制
+        stopEdgeAutoScroll()
         drag.dragMode = .none
         drag.lastPanWidth = 0
         drag.resetPanIntent()

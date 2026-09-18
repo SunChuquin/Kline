@@ -40,6 +40,11 @@ final class DragState {
     var panTrail: [(t: CFTimeInterval, x: CGFloat)] = []
     /// 进行中的横向惯性滑动动画器（nil = 无）
     var momentum: ChartMomentumAnimator? = nil
+    /// 光标贴边自动拖动方向：+1 = 手指朝右推、光标贴右缘（窗口露更新数据）；
+    /// −1 = 朝左推、贴左缘（露更早数据）；0 = 未激活。激活期间窗口由动画器持续滚动
+    var edgeAutoScrollDir: CGFloat = 0
+    /// 光标贴边自动拖动的动画器（CADisplayLink 无限匀速推进；nil = 未激活）
+    var edgeAutoScroller: ChartMomentumAnimator? = nil
     /// 调试用：本次手势是否已记录起点日志（onEnded 复位）
     var beginLogged = false
 
