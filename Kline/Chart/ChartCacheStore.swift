@@ -85,4 +85,10 @@ final class ChartCacheStore {
             entries = entries.filter { $0.key.metaId != oldest }
         }
     }
+
+    /// 清空全部缓存（数据源切换 / 底层行情数据整体更新时调用，防止旧配置曲线残留）
+    func clearAll() {
+        entries.removeAll()
+        metaOrder.removeAll()
+    }
 }

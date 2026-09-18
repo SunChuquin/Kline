@@ -263,6 +263,41 @@ final class FavoritesStore: ObservableObject {
         saveToDisk()
     }
 
+    // MARK: - 数据源切换：按 file 主键重映射 metaID
+
+    /// 数据源切换（DB↔bin）后，两套 metaID 含义不同，但同一标的的 file 名一致。
+    /// 用 file 名把 manual 分组与 formula 分组缓存的 metaID 重映射到新数据源，落盘保存。
+    func remapMetaIDs(from oldList: [MetaItem], to newList: [MetaItem]) {
+        var oldFileByID: [Int: String] = [:]
+        for m in oldList { oldFileByID[m.id] = m.file }
+        var newIDByFile: [String: Int] = [:]
+        for m in newList { newIDByFile[m.file] = m.id }
+
+        func remap(_ ids: [Int]) -> [Int] {
+            ids.compactMap { id -> Int? in
+                guard let file = oldFileByID[id] else { return nil }
+                return newIDByFile[file]
+            }
+        }
+
+        var changed = false
+        for i in groups.indices {
+            let newManual = remap(groups[i].manualMetaIDs)
+            var newCached = groups[i].cachedMatches
+            if let cm = groups[i].cachedMatches {
+                newCached = remap(cm)
+            }
+            if newManual != groups[i].manualMetaIDs || newCached != groups[i].cachedMatches {
+                groups[i].manualMetaIDs = newManual
+                groups[i].cachedMatches = newCached
+                changed = true
+            }
+        }
+        if changed {
+            saveToDisk()
+        }
+    }
+
     // MARK: - Manual 分组：一键获取 metaID -> MetaItem 列表（从 DatabaseManager metaList 查找）
 
     func resolveMetaItems(groupID: UUID, allMeta: [MetaItem]) -> [MetaItem] {
