@@ -175,9 +175,16 @@ extension KlineChartView {
                 drag.lastPanWidth = 0; drag.lastPanHeight = 0; drag.dragMode = .none
                 // 兜底：无论手势如何结束（含双指手势被中断），都清除双指状态，避免残留拦截后续单指拖动
                 drag.twoFingerActive = false
-                // 抬手：终止「光标贴边自动拖动」（幂等）；窗口已滚动的收尾（panOffset 归零 +
-                // refreshCurves/startPrefetch）由下方原有流程统一处理
-                stopEdgeAutoScroll()
+                // 光标贴边自动拖动进行中：抬手**不停止**——继续以每秒一根K线的速度滚动，
+                // 直到该光标被现有任何方式清除、手指反向退回主图内侧一半、或滚到数据边界。
+                // 因此这里不做 panOffset 对齐与指标重算（滚动仍在继续），只复位手势态。
+                // 例外：本次是轻点（无位移）→ 视为"清除光标"操作，停滚动并照常走下方轻点逻辑
+                if drag.edgeAutoScrollDir != 0 {
+                    drag.isDragging = false
+                    let isTapOnAutoScroll = abs(value.translation.width) < 6 && abs(value.translation.height) < 6
+                    if !isTapOnAutoScroll { return }
+                    stopEdgeAutoScroll()
+                }
                 // 联动非来源的**同周期**视图：单指手势全程忽略，不产生任何光标/窗口变化
                 if isLinkedFrozenView {
                     drag.isDragging = false

@@ -13,9 +13,10 @@
 //  惯性中的平移推进与拖动手势 pan 分支同构（panOffset 亚像素累计、满一根K线
 //  间距进位 endOffset），因此每帧画面与手指拖动无差异，不会出现卡顿或跳跃。
 //
-//  另含「光标贴边自动拖动」：光标被推到主图可视边缘最后一根后，手指按住停在主图
-//  外侧一半区域（越过中线）期间，复用同一动画器（duration = nil 无限）按较慢的
-//  恒定速度持续滚动可见窗口，抬手或手指退回内侧一半才停（见 startEdgeAutoScroll）。
+//  另含「光标贴边自动拖动」：光标被推到主图可视边缘最后一根后，复用同一动画器
+//  （duration = nil 无限）以「每秒一根K线」持续滚动可见窗口。**抬手不停**，直到该光标
+//  被现有任何方式清除、手指反向退回主图内侧一半、或滚到数据边界自然停住
+//  （见 startEdgeAutoScroll / stopEdgeAutoScroll）。
 //
 
 import SwiftUI
@@ -197,8 +198,9 @@ extension KlineChartView {
     // MARK: - 光标贴边「按住持续滚动」
 
     /// 光标贴边自动拖动：手指把光标推到主图可视边缘最后一根后仍朝同方向推、且停在主图外侧一半区域
-    /// （越过主图中线）期间，可见窗口按固定速度（每秒一根K线）**持续滚动**，与手指是否还在移动无关：
-    /// 手指按住不动也继续滚，直到抬手、手指退回内侧一半、或滚到数据边界自然停住。
+    /// （越过主图中线）期间，可见窗口按固定速度（每秒一根K线）**持续滚动**，与手指是否还在移动无关。
+    /// **抬手不停**：手指抬起后继续滚动，直到该光标被现有任何方式清除（selectedIndex 归 nil）、
+    /// 手指反向退回主图内侧一半、或滚到数据边界自然停住。
     ///
     /// - Parameter direction: 手指推动方向 +1（光标贴右缘、查看更新数据）/ −1（贴左缘、查看更早数据）。
     /// 与抬手的甩动惯性不同：无固定时长，只能被 stopEdgeAutoScroll() 或数据边界终止。
@@ -233,25 +235,36 @@ extension KlineChartView {
             return applied == shift
         }
         animator.onFinish = { [self] in
-            // 触边自然停：只清状态；对齐 + 重算/预取由抬手时的 onEnded 统一处理（拖动中不重算指标）
+            // 数据边界自然停：清状态并做一次收尾（对齐 + 指标重算 + 恢复预取）。
+            // 抬手路径不在这里——抬手后自动滚动仍在继续，收尾只能放在真正停下的这一刻
             drag.edgeAutoScroller = nil
             drag.edgeAutoScrollDir = 0
+            drag.cursorDragging = false
             panOffset = 0
             DebugLogger.shared.log("[贴边自动滚动] 结束 方式=触边即停 endOffset=\(endOffset)/\(maxEndOffset)")
+            refreshCurves()
+            startPrefetch()
         }
         drag.edgeAutoScrollDir = dirIn
         drag.edgeAutoScroller = animator
-        DebugLogger.shared.log("[贴边自动滚动] ✅启动 方向=\(dirIn > 0 ? "贴右缘(露更新)" : "贴左缘(露更早)") v=\(String(format: "%.0f", Double(abs(v))))px/s 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset)")
+        // 自动滚动期间保持「本地光标模式」（与手指拖动同态）：横线仍停在手指最后位置、
+        // 光标按 selectedIndex 渲染，且每次光标推进都会对外发布联动光标
+        drag.cursorDragging = true
+        DebugLogger.shared.log("[贴边自动滚动] ✅启动 方向=\(dirIn > 0 ? "贴右缘(看更新)" : "贴左缘(看更早)") v=\(String(format: "%.0f", Double(abs(v))))px/s 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset)")
         animator.start()
         return true
     }
 
-    /// 终止「光标贴边自动滚动」（幂等）：抬手、手指退回主图内侧一半、双指接管、视图销毁时调用
+    /// 终止「光标贴边自动滚动」（幂等）：该光标被现有任何方式清除、手指反向退回主图内侧一半、
+    /// 双指接管、其他视图接管来源、视图销毁 / 数据刷新时调用
     func stopEdgeAutoScroll() {
         guard drag.edgeAutoScrollDir != 0 || drag.edgeAutoScroller != nil else { return }
         drag.edgeAutoScrollDir = 0
         drag.edgeAutoScroller?.cancel()   // cancel 不触发 onFinish，状态上面已手动清
         drag.edgeAutoScroller = nil
+        // 自动滚动期间 cursorDragging 恒为 true（见 startEdgeAutoScroll）；停时必须复位，
+        // 否则后续轻点会被 onEnded 的 cursorDragging 分支吞掉，光标再也点不掉
+        drag.cursorDragging = false
         panOffset = 0
     }
 }

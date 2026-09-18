@@ -732,6 +732,9 @@ struct KlineChartView: View {
             klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
             notifyHasCursor()
             publishLinkCursor(index: newIdx)
+            // 「光标贴边自动拖动」的唯一停法之一：该光标被现有任何方式清除（轻点清除、
+            // 关闭光标联动、退出联动、切周期/标的销毁视图等最终都会让 selectedIndex 归 nil）
+            if newIdx == nil { stopEdgeAutoScroll() }
         }
         .onChange(of: cursorClearToken) { _ in
             // 外层广播：清掉本视图所有十字光标（切换光标联动开/关、退出联动等场景）

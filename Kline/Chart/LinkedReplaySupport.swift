@@ -551,7 +551,12 @@ extension KlineChartView {
     func applyLinkCursor(_ date: Int?) {
         // 总开关：未开启光标联动时直接忽略
         guard cursorLinkEnabled else { return }
-        // 本视图正在被用户直接拖动光标（手势进行中）：忽略联动。
+        // 其他视图接管了联动来源（本视图不再是来源）时，本视图进行中的「光标贴边自动滚动」
+        // 立即让位：否则两边各按自己的光标发布，会互相抢着居中而打架
+        if drag.edgeAutoScrollDir != 0, linkSync.sourceID != selfIndex {
+            stopEdgeAutoScroll()
+        }
+        // 本视图正在被用户直接拖动光标（手势进行中 / 贴边自动滚动中）：忽略联动。
         // 否则回声会把光标拽到别的K线，下一帧手指又拉回，产生闪烁
         if drag.cursorDragging { return }
         // 正在应用联动（非用户直接拖动）；复位来源标记，防止手势中断后粘滞
