@@ -100,6 +100,8 @@ struct KlineChartView: View {
     var initialVisibleCount: CGFloat? = nil
     /// 可见K线数变化回调（联动持久化缩放级别用）。nil = 不回调（单图模式无需持久化）。
     var onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil
+    /// 信息行被拖动上报（多图重置按钮高亮用）：任一信息行内容被拖动置 true。
+    var onInfoRowPanned: ((Bool) -> Void)? = nil
 
     // 交互状态
     @State var selectedIndex: Int? = nil
@@ -204,7 +206,8 @@ struct KlineChartView: View {
          editorOwnerIndex: Binding<Int?> = .constant(nil),
          onEditorActivate: (() -> Void)? = nil,
          initialVisibleCount: CGFloat? = nil,
-         onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil) {
+         onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil,
+         onInfoRowPanned: ((Bool) -> Void)? = nil) {
         self.series = series
         self.metaId = metaId
         self.period = period
@@ -233,6 +236,7 @@ struct KlineChartView: View {
         self.onEditorActivate = onEditorActivate
         self.initialVisibleCount = initialVisibleCount
         self.onVisibleCountChange = onVisibleCountChange
+        self.onInfoRowPanned = onInfoRowPanned
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor

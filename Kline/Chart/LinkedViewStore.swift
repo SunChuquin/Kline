@@ -97,6 +97,29 @@ final class LinkedViewStore: ObservableObject {
     /// @Published 保证写入 series 时所有读到这个槽的 View 重新渲染。
     @Published private(set) var tileData: [LinkedTileDataKey: LinkedTileDataSlot] = [:]
 
+    /// 信息行是否被拖过（key = "\(ownerMetaID)-\(tileIndex)"，值 true 表示该视图信息行被拖动、
+    /// 重置按钮应高亮可点）。内存态、不落盘；重置或信息行复位时清除。
+    @Published private(set) var infoRowPanned: [String: Bool] = [:]
+
+    // MARK: - 信息行拖动状态（供重置按钮高亮判定）
+
+    /// 标记某视图信息行被拖过（重置按钮高亮）。
+    func markInfoRowPanned(owner: Int, index: Int) {
+        let k = "\(owner)-\(index)"
+        if infoRowPanned[k] != true { infoRowPanned[k] = true }
+    }
+
+    /// 清除某视图信息行的拖动标记（重置/复位后按钮变灰）。
+    func clearInfoRowPanned(owner: Int, index: Int) {
+        let k = "\(owner)-\(index)"
+        if infoRowPanned[k] != nil { infoRowPanned[k] = nil }
+    }
+
+    /// 某视图信息行是否被拖过（并入重置按钮高亮判定）。
+    func isInfoRowPanned(owner: Int, index: Int) -> Bool {
+        infoRowPanned["\(owner)-\(index)"] == true
+    }
+
     private let fm = FileManager.default
 
     // MARK: - 共享数据槽读写（线程安全：只在主线程访问）
