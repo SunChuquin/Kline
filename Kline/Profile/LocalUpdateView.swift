@@ -8,14 +8,17 @@
 import SwiftUI
 
 /// 「本地更新」卡片组（个人中心内）：只保留两条状态行，行高固定 48，
-/// 任何状态与点击都只替换右侧状态图标（图标占位固定 24x24），
-/// 不新增文本 / 进度块 / 列表，**布局永不变形**。
+/// 任何状态与点击都只替换右侧状态图标（图标位固定 24x24），
+/// 不新增文本 / 额外行 / 列表，**布局永不变形**。
 ///
 /// 1. 在线服务：进入个人中心（或回前台）自动探测一次本地 HTTP 服务（部署助手链路依赖它）；
 ///    探测中 = 黄「=」，在线 = 绿勾，离线 = 红叉且整行可点 = 重连。
-/// 2. 检查新版（当前 #N）：只由用户点这一行触发检查（不自动）；
-///    未检查 = 灰「=」，检查/下载中 = 黄「=」，已是最新 = 绿勾（可再点复检），
-///    有新版或失败 = 红叉（点击 = 下载并安装 / 重试检查）。
+/// 2. 检查新版（最新#N 当前 #M）：**页面打开即自动检查一次**，之后也可点这一行复检；
+///    未检查 = 灰「=」，检查中 = 黄「…」，下载中 = 黄「圆圈+百分比数字」，
+///    已是最新 = 绿勾，有新版或失败 = 红叉（点击 = 下载并安装 / 重试）。
+///
+/// 下载新版前会把沙盒内现有的 Kline.ipa 归档为 Kline_<当前构建号>.ipa（可回退手动安装），
+/// 归档只保留版本号最大的 10 个，避免磁盘被历史 IPA 占满。
 struct LocalUpdateView: View {
 
     @Environment(\.scenePhase) private var scenePhase
@@ -30,9 +33,16 @@ struct LocalUpdateView: View {
         case failed        // 检查/下载失败（点击 = 重试）
     }
 
+    /// 归档保留数量：下载前归档上一版，超过该数量则按版本号从大到小保留
+    private static let archiveKeepCount = 10
+
     @State private var serverOK = false
     @State private var serverProbing = false          // 在线服务探测中
     @State private var remoteState: RemoteState = .idle
+    /// 远程最新构建号（检查成功后写入，用于标题「最新#N」）
+    @State private var remoteBuildNumber: Int? = nil
+    /// 下载进度 0~100（下载中显示在圆圈里）
+    @State private var downloadPercent = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -43,24 +53,28 @@ struct LocalUpdateView: View {
 
             VStack(spacing: 0) {
                 statusRow(title: "在线服务",
-                          icon: serverIcon.0,
-                          tint: serverIcon.1,
                           enabled: !serverOK && !serverProbing,
-                          action: reconnectServer)
+                          action: reconnectServer) {
+                    Image(systemName: serverIcon.0)
+                        .font(.system(size: 18))
+                        .foregroundColor(serverIcon.1)
+                }
 
                 Divider()
 
                 statusRow(title: remoteTitle,
-                          icon: remoteIcon.0,
-                          tint: remoteIcon.1,
                           enabled: remoteTappable,
-                          action: onRemoteRowTap)
+                          action: onRemoteRowTap) {
+                    remoteStatusIcon
+                }
             }
             .background(Color(.secondarySystemBackground))
             .cornerRadius(12)
         }
         .onAppear {
             refreshServerStatus()
+            // 页面打开即自动检查一次 Git 最新版本；已在检查/下载中则不打断
+            if !remoteBusy { checkGitHubUpdate() }
         }
         // 回前台重新探测：服务器此时会自检并可能重建监听，界面要跟着显示真实结果
         .onChange(of: scenePhase) { phase in
@@ -70,17 +84,16 @@ struct LocalUpdateView: View {
 
     // MARK: - 状态行
 
-    /// 状态行：行高固定、右侧状态图标占位固定 —— 换图标/换色都不改变布局
-    private func statusRow(title: String, icon: String, tint: Color,
-                           enabled: Bool, action: @escaping () -> Void) -> some View {
+    /// 状态行：行高固定、右侧图标位固定 —— 换图标/换色都不改变布局
+    private func statusRow<Icon: View>(title: String, enabled: Bool,
+                                       action: @escaping () -> Void,
+                                       @ViewBuilder icon: () -> Icon) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(title)
                     .font(.system(size: 16))
                 Spacer(minLength: 12)
-                Image(systemName: icon)
-                    .font(.system(size: 18))
-                    .foregroundColor(tint)
+                icon()
                     .frame(width: 24, height: 24)
             }
             .padding(.horizontal, 16)
@@ -97,27 +110,64 @@ struct LocalUpdateView: View {
         return serverOK ? ("checkmark.circle.fill", .green) : ("xmark.circle.fill", .red)
     }
 
-    /// 检查新版行：灰「=」未检查 / 黄「=」进行中 / 绿勾最新 / 红叉有新版或失败
-    private var remoteIcon: (String, Color) {
+    /// 检查新版行：灰「=」未检查 / 黄「…」检查中 / 黄进度圈 下载中 / 绿勾最新 / 红叉有新版或失败
+    @ViewBuilder
+    private var remoteStatusIcon: some View {
         switch remoteState {
-        case .idle:                   return ("minus.circle.fill", .gray)
-        case .checking, .downloading: return ("minus.circle.fill", .yellow)
-        case .latest:                 return ("checkmark.circle.fill", .green)
-        case .outdated, .failed:      return ("xmark.circle.fill", .red)
+        case .idle:
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.gray)
+        case .checking:
+            Image(systemName: "ellipsis.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.yellow)
+        case .downloading:
+            downloadProgressIcon
+        case .latest:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.green)
+        case .outdated, .failed:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.red)
+        }
+    }
+
+    /// 下载进度：圆圈包着百分比数字（0~100），占位与其它状态图标一致（24x24）
+    private var downloadProgressIcon: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.yellow.opacity(0.3), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: CGFloat(downloadPercent) / 100)
+                .stroke(Color.yellow, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(downloadPercent)")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.yellow)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
     }
 
     private var remoteTitle: String {
-        "检查新版（当前 #\(GitHubUpdateService.currentBuildNumber.map(String.init) ?? "?")）"
+        let latest = remoteBuildNumber.map { "#\($0)" } ?? "#?"
+        let current = GitHubUpdateService.currentBuildNumber.map { "#\($0)" } ?? "#?"
+        return "检查新版（最新\(latest) 当前 \(current)）"
     }
 
-    /// 检查/下载进行中时不可点，其余状态都可点（最新时再点 = 复检）
-    private var remoteTappable: Bool {
+    /// 检查/下载进行中
+    private var remoteBusy: Bool {
         switch remoteState {
-        case .checking, .downloading: return false
-        default: return true
+        case .checking, .downloading: return true
+        default: return false
         }
     }
+
+    /// 进行中不可点；其余状态都可点（最新时再点 = 复检）
+    private var remoteTappable: Bool { !remoteBusy }
 
     // MARK: - 在线服务（自动探测；离线点击重连）
 
@@ -147,7 +197,7 @@ struct LocalUpdateView: View {
         }
     }
 
-    // MARK: - 检查新版（仅手动触发；有新版时点击 = 下载并安装）
+    // MARK: - 检查新版（页面打开自动检查一次；有新版时点击 = 下载并安装）
 
     private func onRemoteRowTap() {
         switch remoteState {
@@ -166,6 +216,7 @@ struct LocalUpdateView: View {
                 return
             }
             let cur = GitHubUpdateService.currentBuildNumber
+            self.remoteBuildNumber = info?.buildNumber
             if let n = info?.buildNumber, let c = cur, n > c {
                 self.remoteState = .outdated
                 DebugLogger.shared.log("发现新版本 #\(n)（当前 #\(c)）")
@@ -178,9 +229,14 @@ struct LocalUpdateView: View {
     }
 
     private func downloadAndInstallLatest() {
+        // 先把现有 Kline.ipa 归档为 Kline_<当前构建号>.ipa，避免下载直接覆盖上一版
+        archiveCurrentIPA()
+        downloadPercent = 0
         remoteState = .downloading
-        // 行内不展示百分比：进度只体现为「黄=进行中」，保证布局不变形（细节见 debug_log）
-        GitHubUpdateService.downloadLatestIPA(progress: { _ in }) { _, err in
+        GitHubUpdateService.downloadLatestIPA(progress: { p in
+            let pct = Int((p * 100).rounded())
+            self.downloadPercent = min(100, max(0, pct))
+        }) { _, err in
             if let err = err {
                 self.remoteState = .failed
                 DebugLogger.shared.log("下载最新 IPA 失败：\(err)")
@@ -194,6 +250,48 @@ struct LocalUpdateView: View {
             KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
             self.remoteState = .latest
             DebugLogger.shared.log("已下载最新 IPA，已拉起 TrollStore 安装")
+        }
+    }
+
+    // MARK: - 上一版 IPA 归档与清理（沙盒 Documents/Downloads）
+
+    /// 下载新版前：把现有 Kline.ipa 改名为 Kline_<当前构建号>.ipa，
+    /// 以便新版本有问题时可用归档包手动装回；随后只保留版本号最大的 N 个归档。
+    private func archiveCurrentIPA() {
+        let fm = FileManager.default
+        let current = GitHubUpdateService.targetIpaPath                  // .../Documents/Downloads/Kline.ipa
+        let dir = (current as NSString).deletingLastPathComponent
+        guard fm.fileExists(atPath: current) else { return }             // 首次下载：无可归档
+        let build = GitHubUpdateService.currentBuildNumber.map(String.init) ?? "unknown"
+        let archive = dir + "/Kline_\(build).ipa"
+        // 同版本重复下载：先清掉旧归档，避免同名 move 失败
+        if fm.fileExists(atPath: archive) { try? fm.removeItem(atPath: archive) }
+        do {
+            // 同容器内直接 rename（跨容器会 EPERM，故不做跨目录搬运）
+            try fm.moveItem(atPath: current, toPath: archive)
+            DebugLogger.shared.log("已归档上一版 IPA：Kline_\(build).ipa")
+        } catch {
+            // 归档失败不阻断下载（下载流程会自行重建 Kline.ipa）
+            DebugLogger.shared.log("归档上一版 IPA 失败：\(error)")
+        }
+        pruneArchives(in: dir, keeping: Self.archiveKeepCount)
+    }
+
+    /// 归档清理：目录内 Kline_<版本号>.ipa 超过 limit 个时，按版本号从大到小保留 limit 个
+    private func pruneArchives(in dir: String, keeping limit: Int) {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return }
+        var archives: [(version: Int, name: String)] = []
+        for name in names where name.hasPrefix("Kline_") && name.hasSuffix(".ipa") {
+            if let v = Int(name.dropFirst("Kline_".count).dropLast(".ipa".count)) {
+                archives.append((v, name))
+            }
+        }
+        guard archives.count > limit else { return }
+        archives.sort { $0.version > $1.version }
+        for item in archives.dropFirst(limit) {
+            try? fm.removeItem(atPath: dir + "/" + item.name)
+            DebugLogger.shared.log("清理旧归档 IPA：\(item.name)")
         }
     }
 }
