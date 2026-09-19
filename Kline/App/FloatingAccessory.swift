@@ -44,26 +44,9 @@ struct FloatingAccessoryButton: View {
         return isDimmed ? 0.25 : 1.0
     }
 
-    /// 四层同心圆：面积自外向内递减，靠后绘制的内圈覆盖外圈即自然形成 Z / X / Q / W 四个环带；
-    /// 每圈用语义色 label 描边（浓度自外向内按 50% 递减，strokeBorder 内描边、不影响直径与环宽）
+    /// 四层同心圆：图形本体已抽成共享的 FloatingAccessoryRings（新按钮在 B' 被操作期间会复用同一份图形）
     private var rings: some View {
-        // 局部简写：几何与描边常量统一由 FloatingAccessoryMetrics 提供（与新按钮共用）
-        let ratios = FloatingAccessoryMetrics.radiusRatios
-        let colors = FloatingAccessoryMetrics.bandColors
-        let opacities = FloatingAccessoryMetrics.ringStrokeOpacities
-        let stroke = FloatingAccessoryMetrics.ringStroke
-        let strokeWidth = FloatingAccessoryMetrics.ringStrokeWidth
-        return ZStack {
-            ForEach(Array(ratios.enumerated()), id: \.offset) { i, ratio in
-                let d = FloatingAccessoryMetrics.baseDiameter * ratio
-                Circle()
-                    .fill(colors[min(i, colors.count - 1)])
-                    .overlay(Circle().strokeBorder(stroke.opacity(opacities[min(i, opacities.count - 1)]),
-                                                   lineWidth: strokeWidth))
-                    .frame(width: d, height: d)
-            }
-        }
-        .frame(width: FloatingAccessoryMetrics.baseDiameter, height: FloatingAccessoryMetrics.baseDiameter)
+        FloatingAccessoryRings()
     }
 
     /// 开始 / 重排闲置淡出：3 秒内再被触碰则本次作废

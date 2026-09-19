@@ -90,6 +90,37 @@ enum FloatingAccessoryAngle {
     }
 }
 
+// MARK: - 旧按钮的四层同心圆图形（可复用）
+
+/// 旧按钮的图形本体：四层同心圆 A/B/C/D 叠加成 Z（A–B）/ X（B–C）/ Q（C–D）/ W（D 内）四个环带，
+/// Z 纯黑填满、X / Q / W 依次比上一层淡 50%，每圈用语义色描边（浓度自外向内按 50% 递减）。
+/// 抽成可复用视图的原因：新按钮在「B' 被操作」期间要整体换成旧按钮的外观，
+/// 直接复用这一份图形，不再复制粘贴四环绘制代码。
+/// `diameter` 只等比缩放几何；描边宽度恒为 `ringStrokeWidth`（与旧按钮一致，不随直径放大）
+struct FloatingAccessoryRings: View {
+    var diameter: CGFloat = FloatingAccessoryMetrics.baseDiameter
+
+    private let ratios = FloatingAccessoryMetrics.radiusRatios
+    private let colors = FloatingAccessoryMetrics.bandColors
+    private let opacities = FloatingAccessoryMetrics.ringStrokeOpacities
+    private let stroke = FloatingAccessoryMetrics.ringStroke
+    private let strokeWidth = FloatingAccessoryMetrics.ringStrokeWidth
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(ratios.enumerated()), id: \.offset) { i, ratio in
+                let d = diameter * ratio
+                Circle()
+                    .fill(colors[min(i, colors.count - 1)])
+                    .overlay(Circle().strokeBorder(stroke.opacity(opacities[min(i, opacities.count - 1)]),
+                                                   lineWidth: strokeWidth))
+                    .frame(width: d, height: d)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+}
+
 // MARK: - 落位计算
 
 /// 悬浮按钮的落位计算：中心点合法范围、夹取、贴指定侧落位、判定落在哪一侧

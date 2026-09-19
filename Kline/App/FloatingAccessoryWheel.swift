@@ -69,6 +69,10 @@ struct FloatingAccessoryWheel: View {
     /// C' 的显示角（度）= 里程表 + 显示偏移（cos / sin 本身周期，无需再对 360 取模）
     private var displayAngleDegrees: Double { odometer + displayAngleOffset }
 
+    /// 是否临时呈现「旧按钮拖动状态」的外观：B' 被操作（点击 / 摁着 / 拖着）时置 true，
+    /// 静止 3 秒（与闲置淡出同一时刻）或自己被外部强制闲置时还原为新按钮自身的稳定态
+    @State private var showsOldLook = false
+
     /// 整体透明度：摁住 / 拖动 / 转圈中 50%；3 秒未触碰后 25%；其余（含触碰后 3 秒内）100%
     private var overallOpacity: Double {
         if isPressing { return 0.5 }
@@ -80,7 +84,19 @@ struct FloatingAccessoryWheel: View {
             let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter)
             let base = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
             let shown = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), in: bounds)
-            disc
+            // B' 被操作（点击 / 摁着 / 拖着）期间，整个按钮临时呈现「旧按钮拖动状态」的外观；
+            // 环上转圈与稳定态都用新按钮自身的三圆图形。
+            // 外层 frame 恒取 A' 直径：命中区始终是 A' 圆盘、不随外观切换而缩小；
+            // 56pt 的旧按钮图形居中在同一个盘心，故圆心与落点判定口径不变
+            ZStack {
+                if showsOldLook {
+                    FloatingAccessoryRings()
+                } else {
+                    disc
+                }
+            }
+            .frame(width: FloatingAccessoryMetrics.wheelOuterDiameter,
+                   height: FloatingAccessoryMetrics.wheelOuterDiameter)
                 // 摁住 / 拖动 / 转圈放大 15%，叠加点击时的果冻缩放
                 .scaleEffect((isPressing ? FloatingAccessoryMetrics.pressScaleFactor : 1) * jellyScale)
                 // 与旧按钮同理：A' / B' 描边与 C' 相互重叠，.opacity 默认逐层施加会做多次半透明
@@ -235,6 +251,9 @@ struct FloatingAccessoryWheel: View {
         FloatingAccessoryCoordinator.shared.beginGesture(.secondary)
         let mode = resolveTouchMode(at: startLocation, center: center)
         touchMode = mode
+        // 只有 B'（整钮模式）触发临时旧外观；环上转圈保留新按钮自身外观 ——
+        // 否则 C' 不可见、转圈时看不到任何反馈
+        showsOldLook = (mode == .whole)
         guard mode == .ring else { return mode }
         FloatingAccessoryCoordinator.shared.setRotating(true)
         // 落点即接管：C' 立即跳到落点角度（改显示偏移而非里程表，理由见 displayAngleOffset）
@@ -292,7 +311,11 @@ struct FloatingAccessoryWheel: View {
         let token = idleFadeToken
         DispatchQueue.main.asyncAfter(deadline: .now() + FloatingAccessoryMetrics.idleFadeDelay) {
             guard token == idleFadeToken else { return }
-            withAnimation(.easeOut(duration: 0.45)) { isDimmed = true }
+            // 静止 3 秒到点：与淡出同一时刻把外观还原为新按钮自身的稳定态
+            withAnimation(.easeOut(duration: 0.45)) {
+                isDimmed = true
+                showsOldLook = false
+            }
         }
     }
 
@@ -307,6 +330,9 @@ struct FloatingAccessoryWheel: View {
     /// 这里不安排任何恢复：解锁只由本按钮下一次被触碰完成（onChanged → cancelIdleFade）
     private func forceIdle() {
         idleFadeToken += 1
+        // 令牌自增会作废 scheduleIdleFade 里那个「3 秒后还原旧外观」的计时，所以这里必须一并还原：
+        // 否则被对方手势强制闲置时，临时旧外观会永久留在屏幕上（再也等不到还原）
+        showsOldLook = false
         if !isDimmed { withAnimation(.easeOut(duration: 0.45)) { isDimmed = true } }
     }
 
