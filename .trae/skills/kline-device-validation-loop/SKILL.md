@@ -1,38 +1,44 @@
 ---
 name: "kline-device-validation-loop"
-description: "Ships Kline iOS changes in independently buildable stages via CI + TrollStore, pausing for on-device user validation each stage. Invoke for Kline feature/bugfix iterations needing device verification."
+description: "Ships Kline iOS changes in independently buildable stages, build/install to the connected device, and pause for on-device user validation. Invoke for ANY Kline feature/bugfix task requiring device verification, on macOS or Windows."
 ---
 
-# Kline 迭代技能
+# Kline 迭代技能（macOS / Windows 双平台）
 
-Kline 项目（Windows 写码 / GitHub Actions 构建 / TrollStore 零触碰部署到 iPad mini 4）的功能开发与修复标准打法：**小步分阶段、每阶段独立可编译可演示。**
+Kline（iOS）功能开发与修复标准打法：**小步分阶段，每阶段独立可编译、可演示、用户真机验收。**
 
 ## 何时使用
 
-任何对Kline项目的改动。
+任何对 Kline 项目的代码改动。
+
+## 闭环命令（唯一随平台变化的部分，前台阻塞执行）
+
+- **macOS（家里，本机直连真机 XIAO iPad）**：
+  `bash scripts/kline_deploy_mac.sh "<提交描述>"`
+  脚本一条龙：xcodebuild 构建 → devicectl 安装启动 → git 提交推送；任一步失败非零退出且不提交代码。
+  注意：xcodebuild 必须**非沙箱**执行，否则 #Preview 宏插件被拦截会误报 macro implementation not found；
+  设备 id 默认 `00008020-000D48E11E78003A`，换机用 `KLINE_DEVICE_ID=<id>` 覆盖（`xcrun devicectl list devices` 查询）。
+- **Windows（公司，GitHub Actions 构建 + TrollStore 部署到 iPad mini 4）**：
+  `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "<提交描述>"`
+  退出码 **0=部署成功 / 6=云端构建成功 / 7=云端构建中网络抖动（稍后重试）** 均可交付；其它退出码自行排查。
+
+不确定平台时先执行 `uname -s`（Darwin = macOS）。
 
 ## 标准节奏
 
-1. **需求对齐**：风险小的简单需求不用拆阶段；但复杂需求得先写计划文档（放 `.trae/documents/<feature>-plan.md`，参考已有计划文档风格：Context → 现有代码（带行号）→ 分步实现 → 边界 → 验收清单 → Critical Files）。
-2. **拆阶段**：每阶段是一次可独立编译、独立演示、用户可单独验收的闭环；阶段顺序先视觉/数据骨架后复杂计算（例：先合成 K 线+淡化，后指标异步重算）；
-3. **执行当前阶段**：编码自查 → **闭环命令 **→ **当退出码等于"0 完整部署成功"、"6 云端构建成功" 或 "7 云端正在构建中，网络不稳定，稍后请手动重试**"时，应交付给用户；可若是其它退出码则需要AI自行规划解决 → 如果用户没有明确要求更新**项目记忆**就不要主动更新。
+1. **需求对齐**：简单需求直接做；复杂需求先写计划 `.trae/documents/<feature>-plan.md`（Context → 现有代码（带行号）→ 分步实现 → 边界 → 验收清单 → Critical Files）。
+2. **拆阶段**：视觉/数据骨架先行、复杂计算在后；每阶段是一次独立可编译、可演示、用户可单独验收的闭环。
+3. **执行当前阶段**：编码自查 → 闭环命令成功 → 交付。交付时说清三件事：①本轮装的是哪个 build；②改了什么、为什么（bug 讲根因与推导链）；③请用户在真机验证的具体操作路径、预期现象与回归点。用户确认后才算闭环；未明确要求不要主动更新项目记忆。
 
 ## 编码自查
 
-- 只改与当前阶段相关的文件；新增文件遵守目录结构；新增复杂功能且代码体积较大时需要通过 `.trae/skill/swiftui-large-file-split` 完成模块化封装。
-- 警惕 SwiftUI 陷阱：
+- 只改当前阶段相关文件；新增大型复杂功能按 `.trae/skills/swiftui-large-file-split` 做模块化封装。
+- SwiftUI 高频陷阱：
   - `Color.opacity(_:)` 入参是 **Double**，不是 CGFloat；
-  - 新增局部变量勿遮蔽同函数已有参数（如 `subChart(model:slot:)` 的 `slot: SubSlot`，槽位下标用 `subSlotIndex`）；
-  - 含 `let id = UUID()` 的值类型（如 KlineItem）每次新建都会击穿 `.equatable()` 优化，自定义 `==` 只比业务内容；
-  - 拖拽期间禁止主线程重算指标（既有明确教训），实时跟随只做廉价派生，重算走后台 + 任务序号防过期 + 缓存。
+  - 勿遮蔽同函数已有参数（如 `subChart(model:slot:)` 的 `slot`，槽位下标用 `subSlotIndex`）；
+  - 含 `let id = UUID()` 的值类型（如 KlineItem）每次新建都击穿 `.equatable()`，自定义 `==` 只比业务字段；
+  - 拖拽期间禁止主线程重算指标：实时跟随只做廉价派生，重算走后台 + 任务序号防过期 + 缓存。
 
 ## 提交规范
 
-- 中文提交信息，格式 `<type>(<scope>): <简述>`，如 `feat(link-replay A): ...`、`fix(link-replay): ...`、`docs: ...`；
-
-## 闭环命令
-
-用户的缺省要求是提交当前仓库全部改动，即执行以下命令（强制要求：使用前台阻塞方式执行）：
-
-`python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "<提交描述>"`
-
+中文 `<type>(<scope>): <简述>`，如 `feat(link-replay A): ...`、`fix(link-replay): ...`、`docs: ...`；纯文档单独提交；会话结束前推送完毕不留未提交改动。
