@@ -202,6 +202,12 @@ struct FloatingAccessoryWheel: View {
                 // 任一方进入手势（含本按钮环上转圈）→ 本按钮强制闲置；手势结束不自动恢复
                 .onReceive(FloatingAccessoryCoordinator.shared.$activeOwner) { owner in
                     guard let owner, owner != .secondary else { return }
+                    // 例外：本按钮此刻正摁着转圈 → 不执行强制闲置。
+                    // 双手同时操作时（一手摁着 C' 转圈、一手拖旧按钮），旧按钮的 beginGesture 会把
+                    // activeOwner 抢成 .primary 并广播过来；若在此淡出，C' 会被 opacity 0 藏掉，
+                    // 而转圈走的是另一条路径、照常推进 K 线 —— 于是「转得动却看不见转了多少」，
+                    // 操作反馈完全丢失。转圈是本按钮的**主动操作**，其可见性优先于耦合规则的被动淡出
+                    guard touchMode != .ring else { return }
                     forceIdle()
                 }
                 .accessibilityIdentifier("accessory2.button")
