@@ -147,6 +147,12 @@ struct FloatingAccessoryButton: View {
             rings
             // 摁住/拖动放大 15%（整体缩放，四圈直径同步 +15%），叠加点击时的果冻缩放
             .scaleEffect((isPressing ? pressScaleFactor : 1) * jellyScale)
+            // ⚠️ 必须先 compositingGroup 再 opacity：四层圆是相互重叠的子视图，
+            // SwiftUI 的 .opacity 默认逐层施加、不做离屏合成，于是 Z/X/Q/W 分别被叠加
+            // 1/2/3/4 次半透明混合，α<1 时内圈反而比外圈更深（α=1 时因填充不透明而看不出）。
+            // compositingGroup 把四圈先合成为一张图，再整体乘透明度，
+            // 保证 50% / 25% 两态的深浅顺序与 100% 态完全一致
+            .compositingGroup()
             .opacity(overallOpacity)
             .contentShape(Circle())
             .position(shown)
