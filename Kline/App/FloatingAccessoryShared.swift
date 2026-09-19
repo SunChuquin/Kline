@@ -77,6 +77,19 @@ enum FloatingAccessoryMetrics {
     static let wheelDotTrackRadius: CGFloat = (wheelOuterDiameter / 2 + wheelInnerDiameter / 2) / 2
 }
 
+// MARK: - 角度
+
+/// 角度工具（新按钮环上转圈用）
+enum FloatingAccessoryAngle {
+    /// 把角度差折算到 (-180, 180]：超过半圈时做 ±360 修正。
+    /// 用于里程表增量，避免 359° → 0° 被当成 −359° 的反向跳变
+    static func wrap(_ delta: Double) -> Double {
+        var d = delta.truncatingRemainder(dividingBy: 360)
+        if d > 180 { d -= 360 } else if d <= -180 { d += 360 }
+        return d
+    }
+}
+
 // MARK: - 落位计算
 
 /// 悬浮按钮的落位计算：中心点合法范围、夹取、贴指定侧落位、判定落在哪一侧

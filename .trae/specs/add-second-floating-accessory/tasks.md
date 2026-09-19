@@ -4,13 +4,13 @@
 > `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "<type>(<scope>): <简述>"`
 > 阶段顺序：先视觉/交互骨架，再程序化驱动，最后跨控件耦合。
 
-- [ ] Task 1: 搭出新按钮外壳、几何与落位（不含转圈驱动光标）
-  - [ ] SubTask 1.1: 把旧按钮的几何常量与描边原语抽出为可共享形态（不改变旧按钮任何可见行为）
-  - [ ] SubTask 1.2: 实现新按钮三圆结构 A'/B'/C'：直径 A'=128.8、B'=72.8、环 Z'=28、C'=27；A'、B'、环 Z' 无填充仅描边；C' 用 `Color(.label)` 实心 + 1pt 阴影达到视觉直径 28
-  - [ ] SubTask 1.3: C' 位置由角度参数驱动，圆心轨迹半径 50.4（校验与环 Z' 中径重合、内外各余 0.5）
-  - [ ] SubTask 1.4: `ContentView` overlay 装配两个按钮，共用 `selectedTab == 1 || == 2` 判定
-  - [ ] SubTask 1.5: 新按钮落位独立持久化（`kline.accessory2.centerX/centerY`）+ 首次默认落旧按钮对侧 + 启动时同侧矫正
-  - [ ] SubTask 1.6: 闭环命令交付本阶段
+- [x] Task 1: 搭出新按钮外壳、几何与落位（不含转圈驱动光标）
+  - [x] SubTask 1.1: 把旧按钮的几何常量与描边原语抽出为可共享形态（不改变旧按钮任何可见行为）
+  - [x] SubTask 1.2: 实现新按钮三圆结构 A'/B'/C'：直径 A'=128.8、B'=72.8、环 Z'=28、C'=27；A'、B'、环 Z' 无填充仅描边；C' 用 `Color(.label)` 实心 + 1pt 阴影达到视觉直径 28
+  - [x] SubTask 1.3: C' 位置由角度参数驱动，圆心轨迹半径 50.4（校验与环 Z' 中径重合、内外各余 0.5）
+  - [x] SubTask 1.4: `ContentView` overlay 装配两个按钮，共用 `selectedTab == 1 || == 2` 判定
+  - [x] SubTask 1.5: 新按钮落位独立持久化（`kline.accessory2.centerX/centerY`）+ 首次默认落旧按钮对侧 + 启动时同侧矫正
+  - [x] SubTask 1.6: 闭环命令交付本阶段（CI run=35431908818，云端构建成功）
 
 - [ ] Task 2: 新按钮触摸状态机（B' 交互 + 环 Z' 落点接管，不接图表）
   - [ ] SubTask 2.1: 落 B' → 摁住/拖动整个按钮（复用旧按钮 `dragDelta` + 吸附逻辑），+15% 直径与 50% 透明度
