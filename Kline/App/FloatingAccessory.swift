@@ -32,8 +32,9 @@ private enum FloatingAccessoryStore {
 // MARK: - 悬浮按钮
 
 /// 常驻悬浮按钮（仿 iOS 辅助触控）
-/// - 外观：四层同心圆（A>B>C>D，逐圈半径减半）叠加，形成 Z（A–B）/ X（B–C）/ Q（C–D）/ W（D 内）
-///   四个环带；Z 纯黑填满，X / Q / W 依次比上一层淡 50%
+/// - 外观：四层同心圆（A>B>C>D）叠加，形成 Z（A–B）/ X（B–C）/ Q（C–D）/ W（D 内）四个环带；
+///   A 直径为 D 的两倍、Z 环宽 = X 环宽 + Q 环宽，各圈用语义色 label 描边（两种主题都不糊边）；
+///   Z 纯黑填满，X / Q / W 依次比上一层淡 50%
 /// - 状态：摁住/拖动中四圈直径 +15%、整体透明度 50%；抬手恢复直径、并保持 100% 透明度 3 秒后降到 25%；点击时果冻弹一下
 /// - 拖动：跟手移动，松手动画吸附到最近的左 / 右边缘（纵向位置保持），并写入 UserDefaults
 /// - 点击：位移小于阈值才视为点击（拖完抬手不会误弹面板）
@@ -48,11 +49,13 @@ struct FloatingAccessoryButton: View {
     /// 判定为「点击」的最大位移；超过即视为拖动
     private let tapSlop: CGFloat = 6
 
-    /// 四层同心圆的半径比例：A（最外）= 1、B = 1/2、C = 1/4、D = 1/8，
-    /// 逐圈半径减半（对应「A 半径 6px 时 B 半径 3px」这一具体数值示例）
-    /// ⚠️ 需求原文「A 半径是 D 半径的两倍」与上述示例（A = 2B）互相矛盾，此处按示例实现；
-    /// 若要改成 A = 2D 的等步长方案，只改这一个数组即可
-    private let radiusRatios: [CGFloat] = [1, 0.5, 0.25, 0.125]
+    /// 四层同心圆的半径（相对最外圈 A 的比例）：A=1、B=0.75、C=0.625、D=0.5
+    /// 即直径 56 / 42 / 35 / 28（半径 28 / 21 / 17.5 / 14）
+    /// 推导：① A 是 D 的两倍（A_r = 2·D_r → D_r = 14）；② Z 环宽 = X 环宽 + Q 环宽，
+    /// 即 (A_r − B_r) = (B_r − C_r) + (C_r − D_r) = B_r − D_r → B_r = (A_r + D_r)/2 = 21（B 由②唯一确定）。
+    /// C 未被②约束到，取「X 与 Q 等宽」补齐 → C_r = (B_r + D_r)/2 = 17.5，
+    /// 于是环宽 Z=7、X=3.5、Q=3.5（X+Q=7=Z ✓）。若想让 X≠Q，只改本数组里 C 的取值即可
+    private let radiusRatios: [CGFloat] = [1, 0.75, 0.625, 0.5]
     /// 四层的填充色（自外向内）：Z 纯黑填满，X / Q / W 依次比上一层「淡 50%」（向白色混合 50%）
     /// 若想改成「黑色透明度逐层减半（1 / 0.5 / 0.25 / 0.125）」，改这一个数组即可
     private let bandColors: [Color] = [
@@ -61,6 +64,11 @@ struct FloatingAccessoryButton: View {
         Color(white: 0.75),   // Q：比 X 淡 50%
         Color(white: 0.875)   // W：比 Q 淡 50%
     ]
+    /// 四圈的描边色：用语义色 label（浅色模式=黑、深色模式=白），保证两种主题下
+    /// 每圈边界都清晰（深色模式下最外圈纯黑会与深色背景糊在一起，白描边正是用来勾出轮廓的）
+    private let ringStroke: Color = Color(.label)
+    /// 描边宽度：1pt（strokeBorder 内描边，不改变各圈直径与环宽）
+    private let ringStrokeWidth: CGFloat = 1
     /// 摁住 / 拖动时四圈直径的放大比例（+15%），抬手即恢复
     private let pressScaleFactor: CGFloat = 1.15
     /// 未被触碰多久后整体降到 25% 透明度
@@ -85,13 +93,16 @@ struct FloatingAccessoryButton: View {
         return isDimmed ? 0.25 : 1.0
     }
 
-    /// 四层同心圆：面积自外向内递减，靠后绘制的内圈覆盖外圈即自然形成 Z / X / Q / W 四个环带
+    /// 四层同心圆：面积自外向内递减，靠后绘制的内圈覆盖外圈即自然形成 Z / X / Q / W 四个环带；
+    /// 每圈用语义色 label 描边（strokeBorder 内描边，不影响直径与环宽）
     private var rings: some View {
         ZStack {
             ForEach(Array(radiusRatios.enumerated()), id: \.offset) { i, ratio in
+                let d = diameter * ratio
                 Circle()
                     .fill(bandColors[min(i, bandColors.count - 1)])
-                    .frame(width: diameter * ratio, height: diameter * ratio)
+                    .overlay(Circle().strokeBorder(ringStroke, lineWidth: ringStrokeWidth))
+                    .frame(width: d, height: d)
             }
         }
         .frame(width: diameter, height: diameter)
