@@ -64,11 +64,15 @@ struct FloatingAccessoryButton: View {
         Color(white: 0.75),   // Q：比 X 淡 50%
         Color(white: 0.875)   // W：比 Q 淡 50%
     ]
-    /// 四圈的描边色：用语义色 label（浅色模式=黑、深色模式=白），保证两种主题下
-    /// 每圈边界都清晰（深色模式下最外圈纯黑会与深色背景糊在一起，白描边正是用来勾出轮廓的）
+    /// 四圈描边的底色：用语义色 label（浅色模式=黑、深色模式=白）。深色模式下最外圈纯黑会与
+    /// 深色背景糊在一起，靠这层描边勾出轮廓；浓度见 ringStrokeOpacities
     private let ringStroke: Color = Color(.label)
     /// 描边宽度：1pt（strokeBorder 内描边，不改变各圈直径与环宽）
     private let ringStrokeWidth: CGFloat = 1
+    /// 四圈描边的浓度（自外向内）：与填充色同样按「每层淡 50%」递减 —— Z 1、X 0.5、Q 0.25、W 0.125。
+    /// 描边色本身仍是语义色（保证两种主题下都还能看见），只是浓度按同比例递减：
+    /// 最外圈 A 描边最强（深色模式下正是靠它勾出与深色背景的轮廓），向内依次变淡
+    private let ringStrokeOpacities: [Double] = [1, 0.5, 0.25, 0.125]
     /// 摁住 / 拖动时四圈直径的放大比例（+15%），抬手即恢复
     private let pressScaleFactor: CGFloat = 1.15
     /// 未被触碰多久后整体降到 25% 透明度
@@ -94,14 +98,15 @@ struct FloatingAccessoryButton: View {
     }
 
     /// 四层同心圆：面积自外向内递减，靠后绘制的内圈覆盖外圈即自然形成 Z / X / Q / W 四个环带；
-    /// 每圈用语义色 label 描边（strokeBorder 内描边，不影响直径与环宽）
+    /// 每圈用语义色 label 描边（浓度自外向内按 50% 递减，strokeBorder 内描边、不影响直径与环宽）
     private var rings: some View {
         ZStack {
             ForEach(Array(radiusRatios.enumerated()), id: \.offset) { i, ratio in
                 let d = diameter * ratio
                 Circle()
                     .fill(bandColors[min(i, bandColors.count - 1)])
-                    .overlay(Circle().strokeBorder(ringStroke, lineWidth: ringStrokeWidth))
+                    .overlay(Circle().strokeBorder(ringStroke.opacity(ringStrokeOpacities[min(i, ringStrokeOpacities.count - 1)]),
+                                                   lineWidth: ringStrokeWidth))
                     .frame(width: d, height: d)
             }
         }
