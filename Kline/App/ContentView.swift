@@ -84,7 +84,7 @@ struct ContentView: View {
                 }
             }
         )
-        // 悬浮按钮（仿辅助触控）与快捷面板：只作用于「自选」/「行情」两个 Tab。
+        // 悬浮按钮（仿辅助触控，两个）与快捷面板：只作用于「自选」/「行情」两个 Tab。
         // K 线详情页是根视图的全屏 overlay、打开时不改变 selectedTab，所以从自选/行情进入的
         // 详情页（以及其上的多图联动等）都自动命中；首页搜索进入的 K 线页 selectedTab == 0，不显示。
         // 面板呈现期间按钮隐藏（opacity 0 + 关闭命中），关闭后原位恢复
@@ -96,6 +96,11 @@ struct ContentView: View {
                     }
                     .opacity(isAccessoryPanelPresented ? 0 : 1)
                     .allowsHitTesting(!isAccessoryPanelPresented)
+                    // 新按钮（转圈驱动光标）：没有自己的面板，但同样要在面板呈现期间隐藏，
+                    // 否则它会压在面板的全屏遮罩之上
+                    FloatingAccessoryWheel()
+                        .opacity(isAccessoryPanelPresented ? 0 : 1)
+                        .allowsHitTesting(!isAccessoryPanelPresented)
                 }
                 if isAccessoryPanelPresented {
                     FloatingAccessoryPanel {

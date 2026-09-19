@@ -4,30 +4,10 @@
 //
 //  自选 / 行情页的常驻悬浮按钮（仿 iOS 辅助触控）：可拖动、松手吸附到最近左右边缘、
 //  位置持久化；单击弹出底部面板（样式对齐「指标选择面板」），面板出现时按钮暂时隐藏。
+//  几何 / 描边常量、落位计算、落位持久化见 FloatingAccessoryShared.swift（与新按钮共用）。
 //
 
 import SwiftUI
-
-// MARK: - 位置持久化
-
-/// 悬浮按钮落位持久化（沿用项目 kline.* key 惯例，与 ChartConfigStore / KlineThemeStore 一致）
-private enum FloatingAccessoryStore {
-    private static let xKey = "kline.accessory.centerX"
-    private static let yKey = "kline.accessory.centerY"
-
-    /// 已保存的中心点；从未拖动过返回 nil（调用点用默认落位）
-    static var savedCenter: CGPoint? {
-        let d = UserDefaults.standard
-        guard d.object(forKey: xKey) != nil, d.object(forKey: yKey) != nil else { return nil }
-        return CGPoint(x: d.double(forKey: xKey), y: d.double(forKey: yKey))
-    }
-
-    static func save(_ p: CGPoint) {
-        let d = UserDefaults.standard
-        d.set(Double(p.x), forKey: xKey)
-        d.set(Double(p.y), forKey: yKey)
-    }
-}
 
 // MARK: - 悬浮按钮
 
@@ -41,42 +21,6 @@ private enum FloatingAccessoryStore {
 /// - 命中区：圆形按钮本身 56pt（≥ 项目规范的 44pt），用 contentShape(Circle()) 限定为圆形
 struct FloatingAccessoryButton: View {
     let action: () -> Void
-
-    /// 按钮直径（= 最外圈 A 的直径，同时也是命中区直径）
-    private let diameter: CGFloat = 56
-    /// 贴边（吸附后 / 默认落位）与屏幕边缘的间距
-    private let edgeInset: CGFloat = 8
-    /// 判定为「点击」的最大位移；超过即视为拖动
-    private let tapSlop: CGFloat = 6
-
-    /// 四层同心圆的半径（相对最外圈 A 的比例）：A=1、B=0.75、C=0.625、D=0.5
-    /// 即直径 56 / 42 / 35 / 28（半径 28 / 21 / 17.5 / 14）
-    /// 推导：① A 是 D 的两倍（A_r = 2·D_r → D_r = 14）；② Z 环宽 = X 环宽 + Q 环宽，
-    /// 即 (A_r − B_r) = (B_r − C_r) + (C_r − D_r) = B_r − D_r → B_r = (A_r + D_r)/2 = 21（B 由②唯一确定）。
-    /// C 未被②约束到，取「X 与 Q 等宽」补齐 → C_r = (B_r + D_r)/2 = 17.5，
-    /// 于是环宽 Z=7、X=3.5、Q=3.5（X+Q=7=Z ✓）。若想让 X≠Q，只改本数组里 C 的取值即可
-    private let radiusRatios: [CGFloat] = [1, 0.75, 0.625, 0.5]
-    /// 四层的填充色（自外向内）：Z 纯黑填满，X / Q / W 依次比上一层「淡 50%」（向白色混合 50%）
-    /// 若想改成「黑色透明度逐层减半（1 / 0.5 / 0.25 / 0.125）」，改这一个数组即可
-    private let bandColors: [Color] = [
-        Color(white: 0),      // Z：黑
-        Color(white: 0.5),    // X：比 Z 淡 50%
-        Color(white: 0.75),   // Q：比 X 淡 50%
-        Color(white: 0.875)   // W：比 Q 淡 50%
-    ]
-    /// 四圈描边的底色：用语义色 label（浅色模式=黑、深色模式=白）。深色模式下最外圈纯黑会与
-    /// 深色背景糊在一起，靠这层描边勾出轮廓；浓度见 ringStrokeOpacities
-    private let ringStroke: Color = Color(.label)
-    /// 描边宽度：1pt（strokeBorder 内描边，不改变各圈直径与环宽）
-    private let ringStrokeWidth: CGFloat = 1
-    /// 四圈描边的浓度（自外向内）：与填充色同样按「每层淡 50%」递减 —— Z 1、X 0.5、Q 0.25、W 0.125。
-    /// 描边色本身仍是语义色（保证两种主题下都还能看见），只是浓度按同比例递减：
-    /// 最外圈 A 描边最强（深色模式下正是靠它勾出与深色背景的轮廓），向内依次变淡
-    private let ringStrokeOpacities: [Double] = [1, 0.5, 0.25, 0.125]
-    /// 摁住 / 拖动时四圈直径的放大比例（+15%），抬手即恢复
-    private let pressScaleFactor: CGFloat = 1.15
-    /// 未被触碰多久后整体降到 25% 透明度
-    private let idleFadeDelay: TimeInterval = 3
 
     @State private var center: CGPoint?
     /// 本次手势的实时位移：与已落位的 center 叠加显示（用 @State 而非 @GestureState，
@@ -100,24 +44,30 @@ struct FloatingAccessoryButton: View {
     /// 四层同心圆：面积自外向内递减，靠后绘制的内圈覆盖外圈即自然形成 Z / X / Q / W 四个环带；
     /// 每圈用语义色 label 描边（浓度自外向内按 50% 递减，strokeBorder 内描边、不影响直径与环宽）
     private var rings: some View {
-        ZStack {
-            ForEach(Array(radiusRatios.enumerated()), id: \.offset) { i, ratio in
-                let d = diameter * ratio
+        // 局部简写：几何与描边常量统一由 FloatingAccessoryMetrics 提供（与新按钮共用）
+        let ratios = FloatingAccessoryMetrics.radiusRatios
+        let colors = FloatingAccessoryMetrics.bandColors
+        let opacities = FloatingAccessoryMetrics.ringStrokeOpacities
+        let stroke = FloatingAccessoryMetrics.ringStroke
+        let strokeWidth = FloatingAccessoryMetrics.ringStrokeWidth
+        return ZStack {
+            ForEach(Array(ratios.enumerated()), id: \.offset) { i, ratio in
+                let d = FloatingAccessoryMetrics.baseDiameter * ratio
                 Circle()
-                    .fill(bandColors[min(i, bandColors.count - 1)])
-                    .overlay(Circle().strokeBorder(ringStroke.opacity(ringStrokeOpacities[min(i, ringStrokeOpacities.count - 1)]),
-                                                   lineWidth: ringStrokeWidth))
+                    .fill(colors[min(i, colors.count - 1)])
+                    .overlay(Circle().strokeBorder(stroke.opacity(opacities[min(i, opacities.count - 1)]),
+                                                   lineWidth: strokeWidth))
                     .frame(width: d, height: d)
             }
         }
-        .frame(width: diameter, height: diameter)
+        .frame(width: FloatingAccessoryMetrics.baseDiameter, height: FloatingAccessoryMetrics.baseDiameter)
     }
 
     /// 开始 / 重排闲置淡出：3 秒内再被触碰则本次作废
     private func scheduleIdleFade() {
         idleFadeToken += 1
         let token = idleFadeToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + idleFadeDelay) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + FloatingAccessoryMetrics.idleFadeDelay) {
             guard token == idleFadeToken else { return }
             withAnimation(.easeOut(duration: 0.45)) { isDimmed = true }
         }
@@ -141,12 +91,12 @@ struct FloatingAccessoryButton: View {
 
     var body: some View {
         GeometryReader { geo in
-            let bounds = centerBounds(in: geo.size)
-            let base = clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), bounds: bounds)
-            let shown = clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), bounds: bounds)
+            let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter)
+            let base = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), in: bounds)
+            let shown = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), in: bounds)
             rings
             // 摁住/拖动放大 15%（整体缩放，四圈直径同步 +15%），叠加点击时的果冻缩放
-            .scaleEffect((isPressing ? pressScaleFactor : 1) * jellyScale)
+            .scaleEffect((isPressing ? FloatingAccessoryMetrics.pressScaleFactor : 1) * jellyScale)
             // ⚠️ 必须先 compositingGroup 再 opacity：四层圆是相互重叠的子视图，
             // SwiftUI 的 .opacity 默认逐层施加、不做离屏合成，于是 Z/X/Q/W 分别被叠加
             // 1/2/3/4 次半透明混合，α<1 时内圈反而比外圈更深（α=1 时因填充不透明而看不出）。
@@ -168,13 +118,13 @@ struct FloatingAccessoryButton: View {
                     .onEnded { value in
                         withAnimation(.easeOut(duration: 0.15)) { isPressing = false }
                         let t = value.translation
-                        let moved = max(abs(t.width), abs(t.height)) > tapSlop
+                        let moved = max(abs(t.width), abs(t.height)) > FloatingAccessoryMetrics.tapSlop
                         if !moved {
                             // 点击：先复位位移、果冻弹一下，再触发动作（不再吸附，避免按钮被拖动后停在偏移处）
                             dragDelta = .zero
                             playJelly(completion: action)
                         } else {
-                            let raw = clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), bounds: bounds)
+                            let raw = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), in: bounds)
                             // 吸附到更近的一侧边缘（纵向保持）
                             let left = bounds.x.lowerBound
                             let right = bounds.x.upperBound
@@ -183,46 +133,31 @@ struct FloatingAccessoryButton: View {
                                 center = target
                                 dragDelta = .zero
                             }
-                            FloatingAccessoryStore.save(target)
+                            FloatingAccessoryStore.save(target, for: .primary)
                         }
                         // 任何触碰后抬手：保持 100% 透明度 3 秒，再降到 25%
                         scheduleIdleFade()
                     }
             )
             .onAppear {
-                center = clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), bounds: bounds)
+                center = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), in: bounds)
                 // 初始 100% 起算：3 秒未触碰即降到 25%
                 scheduleIdleFade()
             }
             .onDisappear { idleFadeToken += 1 }
             // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
             .onChange(of: geo.size) { _ in
-                let b = centerBounds(in: geo.size)
-                center = clamped(center ?? defaultCenter(in: geo.size, bounds: b), bounds: b)
+                let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter)
+                center = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: b), in: b)
             }
             .accessibilityIdentifier("accessory.button")
         }
     }
 
-    /// 中心点的合法范围：四周留 edgeInset（上下另留 4pt），保证圆钮整体始终在屏内
-    private func centerBounds(in size: CGSize) -> (x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>) {
-        let half = diameter / 2
-        let minX = half + edgeInset
-        let maxX = max(minX, size.width - half - edgeInset)
-        let minY = half + 4
-        let maxY = max(minY, size.height - half - 4)
-        return (minX...maxX, minY...maxY)
-    }
-
-    private func clamped(_ p: CGPoint, bounds: (x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>)) -> CGPoint {
-        CGPoint(x: min(max(p.x, bounds.x.lowerBound), bounds.x.upperBound),
-                y: min(max(p.y, bounds.y.lowerBound), bounds.y.upperBound))
-    }
-
     /// 默认落位：右侧贴边、纵向约 40% 高度（首次启动时用；之后以用户拖动后的落位为准）
-    private func defaultCenter(in size: CGSize, bounds: (x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>)) -> CGPoint {
-        if let saved = FloatingAccessoryStore.savedCenter { return saved }
-        return CGPoint(x: bounds.x.upperBound, y: size.height * 0.4)
+    private func defaultCenter(in size: CGSize, bounds: FloatingAccessoryPlacement.Bounds) -> CGPoint {
+        if let saved = FloatingAccessoryStore.savedCenter(for: .primary) { return saved }
+        return FloatingAccessoryPlacement.edgeCenter(on: .right, in: size, bounds: bounds)
     }
 }
 
