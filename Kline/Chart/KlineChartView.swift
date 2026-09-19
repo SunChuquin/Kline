@@ -1082,12 +1082,24 @@ struct MainChartCanvas: View, Equatable {
                                x: CGFloat, candleWidth: CGFloat, h: CGFloat, hollow: Bool, color: Color) {
         let yH = yPos(high, h: h)
         let yL = yPos(low, h: h)
-        var wick = Path(); wick.move(to: CGPoint(x: x, y: yH)); wick.addLine(to: CGPoint(x: x, y: yL))
-        ctx.stroke(wick, with: .color(color), lineWidth: 1)
         let bodyTop = yPos(max(open, close), h: h)
         let bodyBottom = yPos(min(open, close), h: h)
         let rect = CGRect(x: x - candleWidth / 2, y: bodyTop, width: candleWidth, height: max(1, bodyBottom - bodyTop))
-        if hollow && close >= open {
+        let isHollow = hollow && close >= open
+        // 影线分上下两段、跳过实体矩形内部（先画影线再画实体，实体填充会盖住重叠部分）：
+        // 淡化区颜色是半透明的（opacity(dimAlpha)），若整条影线先画、再被同色半透明实体覆盖，
+        // 重叠处 alpha 叠加为 1-(1-a)²，明显高于实体本身（a=1/3 时 0.33→0.56），
+        // 视觉上就是实心蜡烛矩形正中多出一条更深的竖线；不淡化（不透明）时本就看不出来。
+        // 空心蜡烛内部用画布底色填充、影线本就不可见，仍按整条绘制
+        var wick = Path()
+        if isHollow {
+            wick.move(to: CGPoint(x: x, y: yH)); wick.addLine(to: CGPoint(x: x, y: yL))
+        } else {
+            wick.move(to: CGPoint(x: x, y: yH)); wick.addLine(to: CGPoint(x: x, y: bodyTop))
+            wick.move(to: CGPoint(x: x, y: bodyBottom)); wick.addLine(to: CGPoint(x: x, y: yL))
+        }
+        ctx.stroke(wick, with: .color(color), lineWidth: 1)
+        if isHollow {
             // 悬空蜡烛：内部填充画布底色（夜间自适应），只留描边
             ctx.fill(Path(rect), with: .color(Color(.systemBackground)))
             ctx.stroke(Path(rect), with: .color(color), lineWidth: 1)
