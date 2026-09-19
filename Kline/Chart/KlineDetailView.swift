@@ -697,7 +697,7 @@ struct KlineDetailView: View {
                                code: v.displayCode,
                                isModified: isLinkedViewModified(v),
                                onReset: {
-                                    // 重置按钮：先把该视图被拖动的信息行内容恢复默认左对齐，清拖动标记，再重置视图配置
+                                    // 重置按钮：先把该视图被拖动的信息行内容恢复默认对齐（行情数据行居中、指标数据栏左对齐），清拖动标记，再重置视图配置
                                     NotificationCenter.default.post(name: .klineInfoRowReset, object: nil, userInfo: ["idx": v.index])
                                     linkedStore.clearInfoRowPanned(owner: item.id, index: v.index)
                                     resetLinkedView(v)

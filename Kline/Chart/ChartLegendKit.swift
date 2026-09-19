@@ -376,8 +376,11 @@ extension KlineChartView {
                 }
                 Group {
                     if isLinkedTile {
-                        // fixedSize：覆盖内容按完整单行自然宽呈现，不压缩/省略，超宽靠拖动查看
-                        InfoPannerCenter(ownerIndex: selfIndex, onDragStateChange: { dirty in if dirty { self.onInfoRowPanned?(true) } }) {
+                        // fixedSize：覆盖内容按完整单行自然宽呈现，不压缩/省略，超宽靠拖动查看；
+                        // initiallyCentered：行情数据栏初始在可视范围内居中（指标数据栏仍左对齐）
+                        InfoPannerCenter(ownerIndex: selfIndex,
+                                         initiallyCentered: true,
+                                         onDragStateChange: { dirty in if dirty { self.onInfoRowPanned?(true) } }) {
                             overlayContent.fixedSize(horizontal: true, vertical: false)
                         }
                     } else {
@@ -446,8 +449,11 @@ extension KlineChartView {
                 }
                 Group {
                     if isLinkedTile {
-                        // fixedSize：行情内容按完整单行自然宽呈现，不压缩/省略，超宽靠拖动查看
-                        InfoPannerCenter(ownerIndex: selfIndex, onDragStateChange: { dirty in if dirty { self.onInfoRowPanned?(true) } }) {
+                        // fixedSize：行情内容按完整单行自然宽呈现，不压缩/省略，超宽靠拖动查看；
+                        // initiallyCentered：行情数据栏初始在可视范围内居中（指标数据栏仍左对齐）
+                        InfoPannerCenter(ownerIndex: selfIndex,
+                                         initiallyCentered: true,
+                                         onDragStateChange: { dirty in if dirty { self.onInfoRowPanned?(true) } }) {
                             quoteRowContent.fixedSize(horizontal: true, vertical: false)
                         }
                     } else {
@@ -489,49 +495,80 @@ private struct InfoPannerWidthKey: PreferenceKey {
 }
 
 /// 信息行复位通知：重置按钮点击时广播（userInfo["idx"]=视图 index），
-/// 对应视图的被拖动信息行内容恢复默认左对齐；不带 idx 时所有视图复位
+/// 对应视图的被拖动信息行内容恢复默认对齐（行情数据行=可视范围内居中、指标数据栏=左对齐）；
+/// 不带 idx 时所有视图复位
 extension Notification.Name {
     static let klineInfoRowReset = Notification.Name("klineInfoRowResetLeft")
 }
 
 /// 信息行 / 行情行 / 时间轴覆盖中「可单指横向拖动」的内容承载区（多图联动 tile 使用）：
-/// - 内容默认靠左对齐；不论是否超宽，都能向左/向右拖动内容、松手停留
+/// - 不论是否超宽，都能向左/向右拖动内容、松手停留
 /// - 超宽：向左拖出右侧被藏部分；未超宽：向右拖出剩余白；两侧带小段 overscroll 保证手感应有
+/// - 默认对齐（用户未拖动时的落位）：`initiallyCentered=true`（行情数据行）→ 可视范围内居中，
+///   即内容左右两侧的留白（未超宽）或裁切（超宽）相等；`false`（指标数据栏）→ 保持左对齐
 /// - 本组件只包裹数值内容本身；左侧名称按钮、右侧操作按钮作为兄弟节点放在组件外部，拖动与点击互不干扰
 private struct InfoPannerCenter<Content: View>: View {
     @ViewBuilder let content: Content
 
     /// 本信息行所属视图下标（对应重置按钮的视图 index；仅当收到相同 index 的复位通知时复位）
     private var ownerIndex: Int = 0
-    /// 拖动状态变化回调（传给外层用于重置按钮高亮判定，传参=是否有非零偏移）
+    /// 默认对齐是否在可视范围内居中（true=行情数据行；false=指标数据栏，左对齐）
+    private var initiallyCentered: Bool = false
+    /// 拖动状态变化回调（传给外层用于重置按钮高亮判定，传参=用户是否拖动过本行内容）
     private var onDragStateChange: ((Bool) -> Void)?
 
     /// 已提交的最终停留偏移（向左为负）；拖动中以 offset + 实时位移 叠加显示
     @State private var committedOffset: CGFloat = 0
     @State private var contentWidth: CGFloat = 0
+    /// 本行可视宽度（由 GeometryReader 回填）：默认对齐与复位时据此重算居中偏移
+    @State private var availWidth: CGFloat = 0
+    /// 用户是否手动拖动过：拖过之后不再因布局变化而重新居中，尊重用户停留位置
+    @State private var userPanned = false
+    /// 是否已按默认对齐落位过。只认「首次量出内容宽度」这一次，之后内容宽度随行情实时刷新
+    /// 变化时不再重新居中，否则数值位数变动会让整行内容持续抖动
+    @State private var didAlignOnce = false
     @GestureState private var dragTranslation: CGFloat = 0
 
     init(ownerIndex: Int = 0,
+         initiallyCentered: Bool = false,
          onDragStateChange: ((Bool) -> Void)? = nil,
          @ViewBuilder content: () -> Content) {
         self.ownerIndex = ownerIndex
+        self.initiallyCentered = initiallyCentered
         self.onDragStateChange = onDragStateChange
         self.content = content()
     }
 
     private func clamp01(_ v: CGFloat, _ lo: CGFloat, _ hi: CGFloat) -> CGFloat { min(max(v, lo), hi) }
 
+    /// 拖动/停留的合法偏移范围：不论是否超宽都向左右双侧开放，保证「左右都能拖」
+    private func dragBounds(avail: CGFloat) -> (lo: CGFloat, hi: CGFloat) {
+        let diff = contentWidth - avail
+        let overscroll: CGFloat = 24
+        return (min(0, diff) - overscroll, max(0, -diff) + overscroll)
+    }
+
+    /// 默认（用户未拖动时）的对齐偏移：行情数据行 = 可视范围内居中；指标数据栏 = 左对齐（0）
+    private func defaultOffset(avail: CGFloat) -> CGFloat {
+        guard initiallyCentered, avail > 0, contentWidth > 0 else { return 0 }
+        let (lo, hi) = dragBounds(avail: avail)
+        return clamp01((avail - contentWidth) / 2, lo, hi)
+    }
+
+    /// 落位到默认对齐（用户未拖动过、且宽度已量出时生效）
+    /// - Parameter force: true = 布局（可视宽度）变化/复位触发的重新居中；false = 首次内容宽度量出，
+    ///   只落位一次
+    private func applyDefaultAlignment(force: Bool) {
+        guard !userPanned, availWidth > 0, contentWidth > 0 else { return }
+        if !force && didAlignOnce { return }
+        didAlignOnce = true
+        committedOffset = defaultOffset(avail: availWidth)
+    }
+
     var body: some View {
         GeometryReader { geo in
             let avail = max(1, geo.size.width)
-            // 不论是否超宽，拖动都向左右双侧开放，保证「左右都能拖」：
-            // - 未超宽：向右拖出剩余白/向左拖小段 overscroll
-            // - 超宽：向左拖出右侧被藏部分/向右拖小段回弹
-            // overscroll 保证未超宽/超宽两侧都始终有可拖行程
-            let diff = contentWidth - avail
-            let overscroll: CGFloat = 24
-            let lo = min(0, diff) - overscroll
-            let hi = max(0, -diff) + overscroll
+            let (lo, hi) = dragBounds(avail: avail)
             let shownOffset = clamp01(committedOffset + dragTranslation, lo, hi)
             ZStack(alignment: .leading) {
                 content
@@ -554,18 +591,33 @@ private struct InfoPannerCenter<Content: View>: View {
                     }
                     .onEnded { value in
                         committedOffset = clamp01(committedOffset + value.translation.width, lo, hi)
+                        userPanned = true
                     }
             )
+            // 可视宽度回填：多图 tile 尺寸变化 / 分屏 / 旋转时重新居中，避免停留在
+            // 按旧宽度算出的偏移上（会呈现「内容被切在左边或被顶到右边」的错位）
+            .onAppear {
+                availWidth = avail
+                applyDefaultAlignment(force: true)
+            }
+            .onChange(of: geo.size.width) { w in
+                availWidth = max(1, w)
+                applyDefaultAlignment(force: true)
+            }
         }
-        .onPreferenceChange(InfoPannerWidthKey.self) { contentWidth = $0 }
-        .onChange(of: committedOffset) { value in
-            // 内容被拖动/复位时上报是否有非零偏移，供外层驱动重置按钮高亮
-            onDragStateChange?(value != 0)
+        .onPreferenceChange(InfoPannerWidthKey.self) { w in
+            contentWidth = w
+            applyDefaultAlignment(force: false)
+        }
+        .onChange(of: committedOffset) { _ in
+            // 内容被拖动/复位时上报用户是否拖动过本行，供外层驱动重置按钮高亮
+            onDragStateChange?(userPanned)
         }
         .onReceive(NotificationCenter.default.publisher(for: .klineInfoRowReset)) { note in
-            // 重置按钮点击：恢复被拖动内容到默认左对齐（按视图 index 匹配）
+            // 重置按钮点击：恢复被拖动内容到默认对齐（按视图 index 匹配）
             guard let noteIndex = note.userInfo?["idx"] as? Int, noteIndex == ownerIndex else { return }
-            committedOffset = 0
+            userPanned = false
+            applyDefaultAlignment(force: true)
         }
     }
 }
