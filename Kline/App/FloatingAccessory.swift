@@ -32,68 +32,148 @@ private enum FloatingAccessoryStore {
 // MARK: - 悬浮按钮
 
 /// 常驻悬浮按钮（仿 iOS 辅助触控）
+/// - 外观：四层同心圆（A>B>C>D，逐圈半径减半）叠加，形成 Z（A–B）/ X（B–C）/ Q（C–D）/ W（D 内）
+///   四个环带；Z 纯黑填满，X / Q / W 依次比上一层淡 50%
+/// - 状态：摁住/拖动中四圈直径 +15%、整体透明度 50%；抬手恢复直径、并保持 100% 透明度 3 秒后降到 25%；点击时果冻弹一下
 /// - 拖动：跟手移动，松手动画吸附到最近的左 / 右边缘（纵向位置保持），并写入 UserDefaults
 /// - 点击：位移小于阈值才视为点击（拖完抬手不会误弹面板）
 /// - 命中区：圆形按钮本身 56pt（≥ 项目规范的 44pt），用 contentShape(Circle()) 限定为圆形
 struct FloatingAccessoryButton: View {
     let action: () -> Void
 
-    /// 按钮直径（同时即命中区直径）
+    /// 按钮直径（= 最外圈 A 的直径，同时也是命中区直径）
     private let diameter: CGFloat = 56
     /// 贴边（吸附后 / 默认落位）与屏幕边缘的间距
     private let edgeInset: CGFloat = 8
     /// 判定为「点击」的最大位移；超过即视为拖动
     private let tapSlop: CGFloat = 6
 
+    /// 四层同心圆的半径比例：A（最外）= 1、B = 1/2、C = 1/4、D = 1/8，
+    /// 逐圈半径减半（对应「A 半径 6px 时 B 半径 3px」这一具体数值示例）
+    /// ⚠️ 需求原文「A 半径是 D 半径的两倍」与上述示例（A = 2B）互相矛盾，此处按示例实现；
+    /// 若要改成 A = 2D 的等步长方案，只改这一个数组即可
+    private let radiusRatios: [CGFloat] = [1, 0.5, 0.25, 0.125]
+    /// 四层的填充色（自外向内）：Z 纯黑填满，X / Q / W 依次比上一层「淡 50%」（向白色混合 50%）
+    /// 若想改成「黑色透明度逐层减半（1 / 0.5 / 0.25 / 0.125）」，改这一个数组即可
+    private let bandColors: [Color] = [
+        Color(white: 0),      // Z：黑
+        Color(white: 0.5),    // X：比 Z 淡 50%
+        Color(white: 0.75),   // Q：比 X 淡 50%
+        Color(white: 0.875)   // W：比 Q 淡 50%
+    ]
+    /// 摁住 / 拖动时四圈直径的放大比例（+15%），抬手即恢复
+    private let pressScaleFactor: CGFloat = 1.15
+    /// 未被触碰多久后整体降到 25% 透明度
+    private let idleFadeDelay: TimeInterval = 3
+
     @State private var center: CGPoint?
     /// 本次手势的实时位移：与已落位的 center 叠加显示（用 @State 而非 @GestureState，
     /// 便于在 onEnded 的同一个动画事务里把它与吸附目标一起归零，吸附过程从松手点平滑过渡）
     @State private var dragDelta: CGSize = .zero
+    /// 手指是否仍按在按钮上（摁住 / 拖动中）：控制 15% 放大与 50% 透明度
+    @State private var isPressing = false
+    /// 是否已进入「3 秒未触碰」的低透明度状态
+    @State private var isDimmed = false
+    /// 点击时的果冻缩放（与 isPressing 的放大叠乘）
+    @State private var jellyScale: CGFloat = 1
+    /// 闲置淡出计时令牌：每次触碰自增使在途的淡出作废（比持有 DispatchWorkItem 更简单可靠）
+    @State private var idleFadeToken = 0
+
+    /// 整体透明度：摁住/拖动中 50%；3 秒未触碰后 25%；其余（含触碰后 3 秒内）100%
+    private var overallOpacity: Double {
+        if isPressing { return 0.5 }
+        return isDimmed ? 0.25 : 1.0
+    }
+
+    /// 四层同心圆：面积自外向内递减，靠后绘制的内圈覆盖外圈即自然形成 Z / X / Q / W 四个环带
+    private var rings: some View {
+        ZStack {
+            ForEach(Array(radiusRatios.enumerated()), id: \.offset) { i, ratio in
+                Circle()
+                    .fill(bandColors[min(i, bandColors.count - 1)])
+                    .frame(width: diameter * ratio, height: diameter * ratio)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    /// 开始 / 重排闲置淡出：3 秒内再被触碰则本次作废
+    private func scheduleIdleFade() {
+        idleFadeToken += 1
+        let token = idleFadeToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + idleFadeDelay) {
+            guard token == idleFadeToken else { return }
+            withAnimation(.easeOut(duration: 0.45)) { isDimmed = true }
+        }
+    }
+
+    /// 触碰即取消在途淡出并回到 100%（任何触碰后抬手也要保持 3 秒 100%）
+    private func cancelIdleFade() {
+        idleFadeToken += 1
+        if isDimmed { withAnimation(.easeOut(duration: 0.15)) { isDimmed = false } }
+    }
+
+    /// 果冻弹一下：先快速压缩，再用低阻尼 spring 回弹过冲；
+    /// `completion` 延后到弹性反馈可见之后再执行（否则面板一弹出按钮就隐藏，看不到果冻）
+    private func playJelly(completion: @escaping () -> Void) {
+        withAnimation(.easeOut(duration: 0.08)) { jellyScale = 0.82 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.34)) { jellyScale = 1 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: completion)
+    }
 
     var body: some View {
         GeometryReader { geo in
             let bounds = centerBounds(in: geo.size)
             let base = clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), bounds: bounds)
             let shown = clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), bounds: bounds)
-            ZStack {
-                Circle().fill(Color.black.opacity(0.55))
-                // 深色底 + 白色描边：浅色/深色模式都可辨识（辅助触控本身即恒定的深色半透明圆钮）
-                Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-                Image(systemName: "square.grid.2x2.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.white)
-            }
-            .frame(width: diameter, height: diameter)
+            rings
+            // 摁住/拖动放大 15%（整体缩放，四圈直径同步 +15%），叠加点击时的果冻缩放
+            .scaleEffect((isPressing ? pressScaleFactor : 1) * jellyScale)
             .shadow(color: Color.black.opacity(0.25), radius: 8, y: 3)
+            .opacity(overallOpacity)
             .contentShape(Circle())
             .position(shown)
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
                     .onChanged { value in
+                        if !isPressing {
+                            cancelIdleFade()
+                            withAnimation(.easeOut(duration: 0.12)) { isPressing = true }
+                        }
                         dragDelta = value.translation
                     }
                     .onEnded { value in
+                        withAnimation(.easeOut(duration: 0.15)) { isPressing = false }
                         let t = value.translation
                         let moved = max(abs(t.width), abs(t.height)) > tapSlop
-                        guard moved else {
-                            // 点击：先复位位移再触发，避免按钮随手指微移后停在偏移处
+                        if !moved {
+                            // 点击：先复位位移、果冻弹一下，再触发动作（不再吸附，避免按钮被拖动后停在偏移处）
                             dragDelta = .zero
-                            action()
-                            return
+                            playJelly(completion: action)
+                        } else {
+                            let raw = clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), bounds: bounds)
+                            // 吸附到更近的一侧边缘（纵向保持）
+                            let left = bounds.x.lowerBound
+                            let right = bounds.x.upperBound
+                            let target = CGPoint(x: (raw.x - left <= right - raw.x) ? left : right, y: raw.y)
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                center = target
+                                dragDelta = .zero
+                            }
+                            FloatingAccessoryStore.save(target)
                         }
-                        let raw = clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), bounds: bounds)
-                        // 吸附到更近的一侧边缘（纵向保持）
-                        let left = bounds.x.lowerBound
-                        let right = bounds.x.upperBound
-                        let target = CGPoint(x: (raw.x - left <= right - raw.x) ? left : right, y: raw.y)
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            center = target
-                            dragDelta = .zero
-                        }
-                        FloatingAccessoryStore.save(target)
+                        // 任何触碰后抬手：保持 100% 透明度 3 秒，再降到 25%
+                        scheduleIdleFade()
                     }
             )
-            .onAppear { center = clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), bounds: bounds) }
+            .onAppear {
+                center = clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), bounds: bounds)
+                // 初始 100% 起算：3 秒未触碰即降到 25%
+                scheduleIdleFade()
+            }
+            .onDisappear { idleFadeToken += 1 }
             // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
             .onChange(of: geo.size) { _ in
                 let b = centerBounds(in: geo.size)
