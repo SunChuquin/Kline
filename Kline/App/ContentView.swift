@@ -96,13 +96,11 @@ struct ContentView: View {
                     }
                     .opacity(isAccessoryPanelPresented ? 0 : 1)
                     .allowsHitTesting(!isAccessoryPanelPresented)
-                    // 新按钮（转圈驱动光标）：点击 B' 果冻播完后打开同一个快捷面板；
-                    // 面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
-                    FloatingAccessoryWheel {
-                        withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
-                    }
-                    .opacity(isAccessoryPanelPresented ? 0 : 1)
-                    .allowsHitTesting(!isAccessoryPanelPresented)
+                    // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
+                    // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
+                    FloatingAccessoryWheel()
+                        .opacity(isAccessoryPanelPresented ? 0 : 1)
+                        .allowsHitTesting(!isAccessoryPanelPresented)
                 }
                 if isAccessoryPanelPresented {
                     FloatingAccessoryPanel {

@@ -39,6 +39,14 @@ struct FloatingAccessorySnapRequest: Equatable {
     let side: FloatingAccessoryPlacement.Side
 }
 
+/// 窗口平移命令（点击新按钮 B' 产生）。同样带 `seq`：订阅重放与「连续两次同值平移」都要能区分
+struct FloatingAccessoryWindowNudge: Equatable {
+    /// 单调递增序号（同一次会话内唯一）
+    let seq: Int
+    /// 平移根数：正 = 朝**更新**的方向（屏幕上 K 线整体左移、右缘进来一根更晚的）；负 = 朝更早方向
+    let candles: Int
+}
+
 /// 两个悬浮按钮共享的协调对象
 final class FloatingAccessoryCoordinator: ObservableObject {
     static let shared = FloatingAccessoryCoordinator()
@@ -51,8 +59,12 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// （不设 private(set)：图表需要订阅投影值 `$cursorAdvance`；只由 advanceCursor(by:) 写入）
     @Published var cursorAdvance: FloatingAccessoryCursorAdvance?
 
+    /// 最新窗口平移命令。与 cursorAdvance 同样开放订阅投影值 `$windowNudge`，故不设 private(set)
+    @Published var windowNudge: FloatingAccessoryWindowNudge?
+
     /// 序号自增源（只增不减，保证同值命令也能被识别为新命令）
     private var advanceSeq = 0
+    private var nudgeSeq = 0
 
     /// 最新吸附请求（订阅方按 owner 认领；带 seq 区分同目标侧的连续请求）
     @Published private(set) var snapRequest: FloatingAccessorySnapRequest?
@@ -120,5 +132,14 @@ final class FloatingAccessoryCoordinator: ObservableObject {
         guard candles != 0 else { return }
         advanceSeq += 1
         cursorAdvance = FloatingAccessoryCursorAdvance(seq: advanceSeq, candles: candles)
+    }
+
+    // MARK: - 窗口平移命令（点击 B'）
+
+    /// 发布「把被驱动那一格的可见窗口平移 candles 根」；candles == 0 不发
+    func nudgeWindow(by candles: Int) {
+        guard candles != 0 else { return }
+        nudgeSeq += 1
+        windowNudge = FloatingAccessoryWindowNudge(seq: nudgeSeq, candles: candles)
     }
 }

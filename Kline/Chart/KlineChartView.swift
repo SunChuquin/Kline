@@ -155,6 +155,8 @@ struct KlineChartView: View {
     /// 已消费的悬浮按钮转圈命令序号（第二层去重）：同一序号只施加一次；
     /// 订阅时那一发重放主要由订阅处的 dropFirst 挡掉，这里再防重复投递
     @State var lastAccessoryAdvanceSeq = 0
+    /// 已消费的「点击新按钮 B' → 窗口平移」命令序号（第二层去重，同上）
+    @State var lastAccessoryNudgeSeq = 0
     /// 上一次观察到的「转圈中」状态：只在 true → false 的边沿做收尾，
     /// 订阅时的初始 false / 转圈中的 true 都不写任何状态（空转期零副作用）
     @State var accessoryWasRotating = false
@@ -761,6 +763,11 @@ struct KlineChartView: View {
         .onReceive(FloatingAccessoryCoordinator.shared.$cursorAdvance.dropFirst()) { cmd in
             applyAccessoryCursorAdvance(cmd)
         }
+        // 点击新按钮 B' → 被驱动那一格的可见窗口朝「更新」方向平移一根。
+        // 同样只由主格消费、同样 dropFirst + seq 两层去重，空转期零写入
+        .onReceive(FloatingAccessoryCoordinator.shared.$windowNudge.dropFirst()) { cmd in
+            applyAccessoryWindowNudge(cmd)
+        }
         // 转圈结束收尾：只在 true → false 的边沿动作（订阅时的初始 false 与转圈中的 true 都不写状态），
         // isRotating 由按钮侧在 onEnded / onDisappear 置 false，故视图销毁也走这条收尾
         .onReceive(FloatingAccessoryCoordinator.shared.$isRotating) { rotating in
@@ -888,6 +895,25 @@ struct KlineChartView: View {
         endOffset = newEndOffset
         // 窗口已平移 → endIndex / startIndex 随之变化，把光标重新锁回该方向的新边缘
         selectedIndex = dir > 0 ? endIndex : startIndex
+    }
+
+    /// 消费「点击新按钮 B'」产生的窗口平移命令：把可见窗口朝**更新**方向平移 candles 根
+    /// （屏幕上 K 线整体左移、右缘进来一根更晚的），夹在 0...maxEndOffset。
+    /// 只动窗口、不动 `selectedIndex` —— 光标仍锚在同一根 K 线上、随内容一起移动（等同一次平移手势）。
+    /// 仅主格生效；其余格、无命令、已到数据边界时一律零写入
+    private func applyAccessoryWindowNudge(_ cmd: FloatingAccessoryWindowNudge?) {
+        guard isMainTile, let cmd else { return }
+        guard cmd.seq != lastAccessoryNudgeSeq else { return }
+        lastAccessoryNudgeSeq = cmd.seq
+        let maxEndOffset = max(0, sortedData.count - count)
+        // 方向取反与既有贴边分支一致：朝「更新」看 → endOffset 减小
+        let newEndOffset = clamp(endOffset - cmd.candles, 0, maxEndOffset)
+        guard newEndOffset != endOffset else { return }   // 已到数据边界：无过冲
+        endOffset = newEndOffset
+        // 与「平移手势结束」同一口径收尾：一次指标重算 + 恢复预取。
+        // 单次点击不是高频路径，可以在这里直接重算（拖拽期才需要避免）
+        refreshCurves()
+        startPrefetch()
     }
 
     /// 转圈结束（`isRotating` true → false）收尾，口径对齐既有贴边自动滚动的 onFinish：
