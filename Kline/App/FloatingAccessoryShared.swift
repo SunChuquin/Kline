@@ -124,6 +124,30 @@ struct FloatingAccessoryRings: View {
     }
 }
 
+// MARK: - 「光标自动移动时隐藏悬浮按钮」共用修饰符
+
+/// 联动多图模式下光标自动移动（贴边自动滚动、抬手后继续）期间，把整个悬浮按钮隐藏并关闭命中，
+/// 自动移动结束后恢复。两个按钮**各自订阅、各自隐藏** —— 不把协调对象挂到 `ContentView` 上观察，
+/// 免得高频命令发布（转圈的每根推进、每次点击）引起根视图整树重算
+private struct AccessoryAutoMoveHider: ViewModifier {
+    @State private var isAutoMoving = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isAutoMoving ? 0 : 1)
+            .allowsHitTesting(!isAutoMoving)
+            // 订阅 @Published 时会立即重放当前值，正好把初始状态对齐
+            .onReceive(FloatingAccessoryCoordinator.shared.$isCursorAutoMoving) { on in
+                withAnimation(.easeOut(duration: 0.2)) { isAutoMoving = on }
+            }
+    }
+}
+
+extension View {
+    /// 联动多图模式下光标自动移动时隐藏本视图（见 AccessoryAutoMoveHider）
+    func hidesDuringCursorAutoMove() -> some View { modifier(AccessoryAutoMoveHider()) }
+}
+
 // MARK: - 落位计算
 
 /// 悬浮按钮的落位计算：中心点合法范围、夹取、贴指定侧落位、判定落在哪一侧

@@ -96,11 +96,15 @@ struct ContentView: View {
                     }
                     .opacity(isAccessoryPanelPresented ? 0 : 1)
                     .allowsHitTesting(!isAccessoryPanelPresented)
+                    // 联动多图模式下光标自动移动（贴边自动滚动、抬手后仍继续）期间整体隐藏，
+                    // 让出正在滚动的图表；停止后自动恢复
+                    .hidesDuringCursorAutoMove()
                     // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
                     // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
                     FloatingAccessoryWheel()
                         .opacity(isAccessoryPanelPresented ? 0 : 1)
                         .allowsHitTesting(!isAccessoryPanelPresented)
+                        .hidesDuringCursorAutoMove()
                 }
                 if isAccessoryPanelPresented {
                     FloatingAccessoryPanel {

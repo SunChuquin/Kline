@@ -55,6 +55,10 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     @Published private(set) var activeOwner: FloatingAccessoryOwner?
     /// 是否正处于「环上转圈」的驱动期（供图表判断程序化驱动期）
     @Published private(set) var isRotating = false
+    /// 联动多图模式下「光标正在自动移动」（贴边自动滚动，**抬手后仍在继续**）：
+    /// 为真时两个悬浮按钮一起隐藏、让出正在自动滚动的图表，滚动停止即恢复。
+    /// 只由多图 tile 上报（见 KlineChartView 的 reportCursorAutoMoving），故单图模式的自动滚动不会隐藏按钮
+    @Published private(set) var isCursorAutoMoving = false
     /// 最新光标推进命令。订阅方建立订阅时会立即收到当前值，故消费端必须用 `seq` 去重。
     /// （不设 private(set)：图表需要订阅投影值 `$cursorAdvance`；只由 advanceCursor(by:) 写入）
     @Published var cursorAdvance: FloatingAccessoryCursorAdvance?
@@ -97,6 +101,11 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 转圈手势起止（幂等，仅在实际变化时发布）
     func setRotating(_ rotating: Bool) {
         if isRotating != rotating { isRotating = rotating }
+    }
+
+    /// 上报「光标正在自动移动」起止（幂等，仅在实际变化时发布）
+    func setCursorAutoMoving(_ on: Bool) {
+        if isCursorAutoMoving != on { isCursorAutoMoving = on }
     }
 
     // MARK: - 同侧互斥（实时，不等抬手）

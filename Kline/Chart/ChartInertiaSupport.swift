@@ -240,6 +240,8 @@ extension KlineChartView {
             drag.edgeAutoScroller = nil
             drag.edgeAutoScrollDir = 0
             drag.cursorDragging = false
+            // 走到数据边界自然停：自动移动结束，恢复两个悬浮按钮
+            reportCursorAutoMoving(false)
             panOffset = 0
             DebugLogger.shared.log("[贴边自动滚动] 结束 方式=触边即停 endOffset=\(endOffset)/\(maxEndOffset)")
             refreshCurves()
@@ -250,14 +252,29 @@ extension KlineChartView {
         // 自动滚动期间保持「本地光标模式」（与手指拖动同态）：横线仍停在手指最后位置、
         // 光标按 selectedIndex 渲染，且每次光标推进都会对外发布联动光标
         drag.cursorDragging = true
+        // 联动多图模式下：光标开始自动移动（抬手后仍继续）→ 让两个悬浮按钮一起让位
+        reportCursorAutoMoving(true)
         DebugLogger.shared.log("[贴边自动滚动] ✅启动 方向=\(dirIn > 0 ? "贴右缘(看更新)" : "贴左缘(看更早)") v=\(String(format: "%.0f", Double(abs(v))))px/s 前方\(candlesAhead)根 endOffset=\(endOffset)/\(maxEndOffset)")
         animator.start()
         return true
     }
 
+    // MARK: - 光标自动移动的上报（联动多图模式）
+
+    /// 「光标正在自动移动」的上报：为真时两个悬浮按钮一起隐藏、让出正在自动滚动的图表。
+    /// 需求限定在**联动多图模式**，故只由多图 tile（`isLinkedTile`）上报，单图模式不参与
+    /// （`isLinkedTile` 仅由 `LinkedKlineTile` 传 true，单图默认 false）
+    private func reportCursorAutoMoving(_ on: Bool) {
+        guard isLinkedTile else { return }
+        FloatingAccessoryCoordinator.shared.setCursorAutoMoving(on)
+    }
+
     /// 终止「光标贴边自动滚动」（幂等）：该光标被现有任何方式清除、手指反向退回主图内侧一半、
     /// 双指接管、其他视图接管来源、视图销毁 / 数据刷新时调用
     func stopEdgeAutoScroll() {
+        // 无条件复位「光标自动移动」标志（幂等）：一旦因任何异常路径留在 true，
+        // 两个悬浮按钮会被永久隐藏，所以这里不做条件判断
+        reportCursorAutoMoving(false)
         guard drag.edgeAutoScrollDir != 0 || drag.edgeAutoScroller != nil else { return }
         drag.edgeAutoScrollDir = 0
         drag.edgeAutoScroller?.cancel()   // cancel 不触发 onFinish，状态上面已手动清
