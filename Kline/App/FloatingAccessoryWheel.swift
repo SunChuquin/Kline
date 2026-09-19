@@ -19,7 +19,7 @@ import Combine
 /// - 外观：A' / B' 仅用语义色 label 描边，环 Z' 透明，C' 用同一语义色实心（+1pt 外描边走满环宽）
 /// - 状态：摁住 / 拖动 / 转圈中整体 +15% 并降到 50% 透明度；抬手后 0.5 秒未触碰降到 25%
 ///   且 C' 隐藏（计时令牌自增防泄漏）
-/// - 手势分区：落点半径 ≤ B' 半径 → 整钮模式（点击播放果冻回弹、并把被驱动那一格的窗口朝更新方向平移一根；
+/// - 手势分区：落点半径 ≤ B' 半径 → 整钮模式（点击=先清全部视图所有光标、再把被驱动那一格的窗口朝更新方向平移一根；
 ///   拖动吸附到更近一侧并持久化）；
 ///   落点半径 > B' 半径（即环 Z'）→ 转圈模式，C' 跳到落点角度后随手指滑动
 /// - 命中区：A' 围出的圆盘（即 B' 盘 ∪ 环 Z' 环带）
@@ -143,12 +143,14 @@ struct FloatingAccessoryWheel: View {
                                 let t = value.translation
                                 let moved = max(abs(t.width), abs(t.height)) > FloatingAccessoryMetrics.tapSlop
                                 if !moved {
-                                    // 点击：先复位位移、果冻弹一下，同时把**被驱动那一格**的可见窗口朝「更新」方向
-                                    // 平移 1 根（屏幕上 K 线整体左移、右缘进来一根更晚的）。
-                                    // 果冻只是反馈、不再延后动作：之前延后 0.18s 是为了面板弹出前先看到果冻，
-                                    // 而现在点击已不再打开面板
+                                    // 点击，两步：① 先清除**屏幕上全部视图的所有光标**（由 KlineDetailView 统一清：
+                                    // 清空联动光标 + 换 cursorClearToken，故每一格的十字/固定/第二光标与范围框都清掉）；
+                                    // ② 再把**被驱动那一格**的可见窗口朝「更新」方向平移 1 根
+                                    //（屏幕上 K 线整体左移、右缘进来一根更晚的）。
+                                    // 两次发布在同一轮同步发生、顺序即此顺序。果冻只是反馈，不延后动作
                                     dragDelta = .zero
                                     playJelly()
+                                    FloatingAccessoryCoordinator.shared.clearAllCursors()
                                     FloatingAccessoryCoordinator.shared.nudgeWindow(by: 1)
                                 } else {
                                     let raw = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), in: bounds)

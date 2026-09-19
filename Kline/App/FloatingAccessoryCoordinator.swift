@@ -62,6 +62,11 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 最新窗口平移命令。与 cursorAdvance 同样开放订阅投影值 `$windowNudge`，故不设 private(set)
     @Published var windowNudge: FloatingAccessoryWindowNudge?
 
+    /// 「清除屏幕上全部视图所有光标」请求计数（点击 B' 的第 1 步）。
+    /// 用自增 Int 而非 Bool：每次点击都是一次**新**请求，订阅方按值变化触发即可（配 dropFirst 挡掉订阅重放）。
+    /// 由 `KlineDetailView` 消费 —— 它才是 `cursorClearToken` 与 `linkSync` 的持有者，能一次清掉**所有**格
+    @Published private(set) var clearAllCursorsSeq = 0
+
     /// 序号自增源（只增不减，保证同值命令也能被识别为新命令）
     private var advanceSeq = 0
     private var nudgeSeq = 0
@@ -136,7 +141,12 @@ final class FloatingAccessoryCoordinator: ObservableObject {
 
     // MARK: - 窗口平移命令（点击 B'）
 
-    /// 发布「把被驱动那一格的可见窗口平移 candles 根」；candles == 0 不发
+    /// 第 1 步：请求清除屏幕上全部视图的所有光标（由 KlineDetailView 统一清）
+    func clearAllCursors() {
+        clearAllCursorsSeq += 1
+    }
+
+    /// 第 2 步：发布「把被驱动那一格的可见窗口平移 candles 根」；candles == 0 不发
     func nudgeWindow(by candles: Int) {
         guard candles != 0 else { return }
         nudgeSeq += 1
