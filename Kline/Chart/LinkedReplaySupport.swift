@@ -461,7 +461,12 @@ extension KlineChartView {
     /// 非来源的**同周期视图**：忽略一切单指点击与拖动，
     /// 保持联动十字光标的既有画面（双指平移 / 缩放照常）。
     var isLinkedFrozenView: Bool {
-        isLinkedNonSource && !isLinkedSecondCursorView
+        // ⚠️ 主格（悬浮按钮驱动的那一格）**永不冻结**：它必须始终能像「手拖主图」那样驱动光标，
+        // 并在拖动过程中自然接管为联动来源。否则一旦联动态下已存在光标、且来源是别的格，
+        // 主格就会被判为冻结视图 —— 手势第一帧直接 return，光标纹丝不动（像被冻住），
+        // 也与规格「多图联动时以该视图为驱动、等同手拖主图」以及「点击 B' 把来源交给主格」冲突。
+        // 其余非来源格保持冻结：避免多个视图互相抢着居中而打架
+        isLinkedNonSource && !isLinkedSecondCursorView && !isMainTile
     }
 
     /// 非来源复盘 / 范围框视图中本地第二光标已存在：指标数值栏与底部行情行一律读
