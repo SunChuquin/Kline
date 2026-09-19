@@ -777,16 +777,15 @@ struct KlineChartView: View {
             // 外层广播：清掉本视图所有十字光标（切换光标联动开/关、退出联动等场景）
             clearLocalCursors()
         }
-        // 点击新按钮 B' 的第 1 步：清除**屏幕上全部视图的所有光标**。
-        // 有意不判 isMainTile（要清的就是所有格）；也**特意不走外层的 cursorClearToken**：
-        // 那个走 .onChange、要到下一次渲染才生效，会把紧接着放上去的新光标又擦掉；
-        // `.onReceive` 是发布时**同步**投递的，才能保证「先全部清干净、再让主格放新光标」的顺序。
-        // 顺带清空共享的联动光标（否则联动开启时其余格会按 linkSync.cursorDate 把光标再画回来）
+        // 点击新按钮 B' 的「清除屏幕上全部视图的光标」广播。
+        // ⚠️ 消费端**跳过主格**：主格由 applyAccessoryWindowNudge 在「放光标之前」同步清自己，
+        // 若这里也把主格清一遍，清除就会取决于投递时序 —— 一旦晚于放光标那一步，
+        // 刚放好的光标会被自己擦掉（表现为「点了 B' 永远看不到最右缘那个光标」）。
+        // 这里**只清本地光标**，不碰共享的 linkSync：联动光标字段一律由主格在同步块里清理并重发，
+        // 否则其它格的这套写入同样可能晚于主格的发布、把刚建立的联动来源又清成 nil
         .onReceive(FloatingAccessoryCoordinator.shared.$clearAllCursorsSeq.dropFirst()) { _ in
+            guard !isMainTile else { return }
             clearLocalCursors()
-            linkSync.cursorDate = nil
-            linkSync.sourceRange = nil
-            linkSync.sourceID = nil
         }
         .onChange(of: linkSync.cursorDate) { date in
             applyLinkCursor(date)
@@ -912,9 +911,11 @@ struct KlineChartView: View {
     /// 消费「点击新按钮 B'」：**先**（按需）清除屏幕上全部视图的光标，**再**把可见窗口朝**更新**方向平移
     /// candles 根（屏幕上 K 线整体左移、右缘进来一根更晚的），**最后**把光标放在平移后的**最右侧可见 K 线**上。
     ///
-    /// **第 0 步为什么按需清**：若本视图**已是联动驱动来源**（`cursorLinkEnabled && linkSync.sourceID == selfIndex`）
-    /// 且**光标已在最右侧可见 K 线**上（`selectedIndex == endIndex`），当前状态就已经是本次点击的终态，
+    /// **第 0 步为什么按需清、以及按什么顺序清**：若本视图**已是联动驱动来源**（或联动未开启）且
+    /// **光标已在最右侧可见 K 线**上（`selectedIndex == endIndex`），当前状态就已经是本次点击的终态，
     /// 整轮清除纯属多余 —— 它会把横线一并清掉、随后又重置到主图中线，表现为「横线无端跳回中线」的闪烁。
+    /// 需要清时，顺序固定为「同步清自己（含共享联动光标字段）→ 广播请其它格清本地光标 → 移窗 → 放光标」，
+    /// 广播消费端跳过主格，故主格刚放好的光标不会被任何晚到的投递擦掉。
     ///
     /// **为什么先移窗、后放光标**：终态即「光标停在可见窗口最右侧那一根」，与既有「光标贴边推进」同一惯用法
     /// （`applyAccessoryCursorAdvance` 分支③ 推进窗口后会把光标重新锁回新边缘）；反过来先放再移，
@@ -929,12 +930,19 @@ struct KlineChartView: View {
         guard isMainTile, let cmd else { return }
         guard cmd.seq != lastAccessoryNudgeSeq else { return }
         lastAccessoryNudgeSeq = cmd.seq
-        // ⓪ 按需清光标（见上方注释）。清除由协调对象广播、各格同步订阅执行；
-        //    这里是在 windowNudge 的投递里发另一个 publisher，两者是不同的 subject，不存在重入问题
-        let alreadySelfConsistent = cursorLinkEnabled
-            && linkSync.sourceID == selfIndex
-            && selectedIndex == endIndex
+        // ⓪ 按需清光标：只有「光标已在最右侧可见 K 线上」**且**「本视图已是联动驱动来源、或联动未开启」时才省。
+        //    省掉的理由：那正是本次点击的终态，再清一轮纯属多余，而且会把横线一并清掉、随后又重置到
+        //    主图中线，表现为「横线无端跳回中线」的闪烁。
+        //    清的顺序必须确定：**先同步清自己**（含共享的联动光标字段），**再**广播请其它格清自己的本地光标
+        //    （广播消费端会跳过主格，见其订阅处注释），**最后**才移窗、放光标 —— 这样无论广播何时投递，
+        //    主格刚放好的光标都不会被擦掉
+        let isSourceOrNoLink = !cursorLinkEnabled || linkSync.sourceID == selfIndex
+        let alreadySelfConsistent = isSourceOrNoLink && selectedIndex == endIndex
         if !alreadySelfConsistent {
+            clearLocalCursors()
+            linkSync.cursorDate = nil
+            linkSync.sourceRange = nil
+            linkSync.sourceID = nil
             FloatingAccessoryCoordinator.shared.clearAllCursors()
         }
         // ① 移窗：方向取反与既有贴边分支一致，朝「更新」看 → endOffset 减小
