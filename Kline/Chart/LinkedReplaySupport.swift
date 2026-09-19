@@ -787,13 +787,13 @@ struct LinkRangeAxisOverlay: View, Equatable {
                                 .frame(width: xR - xL, height: regionHeight)
                                 .position(x: (xL + xR) / 2, y: midY)
                         }
-                        // 两根竖轴（无标签）
+                        // 两根竖轴（无标签）；线宽 0.5 与十字光标竖轴统一，比K线上下影线（1pt）细一半
                         if showLAxis {
-                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 0.5, height: regionHeight)
                                 .position(x: xL, y: midY)
                         }
                         if showRAxis {
-                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 1.5, height: regionHeight)
+                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 0.5, height: regionHeight)
                                 .position(x: xR, y: midY)
                         }
                     }

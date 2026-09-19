@@ -92,9 +92,10 @@ struct CrosshairLineOverlay: View, Equatable {
         let segments = nonLabelSegments
         ZStack(alignment: .topLeading) {
             // 横轴虚线：从数值背景的最左边（x=0）开始画起；按区间逐段绘制，跳过所有标签区间
+            // 线宽 0.5：与竖轴一致（比K线上下影线 1pt 细一半），保证横竖轴视觉粗细统一
             ForEach(segments, id: \.lowerBound) { seg in
                 Rectangle().fill(lineColor)
-                    .frame(width: max(0, seg.upperBound - seg.lowerBound), height: 1.0)
+                    .frame(width: max(0, seg.upperBound - seg.lowerBound), height: 0.5)
                     .position(x: (seg.lowerBound + seg.upperBound) / 2, y: y)
             }
             if let secondLine {
@@ -142,8 +143,9 @@ struct SubCursorVLine: View, Equatable {
     var body: some View {
         if let index, index >= startIndex, index <= endIndex {
             let xPosition = (CGFloat(index - startIndex) + 0.5) * candleSpacing
+            // 线宽 0.5：与主图竖线一致，比K线上下影线（1pt）细一半，避免正好压在某根K线上时把影线盖掉
             Rectangle().fill((compare != nil || secondary) ? Color.blue : Color(.label).opacity(0.45))
-                .frame(width: 1.0, height: height)
+                .frame(width: 0.5, height: height)
                 .position(x: xPosition, y: height / 2)
         }
     }

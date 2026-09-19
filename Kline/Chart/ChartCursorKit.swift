@@ -156,7 +156,9 @@ extension KlineChartView {
             // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）；第二个光标蓝色、固定光标黑色
             let topCut = clampedAxisY(0, in: height) + 8
             let lineHeight = max(0, height - topCut)
-            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color(.label).opacity(0.45)).frame(width: 1.0, height: lineHeight)
+            // 线宽 0.5：比K线上下影线（1pt）细一半。竖线正好落在某根K线上时，1pt 会把影线整条盖掉
+            // （光标竖轴与该K线的影线同色系同宽），细一半后影线仍能从竖轴两侧露出来
+            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color(.label).opacity(0.45)).frame(width: 0.5, height: lineHeight)
                 .position(x: xPosition, y: topCut + lineHeight / 2)
             // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
             // 第二个光标时第二行显示 两光标间振幅 / 最大回撤 / 最大上涨 / 涨幅；宽度按最宽一行（第二行）贴边判定
