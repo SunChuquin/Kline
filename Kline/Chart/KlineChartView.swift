@@ -909,14 +909,18 @@ struct KlineChartView: View {
         notifyHasCursor()
     }
 
-    /// 消费「点击新按钮 B'」产生的窗口平移命令：**先**把可见窗口朝**更新**方向平移 candles 根
-    /// （屏幕上 K 线整体左移、右缘进来一根更晚的），**再**把光标放在平移后的**最右侧可见 K 线**上。
+    /// 消费「点击新按钮 B'」：**先**（按需）清除屏幕上全部视图的光标，**再**把可见窗口朝**更新**方向平移
+    /// candles 根（屏幕上 K 线整体左移、右缘进来一根更晚的），**最后**把光标放在平移后的**最右侧可见 K 线**上。
     ///
-    /// 为什么是「先移窗、后放光标」：这样终态恰好是「光标停在可见窗口最右侧那一根」，
-    /// 与既有「光标贴边推进」同一惯用法（`applyAccessoryCursorAdvance` 分支③ 推进窗口后会把光标
-    /// 重新锁回新边缘）；若反过来先放再移，光标最后会落在右缘左边一根，与需求描述不符。
+    /// **第 0 步为什么按需清**：若本视图**已是联动驱动来源**（`cursorLinkEnabled && linkSync.sourceID == selfIndex`）
+    /// 且**光标已在最右侧可见 K 线**上（`selectedIndex == endIndex`），当前状态就已经是本次点击的终态，
+    /// 整轮清除纯属多余 —— 它会把横线一并清掉、随后又重置到主图中线，表现为「横线无端跳回中线」的闪烁。
     ///
-    /// 为什么放光标时要显式 `publishLinkCursor`：这里把 `cursorDragging` 置 true 后**必须马上复位**
+    /// **为什么先移窗、后放光标**：终态即「光标停在可见窗口最右侧那一根」，与既有「光标贴边推进」同一惯用法
+    /// （`applyAccessoryCursorAdvance` 分支③ 推进窗口后会把光标重新锁回新边缘）；反过来先放再移，
+    /// 光标最后会落在右缘左边一根，与需求不符。
+    ///
+    /// **为什么放光标时要显式 `publishLinkCursor`**：这里把 `cursorDragging` 置 true 后**必须马上复位**
     /// （否则后续轻点会被 onEnded 的 cursorDragging 分支吞掉，光标再也点不掉 —— 既有教训），
     /// 而 `selectedIndex` 的 `.onChange` 要到下一次渲染才触发，那时标记已复位、发布会被守卫挡掉；
     /// 所以在这一个同步块里直接发布一次联动光标，让其余格能自洽地跟随。
@@ -925,6 +929,14 @@ struct KlineChartView: View {
         guard isMainTile, let cmd else { return }
         guard cmd.seq != lastAccessoryNudgeSeq else { return }
         lastAccessoryNudgeSeq = cmd.seq
+        // ⓪ 按需清光标（见上方注释）。清除由协调对象广播、各格同步订阅执行；
+        //    这里是在 windowNudge 的投递里发另一个 publisher，两者是不同的 subject，不存在重入问题
+        let alreadySelfConsistent = cursorLinkEnabled
+            && linkSync.sourceID == selfIndex
+            && selectedIndex == endIndex
+        if !alreadySelfConsistent {
+            FloatingAccessoryCoordinator.shared.clearAllCursors()
+        }
         // ① 移窗：方向取反与既有贴边分支一致，朝「更新」看 → endOffset 减小
         let maxEndOffset = max(0, sortedData.count - count)
         let newEndOffset = clamp(endOffset - cmd.candles, 0, maxEndOffset)
