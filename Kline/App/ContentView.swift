@@ -12,6 +12,8 @@ struct ContentView: View {
     @State private var isSearching = false
     @State private var isProfilePresented = false
     @State private var isTestPresented = false
+    /// 悬浮按钮点开的快捷面板是否呈现
+    @State private var isAccessoryPanelPresented = false
     @State private var lastHomeTapTime: Date?
     @State private var lastSimulateTapTime: Date?
     @ObservedObject private var detailRouter = DetailRouter.shared
@@ -79,6 +81,27 @@ struct ContentView: View {
                 if isTestPresented {
                     ProfileView(isPresented: $isTestPresented)
                         .transition(.opacity)
+                }
+            }
+        )
+        // 悬浮按钮（仿辅助触控）与快捷面板：只作用于「自选」/「行情」两个 Tab。
+        // K 线详情页是根视图的全屏 overlay、打开时不改变 selectedTab，所以从自选/行情进入的
+        // 详情页（以及其上的多图联动等）都自动命中；首页搜索进入的 K 线页 selectedTab == 0，不显示。
+        // 面板呈现期间按钮隐藏（opacity 0 + 关闭命中），关闭后原位恢复
+        .overlay(
+            Group {
+                if selectedTab == 1 || selectedTab == 2 {
+                    FloatingAccessoryButton {
+                        withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
+                    }
+                    .opacity(isAccessoryPanelPresented ? 0 : 1)
+                    .allowsHitTesting(!isAccessoryPanelPresented)
+                }
+                if isAccessoryPanelPresented {
+                    FloatingAccessoryPanel {
+                        withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = false }
+                    }
+                    .transition(.opacity)
                 }
             }
         )
