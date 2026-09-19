@@ -11,6 +11,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// 新按钮（转圈驱动 K 线光标的那个）
 /// - 几何：A' = B' + 2 × 环 Z'，B' = 旧按钮 A × 1.3，环 Z' 宽 = 旧按钮 D 直径，C' = 环宽 − 1；
@@ -62,6 +63,8 @@ struct FloatingAccessoryWheel: View {
     @State private var displayAngleOffset: Double = -90
     /// 已发布的 K 线推进根数（按里程表取整得到）：与里程表的取整值比较，差值非 0 才发命令
     @State private var deliveredCandles = 0
+    /// 容器尺寸缓存：吸附请求在几何闭包外用 `.onReceive` 处理，需要据此自行算出目标边缘 x
+    @State private var containerSize: CGSize = .zero
 
     /// C' 的显示角（度）= 里程表 + 显示偏移（cos / sin 本身周期，无需再对 360 取模）
     private var displayAngleDegrees: Double { odometer + displayAngleOffset }
@@ -98,6 +101,12 @@ struct FloatingAccessoryWheel: View {
                             let mode = touchMode ?? beginTouch(at: value.startLocation)
                             if mode == .whole {
                                 dragDelta = value.translation
+                                // 同侧互斥每帧判定（廉价读字典，不发布）：中心越过屏幕中线时请求另一按钮反向吸附
+                                let dragged = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + value.translation.width,
+                                                                                        y: base.y + value.translation.height),
+                                                                               in: bounds)
+                                FloatingAccessoryCoordinator.shared.reportDrag(owner: .secondary,
+                                                                               side: FloatingAccessoryPlacement.side(of: dragged, in: geo.size))
                             } else {
                                 updateRingAngle(to: value.location)
                             }
@@ -126,6 +135,9 @@ struct FloatingAccessoryWheel: View {
                                         dragDelta = .zero
                                     }
                                     FloatingAccessoryStore.save(target, for: .secondary)
+                                    // 抬手后的最终侧上报：协调对象据此继续保证两侧互斥
+                                    FloatingAccessoryCoordinator.shared.reportSide(.secondary,
+                                                                                   FloatingAccessoryPlacement.side(of: target, in: geo.size))
                                 }
                             }
                             // 任何触碰后抬手：保持 100% 透明度 3 秒，再降到 25%
@@ -134,7 +146,10 @@ struct FloatingAccessoryWheel: View {
                 )
                 .position(shown)
                 .onAppear {
-                    center = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
+                    containerSize = geo.size
+                    let resolved = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
+                    center = resolved
+                    reportSide(of: resolved, in: geo.size)
                     // 初始 100% 起算：3 秒未触碰即降到 25%
                     scheduleIdleFade()
                 }
@@ -142,14 +157,27 @@ struct FloatingAccessoryWheel: View {
                     idleFadeToken += 1
                     // 手势被打断时不会有 onEnded，模式必须在这里清零，否则下次触摸会沿用上一次的模式
                     touchMode = nil
-                    // 转圈标记与手势占用者同样要复位，避免视图消失后残留「正在转圈」状态
+                    // 转圈标记与手势占用者同样要复位，避免视图消失后残留「正在转圈」状态 / 让对方永久闲置
                     FloatingAccessoryCoordinator.shared.setRotating(false)
                     FloatingAccessoryCoordinator.shared.endGesture(.secondary)
                 }
                 // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
-                .onChange(of: geo.size) { _ in
+                .onChange(of: geo.size) { newSize in
+                    containerSize = newSize
                     let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter)
-                    center = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: b), in: b)
+                    let resolved = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: b), in: b)
+                    center = resolved
+                    reportSide(of: resolved, in: newSize)
+                }
+                // 另一按钮拖过屏幕中线 → 本按钮立即反向吸附（实时、不等抬手；与对方跟手拖动并行）。
+                // dropFirst：@Published 订阅时会重放当前值，那只是「建立订阅那一刻的旧请求」，须丢掉
+                .onReceive(FloatingAccessoryCoordinator.shared.$snapRequest.dropFirst()) { req in
+                    handleSnapRequest(req)
+                }
+                // 任一方进入手势（含本按钮环上转圈）→ 本按钮强制闲置；手势结束不自动恢复
+                .onReceive(FloatingAccessoryCoordinator.shared.$activeOwner) { owner in
+                    guard let owner, owner != .secondary else { return }
+                    forceIdle()
                 }
                 .accessibilityIdentifier("accessory2.button")
         }
@@ -268,6 +296,33 @@ struct FloatingAccessoryWheel: View {
     private func cancelIdleFade() {
         idleFadeToken += 1
         if isDimmed { withAnimation(.easeOut(duration: 0.15)) { isDimmed = false } }
+    }
+
+    /// 被另一方的手势强制闲置：立即进入 25% 稳定态（C' 随之隐藏），并作废所有在途淡出计时
+    /// （否则刚被触碰、自己那 3 秒计时还在途时会按自己的节奏淡出，与「立即强制闲置」时序不一致）。
+    /// 这里不安排任何恢复：解锁只由本按钮下一次被触碰完成（onChanged → cancelIdleFade）
+    private func forceIdle() {
+        idleFadeToken += 1
+        if !isDimmed { withAnimation(.easeOut(duration: 0.45)) { isDimmed = true } }
+    }
+
+    /// 上报某点所在侧（协调对象据此做同侧互斥判定；不发布，可安全随时调用）。
+    /// 显式传入点与尺寸，避免依赖「刚写完 @State 立刻读回」的时序
+    private func reportSide(of point: CGPoint, in size: CGSize) {
+        guard size.width > 0 else { return }
+        FloatingAccessoryCoordinator.shared.reportSide(.secondary,
+                                                       FloatingAccessoryPlacement.side(of: point, in: size))
+    }
+
+    /// 收到吸附请求（另一按钮拖过了屏幕中线）：立即吸附到目标侧边缘、纵向保持；
+    /// 与对方的跟手拖动各自动画、并行不串行；落位写入自己的槽位
+    private func handleSnapRequest(_ req: FloatingAccessorySnapRequest?) {
+        guard let req, req.owner == .secondary, containerSize.width > 0 else { return }
+        let bounds = FloatingAccessoryPlacement.bounds(in: containerSize, diameter: FloatingAccessoryMetrics.wheelOuterDiameter)
+        let cur = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: containerSize, bounds: bounds), in: bounds)
+        let target = CGPoint(x: req.side == .left ? bounds.x.lowerBound : bounds.x.upperBound, y: cur.y)
+        withAnimation(.easeOut(duration: 0.2)) { center = target }
+        FloatingAccessoryStore.save(target, for: .secondary)
     }
 
     /// 果冻弹一下（参数与旧按钮一致）：先快速压缩，再用低阻尼 spring 回弹过冲；

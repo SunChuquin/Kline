@@ -3,9 +3,9 @@
 //  Kline
 //
 //  两个悬浮按钮共享的协调对象（单例）：记录当前正在手势中的按钮、是否处于转圈驱动期，
-//  并承载「新按钮转圈 → 图表光标」的命令通道。
-//  本阶段只落地命令通道与基础 API：同侧互斥 / 手势期间强制闲置（第 6 阶段）、
-//  贴边反向滚动与多图联动语义（第 4 / 5 阶段）后续接入，届时复用这里的同一组状态。
+//  承载「新按钮转圈 → 图表光标」的命令通道，以及两按钮的耦合（同侧互斥 / 手势期间强制闲置）。
+//  注：两个按钮都不 @ObservedObject 观察本对象（避免高频发布引发整树重算），
+//  只订阅各自关心的 @Published 事件，并把「已知侧」当普通状态在 onChanged 里主动读取。
 //
 
 import Combine
@@ -14,6 +14,9 @@ import Combine
 enum FloatingAccessoryOwner: Hashable {
     case primary
     case secondary
+
+    /// 另一个按钮
+    var other: FloatingAccessoryOwner { self == .primary ? .secondary : .primary }
 }
 
 /// 光标推进命令。带单调递增序号 `seq`：连续两次同值推进（例如各推进 1 根）也能被消费端
@@ -23,6 +26,17 @@ struct FloatingAccessoryCursorAdvance: Equatable {
     let seq: Int
     /// 本次要推进的 K 线根数：正 = 向右（更晚），负 = 向左（更早）
     let candles: Int
+}
+
+/// 吸附请求：要求指定按钮立即吸附到某一侧（纵向保持）。
+/// 带单调递增 `seq`：同一目标侧的连续两次请求也是两条不同请求，不会被按值去重
+struct FloatingAccessorySnapRequest: Equatable {
+    /// 单调递增序号
+    let seq: Int
+    /// 需要吸附的按钮
+    let owner: FloatingAccessoryOwner
+    /// 吸附到哪一侧
+    let side: FloatingAccessoryPlacement.Side
 }
 
 /// 两个悬浮按钮共享的协调对象
@@ -40,13 +54,22 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 序号自增源（只增不减，保证同值命令也能被识别为新命令）
     private var advanceSeq = 0
 
+    /// 最新吸附请求（订阅方按 owner 认领；带 seq 区分同目标侧的连续请求）
+    @Published private(set) var snapRequest: FloatingAccessorySnapRequest?
+    /// 各按钮「已知所在侧」：普通内存态、不发布 —— 只需被拖方在 onChanged 每帧主动读取，
+    /// 这样即使每帧判定也不会引发任何视图重算
+    private var knownSides: [FloatingAccessoryOwner: FloatingAccessoryPlacement.Side] = [:]
+    /// 吸附请求序号自增源
+    private var snapSeq = 0
+
     private init() {}
 
     // MARK: - 手势占用
 
-    /// 手势开始（本阶段只是登记；强制对方闲置等效果属第 6 阶段）
+    /// 手势开始（含环上转圈）。值未变化时不赋值 —— @Published 每次赋值都会发布，
+    /// onChanged 每帧调用它，无此守卫会造成发布风暴
     func beginGesture(_ owner: FloatingAccessoryOwner) {
-        activeOwner = owner
+        if activeOwner != owner { activeOwner = owner }
     }
 
     /// 手势结束
@@ -57,6 +80,37 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 转圈手势起止（幂等，仅在实际变化时发布）
     func setRotating(_ rotating: Bool) {
         if isRotating != rotating { isRotating = rotating }
+    }
+
+    // MARK: - 同侧互斥（实时，不等抬手）
+
+    /// 读取某按钮已知所在侧（nil = 尚未上报：此时不做互斥判定，避免误发请求）
+    func knownSide(of owner: FloatingAccessoryOwner) -> FloatingAccessoryPlacement.Side? {
+        knownSides[owner]
+    }
+
+    /// 上报某按钮当前所在侧（值未变时不写、不发布，可安全在每帧调用）
+    func reportSide(_ owner: FloatingAccessoryOwner, _ side: FloatingAccessoryPlacement.Side) {
+        if knownSides[owner] != side { knownSides[owner] = side }
+    }
+
+    /// 拖动中每帧调用：上报本按钮所在侧；若另一方与它同侧，则请求另一方反向吸附。
+    /// 幂等：`requestSnap` 会把另一方的已知侧**乐观**改写成目标侧，故同一状态每帧只发一次请求
+    /// （不会重复对同一属性赋动画值）；越过中线再拖回时已知侧来回翻转，于是能反向吸附两次
+    func reportDrag(owner: FloatingAccessoryOwner, side: FloatingAccessoryPlacement.Side) {
+        reportSide(owner, side)
+        let other = owner.other
+        guard knownSides[other] == side else { return }
+        requestSnap(other, to: side.opposite)
+    }
+
+    /// 请求「把 owner 立即吸附到 side」：已知侧已是目标侧则忽略（幂等）；
+    /// 否则乐观上报目标侧并发布一次请求 —— 乐观上报让被拖方的幂等判定立即成立
+    func requestSnap(_ owner: FloatingAccessoryOwner, to side: FloatingAccessoryPlacement.Side) {
+        guard knownSides[owner] != side else { return }
+        knownSides[owner] = side
+        snapSeq += 1
+        snapRequest = FloatingAccessorySnapRequest(seq: snapSeq, owner: owner, side: side)
     }
 
     // MARK: - 光标命令

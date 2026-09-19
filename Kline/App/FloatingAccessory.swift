@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import Combine
 
 // MARK: - 悬浮按钮
 
@@ -34,6 +35,8 @@ struct FloatingAccessoryButton: View {
     @State private var jellyScale: CGFloat = 1
     /// 闲置淡出计时令牌：每次触碰自增使在途的淡出作废（比持有 DispatchWorkItem 更简单可靠）
     @State private var idleFadeToken = 0
+    /// 容器尺寸缓存：吸附请求在几何闭包外用 `.onReceive` 处理，需要据此自行算出目标边缘 x
+    @State private var containerSize: CGSize = .zero
 
     /// 整体透明度：摁住/拖动中 50%；3 秒未触碰后 25%；其余（含触碰后 3 秒内）100%
     private var overallOpacity: Double {
@@ -79,6 +82,33 @@ struct FloatingAccessoryButton: View {
         if isDimmed { withAnimation(.easeOut(duration: 0.15)) { isDimmed = false } }
     }
 
+    /// 被另一方的手势强制闲置：立即进入 25% 稳定态，并作废所有在途淡出计时
+    /// （否则刚被触碰、自己那 3 秒计时还在途时会按自己的节奏淡出，与「立即强制闲置」时序不一致）。
+    /// 这里不安排任何恢复：解锁只由本按钮下一次被触碰完成（onChanged → cancelIdleFade）
+    private func forceIdle() {
+        idleFadeToken += 1
+        if !isDimmed { withAnimation(.easeOut(duration: 0.45)) { isDimmed = true } }
+    }
+
+    /// 上报某点所在侧（协调对象据此做同侧互斥判定；不发布，可安全随时调用）。
+    /// 显式传入点与尺寸，避免依赖「刚写完 @State 立刻读回」的时序
+    private func reportSide(of point: CGPoint, in size: CGSize) {
+        guard size.width > 0 else { return }
+        FloatingAccessoryCoordinator.shared.reportSide(.primary,
+                                                       FloatingAccessoryPlacement.side(of: point, in: size))
+    }
+
+    /// 收到吸附请求（另一按钮拖过了屏幕中线）：立即吸附到目标侧边缘、纵向保持；
+    /// 与对方的跟手拖动各自动画、并行不串行；落位写入自己的槽位
+    private func handleSnapRequest(_ req: FloatingAccessorySnapRequest?) {
+        guard let req, req.owner == .primary, containerSize.width > 0 else { return }
+        let bounds = FloatingAccessoryPlacement.bounds(in: containerSize, diameter: FloatingAccessoryMetrics.baseDiameter)
+        let cur = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: containerSize, bounds: bounds), in: bounds)
+        let target = CGPoint(x: req.side == .left ? bounds.x.lowerBound : bounds.x.upperBound, y: cur.y)
+        withAnimation(.easeOut(duration: 0.2)) { center = target }
+        FloatingAccessoryStore.save(target, for: .primary)
+    }
+
     /// 果冻弹一下：先快速压缩，再用低阻尼 spring 回弹过冲；
     /// `completion` 延后到弹性反馈可见之后再执行（否则面板一弹出按钮就隐藏，看不到果冻）
     private func playJelly(completion: @escaping () -> Void) {
@@ -112,11 +142,19 @@ struct FloatingAccessoryButton: View {
                         if !isPressing {
                             cancelIdleFade()
                             withAnimation(.easeOut(duration: 0.12)) { isPressing = true }
+                            FloatingAccessoryCoordinator.shared.beginGesture(.primary)
                         }
                         dragDelta = value.translation
+                        // 同侧互斥每帧判定（廉价读字典，不发布）：中心越过屏幕中线时请求另一按钮反向吸附
+                        let dragged = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + value.translation.width,
+                                                                                y: base.y + value.translation.height),
+                                                                       in: bounds)
+                        FloatingAccessoryCoordinator.shared.reportDrag(owner: .primary,
+                                                                       side: FloatingAccessoryPlacement.side(of: dragged, in: geo.size))
                     }
                     .onEnded { value in
                         withAnimation(.easeOut(duration: 0.15)) { isPressing = false }
+                        FloatingAccessoryCoordinator.shared.endGesture(.primary)
                         let t = value.translation
                         let moved = max(abs(t.width), abs(t.height)) > FloatingAccessoryMetrics.tapSlop
                         if !moved {
@@ -134,21 +172,44 @@ struct FloatingAccessoryButton: View {
                                 dragDelta = .zero
                             }
                             FloatingAccessoryStore.save(target, for: .primary)
+                            // 抬手后的最终侧上报：协调对象据此继续保证两侧互斥
+                            FloatingAccessoryCoordinator.shared.reportSide(.primary,
+                                                                           FloatingAccessoryPlacement.side(of: target, in: geo.size))
                         }
                         // 任何触碰后抬手：保持 100% 透明度 3 秒，再降到 25%
                         scheduleIdleFade()
                     }
             )
             .onAppear {
-                center = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), in: bounds)
+                containerSize = geo.size
+                let resolved = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), in: bounds)
+                center = resolved
+                reportSide(of: resolved, in: geo.size)
                 // 初始 100% 起算：3 秒未触碰即降到 25%
                 scheduleIdleFade()
             }
-            .onDisappear { idleFadeToken += 1 }
+            .onDisappear {
+                idleFadeToken += 1
+                // 手势被打断时不会有 onEnded：占用者必须复位，否则另一方会被永久强制闲置
+                FloatingAccessoryCoordinator.shared.endGesture(.primary)
+            }
             // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
-            .onChange(of: geo.size) { _ in
+            .onChange(of: geo.size) { newSize in
+                containerSize = newSize
                 let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter)
-                center = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: b), in: b)
+                let resolved = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: b), in: b)
+                center = resolved
+                reportSide(of: resolved, in: newSize)
+            }
+            // 另一按钮拖过屏幕中线 → 本按钮立即反向吸附（实时、不等抬手；与对方跟手拖动并行）。
+            // dropFirst：@Published 订阅时会重放当前值，那只是「建立订阅那一刻的旧请求」，须丢掉
+            .onReceive(FloatingAccessoryCoordinator.shared.$snapRequest.dropFirst()) { req in
+                handleSnapRequest(req)
+            }
+            // 任一方进入手势（含新按钮环上转圈）→ 本按钮强制闲置；手势结束不自动恢复
+            .onReceive(FloatingAccessoryCoordinator.shared.$activeOwner) { owner in
+                guard let owner, owner != .primary else { return }
+                forceIdle()
             }
             .accessibilityIdentifier("accessory.button")
         }
