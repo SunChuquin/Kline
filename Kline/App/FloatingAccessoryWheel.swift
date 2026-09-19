@@ -92,13 +92,18 @@ struct FloatingAccessoryWheel: View {
                 // 「A' 的描边没有独立行为」理解 —— A' 只提供轮廓与命中范围，
                 // 真正的可交互区域仍是它围出的整个圆盘（盘内分区见 resolveTouchMode）
                 .contentShape(Circle())
-                // 手势挂在 disc 自身、且位于 .position 之前：此时 .local 就是 disc 自己的
-                // 128.8×128.8 坐标系（圆心 = (64.4, 64.4)），落点半径与 atan2 都按这个口径算
+                .position(shown)
+                // ⚠️ 手势必须挂在 .position **之后**（与旧按钮完全同构）：此时它的 .local 是 GeometryReader
+                // 的容器坐标系，**不受 scaleEffect 影响**，手指位移 1:1 映射，拖动才跟手。
+                // 若挂在 .position 之前（即落在 scaleEffect 内部），.local 会变成被 1.15 倍缩放过的 disc
+                // 坐标系：上报的 translation 被缩小 1.15 倍，按钮永远追不上手指（越拖越落后）；
+                // 且按下瞬间缩放 1.0→1.15 的动画期间映射还在变，会额外「发飘」。
+                // 代价：坐标是容器系，落点半径与 atan2 的圆心须用 shown，不能再用 disc 的 (64.4, 64.4)
                 .gesture(
                     DragGesture(minimumDistance: 0, coordinateSpace: .local)
                         .onChanged { value in
                             // 模式只在本手势的第一次回调里定下，之后整个手势沿用
-                            let mode = touchMode ?? beginTouch(at: value.startLocation)
+                            let mode = touchMode ?? beginTouch(at: value.startLocation, center: shown)
                             if mode == .whole {
                                 dragDelta = value.translation
                                 // 同侧互斥每帧判定（廉价读字典，不发布）：中心越过屏幕中线时请求另一按钮反向吸附
@@ -108,7 +113,7 @@ struct FloatingAccessoryWheel: View {
                                 FloatingAccessoryCoordinator.shared.reportDrag(owner: .secondary,
                                                                                side: FloatingAccessoryPlacement.side(of: dragged, in: geo.size))
                             } else {
-                                updateRingAngle(to: value.location)
+                                updateRingAngle(to: value.location, center: shown)
                             }
                         }
                         .onEnded { value in
@@ -144,7 +149,6 @@ struct FloatingAccessoryWheel: View {
                             scheduleIdleFade()
                         }
                 )
-                .position(shown)
                 .onAppear {
                     containerSize = geo.size
                     let resolved = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
@@ -225,31 +229,31 @@ struct FloatingAccessoryWheel: View {
 
     /// 本次手势的第一次回调：定模式（并记入 touchMode）、进入摁住态（取消在途淡出）；
     /// 转圈模式额外做「落点即接管」。返回本次手势的模式
-    private func beginTouch(at startLocation: CGPoint) -> TouchMode {
+    private func beginTouch(at startLocation: CGPoint, center: CGPoint) -> TouchMode {
         cancelIdleFade()
         withAnimation(.easeOut(duration: 0.12)) { isPressing = true }
         FloatingAccessoryCoordinator.shared.beginGesture(.secondary)
-        let mode = resolveTouchMode(at: startLocation)
+        let mode = resolveTouchMode(at: startLocation, center: center)
         touchMode = mode
         guard mode == .ring else { return mode }
         FloatingAccessoryCoordinator.shared.setRotating(true)
         // 落点即接管：C' 立即跳到落点角度（改显示偏移而非里程表，理由见 displayAngleOffset）
-        let raw = rawAngleDegrees(at: startLocation)
+        let raw = rawAngleDegrees(at: startLocation, center: center)
         displayAngleOffset = raw - odometer
         lastRawAngle = raw
         return mode
     }
 
     /// 落点半径 → 本次触摸模式：B' 圆内 = 整钮，环 Z' 上 = 转圈
-    private func resolveTouchMode(at location: CGPoint) -> TouchMode {
-        let (dx, dy) = deltaFromCenter(location)
+    private func resolveTouchMode(at location: CGPoint, center: CGPoint) -> TouchMode {
+        let (dx, dy) = deltaFromCenter(location, center: center)
         let distance = (dx * dx + dy * dy).squareRoot()
         return distance <= Double(FloatingAccessoryMetrics.wheelInnerDiameter / 2) ? .whole : .ring
     }
 
     /// 转圈：用里程表累积 wrap 后的角度增量（跨 0°/360° 不会跳变）
-    private func updateRingAngle(to location: CGPoint) {
-        let (dx, dy) = deltaFromCenter(location)
+    private func updateRingAngle(to location: CGPoint, center: CGPoint) {
+        let (dx, dy) = deltaFromCenter(location, center: center)
         // 奇点保护：手指贴近圆心时 atan2 抖动剧烈 —— 冻结角度，且不更新 lastRawAngle，
         // 这样手指从圆心附近回到环上后，增量仍从冻结前的角度连续续算
         guard (dx * dx + dy * dy).squareRoot() >= Double(ringAngleDeadZoneRadius) else { return }
@@ -270,15 +274,15 @@ struct FloatingAccessoryWheel: View {
         FloatingAccessoryCoordinator.shared.advanceCursor(by: delta)
     }
 
-    /// 落点相对 disc 圆心的位移（disc 自身坐标系里圆心为 (64.4, 64.4)）；转成 Double 便于算半径与角度
-    private func deltaFromCenter(_ p: CGPoint) -> (dx: Double, dy: Double) {
-        let radius = FloatingAccessoryMetrics.wheelOuterDiameter / 2
-        return (Double(p.x - radius), Double(p.y - radius))
+    /// 落点相对圆心（容器坐标系传入的 center，即 shown）的位移；转成 Double 便于算半径与角度。
+    /// 手势挂在 .position 之后，坐标是容器系，故圆心必须由调用点传入而不是写死 disc 的半宽
+    private func deltaFromCenter(_ p: CGPoint, center: CGPoint) -> (dx: Double, dy: Double) {
+        (Double(p.x - center.x), Double(p.y - center.y))
     }
 
     /// 落点的原始角度（度）：屏幕坐标 y 向下为正，故 atan2 递增 = 视觉顺时针；-90° = 12 点方向
-    private func rawAngleDegrees(at location: CGPoint) -> Double {
-        let (dx, dy) = deltaFromCenter(location)
+    private func rawAngleDegrees(at location: CGPoint, center: CGPoint) -> Double {
+        let (dx, dy) = deltaFromCenter(location, center: center)
         return atan2(dy, dx) * 180 / .pi
     }
 
