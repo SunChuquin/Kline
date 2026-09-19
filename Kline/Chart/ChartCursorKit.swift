@@ -156,10 +156,33 @@ extension KlineChartView {
             // 主图竖线：从顶部日期标签背景下沿开始画到底部（竖线完全从背景底下开始，顶部无露出）；第二个光标蓝色、固定光标黑色
             let topCut = clampedAxisY(0, in: height) + 8
             let lineHeight = max(0, height - topCut)
-            // 线宽 0.5：比K线上下影线（1pt）细一半。竖线正好落在某根K线上时，1pt 会把影线整条盖掉
-            // （光标竖轴与该K线的影线同色系同宽），细一半后影线仍能从竖轴两侧露出来
-            Rectangle().fill((compare != nil || secondary) ? Color.blue : Color(.label).opacity(0.45)).frame(width: 0.5, height: lineHeight)
-                .position(x: xPosition, y: topCut + lineHeight / 2)
+            let lineBottom = topCut + lineHeight
+            // 线宽 0.5：比K线上下影线（1pt）细一半
+            let vColor: Color = (compare != nil || secondary) ? .blue : Color(.label).opacity(0.45)
+            // 避开光标所在那根K线：与「竖轴遇到副图指标数据栏不穿过去、而是分段绘制」同理，
+            // 竖轴遇到该K线（上下影线 + 实体）也不穿过去，改在K线上、下两段分别绘制，
+            // 这样光标停在哪根K线上，那根K线都完整可见
+            if let ext = drawnMainCandleExtent(at: index, width: width) {
+                let wickTop = priceToY(ext.high, mainTop: 0, mainBottom: height, mainHeight: height)
+                let wickBottom = priceToY(ext.low, mainTop: 0, mainBottom: height, mainHeight: height)
+                let gap: CGFloat = 1.5   // 与影线端点的余量，避免视觉上仍与影线粘连
+                // 上段：主图顶部 → 影线最高点之上
+                let upperH = max(0, wickTop - gap - topCut)
+                if upperH > 0.5 {
+                    Rectangle().fill(vColor).frame(width: 0.5, height: upperH)
+                        .position(x: xPosition, y: topCut + upperH / 2)
+                }
+                // 下段：影线最低点之下 → 主图底部
+                let lowerTop = min(wickBottom + gap, lineBottom)
+                let lowerH = max(0, lineBottom - lowerTop)
+                if lowerH > 0.5 {
+                    Rectangle().fill(vColor).frame(width: 0.5, height: lowerH)
+                        .position(x: xPosition, y: lowerTop + lowerH / 2)
+                }
+            } else {
+                Rectangle().fill(vColor).frame(width: 0.5, height: lineHeight)
+                    .position(x: xPosition, y: topCut + lineHeight / 2)
+            }
             // 顶部日期+星期标签：位于主图顶部坐标值那一行、跟随竖线位置，样式与横轴数值一致（天蓝色背景、白字加粗）；
             // 第二个光标时第二行显示 两光标间振幅 / 最大回撤 / 最大上涨 / 涨幅；宽度按最宽一行（第二行）贴边判定
             let compareStats = compare.flatMap { pinnedRangeStats(index, $0) }
@@ -269,6 +292,46 @@ extension KlineChartView {
         let denom = max(1e-9, priceRange.upperBound - priceRange.lowerBound)
         let ratio = (priceRange.upperBound - price) / denom
         return min(max(mainTop + CGFloat(ratio) * mainHeight, mainTop), mainBottom)
+    }
+
+    /// 主图光标竖轴避让用：全局索引 idx 处**实际绘制的那根蜡烛**的高低价区间。
+    /// 与 MainChartCanvas 的取值严格同源：镜像取负（slice 用 mirroredSlice）、联动复盘合成K线替换
+    /// （与 ChartLayoutKit.mainCanvas 的 syntheticBar 同构）、K线过密时的按块聚合包络
+    /// （块长规则与 MainChartCanvas.drawCandles 一致：列宽按 2pt/列折算，块内取高低极值）。
+    /// 索引不在可见窗口内时返回 nil，调用点退回整条竖轴绘制。
+    func drawnMainCandleExtent(at idx: Int, width: CGFloat) -> (high: Double, low: Double)? {
+        let arr = mainMirrored ? mirroredSlice : slice
+        let li = idx - startIndex
+        guard li >= 0, li < arr.count else { return nil }
+        // 联动复盘的合成K线：全局 idx 命中时局部索引为 idx - startIndex，镜像态取负
+        let synthetic: (index: Int, item: KlineItem)? = {
+            guard let r = linkReplayState, let s = r.synthetic,
+                  r.idx >= startIndex, r.idx <= endIndex else { return nil }
+            guard mainMirrored else { return (r.idx - startIndex, s) }
+            return (r.idx - startIndex, KlineItem(date: s.date, open: -s.open, high: -s.high, low: -s.low,
+                                                  close: -s.close, volume: s.volume, turnover: s.turnover))
+        }()
+        func drawn(_ i: Int) -> KlineItem {
+            if let sy = synthetic, sy.index == i { return sy.item }
+            return arr[i]
+        }
+        let n = arr.count
+        let cols = max(Int(width / 2.0), 1)
+        let blockLen = max(1, (n + cols - 1) / cols)
+        if blockLen == 1 {
+            let it = drawn(li)
+            return (it.high, it.low)
+        }
+        let lo = (li / blockLen) * blockLen
+        let hi = min(n, lo + blockLen)
+        var low = Double.greatestFiniteMagnitude
+        var high = -Double.greatestFiniteMagnitude
+        for k in lo..<hi {
+            let it = drawn(k)
+            if it.low < low { low = it.low }
+            if it.high > high { high = it.high }
+        }
+        return high >= low ? (high, low) : nil
     }
 
     /// 第二个光标相对第一个固定光标的横轴价格涨幅（基于第二个光标横线所在位置的价格 与 第一个固定光标横轴的固定价格；
