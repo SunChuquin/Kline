@@ -775,10 +775,18 @@ struct KlineChartView: View {
         }
         .onChange(of: cursorClearToken) { _ in
             // 外层广播：清掉本视图所有十字光标（切换光标联动开/关、退出联动等场景）
-            selectedIndex = nil; crosshairY = nil
-            pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
-            clearSecondCursor()
-            notifyHasCursor()
+            clearLocalCursors()
+        }
+        // 点击新按钮 B' 的第 1 步：清除**屏幕上全部视图的所有光标**。
+        // 有意不判 isMainTile（要清的就是所有格）；也**特意不走外层的 cursorClearToken**：
+        // 那个走 .onChange、要到下一次渲染才生效，会把紧接着放上去的新光标又擦掉；
+        // `.onReceive` 是发布时**同步**投递的，才能保证「先全部清干净、再让主格放新光标」的顺序。
+        // 顺带清空共享的联动光标（否则联动开启时其余格会按 linkSync.cursorDate 把光标再画回来）
+        .onReceive(FloatingAccessoryCoordinator.shared.$clearAllCursorsSeq.dropFirst()) { _ in
+            clearLocalCursors()
+            linkSync.cursorDate = nil
+            linkSync.sourceRange = nil
+            linkSync.sourceID = nil
         }
         .onChange(of: linkSync.cursorDate) { date in
             applyLinkCursor(date)
@@ -789,12 +797,7 @@ struct KlineChartView: View {
         }
         .onChange(of: suppressCrosshair) { on in
             // 「边」开启时清除可能残留的十字光标（含固定光标、联动第二光标），并同步联动/上报
-            if on {
-                selectedIndex = nil; crosshairY = nil
-                pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
-                clearSecondCursor()
-                notifyHasCursor()
-            }
+            if on { clearLocalCursors() }
         }
         .onChange(of: pinnedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(pinnedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] selected:\(String(describing: selectedIndex))")
@@ -897,23 +900,49 @@ struct KlineChartView: View {
         selectedIndex = dir > 0 ? endIndex : startIndex
     }
 
-    /// 消费「点击新按钮 B'」产生的窗口平移命令：把可见窗口朝**更新**方向平移 candles 根
-    /// （屏幕上 K 线整体左移、右缘进来一根更晚的），夹在 0...maxEndOffset。
-    /// 只动窗口、不动 `selectedIndex` —— 光标仍锚在同一根 K 线上、随内容一起移动（等同一次平移手势）。
-    /// 仅主格生效；其余格、无命令、已到数据边界时一律零写入
+    /// 清掉本视图的所有十字光标（可交互光标 / 固定光标 / 联动第二光标与范围框）并上报。
+    /// 三处调用共用：cursorClearToken 外层广播、「边」开启、点击新按钮 B' 的同步清除
+    private func clearLocalCursors() {
+        selectedIndex = nil; crosshairY = nil
+        pinnedIndex = nil; pinnedY = nil; pinnedPrice = nil
+        clearSecondCursor()
+        notifyHasCursor()
+    }
+
+    /// 消费「点击新按钮 B'」产生的窗口平移命令：**先**把可见窗口朝**更新**方向平移 candles 根
+    /// （屏幕上 K 线整体左移、右缘进来一根更晚的），**再**把光标放在平移后的**最右侧可见 K 线**上。
+    ///
+    /// 为什么是「先移窗、后放光标」：这样终态恰好是「光标停在可见窗口最右侧那一根」，
+    /// 与既有「光标贴边推进」同一惯用法（`applyAccessoryCursorAdvance` 分支③ 推进窗口后会把光标
+    /// 重新锁回新边缘）；若反过来先放再移，光标最后会落在右缘左边一根，与需求描述不符。
+    ///
+    /// 为什么放光标时要显式 `publishLinkCursor`：这里把 `cursorDragging` 置 true 后**必须马上复位**
+    /// （否则后续轻点会被 onEnded 的 cursorDragging 分支吞掉，光标再也点不掉 —— 既有教训），
+    /// 而 `selectedIndex` 的 `.onChange` 要到下一次渲染才触发，那时标记已复位、发布会被守卫挡掉；
+    /// 所以在这一个同步块里直接发布一次联动光标，让其余格能自洽地跟随。
+    /// 仅主格生效；其余格、无命令时一律零写入
     private func applyAccessoryWindowNudge(_ cmd: FloatingAccessoryWindowNudge?) {
         guard isMainTile, let cmd else { return }
         guard cmd.seq != lastAccessoryNudgeSeq else { return }
         lastAccessoryNudgeSeq = cmd.seq
+        // ① 移窗：方向取反与既有贴边分支一致，朝「更新」看 → endOffset 减小
         let maxEndOffset = max(0, sortedData.count - count)
-        // 方向取反与既有贴边分支一致：朝「更新」看 → endOffset 减小
         let newEndOffset = clamp(endOffset - cmd.candles, 0, maxEndOffset)
-        guard newEndOffset != endOffset else { return }   // 已到数据边界：无过冲
-        endOffset = newEndOffset
-        // 与「平移手势结束」同一口径收尾：一次指标重算 + 恢复预取。
-        // 单次点击不是高频路径，可以在这里直接重算（拖拽期才需要避免）
-        refreshCurves()
-        startPrefetch()
+        let didShift = newEndOffset != endOffset
+        if didShift { endOffset = newEndOffset }
+        // ② 放光标：本地光标模式标记 + 显式发布 + 立即复位（理由见上方注释）
+        linkUserDragging = true
+        drag.cursorDragging = true
+        if crosshairY == nil, accessoryMainCenterY > 0 { crosshairY = accessoryMainCenterY }
+        selectedIndex = endIndex
+        publishLinkCursor(index: endIndex)
+        linkUserDragging = false
+        drag.cursorDragging = false
+        // 与「平移手势结束」同一口径收尾：一次指标重算 + 恢复预取（单次点击不是高频路径）
+        if didShift {
+            refreshCurves()
+            startPrefetch()
+        }
     }
 
     /// 转圈结束（`isRotating` true → false）收尾，口径对齐既有贴边自动滚动的 onFinish：

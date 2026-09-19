@@ -340,15 +340,10 @@ struct KlineDetailView: View {
         // 键盘避让已由 ContentView 根部全局禁用（覆盖单图搜索与双联动 tile 搜索）；
         // 公式编辑器走 fullScreenCover 独立图层，自管键盘行为，不受影响
         //
-        // 点击新按钮 B' 的第 1 步：清除**屏幕上全部视图的所有光标**。
-        // 用与「切光标联动开关」「退出联动」完全相同的清法 —— 先清空联动光标（否则其余格会按 cursorDate
-        // 把光标再画回来），再换一个 cursorClearToken（每一格据此清掉自己的十字/固定光标、第二光标与范围框）
-        .onReceive(FloatingAccessoryCoordinator.shared.$clearAllCursorsSeq.dropFirst()) { _ in
-            linkSync.cursorDate = nil
-            linkSync.sourceRange = nil
-            linkSync.sourceID = nil
-            cursorClearToken = UUID()
-        }
+        // 注：点击新按钮 B' 的「清除屏幕上全部视图的所有光标」**不在这里做**。
+        // 这里只能换 cursorClearToken，而它走 .onChange、要到下一次渲染才生效，
+        // 会把紧接着由主格放上去的新光标又擦掉；故改由每个 KlineChartView 同步订阅
+        // FloatingAccessoryCoordinator.$clearAllCursorsSeq 自行清除（见 KlineChartView 内的同名注释）
     }
 
     /// 单图 副图2 🔍 覆盖式搜索栏（复用 SearchContentView 的模糊搜索逻辑；选中即切换当前标的）
