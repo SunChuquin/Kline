@@ -152,9 +152,15 @@ struct KlineChartView: View {
     /// swipeFeedback 被创建（nil→非nil）才解锁。
     @State var swipeSubSlotTriggered = false
     @State var crosshairY: CGFloat? = nil
-    /// 已消费的悬浮按钮转圈命令序号：订阅 @Published 时会立即收到当前值（重放），
-    /// 靠它把重放过滤掉，保证同值命令可重复触发、旧命令不会被二次施加
+    /// 已消费的悬浮按钮转圈命令序号（第二层去重）：同一序号只施加一次；
+    /// 订阅时那一发重放主要由订阅处的 dropFirst 挡掉，这里再防重复投递
     @State var lastAccessoryAdvanceSeq = 0
+    /// 上一次观察到的「转圈中」状态：只在 true → false 的边沿做收尾，
+    /// 订阅时的初始 false / 转圈中的 true 都不写任何状态（空转期零副作用）
+    @State var accessoryWasRotating = false
+    /// 主图面板竖直中线（由 body 内的 mainCenterY 同步而来）：转圈生成光标且无手指位置时，
+    /// 横线停在这里。不在 body 内直接读它——那个 mainCenterY 是 GeometryReader 闭包的局部量
+    @State var accessoryMainCenterY: CGFloat = 0
     /// 指标/预计算状态域（跳空缺口、主图曲线、覆盖区间、预计算 token 等）：
     /// 从 7 个散落 @State 收敛为 ObservableObject（IndicatorPipeline.swift）。
     /// 全部低频写入、无 .onChange 挂钩，写入触发本视图重绘（与原 @State 行为一致，性能中性）
@@ -680,6 +686,10 @@ struct KlineChartView: View {
                 }
                 notifyHasCursor()
             }
+            // 把主图竖直中线同步给 @State（供悬浮按钮转圈生成光标时取用）：
+            // 只在本视图自己读写，旋转 / 切换主图放大都会经 onChange 更新
+            .onAppear { accessoryMainCenterY = mainCenterY }
+            .onChange(of: mainCenterY) { accessoryMainCenterY = $0 }
         }
         .background(Color(.systemBackground))
         .onAppear {
@@ -746,9 +756,15 @@ struct KlineChartView: View {
         }
         // 悬浮按钮（新按钮）环上转圈 → 光标推进命令。仅主格消费（其余格在方法内直接 return）；
         // 无命令时本路径不写任何状态，既有手势/惯性/贴边自动滚动/联动发布全部不参与。
-        // 订阅 @Published 时会立即收到当前值，靠 seq 去重，避免重放被当成新命令
-        .onReceive(FloatingAccessoryCoordinator.shared.$cursorAdvance) { cmd in
+        // dropFirst：@Published 订阅时会立即重放当前值，而这只表现为「建立订阅那一刻的旧命令」——
+        // 必须丢掉（否则「无光标 → 生成」分支会让新出现的图表凭空长出一个光标）；seq 再去重一层
+        .onReceive(FloatingAccessoryCoordinator.shared.$cursorAdvance.dropFirst()) { cmd in
             applyAccessoryCursorAdvance(cmd)
+        }
+        // 转圈结束收尾：只在 true → false 的边沿动作（订阅时的初始 false 与转圈中的 true 都不写状态），
+        // isRotating 由按钮侧在 onEnded / onDisappear 置 false，故视图销毁也走这条收尾
+        .onReceive(FloatingAccessoryCoordinator.shared.$isRotating) { rotating in
+            finishAccessoryRotation(rotating)
         }
         .onChange(of: cursorClearToken) { _ in
             // 外层广播：清掉本视图所有十字光标（切换光标联动开/关、退出联动等场景）
@@ -824,19 +840,72 @@ struct KlineChartView: View {
         onHasCursorChange?(renderCursorIndex != nil || pinnedIndex != nil)
     }
 
-    /// 消费悬浮按钮（新按钮）转圈命令：
-    /// - 仅主格生效，其余格与未收到命令时一律零写入；
-    /// - 无光标（selectedIndex == nil）时不生成（贴边生成属第 4 阶段），直接忽略；
-    /// - 有光标时按 candles 平移，并夹在可见窗口 startIndex...endIndex 内（越界停在边缘，
-    ///   窗口反向滚动属第 4 阶段）。
+    /// 消费悬浮按钮（新按钮）转圈命令（仅主格生效，其余格与无命令时零写入）。
+    /// 语义为「按转圈步进」：每步 1 根，不使用 startEdgeAutoScroll 那套按时间跑的无限动画器——
+    /// 那会让「转一圈推进多少根」取决于用户转得多快，破坏 18°/根（一圈 20 根）的对应关系。
+    /// 分支：
+    ///   ① 无光标：按方向在对应边缘生成光标（这一根消耗在「生成」上）
+    ///   ② 光标在窗口内：平移 candles 根（夹在 startIndex...endIndex）
+    ///   ③ 光标已贴该方向边缘：可见窗口同向平移本次推进的根数（endOffset 减/加根数）并把光标锁回新边缘
+    ///   ④ 已到数据边界（endOffset 没变）：什么都不做，自然停住、无过冲
+    /// ①②③ 都会置「本地光标模式」标记（与既有贴边生成/贴边自动滚动同态）：让 renderCursorIndex
+    /// 走本地 selectedIndex、并让光标推进能经 publishLinkCursor 对外发布；抬手时由收尾统一复位
     private func applyAccessoryCursorAdvance(_ cmd: FloatingAccessoryCursorAdvance?) {
         guard isMainTile, let cmd else { return }
         guard cmd.seq != lastAccessoryAdvanceSeq else { return }
         lastAccessoryAdvanceSeq = cmd.seq
-        guard let cur = selectedIndex else { return }
-        let target = min(max(cur + cmd.candles, startIndex), endIndex)
-        guard target != cur else { return }
-        selectedIndex = target
+        // 方向：正 = 顺时针 = 朝更晚的数据（右），负 = 逆时针 = 朝更早的数据（左）
+        let dir = cmd.candles > 0 ? 1 : -1
+
+        guard let cur = selectedIndex else {
+            // ① 无光标：按方向在对应边缘生成（这一根就消耗在生成上）
+            linkUserDragging = true
+            drag.cursorDragging = true
+            if crosshairY == nil, accessoryMainCenterY > 0 { crosshairY = accessoryMainCenterY }
+            selectedIndex = dir > 0 ? endIndex : startIndex
+            return
+        }
+
+        // ② 窗口内平移
+        let target = clamp(cur + cmd.candles, startIndex, endIndex)
+        if target != cur {
+            linkUserDragging = true
+            drag.cursorDragging = true
+            selectedIndex = target
+            return
+        }
+
+        // ③ 已贴边：窗口按同方向平移「本次推进的根数」并把光标锁回新的边缘。
+        // 方向取反与既有贴边分支（手指朝右推时 endOffset 减小、露出更晚的 K 线）完全一致；
+        // 平移量与本次命令的根数一致（快速转动时一条命令可能带多根），这样「转一圈 = 窗口走 20 根」
+        // 才严格成立；夹在 0...maxEndOffset，到边界后差值自然为 0（④）
+        let steps = abs(cmd.candles)
+        let maxEndOffset = max(0, sortedData.count - count)
+        let newEndOffset = clamp(endOffset + (dir > 0 ? -steps : steps), 0, maxEndOffset)
+        guard newEndOffset != endOffset else { return }   // ④ 已到数据边界：什么都不做
+        linkUserDragging = true
+        drag.cursorDragging = true
+        endOffset = newEndOffset
+        // 窗口已平移 → endIndex / startIndex 随之变化，把光标重新锁回该方向的新边缘
+        selectedIndex = dir > 0 ? endIndex : startIndex
+    }
+
+    /// 转圈结束（`isRotating` true → false）收尾，口径对齐既有贴边自动滚动的 onFinish：
+    /// 复位「本地光标模式」标记、对齐亚像素偏移、做一次指标重算并恢复预取。
+    /// 幂等：只有 true → false 的边沿才动作 —— 订阅时的初始 false、转圈中的 true、
+    /// 以及重复的 false 都不写任何状态，保证空转期零副作用
+    private func finishAccessoryRotation(_ rotating: Bool) {
+        guard isMainTile else { return }
+        guard accessoryWasRotating != rotating else { return }
+        accessoryWasRotating = rotating
+        guard !rotating else { return }   // 起转：无需收尾
+        // 转圈期间命令路径把 cursorDragging / linkUserDragging 置为 true，必须复位，
+        // 否则后续第一次轻点会被「cursorDragging 分支」吞掉（既有贴边自动滚动同一处教训）
+        drag.cursorDragging = false
+        linkUserDragging = false
+        panOffset = 0
+        refreshCurves()
+        startPrefetch()
     }
 
     func refreshCurves(force: Bool = false) {
