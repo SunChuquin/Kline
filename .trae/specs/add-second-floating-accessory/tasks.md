@@ -44,18 +44,21 @@
     > 核对要点：`isMainTile` 全仓仅两处赋值（单图 `KlineDetailView.swift:1178` 恒 true、多图 `LinkedKlineTile.swift:360` 为 `view.index == 0`），其余格在 `KlineChartView.swift:854/898` 首行即 return；`linkUserDragging` 是**各视图自己的 @State**（`KlineChartView.swift:84`），不在 `DualLinkSync` 里、不跨视图共享；接收端 `applyLinkCursor` 的守卫是 `cursorLinkEnabled` 与**自身** `drag.cursorDragging`（`LinkedReplaySupport.swift:553/561`），不读来源端的 `linkUserDragging`；接收端只写 `endOffset` 不写 `selectedIndex`，无回声。
     > 已知残留（不建议本阶段动）：①「第一格」依赖联动配置中 `index == 0` 唯一（与既有 `linkAutoCenter` 同一假设）；②双手同时操作两格时 `cursorDate` 会在两个来源间交替、接收格抖动，属既有「对称来源」语义；③抬手收尾不复位联动会话，其余格停在当前光标（与手指拖完抬手一致）。
 
-- [ ] Task 6: 两按钮耦合（同侧互斥 + 手势期间强制闲置）
-  - [ ] SubTask 6.1: 同侧互斥：`onChanged` 每帧判「被拖按钮是否越过屏幕中线」，越过即幂等地把另一方吸附到对侧；允许两者动画并行
-  - [ ] SubTask 6.2: 手势占用：任一方 `onChanged` 首次置 `activeOwner`，`onEnded` 置回 `nil`；转圈手势同样计入占用
-  - [ ] SubTask 6.3: 被占用方强制 `isDimmed = true` 并**作废其在途淡出计时**（令牌自增）；手势结束不主动恢复
-  - [ ] SubTask 6.4: 被占用方自身被触碰时自然解锁回 100%
-  - [ ] SubTask 6.5: 闭环命令交付本阶段
+- [x] Task 6: 两按钮耦合（同侧互斥 + 手势期间强制闲置）
+  - [x] SubTask 6.1: 同侧互斥：`onChanged` 每帧判「被拖按钮是否越过屏幕中线」，越过即幂等地把另一方吸附到对侧；允许两者动画并行
+  - [x] SubTask 6.2: 手势占用：任一方 `onChanged` 首次置 `activeOwner`，`onEnded` 置回 `nil`；转圈手势同样计入占用
+  - [x] SubTask 6.3: 被占用方强制 `isDimmed = true` 并**作废其在途淡出计时**（令牌自增）；手势结束不主动恢复
+  - [x] SubTask 6.4: 被占用方自身被触碰时自然解锁回 100%
+  - [x] SubTask 6.5: 闭环命令交付本阶段（CI run=35433805739，云端构建成功）
 
-- [ ] Task 7: 知识沉淀文档（按 `module-knowledge-digest` + `mermaid-doc-convention`）
-  - [ ] SubTask 7.1: `decisions/` 新增 4 篇：新按钮几何（含与旧按钮的关系 B'=旧A×1.3、环 Z'=旧D）、同侧互斥吸附、手势期间强制闲置（单向耦合）、C' 转圈驱动光标
-  - [ ] SubTask 7.2: `pitfalls/` 视实际踩坑补充（若出现则一坑一篇）
-  - [ ] SubTask 7.3: 更新 `modules/悬浮按钮.md`（新增新按钮的位置、状态机图、互斥与耦合机制图）与 `INDEX.md`
-  - [ ] SubTask 7.4: 落盘后自动提交，汇报带哈希
+- [x] Task 7: 知识沉淀文档（按 `module-knowledge-digest` + `mermaid-doc-convention`）
+  - [x] SubTask 7.1: `decisions/` 新增 5 篇：新按钮几何（B'=旧A×1.3、环 Z'=旧D）、转圈驱动光标必须新建命令通道、贴边推进用按转圈步进而非按时间动画器、同侧互斥吸附、手势期间强制闲置（单向耦合）
+  - [x] SubTask 7.2: `pitfalls/` 新增 1 篇：`@Published` 同值赋值也会发布（高频 `onChanged` 下的发布风暴）
+  - [x] SubTask 7.3: 更新 `modules/悬浮按钮.md`（标注为旧按钮、补「被对方手势强制闲置」外部置入态与遗留）与 `INDEX.md`；新增 `modules/新按钮（转圈驱动光标）.md`、`modules/两按钮耦合.md`
+  - [x] SubTask 7.4: 落盘后自动提交（commit `0e7f56b`，10 个文件）
+    > 该提交只改 `.trae/**`，而 `.github/workflows/build.yml` 有 `paths-ignore: '.trae/**'` ——
+    > **不触发云端构建是设计如此**，脚本报 exit_code=4（120s 内未发现对应 Actions run）属预期，非失败。
+    > 代码侧最后一次构建为 Task 6 的 run=35433805739（当时也一并提交了那时的 spec 文档）。
 
 # Task Dependencies
 
