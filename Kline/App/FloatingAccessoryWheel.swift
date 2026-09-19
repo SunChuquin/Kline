@@ -34,6 +34,8 @@ struct FloatingAccessoryWheel: View {
 
     /// 手指到圆心距离小于该值时冻结角度：规避 atan2 在圆心附近的奇点抖动
     private let ringAngleDeadZoneRadius: CGFloat = 8
+    /// 转圈 → K 线推进：一圈 360° = 20 根，即 18° = 1 根
+    private let degreesPerCandle: Double = 18
 
     /// 已落位的中心点；nil 表示尚未初始化（onAppear 时按持久化值或默认落位解析）
     @State private var center: CGPoint?
@@ -58,6 +60,8 @@ struct FloatingAccessoryWheel: View {
     /// 使 C' 立即跳到手指角度而里程表自身保持连续 —— 若改成直接给里程表赋值，
     /// 接管瞬间会被当成转过一大圈（第 4 阶段据此推进 K 线时会凭空走进一段）
     @State private var displayAngleOffset: Double = -90
+    /// 已发布的 K 线推进根数（按里程表取整得到）：与里程表的取整值比较，差值非 0 才发命令
+    @State private var deliveredCandles = 0
 
     /// C' 的显示角（度）= 里程表 + 显示偏移（cos / sin 本身周期，无需再对 360 取模）
     private var displayAngleDegrees: Double { odometer + displayAngleOffset }
@@ -102,6 +106,8 @@ struct FloatingAccessoryWheel: View {
                             withAnimation(.easeOut(duration: 0.15)) { isPressing = false }
                             let wasWhole = touchMode == .whole
                             touchMode = nil
+                            FloatingAccessoryCoordinator.shared.setRotating(false)
+                            FloatingAccessoryCoordinator.shared.endGesture(.secondary)
                             if wasWhole {
                                 let t = value.translation
                                 let moved = max(abs(t.width), abs(t.height)) > FloatingAccessoryMetrics.tapSlop
@@ -136,6 +142,9 @@ struct FloatingAccessoryWheel: View {
                     idleFadeToken += 1
                     // 手势被打断时不会有 onEnded，模式必须在这里清零，否则下次触摸会沿用上一次的模式
                     touchMode = nil
+                    // 转圈标记与手势占用者同样要复位，避免视图消失后残留「正在转圈」状态
+                    FloatingAccessoryCoordinator.shared.setRotating(false)
+                    FloatingAccessoryCoordinator.shared.endGesture(.secondary)
                 }
                 // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
                 .onChange(of: geo.size) { _ in
@@ -191,9 +200,11 @@ struct FloatingAccessoryWheel: View {
     private func beginTouch(at startLocation: CGPoint) -> TouchMode {
         cancelIdleFade()
         withAnimation(.easeOut(duration: 0.12)) { isPressing = true }
+        FloatingAccessoryCoordinator.shared.beginGesture(.secondary)
         let mode = resolveTouchMode(at: startLocation)
         touchMode = mode
         guard mode == .ring else { return mode }
+        FloatingAccessoryCoordinator.shared.setRotating(true)
         // 落点即接管：C' 立即跳到落点角度（改显示偏移而非里程表，理由见 displayAngleOffset）
         let raw = rawAngleDegrees(at: startLocation)
         displayAngleOffset = raw - odometer
@@ -217,6 +228,18 @@ struct FloatingAccessoryWheel: View {
         let raw = atan2(dy, dx) * 180 / .pi
         odometer += FloatingAccessoryAngle.wrap(raw - lastRawAngle)
         lastRawAngle = raw
+        publishCursorAdvance()
+    }
+
+    /// 里程表 → K 线推进：18° = 1 根，把里程表取整得到「应到的根数」，
+    /// 与已发布根数比较，差值非 0 才发命令（里程表保留小数部分 = 亚像素累计，不清零、不取模）。
+    /// 取整用向零取整，逆时针（负角度）同样只差出整数根数
+    private func publishCursorAdvance() {
+        let want = Int((odometer / degreesPerCandle).rounded(.towardZero))
+        let delta = want - deliveredCandles
+        guard delta != 0 else { return }
+        deliveredCandles = want
+        FloatingAccessoryCoordinator.shared.advanceCursor(by: delta)
     }
 
     /// 落点相对 disc 圆心的位移（disc 自身坐标系里圆心为 (64.4, 64.4)）；转成 Double 便于算半径与角度

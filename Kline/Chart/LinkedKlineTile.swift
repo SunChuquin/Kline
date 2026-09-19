@@ -355,7 +355,9 @@ struct LinkedKlineTile: View {
                        onInfoRowPanned: { panned in
                            // 信息行被拖动 → 标记该视图重置按钮高亮可点
                            if panned { linkedStore.markInfoRowPanned(owner: ownerMetaID, index: view.index) }
-                       })
+                       },
+                       // 主格 = 第一格（index 0）：只有它消费悬浮按钮转圈发出的光标命令，其余格零响应
+                       isMainTile: view.index == 0)
             .overlay {
                 // 副图二 🔍 覆盖式搜索栏：顶部锚定，正好落在本视图主图指标数值栏
                 // （KlineChartView 第一行 mainLegendRow）；overlay 默认居中会落在副图一指标栏区域

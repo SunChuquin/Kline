@@ -102,6 +102,9 @@ struct KlineChartView: View {
     var onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil
     /// 信息行被拖动上报（多图重置按钮高亮用）：任一信息行内容被拖动置 true。
     var onInfoRowPanned: ((Bool) -> Void)? = nil
+    /// 是否为主格（单图 / 联动多图的第一格）：只有主格消费悬浮按钮（新按钮）转圈发出的光标命令，
+    /// 其余格完全不响应。默认 false，避免影响既有调用点。
+    var isMainTile: Bool = false
 
     // 交互状态
     @State var selectedIndex: Int? = nil
@@ -149,6 +152,9 @@ struct KlineChartView: View {
     /// swipeFeedback 被创建（nil→非nil）才解锁。
     @State var swipeSubSlotTriggered = false
     @State var crosshairY: CGFloat? = nil
+    /// 已消费的悬浮按钮转圈命令序号：订阅 @Published 时会立即收到当前值（重放），
+    /// 靠它把重放过滤掉，保证同值命令可重复触发、旧命令不会被二次施加
+    @State var lastAccessoryAdvanceSeq = 0
     /// 指标/预计算状态域（跳空缺口、主图曲线、覆盖区间、预计算 token 等）：
     /// 从 7 个散落 @State 收敛为 ObservableObject（IndicatorPipeline.swift）。
     /// 全部低频写入、无 .onChange 挂钩，写入触发本视图重绘（与原 @State 行为一致，性能中性）
@@ -207,7 +213,8 @@ struct KlineChartView: View {
          onEditorActivate: (() -> Void)? = nil,
          initialVisibleCount: CGFloat? = nil,
          onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil,
-         onInfoRowPanned: ((Bool) -> Void)? = nil) {
+         onInfoRowPanned: ((Bool) -> Void)? = nil,
+         isMainTile: Bool = false) {
         self.series = series
         self.metaId = metaId
         self.period = period
@@ -237,6 +244,7 @@ struct KlineChartView: View {
         self.initialVisibleCount = initialVisibleCount
         self.onVisibleCountChange = onVisibleCountChange
         self.onInfoRowPanned = onInfoRowPanned
+        self.isMainTile = isMainTile
         self._chartStyle = chartStyle
         self._displaySettings = displaySettings
         self._showCustomEditor = showCustomEditor
@@ -736,6 +744,12 @@ struct KlineChartView: View {
             // 关闭光标联动、退出联动、切周期/标的销毁视图等最终都会让 selectedIndex 归 nil）
             if newIdx == nil { stopEdgeAutoScroll() }
         }
+        // 悬浮按钮（新按钮）环上转圈 → 光标推进命令。仅主格消费（其余格在方法内直接 return）；
+        // 无命令时本路径不写任何状态，既有手势/惯性/贴边自动滚动/联动发布全部不参与。
+        // 订阅 @Published 时会立即收到当前值，靠 seq 去重，避免重放被当成新命令
+        .onReceive(FloatingAccessoryCoordinator.shared.$cursorAdvance) { cmd in
+            applyAccessoryCursorAdvance(cmd)
+        }
         .onChange(of: cursorClearToken) { _ in
             // 外层广播：清掉本视图所有十字光标（切换光标联动开/关、退出联动等场景）
             selectedIndex = nil; crosshairY = nil
@@ -808,6 +822,21 @@ struct KlineChartView: View {
     /// 屏幕上是否有任意光标（固定光标或可交互光标），通知详情页用于控制 📌 按钮
     func notifyHasCursor() {
         onHasCursorChange?(renderCursorIndex != nil || pinnedIndex != nil)
+    }
+
+    /// 消费悬浮按钮（新按钮）转圈命令：
+    /// - 仅主格生效，其余格与未收到命令时一律零写入；
+    /// - 无光标（selectedIndex == nil）时不生成（贴边生成属第 4 阶段），直接忽略；
+    /// - 有光标时按 candles 平移，并夹在可见窗口 startIndex...endIndex 内（越界停在边缘，
+    ///   窗口反向滚动属第 4 阶段）。
+    private func applyAccessoryCursorAdvance(_ cmd: FloatingAccessoryCursorAdvance?) {
+        guard isMainTile, let cmd else { return }
+        guard cmd.seq != lastAccessoryAdvanceSeq else { return }
+        lastAccessoryAdvanceSeq = cmd.seq
+        guard let cur = selectedIndex else { return }
+        let target = min(max(cur + cmd.candles, startIndex), endIndex)
+        guard target != cur else { return }
+        selectedIndex = target
     }
 
     func refreshCurves(force: Bool = false) {

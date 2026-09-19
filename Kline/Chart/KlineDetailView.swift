@@ -1173,7 +1173,9 @@ struct KlineDetailView: View {
                            }
                        },
                        mainLegendPortal: mainLegendPortal,
-                       linkSync: linked ? linkSync : nil)
+                       linkSync: linked ? linkSync : nil,
+                       // 单图（含钻取单图）即主格：消费悬浮按钮转圈发出的光标命令
+                       isMainTile: true)
             .id(series.sorted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
