@@ -35,8 +35,11 @@ enum FloatingAccessoryMetrics {
     static let tapSlop: CGFloat = 6
     /// 摁住 / 拖动时直径的放大比例（+15%），抬手即恢复
     static let pressScaleFactor: CGFloat = 1.15
-    /// 未被触碰多久后整体降到 25% 透明度
+    /// 未被触碰多久后整体降到 25% 透明度（**旧按钮**；新按钮见 wheelIdleFadeDelay）
     static let idleFadeDelay: TimeInterval = 3
+    /// 新按钮的闲置淡出延时：比旧按钮短得多（0.5 秒）。
+    /// 它同时也是「临时旧外观」的还原时刻 —— 两者共用同一条计时，见 scheduleIdleFade
+    static let wheelIdleFadeDelay: TimeInterval = 0.5
 
     // MARK: 旧按钮四层同心圆 A / B / C / D
 

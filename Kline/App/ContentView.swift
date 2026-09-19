@@ -96,11 +96,13 @@ struct ContentView: View {
                     }
                     .opacity(isAccessoryPanelPresented ? 0 : 1)
                     .allowsHitTesting(!isAccessoryPanelPresented)
-                    // 新按钮（转圈驱动光标）：没有自己的面板，但同样要在面板呈现期间隐藏，
-                    // 否则它会压在面板的全屏遮罩之上
-                    FloatingAccessoryWheel()
-                        .opacity(isAccessoryPanelPresented ? 0 : 1)
-                        .allowsHitTesting(!isAccessoryPanelPresented)
+                    // 新按钮（转圈驱动光标）：点击 B' 果冻播完后打开同一个快捷面板；
+                    // 面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
+                    FloatingAccessoryWheel {
+                        withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
+                    }
+                    .opacity(isAccessoryPanelPresented ? 0 : 1)
+                    .allowsHitTesting(!isAccessoryPanelPresented)
                 }
                 if isAccessoryPanelPresented {
                     FloatingAccessoryPanel {

@@ -17,13 +17,18 @@ import Combine
 /// - 几何：A' = B' + 2 × 环 Z'，B' = 旧按钮 A × 1.3，环 Z' 宽 = 旧按钮 D 直径，C' = 环宽 − 1；
 ///   全部由 FloatingAccessoryMetrics 派生（派生式与自洽性校验见该处注释）
 /// - 外观：A' / B' 仅用语义色 label 描边，环 Z' 透明，C' 用同一语义色实心（+1pt 外描边走满环宽）
-/// - 状态：摁住 / 拖动 / 转圈中整体 +15% 并降到 50% 透明度；抬手后 3 秒未触碰降到 25%
+/// - 状态：摁住 / 拖动 / 转圈中整体 +15% 并降到 50% 透明度；抬手后 0.5 秒未触碰降到 25%
 ///   且 C' 隐藏（计时令牌自增防泄漏）
-/// - 手势分区：落点半径 ≤ B' 半径 → 整钮模式（点击只做果冻回弹、拖动吸附到更近一侧并持久化）；
+/// - 手势分区：落点半径 ≤ B' 半径 → 整钮模式（点击播放果冻回弹、播完打开与旧按钮同一个快捷面板；
+///   拖动吸附到更近一侧并持久化）；
 ///   落点半径 > B' 半径（即环 Z'）→ 转圈模式，C' 跳到落点角度后随手指滑动
 /// - 命中区：A' 围出的圆盘（即 B' 盘 ∪ 环 Z' 环带）
 /// - 落位：默认落在旧按钮的对侧；启动 / 尺寸变化时若两按钮同侧，强制移回旧按钮的对侧
 struct FloatingAccessoryWheel: View {
+
+    /// 点击 B' 时执行（打开与旧按钮同一个快捷面板）；由外层 `ContentView` 注入。
+    /// 调用时机与旧按钮一致：**果冻播完之后**（见 `playJelly(completion:)`）
+    var action: () -> Void = {}
 
     /// 本次触摸的模式：首次 onChanged 按落点半径定下，整个手势期间不再改变
     private enum TouchMode {
@@ -142,9 +147,10 @@ struct FloatingAccessoryWheel: View {
                                 let t = value.translation
                                 let moved = max(abs(t.width), abs(t.height)) > FloatingAccessoryMetrics.tapSlop
                                 if !moved {
-                                    // 点击：先复位位移、果冻弹一下；新按钮没有面板，不回调任何 action
+                                    // 点击：先复位位移、果冻弹一下，果冻播完再回调 action（打开与旧按钮相同的面板）——
+                                    // 面板一呈现两个按钮都会隐藏，同步触发则看不到果冻
                                     dragDelta = .zero
-                                    playJelly()
+                                    playJelly(completion: action)
                                 } else {
                                     let raw = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), in: bounds)
                                     // 吸附到更近的一侧边缘（纵向保持）；两按钮同侧互斥属后续阶段，这里只做单钮吸附
@@ -305,13 +311,14 @@ struct FloatingAccessoryWheel: View {
         return atan2(dy, dx) * 180 / .pi
     }
 
-    /// 开始 / 重排闲置淡出：3 秒内再被触碰则本次作废
+    /// 开始 / 重排闲置淡出：短延时内再被触碰则本次作废。
+    /// 延时用新按钮自己的 wheelIdleFadeDelay（0.5 秒，比旧按钮的 3 秒短得多）
     private func scheduleIdleFade() {
         idleFadeToken += 1
         let token = idleFadeToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + FloatingAccessoryMetrics.idleFadeDelay) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + FloatingAccessoryMetrics.wheelIdleFadeDelay) {
             guard token == idleFadeToken else { return }
-            // 静止 3 秒到点：与淡出同一时刻把外观还原为新按钮自身的稳定态
+            // 静止到点：与淡出同一时刻把外观还原为新按钮自身的稳定态
             withAnimation(.easeOut(duration: 0.45)) {
                 isDimmed = true
                 showsOldLook = false
@@ -356,12 +363,13 @@ struct FloatingAccessoryWheel: View {
     }
 
     /// 果冻弹一下（参数与旧按钮一致）：先快速压缩，再用低阻尼 spring 回弹过冲；
-    /// 新按钮没有面板，故不收 completion（旧按钮的 completion 只为延后面板弹出）
-    private func playJelly() {
+    /// `completion` 延后到弹性反馈可见之后再执行（与旧按钮同一理由：面板一弹出按钮就隐藏，看不到果冻）
+    private func playJelly(completion: @escaping () -> Void) {
         withAnimation(.easeOut(duration: 0.08)) { jellyScale = 0.82 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             withAnimation(.spring(response: 0.34, dampingFraction: 0.34)) { jellyScale = 1 }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: completion)
     }
 
     // MARK: - 落位
