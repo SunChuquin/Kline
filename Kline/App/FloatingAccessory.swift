@@ -147,7 +147,6 @@ struct FloatingAccessoryButton: View {
             rings
             // 摁住/拖动放大 15%（整体缩放，四圈直径同步 +15%），叠加点击时的果冻缩放
             .scaleEffect((isPressing ? pressScaleFactor : 1) * jellyScale)
-            .shadow(color: Color.black.opacity(0.25), radius: 8, y: 3)
             .opacity(overallOpacity)
             .contentShape(Circle())
             .position(shown)
