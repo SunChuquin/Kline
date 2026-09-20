@@ -12,8 +12,8 @@ import SwiftUI
 /// 交易策略详情页（全屏 overlay 子页）
 ///
 /// 只读展示一份策略文档的定义：选股条件摘要、交易指令与绑定账户、逐条规则触发语义。
-/// 执行侧：「跑选股」进命中清单页、「生成条件单」进生成确认页（本页内 overlay 承载），
-/// 「回测」留待下一阶段接入。
+/// 执行侧：「跑选股」进命中清单页、「生成条件单」进生成确认页、「回测」进参数页 / 结果页
+/// （均由本页内 overlay 承载）。
 struct StrategyDetailView: View {
     /// 展示的策略文档（由公式管理页传入快照）
     var doc: FormulaDoc
@@ -25,6 +25,8 @@ struct StrategyDetailView: View {
     @ObservedObject private var sim = SimStore.shared
     /// 公式库（解析 PICKREF 指向的选股公式名）
     @ObservedObject private var library = FormulaLibraryStore.shared
+    /// 回测执行器（进度 / 结果都由它驱动）
+    @ObservedObject private var backtest = StrategyBacktestRunner.shared
 
     // MARK: - 执行侧状态
 
@@ -32,6 +34,10 @@ struct StrategyDetailView: View {
     @State private var showPickList = false
     /// 是否展示生成条件单确认页
     @State private var showGenConfirm = false
+    /// 是否展示回测参数页
+    @State private var showBacktestParams = false
+    /// 是否展示回测结果页（由 phase 变化驱动开启，关闭后不清 result，便于回看）
+    @State private var showBacktestResult = false
     /// 跑选股勾选的标的（生成确认页的输入）
     @State private var pickedMetas: [MetaItem] = []
     /// 页内浅蓝提示条文案（3 秒后自动消失）
@@ -70,6 +76,13 @@ struct StrategyDetailView: View {
         .overlay(alignment: .top) { toastBar }
         // 子页面：只用 overlay（详情页本身也是 FormulaCenterView 的 overlay 子页，避免多层呈现栈）
         .overlay { subPages }
+        // 回测进度 → 结果：执行器 phase 变化时决定是否进入结果页
+        .onChange(of: backtest.phase) { handleBacktestPhase($0) }
+        .onChange(of: backtest.result) { _ in
+            if case .finished = backtest.phase, backtest.result != nil {
+                showBacktestResult = true
+            }
+        }
     }
 
     /// 页头：‹ 返回 / 「策略详情」/ 编辑（视觉令牌沿用 FormulaEditorView / SimCondListView）
@@ -205,16 +218,11 @@ struct StrategyDetailView: View {
                 // 跑选股不依赖 TRADE 段：未配置交易指令也能跑，只看选股公式
                 actionButton("跑选股") { showPickList = true }
                 actionButton("生成条件单", enabled: canGenerate) { startGenerate() }
-                // 回测留待下一阶段
-                actionButton("回测", enabled: false) { }
+                // 回测不依赖 TRADE 段：未配置时只提示，不阻断
+                actionButton("回测") { showBacktestParams = true }
             }
 
-            if canGenerate {
-                Text("历史回测将在下一阶段接入")
-                    .font(.system(size: 11))
-                    .foregroundColor(.gray)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
+            if !canGenerate {
                 Text("请先在编辑里配置交易指令与绑定账户")
                     .font(.system(size: 11))
                     .foregroundColor(.orange)
@@ -268,6 +276,177 @@ struct StrategyDetailView: View {
                     .transition(.opacity)
                     .zIndex(2000)
             }
+            if showBacktestParams {
+                BacktestParamView(doc: doc,
+                                  onClose: { showBacktestParams = false },
+                                  onRun: { params in
+                                      showBacktestParams = false
+                                      // 先收起旧结果，避免上一轮结果闪现
+                                      showBacktestResult = false
+                                      backtest.start(doc: doc, params: params)
+                                  })
+                    .transition(.opacity)
+                    .zIndex(2000)
+            }
+            if showsBacktestProgress {
+                backtestProgressPage
+                    .transition(.opacity)
+                    .zIndex(2000)
+            }
+            if showBacktestResult, let result = finishedBacktestResult {
+                BacktestResultView(result: result, onClose: { showBacktestResult = false })
+                    .transition(.opacity)
+                    .zIndex(2000)
+            }
+        }
+    }
+
+    /// 已完成的回测结果（phase 未到 finished 时返回 nil，避免展示上一轮的旧结果）
+    private var finishedBacktestResult: BacktestResult? {
+        if case .finished = backtest.phase { return backtest.result }
+        return nil
+    }
+
+    // MARK: - 回测进度页（准备 / 逐日回测 / 失败）
+
+    /// 是否展示回测进度页（运行中或失败；结果由结果页承载）
+    private var showsBacktestProgress: Bool {
+        switch backtest.phase {
+        case .preparing, .simulating, .failed: return true
+        case .idle, .finished, .cancelled:     return false
+        }
+    }
+
+    private var backtestProgressPage: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    closeBacktestRun()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
+                        Text("返回").font(.system(size: 15, weight: .medium))
+                    }
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 16)
+
+                Spacer()
+
+                Text("历史回测")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                // 占位：与左侧「返回」等宽，保证标题居中
+                Color.clear.frame(width: 66, height: 44)
+                    .padding(.trailing, 16)
+            }
+            .padding(.vertical, 8)
+            .background(Color(.systemBackground))
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                switch backtest.phase {
+                case .preparing(let done, let total):
+                    Text("准备行情数据 \(done)/\(total)")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundColor(Color(.secondaryLabel))
+                    progressTrack(ratio: total > 0 ? Double(done) / Double(total) : 0)
+                    cancelRow
+
+                case .simulating:
+                    Text("正在逐日回测…")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundColor(Color(.secondaryLabel))
+                    progressTrack(ratio: nil)
+                    cancelRow
+
+                case .failed(let message):
+                    Text(message)
+                        .font(.system(size: 12.5))
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 8)
+                        inlineAction("返回") { closeBacktestRun() }
+                    }
+
+                default:
+                    EmptyView()
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+            .padding(16)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+        .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    /// 手写 3pt 细条进度（ratio 为 nil 时显示不确定态的空条）
+    private func progressTrack(ratio: Double?) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color(.secondaryLabel).opacity(0.2))
+                if let ratio = ratio {
+                    Capsule()
+                        .fill(Color.blue)
+                        .frame(width: geo.size.width * CGFloat(min(max(ratio, 0), 1)))
+                }
+            }
+        }
+        .frame(height: 3)
+    }
+
+    private var cancelRow: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 8)
+            inlineAction("取消") { backtest.cancel() }
+        }
+    }
+
+    /// 行内小动作（蓝字 12.5pt，补足 44pt 命中区）
+    private func inlineAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(Color.blue)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 关闭回测进度页：运行中先取消，再回到详情页
+    private func closeBacktestRun() {
+        if backtest.isRunning { backtest.cancel() }
+        showBacktestResult = false
+    }
+
+    /// 执行器 phase 变化：结束进结果页，取消回到详情页
+    private func handleBacktestPhase(_ phase: StrategyBacktestRunner.Phase) {
+        switch phase {
+        case .finished:
+            if backtest.result != nil { showBacktestResult = true }
+        case .cancelled, .idle:
+            showBacktestResult = false
+        case .preparing, .simulating, .failed:
+            break
         }
     }
 
