@@ -996,6 +996,47 @@ final class SimStore: ObservableObject {
         saveToDisk()
     }
 
+    /// 批量新增/整体替换条件单：合并后只落盘一次；返回实际写入条数
+    ///
+    /// 合并口径与 `upsertCondOrder` 一致（同 id 替换、否则 append；替换时刷新 updatedAt；
+    /// 值未变的条目不计入写入也不落盘），但只做一次 `assignConditionalOrders` + 一次 `saveToDisk`，
+    /// 并按受影响账户各追加一条操作日志（严格按入参首次出现顺序）。
+    /// 空数组直接返回 0，不做任何写盘。
+    @discardableResult
+    func upsertCondOrders(_ orders: [SimCondOrder]) -> Int {
+        guard !orders.isEmpty else { return 0 }
+
+        let now = Date()
+        var arr = conditionalOrders
+        var affected: [UUID] = []              // 受影响账户（保序、去重）
+        var countByAccount: [UUID: Int] = [:]
+
+        for order in orders {
+            var target = order
+            target.updatedAt = now
+            if let idx = arr.firstIndex(where: { $0.id == target.id }) {
+                guard arr[idx] != target else { continue }   // 值未变不写
+                arr[idx] = target
+            } else {
+                arr.append(target)
+            }
+            if countByAccount[target.accountID] == nil { affected.append(target.accountID) }
+            countByAccount[target.accountID, default: 0] += 1
+        }
+
+        // 无实质变化：不赋值、不落盘、不写日志（与单条接口的早退一致）
+        guard !affected.isEmpty else { return 0 }
+
+        assignConditionalOrders(arr)
+        for accountID in affected {
+            appendLog(ActionLog(id: UUID(), accountID: accountID, module: .condition,
+                                content: "策略生成条件单 \(countByAccount[accountID] ?? 0) 条",
+                                result: "已创建", occurredAt: now, condID: nil))
+        }
+        saveToDisk()
+        return countByAccount.values.reduce(0, +)
+    }
+
     /// 撤销条件单（仅「监控中」可撤）
     func cancelCondOrder(id: UUID) {
         guard let idx = conditionalOrders.firstIndex(where: { $0.id == id }) else { return }

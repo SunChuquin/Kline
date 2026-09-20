@@ -2,7 +2,7 @@
 //  StrategyDetailView.swift
 //  Kline
 //
-//  交易策略详情页：选股条件 / 交易指令与绑定账户 / 规则清单 + 执行侧动作入口（本阶段占位）。
+//  交易策略详情页：选股条件 / 交易指令与绑定账户 / 规则清单 + 执行侧动作入口（跑选股 / 生成条件单）。
 //
 //  Created by 孙楚昆 on 2026/9/20.
 //
@@ -12,7 +12,8 @@ import SwiftUI
 /// 交易策略详情页（全屏 overlay 子页）
 ///
 /// 只读展示一份策略文档的定义：选股条件摘要、交易指令与绑定账户、逐条规则触发语义。
-/// 执行侧（跑选股 / 生成条件单 / 回测）留待下一阶段接入，本页先给出禁用的占位入口与口径说明。
+/// 执行侧：「跑选股」进命中清单页、「生成条件单」进生成确认页（本页内 overlay 承载），
+/// 「回测」留待下一阶段接入。
 struct StrategyDetailView: View {
     /// 展示的策略文档（由公式管理页传入快照）
     var doc: FormulaDoc
@@ -24,6 +25,17 @@ struct StrategyDetailView: View {
     @ObservedObject private var sim = SimStore.shared
     /// 公式库（解析 PICKREF 指向的选股公式名）
     @ObservedObject private var library = FormulaLibraryStore.shared
+
+    // MARK: - 执行侧状态
+
+    /// 是否展示跑选股命中清单页
+    @State private var showPickList = false
+    /// 是否展示生成条件单确认页
+    @State private var showGenConfirm = false
+    /// 跑选股勾选的标的（生成确认页的输入）
+    @State private var pickedMetas: [MetaItem] = []
+    /// 页内浅蓝提示条文案（3 秒后自动消失）
+    @State private var genToast: String? = nil
 
     // 显式 init：本视图含 private 存储属性，合成 memberwise init 会是 private
     init(doc: FormulaDoc, onClose: @escaping () -> Void, onEdit: @escaping () -> Void) {
@@ -54,6 +66,10 @@ struct StrategyDetailView: View {
         .background(Color(.systemBackground))
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
+        // 页内浅蓝提示条（3 秒自动消失）
+        .overlay(alignment: .top) { toastBar }
+        // 子页面：只用 overlay（详情页本身也是 FormulaCenterView 的 overlay 子页，避免多层呈现栈）
+        .overlay { subPages }
     }
 
     /// 页头：‹ 返回 / 「策略详情」/ 编辑（视觉令牌沿用 FormulaEditorView / SimCondListView）
@@ -177,7 +193,7 @@ struct StrategyDetailView: View {
         }
     }
 
-    // MARK: - 动作区（阶段一占位，下一阶段替换为真实实现）
+    // MARK: - 动作区
 
     private var actionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -186,34 +202,92 @@ struct StrategyDetailView: View {
                 .foregroundColor(.primary)
 
             HStack(spacing: 10) {
-                actionButton("跑选股")
-                actionButton("生成条件单")
-                actionButton("回测")
+                // 跑选股不依赖 TRADE 段：未配置交易指令也能跑，只看选股公式
+                actionButton("跑选股") { showPickList = true }
+                actionButton("生成条件单", enabled: canGenerate) { startGenerate() }
+                // 回测留待下一阶段
+                actionButton("回测", enabled: false) { }
             }
 
-            Text("生成条件单与历史回测将在下一阶段接入")
-                .font(.system(size: 11))
-                .foregroundColor(.gray)
-                .fixedSize(horizontal: false, vertical: true)
+            if canGenerate {
+                Text("历史回测将在下一阶段接入")
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("请先在编辑里配置交易指令与绑定账户")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
-    /// 占位动作按钮：统一灰态禁用（下一阶段在 actionsSection 内替换为真实入口）
-    private func actionButton(_ title: String) -> some View {
-        Button {
-            // 阶段一占位：本页只读展示，不做任何写操作
-        } label: {
+    /// 动作按钮：可用 = 蓝字 + 蓝底 12%；禁用 = 灰字 + 次级背景（命中区 44pt）
+    private func actionButton(_ title: String, enabled: Bool = true,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.gray)
+                .foregroundColor(enabled ? Color.blue : Color.gray)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
-                .background(Color(.secondarySystemBackground))
-                .cornerRadius(10)
+                .background(RoundedRectangle(cornerRadius: 10)
+                    .fill(enabled ? Color.blue.opacity(0.12) : Color(.secondarySystemBackground)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(true)
+        .disabled(!enabled)
+    }
+
+    // MARK: - 子页面（跑选股 / 生成确认）
+
+    /// 页内子页面：zIndex(2000) 高于详情页自身在 FormulaCenterView 的 1000 层
+    @ViewBuilder
+    private var subPages: some View {
+        ZStack {
+            if showPickList {
+                StrategyPickListView(doc: doc,
+                                     onClose: { showPickList = false },
+                                     onGenerate: { metas in
+                                         pickedMetas = metas
+                                         showPickList = false
+                                         showGenConfirm = true
+                                     })
+                    .transition(.opacity)
+                    .zIndex(2000)
+            }
+            if showGenConfirm {
+                StrategyGenConfirmView(doc: doc,
+                                       metas: pickedMetas,
+                                       onClose: { showGenConfirm = false },
+                                       onDone: { count in
+                                           showGenConfirm = false
+                                           showToast("已生成 \(count) 条条件单")
+                                       })
+                    .transition(.opacity)
+                    .zIndex(2000)
+            }
+        }
+    }
+
+    /// 页内浅蓝提示条
+    @ViewBuilder
+    private var toastBar: some View {
+        if let text = genToast {
+            Text(text)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(Color.blue)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.12)))
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
     }
 
     // MARK: - 通用卡片
@@ -240,6 +314,11 @@ struct StrategyDetailView: View {
         !doc.trade.isEmpty || !doc.trade.accountIDs.isEmpty
     }
 
+    /// 「生成条件单」是否可用：必须已配置交易指令且绑定了账户
+    private var canGenerate: Bool {
+        !doc.trade.isEmpty && !doc.trade.accountIDs.isEmpty
+    }
+
     /// 绑定的账户（按 accountIDs 顺序解析；找不到的为失效，不计入）
     private var boundAccounts: [SimAccount] {
         doc.trade.accountIDs.compactMap { id in sim.accounts.first { $0.id == id } }
@@ -256,5 +335,26 @@ struct StrategyDetailView: View {
         var text = "绑定账户：" + names.prefix(3).joined(separator: "、")
         if names.count > 3 { text += " +\(names.count - 3)" }
         return text
+    }
+
+    // MARK: - 行为
+
+    /// 点「生成条件单」：未跑选股就就地提示，跑过则直接进确认页
+    private func startGenerate() {
+        if pickedMetas.isEmpty {
+            showToast("请先跑选股并勾选标的")
+        } else {
+            showGenConfirm = true
+        }
+    }
+
+    /// 页内浅蓝提示条：3 秒后自动消失
+    private func showToast(_ text: String) {
+        withAnimation(.easeInOut(duration: 0.15)) { genToast = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            if genToast == text {
+                withAnimation(.easeInOut(duration: 0.15)) { genToast = nil }
+            }
+        }
     }
 }
