@@ -22,6 +22,9 @@ import Combine
 /// - 命中区：圆形按钮本身 56pt（≥ 项目规范的 44pt），用 contentShape(Circle()) 限定为圆形
 struct FloatingAccessoryButton: View {
     let action: () -> Void
+    /// 底部需避让的高度（「自选 / 行情」页的底部导航栏实测高度）。
+    /// 不避让时按钮能被拖到物理屏幕底边、与 Tab 的命中区重叠，想切首页/模拟页时会误触到它
+    var bottomClearance: CGFloat = 0
 
     @State private var center: CGPoint?
     /// 本次手势的实时位移：与已落位的 center 叠加显示（用 @State 而非 @GestureState，
@@ -85,7 +88,8 @@ struct FloatingAccessoryButton: View {
     /// 与对方的跟手拖动各自动画、并行不串行；落位写入自己的槽位
     private func handleSnapRequest(_ req: FloatingAccessorySnapRequest?) {
         guard let req, req.owner == .primary, containerSize.width > 0 else { return }
-        let bounds = FloatingAccessoryPlacement.bounds(in: containerSize, diameter: FloatingAccessoryMetrics.baseDiameter)
+        let bounds = FloatingAccessoryPlacement.bounds(in: containerSize, diameter: FloatingAccessoryMetrics.baseDiameter,
+                                                       bottomClearance: bottomClearance)
         let cur = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: containerSize, bounds: bounds), in: bounds)
         let target = CGPoint(x: req.side == .left ? bounds.x.lowerBound : bounds.x.upperBound, y: cur.y)
         withAnimation(.easeOut(duration: 0.2)) { center = target }
@@ -104,7 +108,8 @@ struct FloatingAccessoryButton: View {
 
     var body: some View {
         GeometryReader { geo in
-            let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter)
+            let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter,
+                                                          bottomClearance: bottomClearance)
             let base = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: bounds), in: bounds)
             let shown = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), in: bounds)
             rings
@@ -179,7 +184,8 @@ struct FloatingAccessoryButton: View {
             // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
             .onChange(of: geo.size) { newSize in
                 containerSize = newSize
-                let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter)
+                let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.baseDiameter,
+                                                         bottomClearance: bottomClearance)
                 let resolved = FloatingAccessoryPlacement.clamped(center ?? defaultCenter(in: geo.size, bounds: b), in: b)
                 center = resolved
                 reportSide(of: resolved, in: newSize)

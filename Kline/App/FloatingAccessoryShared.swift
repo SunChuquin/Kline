@@ -171,14 +171,16 @@ enum FloatingAccessoryPlacement {
     /// 放大由 scaleEffect 施加，不改变布局 frame，落位范围若只按静止半径算，
     /// 贴边（尤其贴角，水平与垂直同时贴）时放大后就会溢出屏幕两侧。
     /// 预留方式是**相加**而非取大：这样放大后剩余的天空恰等于静止时的边距（左右 8 / 上下 4），
-    /// 既不会溢出，也仍看得见空隙
-    static func bounds(in size: CGSize, diameter: CGFloat) -> Bounds {
+    /// 既不会溢出，也仍看得见空隙。
+    /// - Parameter bottomClearance: 底部还需避让的高度（本 App 是「自选 / 行情」页的底部导航栏）。
+    ///   不传时左右上下对称，与改动前一致
+    static func bounds(in size: CGSize, diameter: CGFloat, bottomClearance: CGFloat = 0) -> Bounds {
         let half = diameter / 2
         let grow = half * (FloatingAccessoryMetrics.pressScaleFactor - 1)
         let minX = half + FloatingAccessoryMetrics.edgeInset + grow
         let maxX = max(minX, size.width - half - FloatingAccessoryMetrics.edgeInset - grow)
         let minY = half + FloatingAccessoryMetrics.verticalInset + grow
-        let maxY = max(minY, size.height - half - FloatingAccessoryMetrics.verticalInset - grow)
+        let maxY = max(minY, size.height - half - FloatingAccessoryMetrics.verticalInset - grow - bottomClearance)
         return Bounds(x: minX...maxX, y: minY...maxY)
     }
 

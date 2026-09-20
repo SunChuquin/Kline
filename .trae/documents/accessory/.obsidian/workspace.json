@@ -18,23 +18,8 @@
               "icon": "lucide-git-fork",
               "title": "关系图谱"
             }
-          },
-          {
-            "id": "3599da215073be45",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "modules/新按钮（转圈驱动光标）.md",
-                "mode": "preview",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "新按钮（转圈驱动光标）"
-            }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
@@ -112,7 +97,6 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "modules/新按钮（转圈驱动光标）.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -131,7 +115,6 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "modules/新按钮（转圈驱动光标）.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
@@ -174,7 +157,6 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "modules/新按钮（转圈驱动光标）.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
@@ -200,8 +182,9 @@
       "bases:新建数据库": false
     }
   },
-  "active": "3599da215073be45",
+  "active": "16e320609f6e3fd7",
   "lastOpenFiles": [
+    "modules/新按钮（转圈驱动光标）.md",
     "modules/悬浮按钮.md",
     "pitfalls/20260919-重叠子视图的透明度被逐层叠加.md",
     "decisions/20260919-手势期间另一方强制闲置.md",

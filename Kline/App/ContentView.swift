@@ -16,6 +16,10 @@ struct ContentView: View {
     @State private var isAccessoryPanelPresented = false
     @State private var lastHomeTapTime: Date?
     @State private var lastSimulateTapTime: Date?
+    /// 底部导航栏实测高度：两个悬浮按钮的下边界要避开它。
+    /// 不避开时按钮能被拖到物理屏幕底边、与 Tab 的命中区重叠 ——
+    /// 想点「首页 / 模拟」切换时容易误触到按钮（它比 Tab 更靠上、命中区 56/128.8pt 也更大）
+    @State private var bottomBarHeight: CGFloat = 0
     @ObservedObject private var detailRouter = DetailRouter.shared
     /// 全 App 显示主题（个人中心可切换：日间 / 夜间 / 跟随系统）
     @ObservedObject private var themeStore = KlineThemeStore.shared
@@ -47,6 +51,13 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 bottomMenuBar
+                    // 实测底栏高度（含 1pt 分隔线）供悬浮按钮避让；底栏高度由内容决定，
+                    // 上报值只写入 @State、不参与布局，故不会引起布局循环
+                    .background(
+                        GeometryReader { g in
+                            Color.clear.preference(key: BottomBarHeightKey.self, value: g.size.height)
+                        }
+                    )
             }
             .ignoresSafeArea(edges: .bottom)
 
@@ -66,6 +77,10 @@ struct ContentView: View {
         .onReceive(DatabaseManager.shared.$isLoaded) { loaded in
             // 数据库就绪即预热（直接透传就绪标志，不依赖内部再读 db.isLoaded）
             MarketRowCache.shared.prewarmMarketData(isLoaded: loaded)
+        }
+        // 底栏高度实测值回填（0 是首帧的占位值，不覆盖）
+        .onPreferenceChange(BottomBarHeightKey.self) { h in
+            if h > 0 { bottomBarHeight = h }
         }
         // 全局禁用键盘避让：键盘弹出/缩小/收起全程不参与本页布局，
         // 导航栏与页面位置恒定；搜索栏均锚定在页面顶部无需腾空间；
@@ -91,20 +106,20 @@ struct ContentView: View {
         .overlay(
             Group {
                 if selectedTab == 1 || selectedTab == 2 {
-                    FloatingAccessoryButton {
+                    FloatingAccessoryButton(action: {
                         withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
-                    }
-                    .opacity(isAccessoryPanelPresented ? 0 : 1)
-                    .allowsHitTesting(!isAccessoryPanelPresented)
-                    // 联动多图模式下光标自动移动（贴边自动滚动、抬手后仍继续）期间整体隐藏，
-                    // 让出正在滚动的图表；停止后自动恢复
-                    .hidesDuringCursorAutoMove()
-                    // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
-                    // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
-                    FloatingAccessoryWheel()
+                    }, bottomClearance: bottomBarHeight)
                         .opacity(isAccessoryPanelPresented ? 0 : 1)
                         .allowsHitTesting(!isAccessoryPanelPresented)
+                        // 联动多图模式下光标自动移动（贴边自动滚动、抬手后仍继续）期间整体隐藏，
+                        // 让出正在滚动的图表；停止后自动恢复
                         .hidesDuringCursorAutoMove()
+                        // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
+                        // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
+                        FloatingAccessoryWheel(bottomClearance: bottomBarHeight)
+                            .opacity(isAccessoryPanelPresented ? 0 : 1)
+                            .allowsHitTesting(!isAccessoryPanelPresented)
+                            .hidesDuringCursorAutoMove()
                 }
                 if isAccessoryPanelPresented {
                     FloatingAccessoryPanel {
@@ -222,6 +237,16 @@ struct ContentView: View {
         default:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
         }
+    }
+}
+
+// MARK: - 底部导航栏高度上报
+
+/// 回传底部导航栏实际渲染高度（悬浮按钮据此避开 Tab 命中区）
+struct BottomBarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

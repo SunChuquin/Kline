@@ -26,6 +26,10 @@ import Combine
 /// - 落位：默认落在旧按钮的对侧；启动 / 尺寸变化时若两按钮同侧，强制移回旧按钮的对侧
 struct FloatingAccessoryWheel: View {
 
+    /// 底部需避让的高度（「自选 / 行情」页的底部导航栏实测高度）。
+    /// 不避让时按钮能被拖到物理屏幕底边、与 Tab 的命中区重叠，想切首页/模拟页时会误触到它
+    var bottomClearance: CGFloat = 0
+
     /// 本次触摸的模式：首次 onChanged 按落点半径定下，整个手势期间不再改变
     private enum TouchMode {
         /// 落点在 B' 圆内：摁住 / 拖动整个按钮
@@ -82,7 +86,8 @@ struct FloatingAccessoryWheel: View {
 
     var body: some View {
         GeometryReader { geo in
-            let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter)
+            let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter,
+                                                          bottomClearance: bottomClearance)
             let base = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
             let shown = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), in: bounds)
             // B' 被操作（点击 / 摁着 / 拖着）期间，整个按钮临时呈现「旧按钮拖动状态」的外观；
@@ -189,7 +194,8 @@ struct FloatingAccessoryWheel: View {
                 // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
                 .onChange(of: geo.size) { newSize in
                     containerSize = newSize
-                    let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter)
+                    let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter,
+                                                         bottomClearance: bottomClearance)
                     let resolved = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: b), in: b)
                     center = resolved
                     reportSide(of: resolved, in: newSize)
@@ -360,7 +366,8 @@ struct FloatingAccessoryWheel: View {
     /// 与对方的跟手拖动各自动画、并行不串行；落位写入自己的槽位
     private func handleSnapRequest(_ req: FloatingAccessorySnapRequest?) {
         guard let req, req.owner == .secondary, containerSize.width > 0 else { return }
-        let bounds = FloatingAccessoryPlacement.bounds(in: containerSize, diameter: FloatingAccessoryMetrics.wheelOuterDiameter)
+        let bounds = FloatingAccessoryPlacement.bounds(in: containerSize, diameter: FloatingAccessoryMetrics.wheelOuterDiameter,
+                                                       bottomClearance: bottomClearance)
         let cur = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: containerSize, bounds: bounds), in: bounds)
         let target = CGPoint(x: req.side == .left ? bounds.x.lowerBound : bounds.x.upperBound, y: cur.y)
         withAnimation(.easeOut(duration: 0.2)) { center = target }
