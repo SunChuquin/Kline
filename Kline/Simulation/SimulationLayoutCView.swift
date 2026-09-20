@@ -19,6 +19,8 @@ struct SimulationLayoutCView: View {
     @State private var module: SimModuleTab = .position
     /// 表格搜索词
     @State private var keyword = ""
+    /// 操作日志模块筛选（nil = 全部；仅日志模块显示筛选条）
+    @State private var logModule: ActionModule? = nil
     /// 全屏下单请求（每次新建都换新 UUID，保证可重复呈现）
     @State private var ticketRequest: SimTicketRequest? = nil
     /// 条件单呈现请求（工具栏入口 → 管理页；持仓行入口 → 编辑器，二者共用一个呈现状态）
@@ -46,6 +48,9 @@ struct SimulationLayoutCView: View {
             topBar
             metricsRow
             moduleRow
+            if module == .log {
+                SimLogModuleFilterBar(selected: $logModule)
+            }
             SimModuleTable(module: module,
                            accountID: store.queryAccountID,
                            onTrade: { position, direction in
@@ -57,7 +62,8 @@ struct SimulationLayoutCView: View {
                            },
                            onAmend: { order in beginAmend(order) },
                            onCondition: { position in openCondEditor(for: position) },
-                           keyword: keyword)
+                           keyword: keyword,
+                           logModuleFilter: module == .log ? logModule : nil)
                 .frame(maxHeight: .infinity)
             bottomCardsRow
             SimBottomActionBar(onTrade: { openBottomTicket($0) },

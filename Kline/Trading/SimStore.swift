@@ -95,6 +95,13 @@ final class SimStore: ObservableObject {
     /// 数据库就绪信号订阅
     private var databaseLoadedCancellable: AnyCancellable?
 
+    /// 已排队的行情触发结算（合并窗口内只结算一次，避免 rows 高频回写引发结算风暴）
+    private var condSweepScheduled = false
+    /// 行情行数据就绪信号订阅
+    private var condRowsCancellable: AnyCancellable?
+    /// 行情触发的合并窗口（秒）
+    private let condSweepCoalesceDelay: TimeInterval = 1.5
+
     // MARK: - Lifecycle
 
     private init() {
@@ -103,8 +110,15 @@ final class SimStore: ObservableObject {
         if existed { _ = loadFromDisk() }
         needsSeed = !existed
 
+        // 日切时会在内部结算一次（跨日失效）；行情触发靠 rows 就绪后的合并结算
         refreshTPlus1IfNeeded()
         observeDatabase()
+
+        // 行情行数据就绪 → 合并结算（批量预取时 rows 会连续高频变化，禁止逐次结算）；
+        // 订阅放在 observeDatabase() 之后，sink 内只排队不结算，故不会与 MarketRowCache.init 形成循环
+        condRowsCancellable = MarketRowCache.shared.$rows
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleCondSweep() }
     }
 
     // MARK: - 选中账户
@@ -216,18 +230,38 @@ final class SimStore: ObservableObject {
     /// 订阅 DatabaseManager 就绪信号：metaList 就绪后执行一次性播种。
     /// （init 时数据库可能尚未加载，此时 metaList 为空，无法按 code 反查 metaID）
     private func observeDatabase() {
+        // 数据库早于本对象就绪：先播种，再结算一次
+        var didSweepForLoadedDatabase = false
         if DatabaseManager.shared.isLoaded && needsSeed {
             performSeed()
             needsSeed = false
+            _ = sweepConditions(trigger: .dataReload)
+            didSweepForLoadedDatabase = true
         }
         databaseLoadedCancellable = DatabaseManager.shared.$isLoaded
             .filter { $0 }
             .first()
             .sink { [weak self] _ in
-                guard let self = self, self.needsSeed else { return }
-                self.performSeed()
-                self.needsSeed = false
+                guard let self = self else { return }
+                if self.needsSeed {
+                    self.performSeed()
+                    self.needsSeed = false
+                }
+                // @Published 会把当前值回放给新订阅者：上面分支已结算过时不再重复结算
+                guard !didSweepForLoadedDatabase else { return }
+                _ = self.sweepConditions(trigger: .dataReload)
             }
+    }
+
+    /// 行情行数据变化 → 合并窗口内只结算一次（禁止在 sink 内同步结算，避免 rows 高频回写引发风暴）
+    private func scheduleCondSweep() {
+        guard !condSweepScheduled else { return }
+        condSweepScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + condSweepCoalesceDelay) { [weak self] in
+            guard let self = self else { return }
+            self.condSweepScheduled = false
+            _ = self.sweepConditions(trigger: .quoteRefresh)
+        }
     }
 
     /// 按标的代码反查 metaID（先精确匹配，再按纯数字归一化匹配，兼容 "600519.SH" / "SH600519" / "600519"）
@@ -858,11 +892,17 @@ final class SimStore: ObservableObject {
         guard UserDefaults.standard.string(forKey: tPlus1Key) != today else { return }
         UserDefaults.standard.set(today, forKey: tPlus1Key)
 
-        guard !positions.isEmpty else { return }
-        var arr = positions
-        for i in arr.indices { arr[i].availableQty = arr[i].qty }
-        assignPositions(arr)
-        saveToDisk()
+        // 原来的「无持仓直接 return」改为条件块：行为不变，但要保证无持仓时也能跑到下面的跨日结算
+        if !positions.isEmpty {
+            var arr = positions
+            for i in arr.indices { arr[i].availableQty = arr[i].qty }
+            assignPositions(arr)
+            saveToDisk()
+        }
+
+        // 跨日结算一次：当日有效 / 指定日期条件单在此置为失效（tPlus1Key 日切守卫保证「每日一次」）。
+        // 放在 T+1 可卖刷新之后，保证卖出类条件判定用的是刷新后的可卖数量
+        _ = sweepConditions(trigger: .dataReload)
     }
 
     // MARK: - 查询（accountID == nil 表示全部账户聚合）
@@ -1094,6 +1134,9 @@ final class SimStore: ObservableObject {
                 _ = MarketRowCache.shared.row(for: meta)
             }
         }
+        // 尽力而为的一次结算：此处刚注册预取，bars 尚未回来多半拿不到最新价；
+        // 真正的自动触发靠 MarketRowCache.rows 就绪后的合并结算（scheduleCondSweep）
+        _ = sweepConditions(trigger: .quoteRefresh)
     }
 
     // MARK: - 日志写入（internal：条件单引擎在另一文件中也需写日志）

@@ -611,6 +611,8 @@ private struct SimModuleDetailSheet: View {
     @ObservedObject private var store = SimStore.shared
 
     @State private var keyword = ""
+    /// 操作日志模块筛选（nil = 全部；仅日志模块显示筛选条）
+    @State private var logModule: ActionModule? = nil
     @State private var ticketRequest: SimTicketRequest? = nil
     /// 条件单呈现请求（持仓行入口 → 编辑器）
     @State private var condPresentation: SimCondEntryRequest? = nil
@@ -621,6 +623,9 @@ private struct SimModuleDetailSheet: View {
         VStack(spacing: 0) {
             header
             searchRow
+            if module == .log {
+                SimLogModuleFilterBar(selected: $logModule)
+            }
             SimModuleTable(module: module,
                            accountID: accountID,
                            onTrade: { position, direction in
@@ -632,7 +637,8 @@ private struct SimModuleDetailSheet: View {
                            },
                            onAmend: { order in beginAmend(order) },
                            onCondition: { position in openCondEditor(for: position) },
-                           keyword: keyword)
+                           keyword: keyword,
+                           logModuleFilter: module == .log ? logModule : nil)
                 .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

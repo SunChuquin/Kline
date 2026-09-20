@@ -28,6 +28,8 @@ struct SimulationLayoutAView: View {
     @State private var sidebarHint: String? = nil
     /// 日志搜索词
     @State private var logKeyword = ""
+    /// 日志模块筛选（nil = 全部）
+    @State private var logModule: ActionModule? = nil
     /// 其他模块搜索词（标的名称 / 代码）
     @State private var tableKeyword = ""
     /// 改价目标委托
@@ -245,6 +247,9 @@ struct SimulationLayoutAView: View {
         VStack(spacing: 0) {
             SimSummaryBand(accountID: store.queryAccountID)
             moduleRow
+            if module == .log {
+                SimLogModuleFilterBar(selected: $logModule)
+            }
             SimModuleTable(module: module,
                            accountID: store.queryAccountID,
                            onTrade: { position, direction in
@@ -256,7 +261,8 @@ struct SimulationLayoutAView: View {
                            },
                            onAmend: { order in beginAmend(order) },
                            onCondition: { position in openCondEditor(for: position) },
-                           keyword: module == .log ? logKeyword : tableKeyword)
+                           keyword: module == .log ? logKeyword : tableKeyword,
+                           logModuleFilter: module == .log ? logModule : nil)
                 .frame(maxHeight: .infinity)
             SimBottomActionBar(onTrade: { direction in openBottomTicket(direction) },
                                hint: bottomHint)
@@ -332,13 +338,11 @@ struct SimulationLayoutAView: View {
         }
     }
 
+    /// 日志工具栏（模块筛选条在下一行；此处保留范围 / 搜索 / 导出）
     private var logToolbar: some View {
         HStack(spacing: 8) {
             toolbarButton(icon: "calendar", title: "近 30 天") {
                 showToast("日志范围：近 30 天（更早记录请继续向下滚动加载）")
-            }
-            toolbarButton(icon: nil, title: "类型 ▾") {
-                showToast("类型筛选：全部 / 委托 / 成交 / 撤单 / 改价 / 资金 / 账户 / 提醒")
             }
             searchBox(text: $logKeyword, placeholder: "搜索操作内容")
             toolbarButton(icon: "square.and.arrow.down", title: "导出") {
@@ -507,7 +511,10 @@ struct SimulationLayoutAView: View {
 
     /// 当前筛选条件下的日志（与表格同一口径）
     private var exportableLogs: [ActionLog] {
-        let all = store.actionLogs(accountID: store.queryAccountID)
+        var all = store.actionLogs(accountID: store.queryAccountID)
+        if let filter = logModule {
+            all = all.filter { $0.module == filter }
+        }
         let key = logKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return all }
         return all.filter { $0.content.localizedCaseInsensitiveContains(key) }

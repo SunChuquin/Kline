@@ -52,9 +52,7 @@ struct SimCondDetailView: View {
                     sectionCard("触发记录") {
                         triggerRecords
                     }
-                    if let related = relatedOrder {
-                        relatedCard(related)
-                    }
+                    relatedSection
                     if current.status == .monitoring {
                         cancelButton
                     }
@@ -143,51 +141,90 @@ struct SimCondDetailView: View {
 
     // MARK: 关联委托
 
+    /// 最近一次触发生成的委托（originOrderID 为空时为空态）
     private var relatedOrder: SimOrder? {
         guard let id = current.originOrderID else { return nil }
         return store.order(id: id)
     }
 
-    private func relatedCard(_ related: SimOrder) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                SimDirectionTag(direction: related.direction)
-                Text("\(related.name) \(related.code)")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                SimInlineButton(title: showRelated ? "收起" : "查看关联委托") {
-                    showRelated.toggle()
+    /// 关联委托卡：可点的蓝色入口（≥44pt）+ 内联展开的委托明细
+    @ViewBuilder
+    private var relatedSection: some View {
+        sectionCard("关联委托") {
+            if let related = relatedOrder {
+                relatedEntry(related)
+                if showRelated {
+                    relatedDetailRows(related)
                 }
-            }
-            Text(relatedLine(related))
-                .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
-                .fixedSize(horizontal: false, vertical: true)
-            if showRelated {
-                Text(relatedDetail(related))
+            } else {
+                Text("暂无关联委托")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundColor(Color(.tertiaryLabel))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 14)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
-        .padding(.horizontal, 16)
     }
 
-    private func relatedLine(_ related: SimOrder) -> String {
-        let priceText = related.priceType == .limit
-            ? (related.price.map { SimFormat.price($0) } ?? "限价")
-            : "市价"
-        return "\(priceText) · \(SimFormat.shares(related.qty)) 股 · \(related.status.title)"
+    /// 蓝色入口行：点击就地展开 / 收起该委托的完整信息
+    private func relatedEntry(_ related: SimOrder) -> some View {
+        Button(action: { showRelated.toggle() }) {
+            HStack(spacing: 8) {
+                SimDirectionTag(direction: related.direction)
+                Text("查看关联委托 #\(related.id.uuidString.prefix(8))")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                SimStatusTag(status: related.status)
+                Image(systemName: showRelated ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.blue)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
-    private func relatedDetail(_ related: SimOrder) -> String {
-        "#\(related.id.uuidString.prefix(8)) · 创建 \(SimFormat.dateTime(related.createdAt))"
-            + " · 已成 \(SimFormat.shares(related.filledQty)) 股"
+    /// 展开后的委托明细：按委托表列序组织（方向 / 名称 / 类型 / 委托价 / 委托量 / 已成 / 状态 / 时间 / 成交均价与费用）
+    private func relatedDetailRows(_ related: SimOrder) -> some View {
+        rows(relatedItems(related))
+    }
+
+    private func relatedItems(_ related: SimOrder) -> [(String, String, Color)] {
+        let summary = relatedFillSummary(related)
+        let statusColor: Color
+        switch related.status {
+        case .filled:    statusColor = Color(.systemRed)
+        case .partial:   statusColor = Color(.orange)
+        default:         statusColor = Color(.secondaryLabel)
+        }
+        return [
+            ("方向", related.direction.title,
+             related.direction.isBuy ? Color(.systemRed) : Color(.systemGreen)),
+            ("名称代码", "\(related.name) \(related.code)", Color.primary),
+            ("类型", related.priceType.title, Color(.secondaryLabel)),
+            ("委托价", related.price.map { SimFormat.price($0) } ?? "市价",
+             related.price == nil ? Color(.secondaryLabel) : Color.primary),
+            ("委托量", SimFormat.shares(related.qty), Color.primary),
+            ("已成", SimFormat.shares(related.filledQty),
+             related.filledQty > 0 ? Color.primary : Color(.secondaryLabel)),
+            ("状态", related.status.title, statusColor),
+            ("委托时间", SimFormat.dateTime(related.createdAt), Color(.secondaryLabel)),
+            ("成交均价", summary.price, Color.primary),
+            ("成交费用", summary.fee, Color(.secondaryLabel))
+        ]
+    }
+
+    /// 该委托的成交汇总（均价 = 成交额 / 成交量，费用求和；无成交时均价显示「—」）
+    private func relatedFillSummary(_ related: SimOrder) -> (price: String, fee: String) {
+        let list = store.fills(accountID: related.accountID).filter { $0.orderID == related.id }
+        let qty = list.reduce(0) { $0 + $1.qty }
+        let amount = list.reduce(0.0) { $0 + $1.amount }
+        let fee = list.reduce(0.0) { $0 + $1.fee }
+        guard qty > 0 else { return ("—", SimFormat.amount(0)) }
+        return (SimFormat.price(amount / Double(qty)), SimFormat.amount(fee))
     }
 
     // MARK: 触发记录

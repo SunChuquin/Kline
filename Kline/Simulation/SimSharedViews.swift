@@ -286,6 +286,51 @@ struct SimModuleSegmentedBar: View {
     }
 }
 
+// MARK: - 操作日志模块筛选条
+
+/// 操作日志模块筛选条：全部 / 委托 / 成交 / 撤单 / 改价 / 资金 / 账户 / 提醒 / 条件单
+/// （三个布局共用一份；选中 nil 表示「全部」）
+struct SimLogModuleFilterBar: View {
+    @Binding var selected: ActionModule?
+
+    /// ActionModule 未实现 CaseIterable（不改动 SimModels.swift），此处按标题顺序手写一份
+    private static let all: [ActionModule] = [.order, .fill, .cancel, .amend,
+                                              .cash, .account, .alert, .condition]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip(title: "全部", value: nil)
+                ForEach(Self.all, id: \.rawValue) { module in
+                    chip(title: module.title, value: module)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(minHeight: 44)
+    }
+
+    /// 单个筛选 chip：选中 = 蓝字 + 1pt 蓝边 + 蓝底 8%；未选中 = 灰字 + 0.5pt 分隔线边
+    private func chip(title: String, value: ActionModule?) -> some View {
+        let isSelected = selected == value
+        return Button(action: { selected = value }) {
+            Text(title)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? Color.blue : Color(.secondaryLabel))
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground)))
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? Color.blue : Color(.separator),
+                            lineWidth: isSelected ? 1 : 0.5))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - 业务模块表格
 
 /// 业务模块表格：按 module 切换五张表（表头吸顶 + 数据行懒加载，不用 Table）
@@ -300,6 +345,8 @@ struct SimModuleTable: View {
     var onCondition: (SimPosition) -> Void = { _ in }
     /// 搜索关键词：持仓 / 委托 / 成交表过滤标的名称或代码，流水表过滤说明，日志表过滤操作内容
     var keyword: String = ""
+    /// 操作日志的模块筛选：nil = 全部（仅 module == .log 时生效）
+    var logModuleFilter: ActionModule? = nil
 
     @ObservedObject private var store = SimStore.shared
     @ObservedObject private var rowCache = MarketRowCache.shared
@@ -364,7 +411,10 @@ struct SimModuleTable: View {
 
     private var logRows: [ActionLog] {
         let key = trimmedKeyword
-        let all = store.actionLogs(accountID: accountID)
+        var all = store.actionLogs(accountID: accountID)
+        if let filter = logModuleFilter {
+            all = all.filter { $0.module == filter }
+        }
         guard !key.isEmpty else { return all }
         return all.filter { $0.content.localizedCaseInsensitiveContains(key) }
     }
