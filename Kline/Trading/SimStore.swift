@@ -1008,7 +1008,8 @@ final class SimStore: ObservableObject {
         assignConditionalOrders(arr)
         appendLog(ActionLog(id: UUID(), accountID: arr[idx].accountID, module: .condition,
                             content: "撤销条件单 \(arr[idx].name) · \(arr[idx].kind.title)",
-                            result: arr[idx].status.title, occurredAt: now))
+                            result: arr[idx].status.title, occurredAt: now,
+                            condID: arr[idx].id))
         saveToDisk()
     }
 

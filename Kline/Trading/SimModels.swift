@@ -195,6 +195,7 @@ struct ActionLog: Identifiable, Codable, Hashable {
     var content: String
     var result: String
     var occurredAt: Date
+    var condID: UUID? = nil     // 条件单相关日志回链（非条件单日志为 nil）
 }
 
 // MARK: - 行情取数助手

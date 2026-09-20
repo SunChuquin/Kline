@@ -28,12 +28,14 @@ struct SimCondSweepResult {
     var fired = 0
     var rejected = 0
     var expired = 0
+    var completed = 0
 
     var message: String {
         var parts: [String] = []
         if fired > 0 { parts.append("触发 \(fired) 笔") }
         if rejected > 0 { parts.append("被拒 \(rejected) 笔") }
         if expired > 0 { parts.append("失效 \(expired) 笔") }
+        if completed > 0 { parts.append("完成 \(completed) 笔") }
         guard !parts.isEmpty else { return "本次检查无触发" }
         return "本次检查" + parts.joined(separator: " · ")
     }
@@ -103,6 +105,18 @@ extension SimStore {
                                        content: "条件单失效 \(list[idx].name) · \(list[idx].kind.title)：\(reason)",
                                        result: list[idx].status.title, at: now))
 
+            case .complete(let reason):
+                // 正常走完：多触发类型档位 / 批次走完，或价格越出网格区间
+                list[idx].status = .completed
+                list[idx].updatedAt = now
+                list[idx].runtime.lastEvaluatedAt = now
+                list[idx].runtime.lastMessage = reason
+                result.completed += 1
+                dirty = true
+                appendLog(conditionLog(order: list[idx],
+                                       content: "条件单完成 \(list[idx].name) · \(list[idx].kind.title)：\(reason)",
+                                       result: list[idx].status.title, at: now))
+
             case .fire(let qty, let at):
                 list[idx] = fireCondOrder(list[idx], qty: qty, at: at,
                                           snapshot: snapshot, now: now, result: &result)
@@ -137,11 +151,11 @@ extension SimStore {
         target.runtime.lastPrice = snapshot.last ?? target.runtime.lastPrice
         target.runtime.lastTriggerPrice = triggerPrice
         target.updatedAt = now
-        target.triggeredCount += 1
 
         switch submit(draft) {
         case .success(let generated):
             target.originOrderID = generated.id
+            target.triggeredCount += 1
             result.fired += 1
             if target.kind.repeatable {
                 // 多触发：档位 / 批次推进后继续监控，走完则已完成
@@ -241,6 +255,6 @@ extension SimStore {
     private func conditionLog(order: SimCondOrder, content: String,
                               result: String, at date: Date) -> ActionLog {
         ActionLog(id: UUID(), accountID: order.accountID, module: .condition,
-                  content: content, result: result, occurredAt: date)
+                  content: content, result: result, occurredAt: date, condID: order.id)
     }
 }

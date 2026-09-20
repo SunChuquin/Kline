@@ -29,7 +29,8 @@ struct SimCondSnapshot {
 enum SimCondDecision {
     case fire(qty: Int, at: Double)     // 触发：本次下单数量与触发价
     case hold(SimCondRuntime)           // 继续监控：可携带更新后的运行时
-    case abort(String)                  // 失效：中文原因
+    case abort(String)                  // 异常失效：中文原因（配置坏了 / 参数缺失）
+    case complete(String)               // 正常走完（多触发类型档位 / 批次走完，或价格越出区间）：中文说明
 }
 
 // MARK: - 建单拒绝原因
@@ -158,7 +159,7 @@ enum SimCondRule {
                   let perLevel = p.gridQtyPerLevel, perLevel > 0 else {
                 return .abort("网格参数不完整")
             }
-            guard price >= lower, price <= upper else { return .abort("价格已越出网格区间") }
+            guard price >= lower, price <= upper else { return .complete("价格已越出网格区间") }
             var runtime = order.runtime
             if runtime.gridLevel == nil { runtime.gridLevel = 0 }
             if runtime.gridLastPrice == nil { runtime.gridLastPrice = p.gridBase ?? price }
@@ -182,7 +183,7 @@ enum SimCondRule {
             }
             let done = max(order.runtime.batchDone, 0)
             let index = done + 1
-            guard index <= count else { return .abort("分批已全部完成") }
+            guard index <= count else { return .complete("分批已全部完成") }
             // 买入越跌越买（目标价递减），卖出越涨越卖（目标价递增）
             let isBuy = order.directive.direction == .buy
             let offset = stepPct / 100 * Double(index - 1)
@@ -302,6 +303,11 @@ enum SimCondRule {
             guard let stepPct = p.batchStepPct, stepPct > 0 else { return .missingParam("每批价差") }
             let totalQty = p.batchTotalQty ?? 0
             if totalQty < count * lot { return .batchTooSmall(lot: lot) }
+        }
+
+        // 有效期：指定日期必须给出到期日，否则该单永不失效
+        if order.validity == .untilDate, order.expiresAt == nil {
+            return .missingParam("有效期到期日")
         }
 
         return nil

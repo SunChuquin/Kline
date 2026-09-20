@@ -231,7 +231,7 @@ struct SimCondDetailView: View {
 
     private var triggerLogs: [ActionLog] {
         let all = store.actionLogs(accountID: order.accountID)
-            .filter { $0.module == .condition && $0.content.contains(order.name) }
+            .filter { $0.module == .condition && $0.condID == order.id }
         return Array(all.prefix(20))
     }
 
