@@ -121,7 +121,8 @@ enum SimCondSegment: String, CaseIterable, Identifiable, Hashable {
 // MARK: - 触发后委托指令
 
 /// 触发后要下发的委托指令
-struct SimCondDirective: Codable, Hashable {
+/// nonisolated：纯数据，需在后台线程（历史回测 / 条件单批量生成）装配
+nonisolated struct SimCondDirective: Codable, Hashable {
     var direction: SimOrderDirection = .sell
     var priceType: SimPriceType = .market
     var offsetTicks: Int = 0        // 触发价 ± N 档，仅 priceType == .limit 时使用
@@ -145,7 +146,8 @@ extension SimCondDirective {
 // MARK: - 类型参数
 
 /// 条件单参数集：各类型的扁平可选字段集合（不用带载荷枚举，避免读档脆弱性）
-struct SimCondParams: Codable, Hashable {
+/// nonisolated：纯数据，需在后台线程（历史回测 / 条件单批量生成）装配
+nonisolated struct SimCondParams: Codable, Hashable {
     // 价格条件
     var compareUp: Bool? = nil              // true: 现价 ≥ 触发价；false: 现价 ≤ 触发价
     var triggerPrice: Double? = nil
@@ -257,7 +259,8 @@ extension SimCondRuntime {
 // MARK: - 条件单实体
 
 /// 条件单
-struct SimCondOrder: Identifiable, Codable, Hashable {
+/// nonisolated：纯数据，需在后台线程（历史回测 / 条件单批量生成）装配
+nonisolated struct SimCondOrder: Identifiable, Codable, Hashable {
     var id: UUID
     var accountID: UUID
     var metaID: Int

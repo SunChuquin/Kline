@@ -97,8 +97,8 @@ struct StrategyParamSpec {
 /// - `MA_CROSS`  ：`PERIOD`→ `maPeriod`、`DIR`→ `maAbove`（UP→true 上穿、DOWN→false 下破）
 /// - `GRID`      ：`BASE`→ `gridBase`、`LOW`→ `gridLower`、`HIGH`→ `gridUpper`、`STEP`→ `gridStepPct`、
 ///                 `QTY`→ `gridQtyPerLevel`、`MULT`→ `gridMultiplier`
-/// - `BATCH`     ：`TOTAL`→ `batchTotalQty`、`COUNT`→ `batchCount`、`FIRST`→ `batchFirstPrice`、`GAP`→ `batchStepPct`
-enum StrategyRuleCatalog {
+/// nonisolated：纯静态目录，需在后台线程（历史回测 / 条件单生成）读取
+nonisolated enum StrategyRuleCatalog {
 
     /// 某类型的参数规格清单（顺序即序列化顺序）
     static func specs(for kind: StrategyRuleKind) -> [StrategyParamSpec] {
@@ -204,7 +204,8 @@ struct StrategyRuleCall: Equatable {
 // MARK: - RULES 段解析器
 
 /// RULES 段解析器
-enum StrategyRuleParser {
+/// nonisolated：纯解析，需在后台线程（历史回测 / 条件单生成）调用
+nonisolated enum StrategyRuleParser {
 
     /// 解析多行 RULES 文本：返回规则数组 + 中文错误清单（错误文案带行号，如「第 1 行：未知规则 PRICE2」）
     /// 规则：空行与 `{...}` 注释行跳过；行格式 `KEYWORD(KEY=VAL, KEY=VAL)`，也容忍 `KEYWORD(KEY = VAL)`、

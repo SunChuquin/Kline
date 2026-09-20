@@ -13,7 +13,8 @@ import Foundation
 // MARK: - 交易指令
 
 /// 策略交易指令（TRADE: 段）：方向 / 数量或金额 / 报价方式 / 有效期 / 绑定账户
-struct StrategyTradeSpec: Equatable {
+/// nonisolated：纯数据，需在后台线程（历史回测引擎）读取
+nonisolated struct StrategyTradeSpec: Equatable {
     var direction: SimOrderDirection? = nil     // 只借用 SimModels 的枚举
     var qty: Int? = nil
     var amount: Double? = nil
@@ -34,7 +35,8 @@ struct StrategyTradeSpec: Equatable {
 /// 用 `ORD` 前缀而不是直接复用规则参数键：`DIR` 已被 `MA_CROSS` 占用（UP/DOWN）、
 /// `QTY` 已被 `GRID` 占用，直接复用会与规则参数撞名并污染 `knownKeys` 校验。
 /// 优先级：规则行内覆盖 > TRADE 段 > 内置默认。
-struct StrategyDirectiveOverride: Equatable {
+/// nonisolated：纯数据，需在后台线程装配
+nonisolated struct StrategyDirectiveOverride: Equatable {
     var dir: SimOrderDirection? = nil
     var qty: Int? = nil
     var amount: Double? = nil
@@ -81,7 +83,8 @@ struct StrategyDirectiveOverride: Equatable {
 // MARK: - TRADE 段解析器
 
 /// TRADE 段与规则行内 ORD* 覆盖键的解析 / 序列化
-enum StrategyTradeParser {
+/// nonisolated：纯解析，需在后台线程（历史回测引擎）调用
+nonisolated enum StrategyTradeParser {
 
     /// 规则行内的保留指令键（不进 StrategyRuleCatalog.specs，不参与规则参数校验）
     static let reservedKeys: [String] = ["ORDDIR", "ORDQTY", "ORDAMT", "ORDPT", "ORDOFF"]

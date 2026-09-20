@@ -79,7 +79,8 @@ enum SimCondRejection: Error, Equatable {
 
 // MARK: - 规则（纯函数）
 
-enum SimCondRule {
+/// nonisolated：纯计算层，历史回测引擎在后台线程直接复用（取数在 @MainActor 的 SimCondSnapshotCenter）
+nonisolated enum SimCondRule {
 
     // MARK: 评估
 

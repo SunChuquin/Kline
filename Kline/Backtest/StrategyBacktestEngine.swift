@@ -522,8 +522,11 @@ enum StrategyBacktestEngine {
             }
 
             // b. T+1 释放：非当日买入的持仓，可卖数量回到全部
+            // （先取局部副本再写回：同一表达式里同时读写 positions[id] 会触发独占访问冲突）
             for id in positions.keys.sorted() where positions[id]?.openedDate != date {
-                positions[id]?.availableQty = positions[id]?.qty ?? 0
+                guard var pos = positions[id] else { continue }
+                pos.availableQty = pos.qty
+                positions[id] = pos
             }
 
             // c. 持仓的规则判定（同一 bar 内止损腿优先于止盈腿；整仓离场后本标的当日不再动作）

@@ -57,7 +57,8 @@ enum SimOrderRejection: Error, Equatable {
 // MARK: - 交易规则
 
 /// 交易规则（集中管理，多账户可各自挂一份）
-struct SimTradingRules {
+/// nonisolated：纯计算值类型，需在后台线程（如历史回测引擎）调用，不参与 UI 隔离
+nonisolated struct SimTradingRules {
     var tPlus1Enabled: Bool = true
     var lotSize: Int = 100
     var commissionRate: Double = 0.00025      // 佣金万 2.5
