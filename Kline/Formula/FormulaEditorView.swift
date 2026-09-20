@@ -165,6 +165,16 @@ struct IndicatorEditSheet: View {
     /// 顶部标题显示的指标名称（系统指标传入 id，自定义指标走 indicator.name）
     var displayName: String = ""
 
+    // ---- 选股公式编辑模式 ----
+    /// 是否为选股公式（此时只编辑名称 + 公式，不编辑作用域/适用范围/线条样式，保存回调 onSavePicker）
+    let isPicker: Bool
+    /// 选股公式初始名称（用于初始化输入框 & 判断是否有修改）
+    let pickerInitialName: String
+    /// 选股公式初始正文（用于初始化输入框 & 判断是否有修改）
+    let pickerInitialFormula: String
+    /// 选股公式保存回调（传入裁剪后的名称与公式正文）
+    var onSavePicker: ((String, String) -> Void)?
+
     @State private var name: String
     @State private var formula: String
     @State private var color: Color
@@ -181,6 +191,10 @@ struct IndicatorEditSheet: View {
 
     /// 名称与公式都非空才允许保存
     private var canSave: Bool {
+        // 选股公式：只需名称与公式均非空
+        if isPicker {
+            return !name.trimmingCharacters(in: .whitespaces).isEmpty && !formula.trimmingCharacters(in: .whitespaces).isEmpty
+        }
         if isSystemIndicator {
             return !formula.trimmingCharacters(in: .whitespaces).isEmpty
         }
@@ -189,6 +203,10 @@ struct IndicatorEditSheet: View {
 
     /// 相对原始指标是否有未保存的修改
     private var hasChanges: Bool {
+        // 选股公式：比较名称与公式正文
+        if isPicker {
+            return name != pickerInitialName || formula != pickerInitialFormula
+        }
         if isSystemIndicator {
             return formula != systemInitialFormula
         }
@@ -210,7 +228,11 @@ struct IndicatorEditSheet: View {
          systemInitialFormula: String = "",
          canRestoreBuiltin: Bool = false,
          onRestoreBuiltin: (() -> String?)? = nil,
-         onSaveSystem: ((String) -> Void)? = nil) {
+         onSaveSystem: ((String) -> Void)? = nil,
+         isPicker: Bool = false,
+         pickerInitialName: String = "",
+         pickerInitialFormula: String = "",
+         onSavePicker: ((String, String) -> Void)? = nil) {
         self.indicator = indicator
         self.data = data
         self.onCancel = onCancel
@@ -221,17 +243,31 @@ struct IndicatorEditSheet: View {
         self.canRestoreBuiltin = canRestoreBuiltin
         self.onRestoreBuiltin = onRestoreBuiltin
         self.onSaveSystem = onSaveSystem
-        _name = State(initialValue: indicator?.name ?? "")
-        _formula = State(initialValue: isSystemIndicator ? systemInitialFormula : (indicator?.formula ?? ""))
+        self.isPicker = isPicker
+        self.pickerInitialName = pickerInitialName
+        self.pickerInitialFormula = pickerInitialFormula
+        self.onSavePicker = onSavePicker
+        // 选股公式优先取选股初始值；否则走系统指标 / 自定义指标分支
+        _name = State(initialValue: isPicker ? pickerInitialName : (indicator?.name ?? ""))
+        _formula = State(initialValue: isPicker ? pickerInitialFormula : (isSystemIndicator ? systemInitialFormula : (indicator?.formula ?? "")))
         _color = State(initialValue: indicator?.color ?? Color(hex: "1E88E5")!)
         _scope = State(initialValue: indicator?.scope ?? .sub)
         _applicablePeriods = State(initialValue: Set(indicator?.applicablePeriods ?? KlinePeriod.allCases))
     }
 
+    /// 页头标题：选股公式显示「选股公式[名称或新建]」，其余沿用既有逻辑
+    private var headerTitle: String {
+        if isPicker {
+            let n = pickerInitialName.trimmingCharacters(in: .whitespaces)
+            return "选股公式[\(n.isEmpty ? "新建" : n)]"
+        }
+        return "公式编辑器[\(displayName.isEmpty ? (indicator?.name ?? "新建指标") : displayName)]"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Text("公式编辑器[\(displayName.isEmpty ? (indicator?.name ?? "新建指标") : displayName)]")
+                    Text(headerTitle)
                         .font(.system(size: 16, weight: .bold)).foregroundColor(.primary)
                     Spacer(minLength: 4)
                     Button("全选") { inputController.selectAll() }
@@ -278,6 +314,8 @@ struct IndicatorEditSheet: View {
                                     .background(Color(uiColor: .systemGray6)).cornerRadius(6)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            // 作用域：选股公式不适用，隐藏
+                            if !isPicker {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("作用域").font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
                                 HStack(spacing: 8) {
@@ -296,9 +334,11 @@ struct IndicatorEditSheet: View {
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                         }
-                        // 适用范围（仅自定义指标）：全周期 or 单/多周期
+                        // 适用范围（仅自定义指标）：全周期 or 单/多周期；选股公式不适用，隐藏
+                        if !isPicker {
                         field("适用范围") {
                             HStack(spacing: 8) {
                                 styleChip("全周期", opt: "", selected: applicablePeriods == Set(KlinePeriod.allCases)) {
@@ -312,6 +352,7 @@ struct IndicatorEditSheet: View {
                             }
                             Text("选择该指标可用的周期。不同周期各有一份独立参数副本（USER_<名称>.tdx），可单独编辑")
                                 .font(.system(size: 10)).foregroundColor(.gray)
+                        }
                         }
                         field("公式") {
                             FormulaTextView(text: Binding(
@@ -346,6 +387,8 @@ struct IndicatorEditSheet: View {
                                 symbolChip("OR")
                             }
                         }
+                        // 输出线条样式：选股公式不适用，隐藏
+                        if !isPicker {
                         field("输出线条样式（通达信选项）") {
                             // 线条类型：全宽单行，避免"不绘制"换行
                             HStack(spacing: 8) {
@@ -376,6 +419,7 @@ struct IndicatorEditSheet: View {
                             }
                             Text("点击样式/粗细/颜色会在光标处插入对应关键字，例如插入 DOTLINE / LINETHICK2 / COLORRED")
                                 .font(.system(size: 10)).foregroundColor(.gray)
+                        }
                         }
                         if let message = testMessage {
                             Text(message)
@@ -423,6 +467,18 @@ struct IndicatorEditSheet: View {
     private func runTest() {
         testMessage = nil
         testError = false
+        // 选股公式：走公式库测试逻辑，最后一根输出值 > 0 视为命中
+        if isPicker {
+            let result = FormulaLibraryStore.shared.testPicker(formula: formula, data: data)
+            if let err = result.error {
+                testMessage = "✗ \(err)"
+                testError = true
+            } else {
+                let verdict = result.hit ? "命中：最后一根输出值 > 0" : "未命中：最后一根输出值 ≤ 0"
+                testMessage = "✓ 解析成功\n\(result.display)\n\(verdict)"
+            }
+            return
+        }
         guard !data.isEmpty else {
             testMessage = "暂无行情数据用于测试"
             testError = true
@@ -442,6 +498,13 @@ struct IndicatorEditSheet: View {
     }
 
     private func save() {
+        // 选股公式：回调保存（由外部写入公式库）
+        if isPicker {
+            let trimmedName = name.trimmingCharacters(in: .whitespaces)
+            guard !trimmedName.isEmpty else { return }
+            onSavePicker?(trimmedName, formula)
+            return
+        }
         // 系统指标：直接回调保存公式模板（由外部写回 .tdx）
         if isSystemIndicator {
             onSaveSystem?(formula)

@@ -47,6 +47,8 @@ struct FormulaCenterView: View {
     @ObservedObject private var customStore = CustomIndicatorStore.shared
     @ObservedObject private var systemStore = SystemIndicatorStore.shared
     @ObservedObject private var chartStore = ChartConfigStore.shared
+    /// 自选仓库：用于统计选股公式被哪些自选分组引用（删除确认 / 引用数展示）
+    @ObservedObject private var favorites = FavoritesStore.shared
 
     /// 当前分段
     @State private var kind: FormulaKind
@@ -57,6 +59,13 @@ struct FormulaCenterView: View {
     @State private var editingCustom: CustomIndicator?
     /// 系统技术指标编辑浮层
     @State private var editingSystem: SystemIndicatorDef?
+    /// 选股公式新建 / 编辑浮层
+    @State private var showPickerSheet = false
+    @State private var editingPicker: FormulaDoc?
+    /// 待删除的选股公式：被自选分组引用时先弹确认，确认后再解绑 + 删除
+    @State private var pendingDeletePicker: FormulaDoc?
+    /// 页面样例行情数据（候选池首只标的的 K 线），供三个编辑器的「测试公式」使用
+    @State private var sampleData: [KlineItem] = []
 
     init(initialKind: FormulaKind = .tech, onClose: @escaping () -> Void) {
         self.initialKind = initialKind
@@ -88,6 +97,19 @@ struct FormulaCenterView: View {
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
         .overlay { editorOverlay }
+        // 进入页面时异步加载样例行情数据（供编辑器「测试公式」使用）
+        .onAppear { loadSampleDataIfNeeded() }
+        // 删除被引用的选股公式前先确认（列出引用分组名，删除后分组保留但变空）
+        .alert("删除选股公式",
+               isPresented: Binding(get: { pendingDeletePicker != nil },
+                                    set: { if !$0 { pendingDeletePicker = nil } })) {
+            Button("删除", role: .destructive) { confirmDeletePendingPicker() }
+            Button("取消", role: .cancel) { pendingDeletePicker = nil }
+        } message: {
+            if let doc = pendingDeletePicker {
+                Text(pickerDeleteMessage(doc))
+            }
+        }
     }
 
     // MARK: - 页头（照抄 FormulaEditorView 页头视觉令牌）
@@ -258,11 +280,10 @@ struct FormulaCenterView: View {
 
     private var pickerSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let hint { hintBanner(hint) }
             infoBanner("选股公式：用于自选分组的公式选股，不出现在 K 线图指标选择中")
 
             if library.pickers.isEmpty {
-                emptyCard("还没有选股公式", "点击下方「新建选股公式」创建；本轮编辑器将在下一步接入")
+                emptyCard("还没有选股公式", "点击下方「新建选股公式」创建，支持通达信语法；最后一根输出值 > 0 视为命中")
             } else {
                 VStack(spacing: 0) {
                     ForEach(library.pickers) { doc in
@@ -274,7 +295,8 @@ struct FormulaCenterView: View {
             }
 
             newButton("新建选股公式") {
-                showPlaceholder("选股公式编辑器将在下一步接入")
+                editingPicker = nil
+                showPickerSheet = true
             }
         }
     }
@@ -295,7 +317,8 @@ struct FormulaCenterView: View {
             }
             Spacer(minLength: 8)
             Button {
-                showPlaceholder("选股公式编辑器将在下一步接入")
+                editingPicker = doc
+                showPickerSheet = true
             } label: {
                 Text("编辑")
                     .font(.system(size: 13))
@@ -305,7 +328,12 @@ struct FormulaCenterView: View {
             }
             .buttonStyle(.plain)
             Button {
-                library.delete(kind: .picker, id: doc.id)
+                // 无引用直接删除；有引用先弹确认（确认后解绑引用分组再删除）
+                if favorites.groups.contains(where: { $0.formulaID == doc.id }) {
+                    pendingDeletePicker = doc
+                } else {
+                    library.delete(kind: .picker, id: doc.id)
+                }
             } label: {
                 Text("删除")
                     .font(.system(size: 13))
@@ -389,10 +417,10 @@ struct FormulaCenterView: View {
     @ViewBuilder
     private var editorOverlay: some View {
         if showCustomSheet || editingCustom != nil {
-            // 中心页无行情数据：data 一律传 []，「测试公式」会提示「暂无行情数据用于测试」（预期行为）
+            // 测试数据：用样例标的（候选池首只）的 K 线，进入页面时异步加载
             IndicatorEditSheet(
                 indicator: editingCustom,
-                data: [],
+                data: sampleData,
                 onCancel: {
                     showCustomSheet = false
                     editingCustom = nil
@@ -411,14 +439,37 @@ struct FormulaCenterView: View {
             .zIndex(1000)
         }
         if let def = editingSystem {
-            // 主图 / 副图选择进入既有系统指标编辑器；中心页无行情数据，data 传 []
+            // 主图 / 副图选择进入既有系统指标编辑器；测试数据同用样例标的的 K 线
             SystemIndicatorEditorContainer(
-                data: [],
+                data: sampleData,
                 isMain: def.scope == .main,
                 period: period,
                 initialSubId: def.id,
                 onClose: { editingSystem = nil },
                 onSaved: { _ in }
+            )
+            .transition(.opacity)
+            .zIndex(1000)
+        }
+        if showPickerSheet || editingPicker != nil {
+            // 选股公式编辑器：复用 IndicatorEditSheet 的选股模式（只编辑名称 + 公式）
+            IndicatorEditSheet(
+                indicator: nil, data: sampleData,
+                onCancel: {
+                    showPickerSheet = false
+                    editingPicker = nil
+                },
+                onSave: { _ in },
+                isPicker: true,
+                pickerInitialName: editingPicker?.name ?? "",
+                pickerInitialFormula: editingPicker?.pickBody ?? "",
+                onSavePicker: { name, formula in
+                    // id 为空串视为新增；保存后 FormulaLibraryStore.reload 会通过 @Published 刷新列表
+                    let id = editingPicker?.id ?? ""
+                    _ = library.save(FormulaDoc(id: id, kind: .picker, name: name, pickBody: formula))
+                    showPickerSheet = false
+                    editingPicker = nil
+                }
             )
             .transition(.opacity)
             .zIndex(1000)
@@ -434,7 +485,8 @@ struct FormulaCenterView: View {
             editingCustom = nil
             showCustomSheet = true
         case .picker:
-            showPlaceholder("选股公式编辑器将在下一步接入")
+            editingPicker = nil
+            showPickerSheet = true
         case .strategy:
             showPlaceholder("策略公式编辑器将在下一步接入")
         }
@@ -482,9 +534,46 @@ struct FormulaCenterView: View {
             .count
     }
 
-    /// 被自选分组引用数：FavoritesGroup 目前尚无 formulaID 字段（另一并行任务接入），
-    /// 暂统一显示 0；待字段落地后改为 FavoritesStore.shared.groups.filter { $0.formulaID == id }.count
-    private func pickerRefCount(_ id: String) -> Int { 0 }
+    /// 被自选分组引用数：统计 formulaID 指向该选股公式的自选分组数量
+    private func pickerRefCount(_ id: String) -> Int {
+        favorites.groups.filter { $0.formulaID == id }.count
+    }
+
+    /// 删除确认正文：列出引用该公式的自选分组名（无引用时给出通用提示）
+    private func pickerDeleteMessage(_ doc: FormulaDoc) -> String {
+        let refs = favorites.groups.filter { $0.formulaID == doc.id }
+        guard !refs.isEmpty else { return "删除后不可恢复。" }
+        let names = refs.map { $0.name }.joined(separator: "、")
+        return "该公式被 \(refs.count) 个自选分组引用：\(names)。删除后这些分组将变为空（分组本身保留）。"
+    }
+
+    /// 确认删除：先解绑所有引用该公式的自选分组（分组保留、变空），再从公式库删除
+    private func confirmDeletePendingPicker() {
+        guard let doc = pendingDeletePicker else { return }
+        for g in favorites.groups where g.formulaID == doc.id {
+            favorites.bindFormula(groupID: g.id, formulaID: nil)
+        }
+        library.delete(kind: .picker, id: doc.id)
+        pendingDeletePicker = nil
+    }
+
+    // MARK: - 样例行情数据（编辑器「测试公式」用）
+
+    /// 加载样例行情数据：取候选池首只标的，按当前周期读全量 K 线并升序排序。
+    /// 已加载 / 候选池为空则直接返回；查询与排序放到后台队列，避免阻塞首屏。
+    private func loadSampleDataIfNeeded() {
+        guard sampleData.isEmpty else { return }
+        guard let meta = DatabaseManager.shared.metaList.first else { return }
+        let p = period
+        DispatchQueue.global(qos: .userInitiated).async {
+            // fetchBars 返回 date DESC，按既有惯例排序为升序
+            let bars = DatabaseManager.shared.fetchBars(metaId: meta.id, period: p)
+                .sorted { $0.date < $1.date }
+            DispatchQueue.main.async {
+                sampleData = bars
+            }
+        }
+    }
 
     // MARK: - 通用小组件
 

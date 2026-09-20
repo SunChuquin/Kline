@@ -53,6 +53,8 @@ struct MarketView: View {
     @State private var addGroupTarget: MetaItem? = nil
     /// 点击顶部搜索图标后弹出搜索页（复用 HomeView 搜索模式，等同双击首页的效果）
     @State private var homeSearchActive = false
+    /// 公式管理中心页（全屏 overlay）开合：仅「选股」Tab 工具区入口触发
+    @State private var showFormulaCenter = false
     /// 有字段筛选生效时，合并 bars 陆续到位触发的重筛选（防抖，避免每行刷全表）
     @State private var filterDebounce: DispatchWorkItem? = nil
 
@@ -219,6 +221,15 @@ struct MarketView: View {
                 HomeView(isSearching: $homeSearchActive, isProfilePresented: .constant(false))
                     .transition(.opacity)
             }
+            // 公式管理中心：全屏页面（铺满，无遮罩），关闭走页内「返回」；
+            // 挂在页面根视图的 overlay 上，避免被表格 ScrollView 裁剪
+            if showFormulaCenter {
+                ZStack {
+                    FormulaCenterView(initialKind: .picker, onClose: { showFormulaCenter = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
         }
         // 异形屏横屏贴边已由 ContentView 根布局统一处理，此处仅实测宿主宽度
         // （贴边后的真实可视宽），供 maxHOffset 计算横向滚动上限
@@ -316,9 +327,25 @@ struct MarketView: View {
                 }
                 .padding(.leading, 12)
 
-                // 右侧：搜索按钮（保持最右不动）
-                HStack {
+                // 右侧：公式入口（仅「选股」Tab 显示）+ 搜索按钮（保持最右不动）
+                HStack(spacing: 0) {
                     Spacer()
+                    // 公式入口：只在「选股」Tab 显示（市场 / 自选页工具区不出现），
+                    // 点击打开公式管理中心并定位到「选股指标」段；
+                    // 44×44 命中区放在 label 内层（不裁剪），外层仍收成 28×28，
+                    // 保证工具栏行高与相邻的搜索 / 设置按钮完全一致、不被撑高
+                    if topMenu == .picker {
+                        Button { showFormulaCenter = true } label: {
+                            Image(systemName: "function")
+                                .foregroundColor(.secondary)
+                                .font(.system(size: 16))
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: 28, height: 28)
+                        .help("公式管理（选股公式）")
+                    }
                     Button { homeSearchActive = true } label: {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary).font(.system(size: 16))

@@ -29,7 +29,10 @@ struct FavoritesGroup: Identifiable, Codable, Hashable {
     /// manual 分组：组内标的 metaID 有序列表（用户拖放顺序）
     var manualMetaIDs: [Int]
     /// formula 分组：通达信公式文本（保存用户原始输入，区分大小写转大写交给引擎）
+    /// 旧档遗留的内嵌文本；新档只存 `formulaID` 引用（二者互斥）
     var formula: String?
+    /// formula 分组：选股公式库条目 id，与内嵌 `formula` 互斥
+    var formulaID: String?
     /// formula 分组最近一次刷新缓存的命中 metaID（便于表格先显示，用户点刷新再重算）
     var cachedMatches: [Int]?
     /// formula 分组上次刷新时间
@@ -39,13 +42,20 @@ struct FavoritesGroup: Identifiable, Codable, Hashable {
 
     static func manual(name: String) -> FavoritesGroup {
         FavoritesGroup(id: UUID(), name: name, kind: .manual,
-                       manualMetaIDs: [], formula: nil,
+                       manualMetaIDs: [], formula: nil, formulaID: nil,
                        cachedMatches: nil, updatedAt: nil, isHidden: false)
     }
 
     static func formula(name: String, formula: String) -> FavoritesGroup {
         FavoritesGroup(id: UUID(), name: name, kind: .formula,
-                       manualMetaIDs: [], formula: formula,
+                       manualMetaIDs: [], formula: formula, formulaID: nil,
+                       cachedMatches: nil, updatedAt: nil, isHidden: false)
+    }
+
+    /// 引用式构造：只存选股公式库条目 id（新档使用）
+    static func formula(name: String, formulaID: String?) -> FavoritesGroup {
+        FavoritesGroup(id: UUID(), name: name, kind: .formula,
+                       manualMetaIDs: [], formula: nil, formulaID: formulaID,
                        cachedMatches: nil, updatedAt: nil, isHidden: false)
     }
 }
@@ -86,23 +96,63 @@ final class FavoritesStore: ObservableObject {
             }
         }
         return FavoritesGroup(id: Self.allGroupID, name: "全部", kind: .manual,
-                              manualMetaIDs: ids, formula: nil,
+                              manualMetaIDs: ids, formula: nil, formulaID: nil,
                               cachedMatches: nil, updatedAt: nil, isHidden: false)
     }
 
     private let fm = FileManager.default
-    private let currentSchema = 1
+    /// 档结构版本：2 起公式分组只存 `formulaID` 引用（1 为内嵌 formula 文本的旧档）
+    private let currentSchema = 2
 
     // MARK: - Lifecycle
 
     private init() {
         // 立即读档；档不存在则写入默认的"我的自选"分组
-        if !loadFromDisk() {
+        if loadFromDisk() {
+            // 迁移发生在读档后、写档前，因此只写一次
+            migrateFormulaGroupsIfNeeded()
+        } else {
             let def = FavoritesGroup.manual(name: "我的自选")
             groups = [def]
             selectedGroupID = def.id
             saveToDisk()
         }
+    }
+
+    // MARK: - 迁移
+
+    /// 幂等迁移：把旧档中「内嵌公式文本」的公式分组改为「引用选股公式库条目」。
+    ///
+    /// 迁移只在读档成功后执行一次（读档后、写档前）：`formulaID != nil` 的分组直接
+    /// 跳过，已迁移的档（schemaVersion 2）不会再重复导入。
+    private func migrateFormulaGroupsIfNeeded() {
+        var changed = false
+        for i in groups.indices where groups[i].kind == .formula {
+            // 已有引用 → 已完成迁移，跳过
+            guard groups[i].formulaID == nil else { continue }
+            guard let text = groups[i].formula else { continue }
+
+            if text.isEmpty {
+                // 内嵌文本为空：不建库条目，只清字段，表现为「未选择公式」
+                groups[i].formula = nil
+                changed = true
+                continue
+            }
+
+            // 以分组名在选股公式库建条目（重名自动加序号后缀）
+            if let newID = FormulaLibraryStore.shared.importPicker(name: groups[i].name,
+                                                                   formula: text) {
+                groups[i].formulaID = newID
+                groups[i].formula = nil
+                groups[i].cachedMatches = nil
+                changed = true
+            } else {
+                // 导入失败：宁可保留旧文本也不要丢公式（下次启动会再尝试）
+                DebugLogger.shared.log("[FavoritesStore] migrate formula group failed: \(groups[i].name)")
+            }
+        }
+        // 有改动立即落盘：把 schemaVersion 写成 2，迁移结果只写一次
+        if changed { saveToDisk() }
     }
 
     // MARK: - 读档/存档
@@ -187,6 +237,32 @@ final class FavoritesStore: ObservableObject {
         guard let idx = groups.firstIndex(where: { $0.id == id }) else { return }
         guard groups[idx].kind == .formula else { return }
         groups[idx].formula = formula
+        groups[idx].cachedMatches = nil
+        saveToDisk()
+    }
+
+    // MARK: - Formula 分组：选股公式引用（自选页 / 公式管理页展示引用状态）
+
+    /// 分组的选股公式引用状态：nil 表示正常；否则返回可直接展示的中文提示
+    func formulaIssue(groupID: UUID) -> String? {
+        guard let g = groups.first(where: { $0.id == groupID }) else { return nil }
+        guard g.kind == .formula, let fid = g.formulaID else { return nil }
+        // 引用的选股公式库条目已不存在 → 提示重新选择
+        return FormulaLibraryStore.shared.doc(kind: .picker, id: fid) == nil ? "公式已删除，请重新选择" : nil
+    }
+
+    /// 分组引用到的选股公式名称（取不到返回 nil）
+    func formulaName(groupID: UUID) -> String? {
+        guard let g = groups.first(where: { $0.id == groupID }) else { return nil }
+        return FormulaLibraryStore.shared.pickerName(id: g.formulaID)
+    }
+
+    /// 绑定 / 解绑公式引用（清空旧内嵌文本与旧结果）
+    func bindFormula(groupID: UUID, formulaID: String?) {
+        guard let idx = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        guard groups[idx].kind == .formula else { return }
+        groups[idx].formulaID = formulaID
+        groups[idx].formula = nil
         groups[idx].cachedMatches = nil
         saveToDisk()
     }
@@ -305,9 +381,21 @@ final class FavoritesStore: ObservableObject {
                              completion: @escaping (Int) -> Void) {
         guard let idx = groups.firstIndex(where: { $0.id == id }) else { completion(0); return }
         guard groups[idx].kind == .formula else { completion(0); return }
-        guard let formula = groups[idx].formula, !formula.isEmpty else { completion(0); return }
+
+        // 取公式文本：优先引用选股公式库条目；取不到再回退读旧的内嵌文本（迁移未完成的兜底）
+        var resolved = FormulaLibraryStore.shared.formulaText(id: groups[idx].formulaID)
+        if resolved == nil { resolved = groups[idx].formula }
 
         let groupIdx = idx
+        guard let formula = resolved, !formula.isEmpty else {
+            // 公式不可用（引用为空 / 引用已被删除 / 内嵌文本为空）：置空缓存并回调 0，不崩溃
+            groups[groupIdx].cachedMatches = []
+            groups[groupIdx].updatedAt = Date()
+            saveToDisk()
+            completion(0)
+            return
+        }
+
         let total = candidates.count
         guard total > 0 else {
             groups[groupIdx].cachedMatches = []
