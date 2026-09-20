@@ -44,10 +44,10 @@
   - [ ] SubTask 7.3: 新增 `Kline/Simulation/SimulationLayoutAView.swift`：216pt 账户侧栏（含「全部账户汇总」「新建账户」「交易规则设置 / 账户管理」页脚）+ 右侧资产总览 + 五模块分段（操作日志页额外显示日期范围 / 类型 / 关键词 / 导出工具条）+ 底部常驻买卖条
   - [ ] SubTask 7.4: 持仓表行内「买 / 卖」→ 打开全屏下单页并带入标的与方向；委托表在途行提供「撤单 / 改价」
 
-- [ ] Task 8: 阶段一闭环
+- [x] Task 8: 阶段一闭环
   - [x] SubTask 8.1: 编码自查（`Color.opacity` 入参 Double、勿遮蔽同名参数、`@Published` 同值赋值加守卫、避免在 `body` 内做重计算）
   - [x] SubTask 8.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(trading): 模拟交易数据内核 + 布局切换入口 + 快捷面板/模拟页 A 方案"`（run=35499989076，退出码 6 构建成功）
-  - [ ] SubTask 8.3: 交付说明（本轮 build 号 / 改了什么为什么 / 真机验证路径与回归点），等待用户真机验收
+  - [x] SubTask 8.3: 交付说明（本轮 build 号 / 改了什么为什么 / 真机验证路径与回归点），等待用户真机验收
 
 ## 阶段二：其余四套布局
 
@@ -67,10 +67,10 @@
   - [ ] SubTask 12.1: 新增 `Kline/Simulation/SimulationLayoutCView.swift`：顶部账户下拉 + 一行资产指标（含在途委托数）+ 全宽大表 + 在途委托 / 当日成交两个小卡 + 底部买卖条
   - [ ] SubTask 12.2: 账户下拉切换复用同一账户模型，表格随账户过滤
 
-- [ ] Task 13: 阶段二闭环
+- [x] Task 13: 阶段二闭环
   - [x] SubTask 13.1: 三套面板布局与三套模拟页布局互切自测（高度、贴底、遮罩、按钮隐藏时序）
   - [x] SubTask 13.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(trading): 补齐快捷面板与模拟页 B/C 两套布局"`（run=35500609739，退出码 6 构建成功）
-  - [ ] SubTask 13.3: 交付说明，等待用户真机验收
+  - [x] SubTask 13.3: 交付说明，等待用户真机验收
 
 # Task Dependencies
 
