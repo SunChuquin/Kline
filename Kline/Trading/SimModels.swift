@@ -97,16 +97,18 @@ enum ActionModule: String, Codable, Hashable {
     case cash
     case account
     case alert
+    case condition
 
     var title: String {
         switch self {
-        case .order:   return "委托"
-        case .fill:    return "成交"
-        case .cancel:  return "撤单"
-        case .amend:   return "改价"
-        case .cash:    return "资金"
-        case .account: return "账户"
-        case .alert:   return "提醒"
+        case .order:     return "委托"
+        case .fill:      return "成交"
+        case .cancel:    return "撤单"
+        case .amend:     return "改价"
+        case .cash:      return "资金"
+        case .account:   return "账户"
+        case .alert:     return "提醒"
+        case .condition: return "条件单"
         }
     }
 }
@@ -153,6 +155,8 @@ struct SimOrder: Identifiable, Codable, Hashable {
     var status: SimOrderStatus
     var createdAt: Date
     var updatedAt: Date
+    /// 由条件单触发时回链条件单 id（手动下单为 nil）
+    var originCondID: UUID? = nil
 }
 
 /// 成交

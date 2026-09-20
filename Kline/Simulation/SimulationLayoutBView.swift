@@ -19,6 +19,8 @@ struct SimulationLayoutBView: View {
     @State private var detailModule: SimModuleTab? = nil
     /// 全屏下单请求（每次新建都换新 UUID，保证可重复呈现）
     @State private var ticketRequest: SimTicketRequest? = nil
+    /// 条件单呈现请求（顶部条入口 → 管理页）
+    @State private var condPresentation: SimCondEntryRequest? = nil
     /// 新建账户
     @State private var showCreateAccount = false
     @State private var newAccountName = ""
@@ -55,6 +57,31 @@ struct SimulationLayoutBView: View {
         .onAppear { SimStore.shared.prepareQuotes() }
     }
 
+    /// 顶部条「条件单」入口（文字右上角叠监控中数量角标）
+    private var condEntryButton: some View {
+        let monitoring = store.condCounts(accountID: store.queryAccountID).monitoring
+        return Button(action: { condPresentation = .list(UUID()) }) {
+            Text("条件单")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(.blue)
+                .overlay(alignment: .topTrailing) {
+                    if monitoring > 0 {
+                        Text("\(monitoring)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color(.systemRed)))
+                            .offset(x: 12, y: -8)
+                    }
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sim.cond.entry")
+    }
+
     // MARK: - 顶部条
 
     private var topBar: some View {
@@ -68,6 +95,7 @@ struct SimulationLayoutBView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 8)
+            condEntryButton
             Button(action: { showWalletAlert = true }) {
                 HStack(spacing: 4) {
                     Image(systemName: "wallet.pass").font(.system(size: 11))
@@ -286,6 +314,8 @@ struct SimulationLayoutBView: View {
         }
         .padding(EdgeInsets(top: 4, leading: 16, bottom: 14, trailing: 16))
         .frame(maxHeight: .infinity, alignment: .top)
+        // 条件单全屏呈现挂在本宫格（与根视图的全屏下单页 / 明细页分开宿主）
+        .simCondEntryPresentation($condPresentation, accountID: store.queryAccountID)
     }
 
     private var positionCard: some View {
@@ -582,6 +612,8 @@ private struct SimModuleDetailSheet: View {
 
     @State private var keyword = ""
     @State private var ticketRequest: SimTicketRequest? = nil
+    /// 条件单呈现请求（持仓行入口 → 编辑器）
+    @State private var condPresentation: SimCondEntryRequest? = nil
     @State private var amendTarget: SimOrder? = nil
     @State private var amendPriceText = ""
 
@@ -599,6 +631,7 @@ private struct SimModuleDetailSheet: View {
                                                                 direction: direction)
                            },
                            onAmend: { order in beginAmend(order) },
+                           onCondition: { position in openCondEditor(for: position) },
                            keyword: keyword)
                 .frame(maxHeight: .infinity)
         }
@@ -660,6 +693,23 @@ private struct SimModuleDetailSheet: View {
         .frame(height: 34)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
         .padding(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        // 条件单全屏呈现挂在本行（与根视图的全屏下单页分开宿主，避免同视图多个 fullScreenCover）
+        .simCondEntryPresentation($condPresentation, accountID: accountID)
+    }
+
+    /// 持仓行「条件单」入口：默认止盈止损 / 卖出，数量取可卖整手，基准价预填成本价
+    private func openCondEditor(for position: SimPosition) {
+        let rules = SimTradingRules.default
+        let qty = rules.sellableQty(position: position)
+        condPresentation = .editor(SimCondEditorRequest(accountID: position.accountID,
+                                                        metaID: position.metaID,
+                                                        code: position.code,
+                                                        name: position.name,
+                                                        initialKind: .stopLoss,
+                                                        initialDirection: .sell,
+                                                        initialQty: qty > 0 ? qty : rules.lotSize,
+                                                        initialPrice: position.costPrice,
+                                                        editing: nil))
     }
 
     // MARK: 改价

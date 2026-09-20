@@ -60,6 +60,8 @@ struct TradeTicketView: View {
     @State private var errorText: String?
     /// 卖出二次确认（bolt / full）
     @State private var showSellConfirm = false
+    /// 条件单编辑器呈现请求（仅 full 形态的「转条件单」入口使用）
+    @State private var condRequest: SimCondEditorRequest? = nil
     /// 程序化回填文本时记录的值，用于区分「用户编辑」与「代码回填」
     @State private var programmaticPriceText = ""
     @State private var programmaticQtyText = ""
@@ -299,8 +301,47 @@ struct TradeTicketView: View {
                 .padding(.top, 12)
 
             submitButton(height: 50, horizontalPadding: 18, topPadding: 12, bottomPadding: 10)
+            condEntryButton
             errorLine(padding: 18)
         }
+        // 挂在 fullBody（body 的 Group 已承载卖出二次确认对话框），避免与对话框同层
+        .fullScreenCover(item: $condRequest) { req in
+            SimCondEditorView(accountID: req.accountID, metaID: req.metaID,
+                              code: req.code, name: req.name,
+                              initialKind: req.initialKind,
+                              initialDirection: req.initialDirection,
+                              initialQty: req.initialQty,
+                              initialPrice: req.initialPrice,
+                              editing: req.editing) { condRequest = nil }
+        }
+    }
+
+    /// 「转条件单」整行入口（仅 full 形态）：把当前已填内容带入编辑器，不提交当前委托
+    private var condEntryButton: some View {
+        Button(action: openCondEditor) {
+            Text("转条件单")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(.blue)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 18)
+        .accessibilityIdentifier("tradeTicket.toCond")
+    }
+
+    /// 用当前已填的方向 / 数量 / 价格打开条件单编辑器（不触发 onSubmit）
+    private func openCondEditor() {
+        condRequest = SimCondEditorRequest(accountID: accountID,
+                                           metaID: metaID,
+                                           code: code,
+                                           name: name,
+                                           initialKind: .price,
+                                           initialDirection: direction,
+                                           initialQty: qty,
+                                           initialPrice: priceType == .limit ? price : lastPrice,
+                                           editing: nil)
     }
 
     // MARK: - 共用子块

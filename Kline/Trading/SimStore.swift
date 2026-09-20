@@ -23,15 +23,17 @@ private struct SimRoot: Codable {
     var fills: [SimFill]
     var ledger: [LedgerEntry]
     var logs: [ActionLog]
+    var conditionalOrders: [SimCondOrder]
     var selectedAccountID: UUID?
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, accounts, positions, orders, fills, ledger, logs, selectedAccountID
+        case schemaVersion, accounts, positions, orders, fills, ledger, logs
+        case conditionalOrders, selectedAccountID
     }
 
     init(schemaVersion: Int, accounts: [SimAccount], positions: [SimPosition],
          orders: [SimOrder], fills: [SimFill], ledger: [LedgerEntry],
-         logs: [ActionLog], selectedAccountID: UUID?) {
+         logs: [ActionLog], conditionalOrders: [SimCondOrder], selectedAccountID: UUID?) {
         self.schemaVersion = schemaVersion
         self.accounts = accounts
         self.positions = positions
@@ -39,6 +41,7 @@ private struct SimRoot: Codable {
         self.fills = fills
         self.ledger = ledger
         self.logs = logs
+        self.conditionalOrders = conditionalOrders
         self.selectedAccountID = selectedAccountID
     }
 
@@ -51,6 +54,7 @@ private struct SimRoot: Codable {
         fills = (try? c.decode([SimFill].self, forKey: .fills)) ?? []
         ledger = (try? c.decode([LedgerEntry].self, forKey: .ledger)) ?? []
         logs = (try? c.decode([ActionLog].self, forKey: .logs)) ?? []
+        conditionalOrders = (try? c.decode([SimCondOrder].self, forKey: .conditionalOrders)) ?? []
         selectedAccountID = try? c.decode(UUID.self, forKey: .selectedAccountID)
     }
 }
@@ -72,6 +76,7 @@ final class SimStore: ObservableObject {
     @Published private(set) var fills: [SimFill] = []
     @Published private(set) var ledger: [LedgerEntry] = []
     @Published private(set) var logs: [ActionLog] = []
+    @Published private(set) var conditionalOrders: [SimCondOrder] = []
 
     /// 当前选中账户；nil 或 allAccountID 表示「全部账户汇总」
     @Published var selectedAccountID: UUID?
@@ -79,8 +84,11 @@ final class SimStore: ObservableObject {
     // MARK: 内部状态
 
     private let fm = FileManager.default
-    private let currentSchema = 1
+    private let currentSchema = 2
     private let tPlus1Key = "kline.sim.lastTPlus1Refresh"
+
+    /// 条件单结算重入保护（引擎在 SimCondEngine.swift 中读写）
+    var condSweepInFlight = false
 
     /// 首次播种待办（仅当 sim.json 不存在时为 true）
     private var needsSeed = false
@@ -137,6 +145,7 @@ final class SimStore: ObservableObject {
             assignFills(root.fills)
             assignLedger(root.ledger)
             assignLogs(root.logs)
+            assignConditionalOrders(root.conditionalOrders)
 
             if let sel = root.selectedAccountID,
                sel == Self.allAccountID || accounts.contains(where: { $0.id == sel }) {
@@ -159,6 +168,7 @@ final class SimStore: ObservableObject {
                            fills: fills,
                            ledger: ledger,
                            logs: logs,
+                           conditionalOrders: conditionalOrders,
                            selectedAccountID: selectedAccountID)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -195,6 +205,10 @@ final class SimStore: ObservableObject {
 
     private func assignLogs(_ value: [ActionLog]) {
         if logs != value { logs = value }
+    }
+
+    func assignConditionalOrders(_ value: [SimCondOrder]) {
+        if conditionalOrders != value { conditionalOrders = value }
     }
 
     // MARK: - 首次播种
@@ -393,9 +407,98 @@ final class SimStore: ObservableObject {
                       occurredAt: todayAt(10, 15, 0))
         ])
 
+        // ---- 条件单（metaID 反查不到则跳过该条，绝不写 metaID = 0）----
+        let seedNow = Date()
+        var seedConds: [SimCondOrder] = []
+
+        // 主账户 · 贵州茅台：止盈止损（OCO，长期有效）
+        if let metaID = resolveMetaID(code: "600519.SH") {
+            var params = SimCondParams()
+            params.basePrice = 1462.30
+            params.baseMode = .price
+            params.takeProfitPrice = 1480.00
+            params.stopLossPrice = 1420.00
+            seedConds.append(SimCondOrder(id: UUID(), accountID: main.id, metaID: metaID,
+                                          code: "600519.SH", name: "贵州茅台",
+                                          kind: .stopLoss, params: params,
+                                          directive: SimCondDirective(direction: .sell,
+                                                                      priceType: .market,
+                                                                      offsetTicks: 0, qty: 500),
+                                          validity: .longTerm, expiresAt: nil,
+                                          createdAt: seedNow, updatedAt: seedNow,
+                                          status: .monitoring, runtime: SimCondRuntime(),
+                                          triggeredCount: 0, triggeredAt: nil, originOrderID: nil))
+        }
+
+        // 主账户 · 宁德时代：回落卖出（当日有效，触发价 -2 档限价卖出）
+        if let metaID = resolveMetaID(code: "300750.SZ") {
+            var params = SimCondParams()
+            params.breakoutPrice = 210.00
+            params.trailPct = 3.0
+            params.floorEnabled = true
+            params.floorPrice = 206.00
+            seedConds.append(SimCondOrder(id: UUID(), accountID: main.id, metaID: metaID,
+                                          code: "300750.SZ", name: "宁德时代",
+                                          kind: .trailing, params: params,
+                                          directive: SimCondDirective(direction: .sell,
+                                                                      priceType: .limit,
+                                                                      offsetTicks: -2, qty: 100),
+                                          validity: .day, expiresAt: nil,
+                                          createdAt: seedNow, updatedAt: seedNow,
+                                          status: .monitoring, runtime: SimCondRuntime(),
+                                          triggeredCount: 0, triggeredAt: nil, originOrderID: nil))
+        }
+
+        // 打板账户 · 东方财富：网格交易（长期有效，已推进 3 档）
+        if let metaID = resolveMetaID(code: "300059.SZ") {
+            var params = SimCondParams()
+            params.gridBase = 14.92
+            params.gridUpper = 15.80
+            params.gridLower = 13.50
+            params.gridStepPct = 1.5
+            params.gridQtyPerLevel = 300
+            params.gridMultiplier = 1
+            var runtime = SimCondRuntime()
+            runtime.gridLevel = 3
+            runtime.gridLastPrice = 14.50
+            runtime.lastMessage = "已成交第 3 档"
+            seedConds.append(SimCondOrder(id: UUID(), accountID: da.id, metaID: metaID,
+                                          code: "300059.SZ", name: "东方财富",
+                                          kind: .grid, params: params,
+                                          directive: SimCondDirective(direction: .buy,
+                                                                      priceType: .market,
+                                                                      offsetTicks: 0, qty: 300),
+                                          validity: .longTerm, expiresAt: nil,
+                                          createdAt: seedNow, updatedAt: seedNow,
+                                          status: .monitoring, runtime: runtime,
+                                          triggeredCount: 3, triggeredAt: nil, originOrderID: nil))
+        }
+
+        // 主账户 · 东方财富：已触发的价格条件（让「已触发」分段非空）
+        if let metaID = resolveMetaID(code: "300059.SZ") {
+            var params = SimCondParams()
+            params.compareUp = true
+            params.triggerPrice = 15.60
+            var runtime = SimCondRuntime()
+            runtime.lastTriggerPrice = 15.60
+            runtime.lastMessage = "已触发并生成委托"
+            seedConds.append(SimCondOrder(id: UUID(), accountID: main.id, metaID: metaID,
+                                          code: "300059.SZ", name: "东方财富",
+                                          kind: .price, params: params,
+                                          directive: SimCondDirective(direction: .sell,
+                                                                      priceType: .market,
+                                                                      offsetTicks: 0, qty: 500),
+                                          validity: .day, expiresAt: nil,
+                                          createdAt: todayAt(9, 46, 0), updatedAt: todayAt(14, 52, 30),
+                                          status: .triggered, runtime: runtime,
+                                          triggeredCount: 1, triggeredAt: todayAt(14, 52, 30),
+                                          originOrderID: eastMoneyOrderID))
+        }
+        assignConditionalOrders(seedConds)
+
         selectedAccountID = main.id
         saveToDisk()
-        DebugLogger.shared.log("[SimStore] seed done: accounts=\(accounts.count) positions=\(positions.count) orders=\(orders.count) fills=\(fills.count)")
+        DebugLogger.shared.log("[SimStore] seed done: accounts=\(accounts.count) positions=\(positions.count) orders=\(orders.count) fills=\(fills.count) conds=\(conditionalOrders.count)")
     }
 
     // MARK: - 账户
@@ -467,6 +570,7 @@ final class SimStore: ObservableObject {
         assignOrders(orders.filter { $0.accountID != id })
         assignFills(fills.filter { $0.accountID != id })
         assignLedger(ledger.filter { $0.accountID != id })
+        assignConditionalOrders(conditionalOrders.filter { $0.accountID != id })
         appendLog(ActionLog(id: UUID(), accountID: id, module: .account,
                             content: "重置账户「\(arr[idx].name)」", result: "成功",
                             occurredAt: Date()))
@@ -541,7 +645,8 @@ final class SimStore: ObservableObject {
                              filledQty: 0,
                              status: .pending,
                              createdAt: now,
-                             updatedAt: now)
+                             updatedAt: now,
+                             originCondID: draft.originCondID)
 
         if rules.isTradingSession(at: now) {
             // 盘中：立即全部成交
@@ -811,6 +916,68 @@ final class SimStore: ObservableObject {
         orders.first { $0.id == id }
     }
 
+    // MARK: - 条件单（查询与写入口；落盘在方法内部完成，与 createAccount / deposit 风格一致）
+
+    /// 条件单列表（accountID == nil 表示全部账户聚合），按创建时间倒序
+    func condOrders(accountID: UUID?) -> [SimCondOrder] {
+        conditionalOrders.filter { matches(accountID, $0.accountID) }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func condOrder(id: UUID) -> SimCondOrder? {
+        conditionalOrders.first { $0.id == id }
+    }
+
+    /// 按分段过滤（监控中 / 已触发含已完成 / 已失效含撤销·过期·被拒）
+    func condOrders(accountID: UUID?, segment: SimCondSegment) -> [SimCondOrder] {
+        condOrders(accountID: accountID).filter { $0.segment == segment }
+    }
+
+    /// 三段计数（监控中 / 已触发 / 已失效）
+    func condCounts(accountID: UUID?) -> (monitoring: Int, triggered: Int, invalid: Int) {
+        let list = condOrders(accountID: accountID)
+        let monitoring = list.reduce(0) { $0 + ($1.segment == .monitoring ? 1 : 0) }
+        let triggered = list.reduce(0) { $0 + ($1.segment == .triggered ? 1 : 0) }
+        return (monitoring, triggered, list.count - monitoring - triggered)
+    }
+
+    /// 新增或整体替换（调用方传入完整 SimCondOrder，引擎维护的字段不做级别合并），并刷新 updatedAt
+    func upsertCondOrder(_ order: SimCondOrder) {
+        var target = order
+        target.updatedAt = Date()
+        var arr = conditionalOrders
+        if let idx = arr.firstIndex(where: { $0.id == target.id }) {
+            guard arr[idx] != target else { return }
+            arr[idx] = target
+        } else {
+            arr.append(target)
+        }
+        assignConditionalOrders(arr)
+        saveToDisk()
+    }
+
+    /// 撤销条件单（仅「监控中」可撤）
+    func cancelCondOrder(id: UUID) {
+        guard let idx = conditionalOrders.firstIndex(where: { $0.id == id }) else { return }
+        guard conditionalOrders[idx].status == .monitoring else { return }
+        var arr = conditionalOrders
+        let now = Date()
+        arr[idx].status = .cancelled
+        arr[idx].updatedAt = now
+        arr[idx].runtime.lastMessage = "用户撤销"
+        assignConditionalOrders(arr)
+        appendLog(ActionLog(id: UUID(), accountID: arr[idx].accountID, module: .condition,
+                            content: "撤销条件单 \(arr[idx].name) · \(arr[idx].kind.title)",
+                            result: arr[idx].status.title, occurredAt: now))
+        saveToDisk()
+    }
+
+    func deleteCondOrder(id: UUID) {
+        guard conditionalOrders.contains(where: { $0.id == id }) else { return }
+        assignConditionalOrders(conditionalOrders.filter { $0.id != id })
+        saveToDisk()
+    }
+
     // MARK: - 汇总
 
     struct SimAccountSummary {
@@ -929,13 +1096,13 @@ final class SimStore: ObservableObject {
         }
     }
 
-    // MARK: - 日志写入
+    // MARK: - 日志写入（internal：条件单引擎在另一文件中也需写日志）
 
-    private func appendLog(_ log: ActionLog) {
+    func appendLog(_ log: ActionLog) {
         assignLogs(logs + [log])
     }
 
-    private func appendLedger(_ entry: LedgerEntry) {
+    func appendLedger(_ entry: LedgerEntry) {
         assignLedger(ledger + [entry])
     }
 }

@@ -296,6 +296,8 @@ struct SimModuleTable: View {
     let onTrade: (SimPosition, SimOrderDirection) -> Void
     /// 委托表「改价」回调
     var onAmend: (SimOrder) -> Void = { _ in }
+    /// 持仓表行内「条件单」回调（默认止盈止损、卖出方向、成本价预填）；由父视图打开条件单编辑器
+    var onCondition: (SimPosition) -> Void = { _ in }
     /// 搜索关键词：持仓 / 委托 / 成交表过滤标的名称或代码，流水表过滤说明，日志表过滤操作内容
     var keyword: String = ""
 
@@ -505,6 +507,7 @@ struct SimModuleTable: View {
             HStack(spacing: 6) {
                 SimInlineButton(title: "买", tint: Color(.systemRed)) { onTrade(position, .buy) }
                 SimInlineButton(title: "卖", tint: Color(.systemGreen)) { onTrade(position, .sell) }
+                SimInlineButton(title: "条件单", tint: .blue) { onCondition(position) }
             }
             .frame(width: PosCol.action, alignment: .trailing)
         }
@@ -635,15 +638,16 @@ struct SimModuleTable: View {
 // MARK: - 列宽（按可用宽 1024 - 216 = 808pt 折算；表头与数据行共用，保证对齐）
 
 private enum PosCol {
-    static let name: CGFloat = 132
+    static let name: CGFloat = 110
     static let qty: CGFloat = 72
     static let available: CGFloat = 64
     static let cost: CGFloat = 80
     static let last: CGFloat = 80
-    static let marketValue: CGFloat = 94
+    static let marketValue: CGFloat = 92
     static let profit: CGFloat = 86
     static let profitPct: CGFloat = 76
-    static let action: CGFloat = 100
+    /// 买 / 卖 / 条件单 三个行内小按钮并排
+    static let action: CGFloat = 122
 }
 
 private enum OrdCol {
@@ -789,6 +793,47 @@ extension View {
     func simFullScreenTicket(_ request: Binding<SimTicketRequest?>) -> some View {
         fullScreenCover(item: request) { req in
             SimFullScreenTicket(request: req) { request.wrappedValue = nil }
+        }
+    }
+}
+
+// MARK: - 条件单入口呈现
+
+/// 条件单入口的呈现请求（管理页 / 编辑器二选一）。
+/// 同一页面里的两个入口（工具栏、持仓行）共用一份 @State 与一个 .fullScreenCover：
+/// iOS 15 上同一宿主视图叠加多个 fullScreenCover 会相互压制，故用单一呈现状态收敛。
+enum SimCondEntryRequest: Identifiable {
+    /// 打开条件单管理页（携带 UUID，保证可重复呈现）
+    case list(UUID)
+    /// 打开条件单编辑器（请求自带 UUID）
+    case editor(SimCondEditorRequest)
+
+    var id: UUID {
+        switch self {
+        case .list(let id):    return id
+        case .editor(let req): return req.id
+        }
+    }
+}
+
+extension View {
+    /// 便捷修饰器：`content.simCondEntryPresentation($request, accountID: ...)`
+    func simCondEntryPresentation(_ request: Binding<SimCondEntryRequest?>,
+                                  accountID: UUID?) -> some View {
+        fullScreenCover(item: request) { item in
+            switch item {
+            case .list(_):
+                SimCondListView(accountID: accountID,
+                                onClose: { request.wrappedValue = nil })
+            case .editor(let req):
+                SimCondEditorView(accountID: req.accountID, metaID: req.metaID,
+                                  code: req.code, name: req.name,
+                                  initialKind: req.initialKind,
+                                  initialDirection: req.initialDirection,
+                                  initialQty: req.initialQty,
+                                  initialPrice: req.initialPrice,
+                                  editing: req.editing) { request.wrappedValue = nil }
+            }
         }
     }
 }

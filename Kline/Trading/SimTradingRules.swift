@@ -21,6 +21,8 @@ struct SimOrderDraft {
     var priceType: SimPriceType
     var price: Double?     // market 时为 nil
     var qty: Int
+    /// 由条件单触发时携带来源条件单 id（手动下单保持 nil）
+    var originCondID: UUID? = nil
 }
 
 // MARK: - 拒绝原因

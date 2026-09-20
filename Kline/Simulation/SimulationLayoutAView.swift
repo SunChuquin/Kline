@@ -18,6 +18,8 @@ struct SimulationLayoutAView: View {
     @State private var module: SimModuleTab = .position
     /// 全屏下单请求（每次新建都换新 UUID，保证可重复呈现）
     @State private var ticketRequest: SimTicketRequest? = nil
+    /// 条件单呈现请求（工具栏入口 → 管理页；持仓行入口 → 编辑器，二者共用一个呈现状态）
+    @State private var condPresentation: SimCondEntryRequest? = nil
     /// 新建账户
     @State private var showCreateAccount = false
     @State private var newAccountName = ""
@@ -253,6 +255,7 @@ struct SimulationLayoutAView: View {
                                           direction: direction)
                            },
                            onAmend: { order in beginAmend(order) },
+                           onCondition: { position in openCondEditor(for: position) },
                            keyword: module == .log ? logKeyword : tableKeyword)
                 .frame(maxHeight: .infinity)
             SimBottomActionBar(onTrade: { direction in openBottomTicket(direction) },
@@ -277,6 +280,7 @@ struct SimulationLayoutAView: View {
         HStack(spacing: 10) {
             SimModuleSegmentedBar(module: $module, accountID: store.queryAccountID)
             Spacer(minLength: 8)
+            condEntryButton
             if module == .log {
                 logToolbar
             } else {
@@ -290,6 +294,33 @@ struct SimulationLayoutAView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color(.separator)).frame(height: 0.5)
         }
+        // 条件单全屏呈现挂在本行（与根视图的全屏下单页分开宿主，避免同视图多个 fullScreenCover）
+        .simCondEntryPresentation($condPresentation, accountID: store.queryAccountID)
+    }
+
+    /// 工具栏「条件单」入口（文字右上角叠监控中数量角标）
+    private var condEntryButton: some View {
+        let monitoring = store.condCounts(accountID: store.queryAccountID).monitoring
+        return Button(action: { condPresentation = .list(UUID()) }) {
+            Text("条件单")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(.blue)
+                .overlay(alignment: .topTrailing) {
+                    if monitoring > 0 {
+                        Text("\(monitoring)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color(.systemRed)))
+                            .offset(x: 12, y: -8)
+                    }
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sim.cond.entry")
     }
 
     private var standardToolbar: some View {
@@ -387,6 +418,21 @@ struct SimulationLayoutAView: View {
                             direction: SimOrderDirection) {
         ticketRequest = SimTicketRequest(accountID: accountID, metaID: metaID,
                                          code: code, name: name, direction: direction)
+    }
+
+    /// 持仓行「条件单」入口：默认止盈止损 / 卖出，数量取可卖整手，基准价预填成本价
+    private func openCondEditor(for position: SimPosition) {
+        let rules = SimTradingRules.default
+        let qty = rules.sellableQty(position: position)
+        condPresentation = .editor(SimCondEditorRequest(accountID: position.accountID,
+                                                        metaID: position.metaID,
+                                                        code: position.code,
+                                                        name: position.name,
+                                                        initialKind: .stopLoss,
+                                                        initialDirection: .sell,
+                                                        initialQty: qty > 0 ? qty : rules.lotSize,
+                                                        initialPrice: position.costPrice,
+                                                        editing: nil))
     }
 
     private func openBottomTicket(_ direction: SimOrderDirection) {
