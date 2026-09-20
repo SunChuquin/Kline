@@ -12,7 +12,8 @@ import Foundation
 // MARK: - 回测参数
 
 /// 回测参数
-struct BacktestParams: Equatable {
+/// nonisolated：纯值类型，需在后台线程参与回测计算（与 SimCondParams 同做法）
+nonisolated struct BacktestParams: Equatable {
     var days: Int = 250                 // 区间交易日数（UI 给 60/120/250/500）
     var initialCapital: Double = 100000 // 初始资金
     var pool: StrategyPickPool = .market // 候选池（复用阶段二的枚举）
@@ -24,7 +25,8 @@ struct BacktestParams: Equatable {
 // MARK: - 成交
 
 /// 一笔成交
-struct BacktestTrade: Identifiable, Equatable {
+/// nonisolated：纯值类型，需在后台线程参与回测计算
+nonisolated struct BacktestTrade: Identifiable, Equatable {
     var id = UUID()
     var signalDate: Int      // 信号日（YYYYMMDD）
     var date: Int            // 成交日
@@ -44,7 +46,8 @@ struct BacktestTrade: Identifiable, Equatable {
 // MARK: - 净值
 
 /// 净值点
-struct BacktestEquityPoint: Equatable {
+/// nonisolated：纯值类型，需在后台线程参与回测计算
+nonisolated struct BacktestEquityPoint: Equatable {
     var date: Int
     var equity: Double
 }
@@ -52,7 +55,8 @@ struct BacktestEquityPoint: Equatable {
 // MARK: - 指标
 
 /// 指标
-struct BacktestStats: Equatable {
+/// nonisolated：纯值类型，需在后台线程参与回测计算
+nonisolated struct BacktestStats: Equatable {
     var initialCapital: Double
     var finalEquity: Double
     var totalReturn: Double      // 0.15 = +15%
@@ -68,7 +72,8 @@ struct BacktestStats: Equatable {
 // MARK: - 结果
 
 /// 回测结果
-struct BacktestResult: Equatable {
+/// nonisolated：纯值类型，需在后台线程参与回测计算
+nonisolated struct BacktestResult: Equatable {
     var params: BacktestParams
     var stats: BacktestStats
     var equity: [BacktestEquityPoint]

@@ -42,6 +42,7 @@ struct StrategyPickListView: View {
 
             toolBar
             progressArea
+            timeoutNotice
 
             listContent
 
@@ -201,6 +202,20 @@ struct StrategyPickListView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    /// 准备行情超时提示：仅「跑完且本次曾超时」时出现，避免打扰
+    @ViewBuilder
+    private var timeoutNotice: some View {
+        if runner.phase == .finished, runner.prepareTimedOut {
+            Text("部分标的行情未就绪，本次结果可能遗漏命中（可稍后重跑）")
+                .font(.system(size: 11))
+                .foregroundColor(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+        }
     }
 
     /// 手写 3pt 细条进度（不用 SimCondProgressBar：它的文案是条件单档位口径）

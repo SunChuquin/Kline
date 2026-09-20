@@ -82,18 +82,21 @@ private final class BacktestCancelBox: @unchecked Sendable {
 /// - 输入输出全值类型；内部所有集合遍历显式排序（`sorted()`），无随机、无字典序依赖；
 /// - 费用与可买量复用 `SimTradingRules.default`，涨跌停复用 `limitRange(prevClose:)`，不复制口径；
 /// - 规则 → `SimCondKind` + `SimCondParams` + `SimCondDirective` 复用 `StrategyCondGenerator.drafts`。
-enum StrategyBacktestEngine {
+/// nonisolated：纯逻辑值类型集合，需在后台线程参与回测计算（与 SimCondParams 同做法）
+nonisolated enum StrategyBacktestEngine {
 
     /// 回测主入口
     /// - Parameters:
     ///   - bars: 标的 → **升序** bars
     ///   - pickHits: 标的 → 命中日期集合（as-of 已算好，元素为 YYYYMMDD）
     ///   - metas: 标的 → MetaItem（缺失时用占位元数据）
+    ///   - shouldCancel: 模拟阶段取消检查（逐交易日调用，须可在后台线程安全调用；默认不取消）
     nonisolated static func run(doc: FormulaDoc,
                                 bars: [Int: [KlineItem]],
                                 pickHits: [Int: Set<Int>],
                                 metas: [Int: MetaItem],
-                                params: BacktestParams) -> BacktestResult {
+                                params: BacktestParams,
+                                shouldCancel: (() -> Bool)? = nil) -> BacktestResult {
         var warnings: [String] = []
         var skipped: [String] = []
         let rules = SimTradingRules.default
@@ -490,8 +493,25 @@ enum StrategyBacktestEngine {
 
         // MARK: 4. 逐交易日推进
         for date in calendar {
-            // a. 开盘执行待成交动作（限价用触发价 ± 档位，市价用当日 open）
+            // 取消检查（逐日粒度）：模拟阶段可被中断，已模拟部分照常收尾成指标，不清空结果
+            if shouldCancel?() == true {
+                warnings.append("回测被取消，以下指标仅基于已模拟的前 \(equityPoints.count) 个交易日")
+                break
+            }
+
+            // a. T+1 释放：非当日买入的持仓，可卖数量回到全部
+            //    T+1 语义 = D 日买入的股票 D+1 日起可卖，因此释放必须早于当日成交执行，
+            //    否则次日开盘的卖出单会在 performSell 里因 availableQty 仍为 0 被误拒并永久丢弃
+            // （先取局部副本再写回：同一表达式里同时读写 positions[id] 会触发独占访问冲突）
+            for id in positions.keys.sorted() where positions[id]?.openedDate != date {
+                guard var pos = positions[id] else { continue }
+                pos.availableQty = pos.qty
+                positions[id] = pos
+            }
+
+            // b. 开盘执行待成交动作（限价用触发价 ± 档位，市价用当日 open）
             //    信号日当日不成交；顺延到该标的下一根 bar 的开盘（停牌自动跳过）
+            //    本步排在 T+1 释放之后：D 日买入产生的卖出单在 D+1 开盘才能真正成交
             if !pending.isEmpty {
                 var rest: [BacktestPendingAction] = []
                 rest.reserveCapacity(pending.count)
@@ -519,14 +539,6 @@ enum StrategyBacktestEngine {
                     }
                 }
                 pending = rest
-            }
-
-            // b. T+1 释放：非当日买入的持仓，可卖数量回到全部
-            // （先取局部副本再写回：同一表达式里同时读写 positions[id] 会触发独占访问冲突）
-            for id in positions.keys.sorted() where positions[id]?.openedDate != date {
-                guard var pos = positions[id] else { continue }
-                pos.availableQty = pos.qty
-                positions[id] = pos
             }
 
             // c. 持仓的规则判定（同一 bar 内止损腿优先于止盈腿；整仓离场后本标的当日不再动作）
@@ -836,6 +848,7 @@ final class StrategyBacktestRunner: ObservableObject {
             var preparedMetas: [Int: MetaItem] = [:]
             var preparedHits: [Int: Set<Int>] = [:]
             var runnerSkips: [String] = []
+            var scannedTotal = 0                    // 已扫描标的数（含未命中；用于结果页「扫描 N 只」）
             let limit = params.days + 60        // 多取 60 根，保证窗口首日也有昨收 / 均线起点
             var done = 0
 
@@ -853,6 +866,7 @@ final class StrategyBacktestRunner: ObservableObject {
                 let raw = db.fetchPeriodLimited(metaId: meta.id, table: params.period.folderName, limit: limit)
                 let series = Array(raw.reversed())      // date DESC → 升序
                 done += 1
+                scannedTotal += 1
                 defer { pushProgress(done) }
 
                 if series.count < 30 {
@@ -877,6 +891,8 @@ final class StrategyBacktestRunner: ObservableObject {
                     continue
                 }
 
+                // 只保留有命中的标的：未命中标的的 bars 立即释放，不再驻留（全市场大池内存控制）
+                guard !hits.isEmpty else { continue }
                 preparedBars[meta.id] = series
                 preparedMetas[meta.id] = meta
                 preparedHits[meta.id] = hits
@@ -890,7 +906,12 @@ final class StrategyBacktestRunner: ObservableObject {
 
             var outcome = StrategyBacktestEngine.run(doc: doc, bars: preparedBars,
                                                      pickHits: preparedHits, metas: preparedMetas,
-                                                     params: params)
+                                                     params: params,
+                                                     // 取消闭包只捕获锁保护的标志盒（@unchecked Sendable），
+                                                     // 不访问 @MainActor 上的属性，可在后台队列安全调用
+                                                     shouldCancel: { cancelBox.isCancelled })
+            // 扫描数 = 实际取数过的标的数（未命中标的的 bars 已释放，不能再取 bars.count）
+            outcome.scannedCount = scannedTotal
             if !runnerSkips.isEmpty { outcome.skipped.append(contentsOf: runnerSkips) }
             // 引用型选股（PICKREF）的正文在引擎侧不可见，这里用同一扫描器补一次未来函数提示
             if !refText.isEmpty, refText != doc.pickBody {

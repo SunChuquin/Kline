@@ -283,7 +283,7 @@ struct StrategyGenConfirmView: View {
             .buttonStyle(.plain)
             .disabled(draftCount == 0)
 
-            Text("条件单在行情刷新与手动检查时评估，非实时盯盘；与回测（下一阶段）的逐 bar 判定口径不同")
+            Text("条件单在行情刷新与手动检查时评估，非实时盯盘；与回测的逐 bar 判定口径不同")
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
                 .fixedSize(horizontal: false, vertical: true)

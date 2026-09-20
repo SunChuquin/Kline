@@ -60,6 +60,8 @@ final class StrategyPickRunner: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var hits: [StrategyPickHit] = []
+    /// 准备阶段是否 15 秒超时（超时后用已就绪的行继续跑，未就绪标的会被当成未命中 → 结果可能遗漏）
+    @Published private(set) var prepareTimedOut: Bool = false
 
     var isRunning: Bool {
         switch phase {
@@ -97,7 +99,11 @@ final class StrategyPickRunner: ObservableObject {
         let formula = refText.isEmpty ? doc.pickBody : refText
         let candidates = self.candidates(pool: pool)
 
+        // 新任务开始先清空上一次的结果与进度、超时标记：
+        // 否则切换到另一个策略后仍会看到上一个策略的命中，可能给新策略生成旧标的的条件单
         if !hits.isEmpty { hits = [] }
+        if prepareTimedOut { prepareTimedOut = false }
+        if phase != .idle { phase = .idle }
 
         // 公式与候选池都为空 → 直接给空结果（不进入准备 / 扫描）
         guard !formula.isEmpty, !candidates.isEmpty else {
@@ -145,6 +151,8 @@ final class StrategyPickRunner: ObservableObject {
 
         // 全部就绪，或等待超时（用已就绪的继续）→ 进入扫描
         if ready == candidates.count || Date().timeIntervalSince(startedAt) >= prepareTimeout {
+            // 超时且仍有未就绪标的：置超时标记，让清单页提示「结果可能遗漏命中」（start 时重置）
+            if ready < candidates.count, !prepareTimedOut { prepareTimedOut = true }
             startScanning(token: token, candidates: candidates, formula: formula)
             return
         }
