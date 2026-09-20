@@ -25,6 +25,8 @@ struct SimulationLayoutCView: View {
     @State private var ticketRequest: SimTicketRequest? = nil
     /// 条件单呈现请求（工具栏入口 → 管理页；持仓行入口 → 编辑器，二者共用一个呈现状态）
     @State private var condPresentation: SimCondEntryRequest? = nil
+    /// 公式管理中心（「交易策略」段）开合：由工具栏「策略公式」入口触发
+    @State private var showStrategyFormulas = false
     /// 改价目标委托
     @State private var amendTarget: SimOrder? = nil
     @State private var amendPriceText = ""
@@ -72,6 +74,18 @@ struct SimulationLayoutCView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
         .overlay(alignment: .top) { toastView }
+        // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
+        // 避免被全宽大表 ScrollView / 底部小卡裁剪；关闭走页内「返回」
+        .overlay {
+            if showStrategyFormulas {
+                ZStack {
+                    FormulaCenterView(initialKind: .strategy,
+                                      onClose: { showStrategyFormulas = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
+        }
         .simFullScreenTicket($ticketRequest)
         .alert("修改委托价", isPresented: amendBinding) {
             TextField("委托价", text: $amendPriceText)
@@ -214,6 +228,8 @@ struct SimulationLayoutCView: View {
             SimModuleSegmentedBar(module: $module, accountID: store.queryAccountID)
             Spacer(minLength: 8)
             condEntryButton
+            // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 44pt 行高
+            SimStrategyFormulaEntryButton { showStrategyFormulas = true }
             searchBox
             refreshButton
         }

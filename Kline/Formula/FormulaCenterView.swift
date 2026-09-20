@@ -37,7 +37,7 @@ struct FormulaCenterSettingRow: View {
 // MARK: - 公式管理中心页
 
 /// 公式管理中心页（全屏 overlay 页面）：三分段切换 技术指标 / 选股指标 / 交易策略。
-/// 技术指标段接入既有编辑器；选股 / 策略段本轮先做列表骨架（新建 / 编辑给内联提示）。
+/// 三段都接入各自编辑器：技术指标（自定义 / 系统）、选股公式、策略公式。
 struct FormulaCenterView: View {
     /// 初始分段
     var initialKind: FormulaKind = .tech
@@ -52,8 +52,6 @@ struct FormulaCenterView: View {
 
     /// 当前分段
     @State private var kind: FormulaKind
-    /// 选股 / 策略段的内联占位提示（编辑器下一步接入）
-    @State private var hint: String?
     /// 自定义技术指标新建 / 编辑浮层
     @State private var showCustomSheet = false
     @State private var editingCustom: CustomIndicator?
@@ -62,6 +60,9 @@ struct FormulaCenterView: View {
     /// 选股公式新建 / 编辑浮层
     @State private var showPickerSheet = false
     @State private var editingPicker: FormulaDoc?
+    /// 策略公式新建 / 编辑浮层
+    @State private var showStrategySheet = false
+    @State private var editingStrategy: FormulaDoc?
     /// 待删除的选股公式：被自选分组引用时先弹确认，确认后再解绑 + 删除
     @State private var pendingDeletePicker: FormulaDoc?
     /// 页面样例行情数据（候选池首只标的的 K 线），供三个编辑器的「测试公式」使用
@@ -161,7 +162,6 @@ struct FormulaCenterView: View {
             ForEach(FormulaKind.allCases) { k in
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) { kind = k }
-                    hint = nil
                 } label: {
                     Text(k.title)
                         .font(.system(size: 13, weight: kind == k ? .semibold : .regular))
@@ -347,15 +347,14 @@ struct FormulaCenterView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - 交易策略段（列表骨架）
+    // MARK: - 交易策略段
 
     private var strategySection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let hint { hintBanner(hint) }
             infoBanner("交易策略公式：由选股条件 + 交易规则组成，用于策略回测与信号提示")
 
             if library.strategies.isEmpty {
-                emptyCard("还没有策略公式", "点击下方「新建策略公式」创建；本轮编辑器将在下一步接入")
+                emptyCard("还没有策略公式", "点击下方「新建策略公式」创建：选股条件（内嵌或引用）+ 交易规则")
             } else {
                 VStack(spacing: 0) {
                     ForEach(library.strategies) { doc in
@@ -367,7 +366,8 @@ struct FormulaCenterView: View {
             }
 
             newButton("新建策略公式") {
-                showPlaceholder("策略公式编辑器将在下一步接入")
+                editingStrategy = nil
+                showStrategySheet = true
             }
         }
     }
@@ -388,7 +388,8 @@ struct FormulaCenterView: View {
             }
             Spacer(minLength: 8)
             Button {
-                showPlaceholder("策略公式编辑器将在下一步接入")
+                editingStrategy = doc
+                showStrategySheet = true
             } label: {
                 Text("编辑")
                     .font(.system(size: 13))
@@ -474,6 +475,23 @@ struct FormulaCenterView: View {
             .transition(.opacity)
             .zIndex(1000)
         }
+        if showStrategySheet || editingStrategy != nil {
+            // 策略公式编辑器：名称 + 选股条件（内嵌 / 引用二选一）+ 交易规则 + 预览校验
+            StrategyFormulaEditorView(
+                initialDoc: editingStrategy ?? FormulaDoc(id: "", kind: .strategy, name: ""),
+                data: sampleData,
+                onClose: {
+                    showStrategySheet = false
+                    editingStrategy = nil
+                },
+                onSaved: { _ in
+                    showStrategySheet = false
+                    editingStrategy = nil
+                }
+            )
+            .transition(.opacity)
+            .zIndex(1000)
+        }
     }
 
     // MARK: - 动作
@@ -488,13 +506,9 @@ struct FormulaCenterView: View {
             editingPicker = nil
             showPickerSheet = true
         case .strategy:
-            showPlaceholder("策略公式编辑器将在下一步接入")
+            editingStrategy = nil
+            showStrategySheet = true
         }
-    }
-
-    /// 页面内联占位提示条（编辑器下一步接入）
-    private func showPlaceholder(_ text: String) {
-        withAnimation(.easeOut(duration: 0.15)) { hint = text }
     }
 
     // MARK: - 摘要计算（不在 body 里做重计算）
@@ -590,16 +604,6 @@ struct FormulaCenterView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(Color(.secondarySystemBackground))
-            .cornerRadius(8)
-    }
-
-    private func hintBanner(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12))
-            .foregroundColor(.blue)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(Color.blue.opacity(0.1))
             .cornerRadius(8)
     }
 

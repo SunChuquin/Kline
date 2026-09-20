@@ -21,6 +21,8 @@ struct SimulationLayoutBView: View {
     @State private var ticketRequest: SimTicketRequest? = nil
     /// 条件单呈现请求（顶部条入口 → 管理页）
     @State private var condPresentation: SimCondEntryRequest? = nil
+    /// 公式管理中心（「交易策略」段）开合：由顶部条「策略公式」入口触发
+    @State private var showStrategyFormulas = false
     /// 新建账户
     @State private var showCreateAccount = false
     @State private var newAccountName = ""
@@ -48,6 +50,18 @@ struct SimulationLayoutBView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
         .overlay(alignment: .top) { toastView }
+        // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
+        // 避免被账户卡片横排 ScrollView / 模块宫格裁剪；关闭走页内「返回」
+        .overlay {
+            if showStrategyFormulas {
+                ZStack {
+                    FormulaCenterView(initialKind: .strategy,
+                                      onClose: { showStrategyFormulas = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
+        }
         .simFullScreenTicket($ticketRequest)
         .fullScreenCover(item: $detailModule) { module in
             SimModuleDetailSheet(module: module,
@@ -96,6 +110,8 @@ struct SimulationLayoutBView: View {
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 8)
             condEntryButton
+            // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 52pt 行高
+            SimStrategyFormulaEntryButton { showStrategyFormulas = true }
             Button(action: { showWalletAlert = true }) {
                 HStack(spacing: 4) {
                     Image(systemName: "wallet.pass").font(.system(size: 11))

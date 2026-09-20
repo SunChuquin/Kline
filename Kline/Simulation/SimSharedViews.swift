@@ -887,3 +887,27 @@ extension View {
         }
     }
 }
+
+// MARK: - 策略公式入口
+
+/// 工具栏「策略公式」入口按钮：模拟页三个布局（A / B / C）共用，
+/// 置于各自工具栏既有的「条件单」入口旁，点击打开公式管理中心的「交易策略」段。
+/// 视觉令牌与各布局工具栏「条件单」入口完全对齐（12.5pt semibold + 语义蓝 + 44×44 命中区），
+/// 不加内边距与圆角描边，以免撑高 44pt 工具栏行、挤压既有按钮。
+/// 边界：只出现在模拟页三个布局的工具栏；K 线图页 / 行情页 / 个人中心不出现本入口
+/// （行情页的公式入口另接「选股指标」段，与本入口互不影响）。
+struct SimStrategyFormulaEntryButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("策略公式")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(.blue)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sim.strategyFormula.entry")
+    }
+}
