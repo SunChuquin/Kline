@@ -28,7 +28,7 @@ fi
 
 # ---- 1. 选定目标设备 -------------------------------------------------------
 
-# 已启动的模拟器 UDID（取第一个；一般同时只开一个）
+# 已启动的模拟器 UDID；多台同时 Booted 时取最近启动的一台（最贴近刚在 Xcode 选中的目标）
 booted_simulator() {
   xcrun simctl list devices booted --json 2>/dev/null | python3 -c '
 import json, sys
@@ -36,9 +36,10 @@ try:
     d = json.load(sys.stdin)
 except Exception:
     print(""); sys.exit(0)
-out = [x["udid"] for devs in d.get("devices", {}).values()
-       for x in devs if x.get("state") == "Booted"]
-print(out[0] if out else "")'
+boots = [(x.get("lastBootedAt", ""), x["udid"])
+         for devs in d.get("devices", {}).values()
+         for x in devs if x.get("state") == "Booted"]
+print(max(boots)[1] if boots else "")'
 }
 
 # 已连接真机 ECID（00008020-XXXXXXXX 形态；排除占位符与 4 连字符的模拟器 UUID）
