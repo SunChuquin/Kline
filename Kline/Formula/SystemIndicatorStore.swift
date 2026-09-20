@@ -54,7 +54,7 @@ final class SystemIndicatorStore: ObservableObject {
         loadAllPeriods()
     }
 
-    /// 解析 .tdx 内容（NAME= / SCOPE= / GROUP= / COORD= / FORMULA: 后为多行模板）
+    /// 解析 .tdx 内容（KIND= / NAME= / SCOPE= / GROUP= / COORD= / FORMULA: 后为多行模板）
     private func parse(content: String, id: String) -> SystemIndicatorDef? {
         var name = id
         var scope = IndicatorScope.sub
@@ -68,7 +68,11 @@ final class SystemIndicatorStore: ObservableObject {
                 if !line.isEmpty { template.append(line) }
                 continue
             }
-            if line.hasPrefix("NAME=") {
+            if line.hasPrefix("KIND=") {
+                // KIND= 类型头：仅 TECH 在此装载；选股/策略或未知取值一律不装载，保证与选股/策略目录零交叉
+                let kindValue = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces).uppercased()
+                guard FormulaKind(rawValue: kindValue) == .tech else { return nil }
+            } else if line.hasPrefix("NAME=") {
                 name = String(line.dropFirst(5))
             } else if line.hasPrefix("SCOPE=") {
                 let v = String(line.dropFirst(6)).uppercased()
@@ -201,7 +205,7 @@ final class SystemIndicatorStore: ObservableObject {
         let scopeStr = def.scope == .main ? "main" : "sub"
         let groupLine = def.group.isEmpty ? "" : "GROUP=\(def.group)\n"
         let coordLine = def.coord.map { "COORD=\($0)\n" } ?? ""
-        let content = "NAME=\(def.name)\nSCOPE=\(scopeStr)\n\(groupLine)\(coordLine)FORMULA:\n\(template)"
+        let content = "KIND=TECH\nNAME=\(def.name)\nSCOPE=\(scopeStr)\n\(groupLine)\(coordLine)FORMULA:\n\(template)"
         return write(content, for: id, period: period)
     }
 

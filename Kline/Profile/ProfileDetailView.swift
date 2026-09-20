@@ -15,6 +15,8 @@ struct ProfileDetailView: View {
     @State private var showPanelLayoutPanel = false
     /// 模拟页布局选择弹窗开合
     @State private var showSimulationLayoutPanel = false
+    /// 公式管理中心页（全屏 overlay）开合
+    @State private var showFormulaCenter = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @ObservedObject private var layoutStore = TradingLayoutStore.shared
 
@@ -81,6 +83,12 @@ struct ProfileDetailView: View {
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
 
+                    // 公式管理（技术指标 / 选股指标 / 交易策略 三类公式分域入口）
+                    FormulaCenterSettingRow { showFormulaCenter = true }
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+
                     // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
                     LocalUpdateView()
                 }
@@ -136,16 +144,27 @@ struct ProfileDetailView: View {
                 .transition(.opacity)
                 .zIndex(1000)
             }
+            // 公式管理中心：全屏页面（铺满，无遮罩），关闭走页内「返回」
+            if showFormulaCenter {
+                ZStack {
+                    FormulaCenterView(initialKind: .tech, onClose: { showFormulaCenter = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
         }
-        // 三个下拉面板互斥：任一打开时关掉其余两个（iOS 15 的 onChange 为单参数闭包）
+        // 浮层互斥：任一打开时关掉其余（iOS 15 的 onChange 为单参数闭包）
         .onChange(of: showThemePanel) { newValue in
-            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false }
+            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showPanelLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showSimulationLayoutPanel = false }
+            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showSimulationLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFormulaCenter = false }
+        }
+        .onChange(of: showFormulaCenter) { newValue in
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false }
         }
     }
 }

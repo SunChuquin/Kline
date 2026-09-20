@@ -45,7 +45,7 @@ extension KlineChartView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     // 系统主图指标（数据驱动，集合来自 .tdx SCOPE=main）
-                    groupHeader("主图指标")
+                    groupHeader("技术指标公式 · 主图")
                     LazyVGrid(columns: gridColumns, spacing: 8) {
                         ForEach(mainIndicatorDefsForSheet, id: \.id) { def in
                             mainTile(def.name, on: config.mainIndicators(for: self.period).contains(def.id)) { toggleMain(def.id) }
@@ -55,21 +55,21 @@ extension KlineChartView {
 
                     // 系统指标公式编辑入口
                     if !mainIndicatorDefsForSheet.isEmpty {
-                        paramEntryRow(title: "公式编辑") {
+                        paramEntryRow(title: "公式编辑 · 技术指标公式") {
                             editorUI.showMainSheet = false
                             editorUI.systemEditorIsMain = true
                             showSystemEditor = true
                         }
                     }
 
-                    groupHeader("自定义指标（主图）")
+                    groupHeader("自定义技术指标（主图）")
                     HStack {
                         Button("+ 新增/管理") { editorUI.showMainSheet = false; editorUI.editorTarget = .main; showCustomEditor = true }
                             .font(.system(size: 13)).foregroundColor(.blue)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     if mainCustoms.isEmpty {
-                        Text("暂无主图自定义指标").font(.system(size: 12)).foregroundColor(.gray)
+                        Text("暂无主图自定义技术指标").font(.system(size: 12)).foregroundColor(.gray)
                             .padding(.horizontal, 16).padding(.bottom, 12)
                     } else {
                         ForEach(mainCustoms) { ind in mainCustomRow(ind) }
@@ -164,7 +164,7 @@ extension KlineChartView {
                     // 公式式系统指标（有 .tdx 模板，如 MACD/KDJ）才提供公式编辑；VOL/AMO 无模板不提供
                     if !m.isCustom,
                        SystemIndicatorStore.shared.template(for: m.kind, period: self.period) != nil {
-                        paramEntryRow(title: "\(m.kind) 公式编辑") {
+                        paramEntryRow(title: "\(m.kind) 公式编辑 · 技术指标公式") {
                             editorUI.showSubSheet = false
                             editorUI.systemEditorIsMain = false
                             editorUI.systemEditorSubId = m.kind
@@ -172,14 +172,14 @@ extension KlineChartView {
                         }
                     }
 
-                    groupHeader("自定义指标（副图）")
+                    groupHeader("自定义技术指标（副图）")
                     HStack {
                         Button("+ 新增/管理") { editorUI.showSubSheet = false; editorUI.editorTarget = .sub; showCustomEditor = true }
                             .font(.system(size: 13)).foregroundColor(.blue)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     if subCustoms.isEmpty {
-                        Text("暂无副图自定义指标").font(.system(size: 12)).foregroundColor(.gray)
+                        Text("暂无副图自定义技术指标").font(.system(size: 12)).foregroundColor(.gray)
                             .padding(.horizontal, 16).padding(.bottom, 12)
                     } else {
                         ForEach(subCustoms) { ind in subCustomRow(ind, model: m) }

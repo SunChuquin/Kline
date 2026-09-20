@@ -108,7 +108,8 @@ final class CustomIndicatorStore: ObservableObject {
         let fileName = Self.tdxFileName(for: ind)
         let fm = FileManager.default
         let scopeStr = ind.scope == .main ? "main" : "sub"
-        let content = "NAME=\(ind.name)\nSCOPE=\(scopeStr)\nFORMULA:\n\(ind.formula)"
+        // 首行写 KIND=TECH：自定义指标属技术指标公式，确保装载器只认技术指标
+        let content = "KIND=TECH\nNAME=\(ind.name)\nSCOPE=\(scopeStr)\nFORMULA:\n\(ind.formula)"
         for period in KlinePeriod.allCases {
             let dir = SystemIndicatorStore.writableDir(for: period)
             try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
