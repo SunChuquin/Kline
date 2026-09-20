@@ -215,18 +215,29 @@ struct FloatingAccessoryButton: View {
 
 /// 悬浮按钮点开的底部面板：样式对齐「指标选择面板」——35% 黑色遮罩（点击关闭）、
 /// 贴底面板（只圆顶部两角，底边直达物理屏幕底边）、头部标题 + 关闭按钮。
-/// 内容区暂空，仅放头部控件，待确认悬浮按钮手感后再填充。
+/// 内容区按 TradingLayoutStore.shared.panelLayout 分发到 QuickPanelLayouts.swift 的三套布局：
+/// A 上下文自适应交易卡（真实实现）、B / C（阶段二替换占位）。
 struct FloatingAccessoryPanel: View {
-    /// 面板高度占屏幕高度比例（内容为空时的临时高度，填充内容后再调整）
-    var heightFraction: CGFloat = 0.5
     let onClose: () -> Void
+
+    /// 布局偏好：面板打开期间在个人中心切换方案时实时换布局与高度
+    @ObservedObject private var layoutStore = TradingLayoutStore.shared
+
+    /// 面板高度占屏幕高度比例（按方案不同：A 0.67 / B 0.60 / C 0.35）
+    private var heightFraction: CGFloat {
+        switch layoutStore.panelLayout {
+        case .a: return 0.67
+        case .b: return 0.60
+        case .c: return 0.35
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
                 Color.black.opacity(0.35).ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { onClose() } }
+                    .onTapGesture { close() }
                 VStack(spacing: 0) {
                     // 头部：标题 + 关闭（字号/间距对齐 sheetHeader）
                     HStack {
@@ -234,15 +245,18 @@ struct FloatingAccessoryPanel: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.primary)
                         Spacer()
-                        Button("关闭") { withAnimation(.easeOut(duration: 0.15)) { onClose() } }
+                        Button("关闭") { close() }
                             .font(.system(size: 14))
                             .foregroundColor(.blue)
                             .accessibilityIdentifier("accessory.close")
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     Divider()
-                    // 内容区：暂空
-                    Spacer(minLength: 0)
+                    // 内容区：内容高度可能超过面板高度，统一包一层纵向滚动
+                    ScrollView(.vertical, showsIndicators: false) {
+                        panelContent
+                            .frame(maxWidth: .infinity, alignment: .top)
+                    }
                 }
                 .frame(width: geo.size.width, height: min(geo.size.height * heightFraction, 660))
                 .background(Color(.systemBackground))
@@ -256,5 +270,23 @@ struct FloatingAccessoryPanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// 按布局偏好分发面板内容
+    @ViewBuilder
+    private var panelContent: some View {
+        switch layoutStore.panelLayout {
+        case .a:
+            QuickPanelAView(onClose: onClose)
+        case .b:
+            QuickPanelPlaceholderView(styleTitle: QuickPanelLayoutStyle.b.title, onClose: onClose)
+        case .c:
+            QuickPanelPlaceholderView(styleTitle: QuickPanelLayoutStyle.c.title, onClose: onClose)
+        }
+    }
+
+    /// 关闭统一走淡出动画（遮罩点击与「关闭」按钮一致）
+    private func close() {
+        withAnimation(.easeOut(duration: 0.15)) { onClose() }
     }
 }
