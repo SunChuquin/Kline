@@ -51,25 +51,25 @@
 
 ## 阶段二：其余四套布局
 
-- [ ] Task 9: 快捷面板方案 B（分页式面板）
+- [x] Task 9: 快捷面板方案 B（分页式面板）
   - [ ] SubTask 9.1: `QuickPanelBView`：交易 / 持仓 / 委托三个分段 + 角标数量，复用 `TradeTicketView(style:.panel)` 与共享子块
   - [ ] SubTask 9.2: 持仓页行内「卖」切到交易页并填好数量；委托页提供「撤单 / 全部撤单」
 
-- [ ] Task 10: 快捷面板方案 C（闪电下单条）
+- [x] Task 10: 快捷面板方案 C（闪电下单条）
   - [ ] SubTask 10.1: `QuickPanelCView`：标的行情头 + 账户条 + 大字号数量控件（步进 100 股）+ 买入 / 卖出两个大按钮（默认市价）
   - [ ] SubTask 10.2: 「展开」切换到完整下单卡（复用 `TradeTicketView(style:.panel)` 或 `.bolt` 展开态）；卖出走二次确认
 
-- [ ] Task 11: 模拟页方案 B（账户卡片 + 模块宫格）
+- [x] Task 11: 模拟页方案 B（账户卡片 + 模块宫格）
   - [ ] SubTask 11.1: 新增 `Kline/Simulation/SimulationLayoutBView.swift`：顶部账户卡片横排（含迷你净值折线 + 新建账户卡）+ 2×2 模块摘要卡（持仓 / 当日委托 / 当日成交 / 历史中心）+ 底部买卖条
   - [ ] SubTask 11.2: 模块卡「查看全部 →」进入全屏明细列表（复用 `SimModuleTable`）
 
-- [ ] Task 12: 模拟页方案 C（券商经典顶栏式）
+- [x] Task 12: 模拟页方案 C（券商经典顶栏式）
   - [ ] SubTask 12.1: 新增 `Kline/Simulation/SimulationLayoutCView.swift`：顶部账户下拉 + 一行资产指标（含在途委托数）+ 全宽大表 + 在途委托 / 当日成交两个小卡 + 底部买卖条
   - [ ] SubTask 12.2: 账户下拉切换复用同一账户模型，表格随账户过滤
 
 - [ ] Task 13: 阶段二闭环
-  - [ ] SubTask 13.1: 三套面板布局与三套模拟页布局互切自测（高度、贴底、遮罩、按钮隐藏时序）
-  - [ ] SubTask 13.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(trading): 补齐快捷面板与模拟页 B/C 两套布局"`
+  - [x] SubTask 13.1: 三套面板布局与三套模拟页布局互切自测（高度、贴底、遮罩、按钮隐藏时序）
+  - [x] SubTask 13.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(trading): 补齐快捷面板与模拟页 B/C 两套布局"`（run=35500609739，退出码 6 构建成功）
   - [ ] SubTask 13.3: 交付说明，等待用户真机验收
 
 # Task Dependencies

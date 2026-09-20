@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kline 交易功能 UI 布局方案 · 快捷面板 × 多账户模拟页</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='4' y='10' width='3.4' height='10' fill='%23D92929'/%3E%3Crect x='10.3' y='5' width='3.4' height='15' fill='%23008C59'/%3E%3Crect x='16.6' y='8' width='3.4' height='12' fill='%23D92929'/%3E%3C/svg%3E">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --red:#D92929; --green:#008C59; --blue:#007AFF; --orange:#FF9500;
+  --ink:#000; --sub:#8E8E8E; --sub2:#AEAEB2;
+  --line:rgba(60,60,67,.14); --line2:rgba(127,127,127,.30);
+  --g6:#F2F2F7; --fill:#EDEDED; --fill3:rgba(120,120,128,.12);
+  --scrim:rgba(0,0,0,.35);
+  --gallery:#26282C; --card:#33363B; --card2:#3C4046; --gtext:#E9EBEF; --gsub:#A6ABB4;
+}
+html,body{background:var(--gallery)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;
+  color:var(--gtext); padding:34px 28px 80px; -webkit-font-smoothing:antialiased;
+}
+.num,.mono{font-variant-numeric:tabular-nums;font-family:"SF Mono",Menlo,Considio,"SF Pro Text",monospace;letter-spacing:-.2px}
+.wrap{max-width:1080px;margin:0 auto}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::selection{background:rgba(0,122,255,.25)}
+
+/* ===== 画廊头部 ===== */
+.hero{margin-bottom:26px}
+.hero h1{font-size:26px;font-weight:800;letter-spacing:.2px}
+.hero p{color:var(--gsub);font-size:14px;line-height:1.7;margin-top:8px;max-width:880px}
+.hero .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:12px;color:var(--gsub);border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:3px 11px;background:rgba(255,255,255,.04)}
+.chip b{color:var(--gtext);font-weight:600}
+
+/* ===== 区块 ===== */
+.section{margin-top:42px}
+.sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--blue);border-radius:6px;padding:2px 8px}
+.sec-head h2{font-size:20px;font-weight:800}
+.sec-head .sub{font-size:13px;color:var(--gsub);line-height:1.6;width:100%;margin-top:4px;max-width:920px}
+
+.switcher{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 14px;align-items:center}
+.switcher .lab{font-size:12px;color:var(--gsub);margin-right:2px}
+.seg{font-size:13px;font-weight:600;color:var(--gsub);background:var(--card);border:1px solid rgba(255,255,255,.10);
+  border-radius:8px;padding:7px 14px;transition:.15s}
+.seg:hover{border-color:rgba(255,255,255,.28)}
+.seg.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.seg .tag{font-size:10px;font-weight:700;background:rgba(255,255,255,.18);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:1px}
+.seg.on .tag{background:rgba(255,255,255,.25)}
+.switcher .gap{width:14px}
+
+/* ===== 舞台：设备框 + 标注栏 ===== */
+.stage{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.frame-col{flex:none}
+.bezel{background:#0C0D0F;padding:11px;border-radius:20px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.screen-wrap{width:573px;height:430px;overflow:hidden;position:relative;border-radius:7px;background:#fff}
+.screen{width:1024px;height:768px;transform-origin:top left;transform:scale(.55957);
+  position:absolute;top:0;left:0;background:#fff;display:none;overflow:hidden;color:var(--ink)}
+.screen.active{display:block}
+.frame-cap{font-size:12px;color:var(--gsub);margin-top:10px;text-align:center}
+.frame-cap b{color:var(--gtext)}
+
+.notes{width:330px;flex:1;min-width:280px}
+.ncard{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:15px 16px;margin-bottom:10px}
+.ncard h3{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+.rec{font-size:10px;font-weight:800;color:#fff;background:var(--red);border-radius:4px;padding:2px 6px;letter-spacing:.5px}
+.ncard .desc{font-size:12.5px;color:var(--gsub);line-height:1.65;margin-top:7px}
+.ann{list-style:none;margin-top:4px}
+.ann li{display:flex;gap:9px;font-size:12.5px;line-height:1.55;color:#D7DAE0;padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+.ann li:last-child{border-bottom:none}
+.ann .n{flex:none;width:19px;height:19px;border-radius:50%;background:var(--blue);color:#fff;font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;margin-top:1px}
+.ann b{color:#fff;font-weight:600}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.pc .box{background:rgba(255,255,255,.04);border-radius:8px;padding:8px 10px}
+.pc .box h4{font-size:11px;font-weight:700;margin-bottom:5px;letter-spacing:.5px}
+.pc .pro h4{color:#54c98f}.pc .con h4{color:#f08a8a}
+.pc .box div{font-size:11.5px;color:var(--gsub);line-height:1.55;padding-left:11px;position:relative}
+.pc .pro div::before{content:"＋";position:absolute;left:0;color:#54c98f}
+.pc .con div::before{content:"－";position:absolute;left:0;color:#f08a8a}
+
+/* ===== 方案对比表 ===== */
+.cmp{margin-top:18px;border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:var(--card)}
+.cmp table{width:100%;border-collapse:collapse;font-size:12.5px}
+.cmp th,.cmp td{padding:10px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,.07);line-height:1.5}
+.cmp th{background:rgba(255,255,255,.05);font-weight:700;color:#fff;font-size:12px}
+.cmp td:first-child{color:var(--gsub);font-weight:600;white-space:nowrap}
+.cmp tr:last-child td{border-bottom:none}
+.cmp .pick{color:#ff8a8a;font-weight:700}
+.cmp .star{color:#FFD66B}
+.cmp-wrap{overflow-x:auto}
+
+/* ===== 屏内通用 iOS 组件 ===== */
+.screen .fill3{background:var(--fill3)}
+.screen .g6{background:var(--g6)}
+.s-row{display:flex;align-items:center}
+.s-between{display:flex;align-items:center;justify-content:space-between}
+.pad16{padding:0 16px}
+.hairline{height:.5px;background:var(--line2)}
+.hairline1{height:1px;background:var(--line)}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.35);z-index:30}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;z-index:31;
+  display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -8px 40px rgba(0,0,0,.18)}
+.sheet-hd{height:46px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.sheet-hd .t{font-size:16px;font-weight:700}
+.sheet-hd .x{font-size:14px;color:var(--blue)}
+.sheet-hd .x.gray{color:var(--sub)}
+.sheet-body{flex:1;overflow:hidden;display:flex;flex-direction:column}
+
+.marker{position:absolute;z-index:80;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;
+  font-size:11.5px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 7px rgba(0,0,0,.35);border:1.5px solid #fff}
+body.hide-ann .marker{display:none}
+
+.toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.82);color:#fff;
+  font-size:13px;padding:11px 18px;border-radius:10px;z-index:200;display:none;max-width:420px;text-align:center;line-height:1.5}
+.toast.show{display:block}
+
+/* 详情页工具栏 */
+.ios-topbar{height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px}
+.back{width:30px;height:28px;background:var(--fill);border-radius:6px;display:flex;align-items:center;justify-content:center}
+.tname{font-size:14px;font-weight:700;white-space:nowrap}
+.tcode{font-size:11px;color:var(--sub);white-space:nowrap}
+.tbtn{width:32px;height:28px;display:flex;align-items:center;justify-content:center;color:var(--sub)}
+.tbtn.small{width:28px}
+.legend{height:18px;flex:none;display:flex;align-items:center;gap:8px;padding:0 6px;overflow:hidden}
+.ind-btn{font-size:10px;font-weight:500;background:var(--fill);border-radius:4px;padding:2px 6px;white-space:nowrap}
+.li{font-size:11px;white-space:nowrap}
+.quote-bar{height:18px;flex:none;display:flex;align-items:center;justify-content:center;gap:7px;background:#FAFAFA}
+.qk{font-size:9px;color:var(--sub)}.qv{font-size:10px}
+.taxis{height:18px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 6px;font-size:10px;color:var(--sub)}
+
+/* 底部导航栏 */
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:47px;background:#fff;border-top:.5px solid var(--line2);
+  display:flex;z-index:5}
+.tabbar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--sub)}
+.tabbar .tab.on{color:var(--blue)}
+.tabbar .tab svg{width:19px;height:19px}
+.tabbar .tab span{font-size:10px}
+
+/* 列表页 */
+.lv-title{height:52px;display:flex;align-items:center;padding:0 16px;font-size:20px;font-weight:800}
+.wl-row{height:52px;display:flex;align-items:center;padding:0 16px;border-bottom:.5px solid var(--line);gap:10px}
+.wl-row .nm{font-size:14px;font-weight:600;width:88px;white-space:nowrap}
+.wl-row .cd{font-size:10.5px;color:var(--sub);width:86px}
+.wl-row .sp{flex:1}
+.wl-row .px{font-size:14px;width:92px;text-align:right}
+.wl-row .pct{font-size:12px;width:64px;text-align:right;border-radius:5px;padding:4px 0;color:#fff;margin-left:8px}
+
+/* ===== 下单卡组件 ===== */
+.acct-strip{height:40px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px;background:var(--g6);border-bottom:.5px solid var(--line)}
+.acct-chip{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;background:#fff;border:1px solid var(--line);
+  border-radius:14px;padding:4px 10px}
+.acct-chip svg{width:11px;height:11px;color:var(--sub)}
+.session{margin-left:auto;font-size:10.5px;color:var(--sub);display:flex;align-items:center;gap:5px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--red)}
+.tk-quote{padding:8px 16px 6px;display:flex;align-items:baseline;gap:10px;border-bottom:.5px solid var(--line)}
+.tk-quote .nm{font-size:14px;font-weight:700}
+.tk-quote .cd{font-size:11px;color:var(--sub)}
+.tk-quote .px{font-size:19px;font-weight:700;margin-left:auto}
+.tk-quote .chg{font-size:11px}
+.seg3{display:flex;background:var(--g6);border-radius:8px;padding:2px;margin:8px 16px 2px}
+.seg3 button{flex:1;font-size:12.5px;font-weight:600;color:var(--sub);border-radius:6px;padding:6px 0}
+.seg3 button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.seg3 button.on.buy{color:var(--red)}.seg3 button.on.sell{color:var(--green)}
+.fld{display:flex;align-items:center;padding:9px 16px;gap:10px;border-bottom:.5px solid var(--line)}
+.fld .lab{font-size:12.5px;color:var(--sub);width:56px;flex:none}
+.fld .steppers{display:flex;gap:6px;margin-left:auto}
+.stp{width:30px;height:30px;border-radius:7px;background:var(--g6);font-size:17px;color:var(--blue);font-weight:500;
+  display:flex;align-items:center;justify-content:center;line-height:1}
+.fld input{flex:1;border:none;outline:none;text-align:right;font-size:16px;font-weight:700;background:transparent;min-width:0}
+.fld .unit{font-size:11px;color:var(--sub);width:34px}
+.qchips{display:flex;gap:6px;padding:6px 16px 10px}
+.qchips button{flex:1;font-size:11.5px;color:var(--blue);background:var(--g6);border-radius:6px;padding:6px 0;font-weight:500}
+.qchips button.on{background:rgba(0,122,255,.12);border:1px solid rgba(0,122,255,.4)}
+.tk-meta{display:flex;justify-content:space-between;padding:4px 16px 8px;font-size:11px;color:var(--sub)}
+.qacts{display:flex;gap:8px;padding:0 16px 8px}
+.qacts button{flex:1;font-size:11.5px;border-radius:7px;padding:7px 0;background:var(--g6);color:var(--ink);font-weight:500}
+.qacts button.danger{color:var(--green)}
+.submit-row{display:flex;gap:10px;padding:10px 16px 14px;border-top:.5px solid var(--line)}
+.bigbtn{flex:1;height:46px;border-radius:10px;font-size:16px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px}
+.bigbtn.buy{background:var(--red)}.bigbtn.sell{background:var(--green)}
+.bigbtn:active{opacity:.85}
+.hold-mini{margin:0 16px 8px;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.hold-mini .hm-h{background:var(--g6);font-size:11px;color:var(--sub);padding:6px 10px;display:flex;justify-content:space-between}
+.hold-mini .hm-r{display:flex;justify-content:space-between;font-size:12px;padding:7px 10px;align-items:center}
+.hm-mini .hm-r .ops button{font-size:11px;color:var(--blue);margin-left:12px}
+
+/* 模拟页 */
+.sim-top{height:52px;flex:none;display:flex;align-items:center;padding:0 18px;border-bottom:.5px solid var(--line2)}
+.sim-top .ttl{font-size:19px;font-weight:800}
+.sim-top .act{font-size:12px;color:var(--blue);display:flex;align-items:center;gap:5px;margin-left:16px}
+.sim-body{flex:1;display:flex;min-height:0;overflow:hidden}
+.sb{width:216px;flex:none;background:var(--g6);border-right:.5px solid var(--line2);display:flex;flex-direction:column;overflow:hidden}
+.sb-lab{font-size:10.5px;font-weight:600;color:var(--sub);padding:12px 16px 5px;letter-spacing:.5px}
+.acc-row{display:flex;align-items:center;gap:9px;padding:9px 14px;margin:0 8px;border-radius:9px;cursor:pointer}
+.acc-row .ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex:none}
+.acc-row .nm{font-size:13px;font-weight:600;line-height:1.3}
+.acc-row .sub{font-size:10px;color:var(--sub);line-height:1.4}
+.acc-row .pl{margin-left:auto;font-size:11px;font-weight:700;text-align:right}
+.acc-row.on{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.10)}
+.acc-add{display:flex;align-items:center;gap:8px;padding:10px 22px;font-size:12.5px;color:var(--blue)}
+.sb .sb-foot{margin-top:auto;border-top:.5px solid var(--line);padding:6px 8px}
+.sb-foot .fi{display:flex;align-items:center;gap:9px;padding:9px 12px;font-size:12.5px;color:var(--ink);border-radius:8px}
+.sb-foot .fi svg{width:16px;height:16px;color:var(--sub)}
+
+.main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.sum-band{flex:none;display:flex;padding:12px 16px 10px;gap:0;border-bottom:.5px solid var(--line2);background:#fff}
+.stat{flex:1;padding:0 12px;border-right:.5px solid var(--line)}
+.stat:first-child{padding-left:0}.stat:last-child{border-right:none}
+.stat .k{font-size:10.5px;color:var(--sub);margin-bottom:3px}
+.stat .v{font-size:16px;font-weight:700;line-height:1.2}
+.stat .v.sm{font-size:14px}
+.stat .d{font-size:10px;margin-top:2px}
+.spark{width:172px;flex:none;padding-left:14px;border-left:.5px solid var(--line);display:flex;flex-direction:column}
+.spark .k{font-size:10.5px;color:var(--sub)}.spark svg{flex:1;width:172px}
+
+.mod-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px 6px}
+.modseg{display:flex;background:var(--g6);border-radius:8px;padding:2px;gap:2px}
+.modseg button{font-size:12.5px;font-weight:600;color:var(--sub);border-radius:6px;padding:6px 13px;display:flex;align-items:center;gap:5px}
+.modseg button .badge{font-size:9px;background:var(--red);color:#fff;border-radius:8px;padding:1px 5px;font-weight:700}
+.modseg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.mod-tools{margin-left:auto;display:flex;gap:7px;align-items:center}
+.mini-in{display:flex;align-items:center;gap:5px;background:var(--g6);border-radius:7px;padding:6px 9px;font-size:11.5px;color:var(--sub)}
+.mini-in input{border:none;background:none;outline:none;width:88px;font-size:11.5px;color:var(--ink)}
+.tbtn2{font-size:11.5px;color:var(--blue);background:var(--g6);border-radius:7px;padding:6px 10px;display:flex;align-items:center;gap:5px}
+
+.table-wrap{flex:1;overflow:hidden;position:relative}
+table.t{width:100%;border-collapse:collapse;table-layout:fixed}
+table.t th{background:var(--g6);font-size:10.5px;font-weight:600;color:var(--sub);padding:8px 8px;text-align:right;white-space:nowrap}
+table.t th.l{text-align:left}
+table.t td{font-size:12.5px;padding:9px 8px;text-align:right;border-bottom:.5px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.t td.l{text-align:left}
+table.t .st{font-size:10.5px;border-radius:4px;padding:2px 7px;display:inline-block}
+.st.filled{color:var(--sub);background:var(--g6)}
+.st.open{color:var(--red);background:rgba(217,41,41,.10)}
+.st.part{color:#B07A00;background:rgba(255,149,0,.12)}
+.st.cancel{color:var(--sub);background:var(--g6)}
+.opbtn{font-size:11px;color:var(--blue);border:1px solid var(--blue);border-radius:6px;padding:3px 9px;margin-left:5px}
+.opbtn.sell{color:var(--green);border-color:var(--green)}
+.opbtn.ghost{color:var(--sub);border-color:var(--line2)}
+.dir-tag{font-size:10.5px;font-weight:700;border-radius:4px;padding:2px 6px}
+.dir-tag.b{color:var(--red);background:rgba(217,41,41,.09)}
+.dir-tag.s{color:var(--green);background:rgba(0,140,89,.09)}
+
+.bbar{flex:none;height:58px;display:flex;align-items:center;gap:12px;padding:0 16px 12px;border-top:.5px solid var(--line2);background:#fff}
+.bbar .hint{font-size:11px;color:var(--sub);line-height:1.5}
+.bbar .bb{width:150px;height:42px;border-radius:10px;color:#fff;font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:7px}
+.bbar .bb.buy{background:var(--red)}.bbar .bb.sell{background:var(--green)}
+
+/* 全屏下单页 */
+.tk-cover{position:absolute;inset:0;z-index:90;display:none}
+.tk-cover.show{display:block}
+.tk-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:600px;max-height:700px;
+  background:#fff;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(0,0,0,.4)}
+.tk-card .sheet-hd{height:50px}
+.tk-dir2{display:flex;margin:10px 18px 0;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.tk-dir2 button{flex:1;padding:11px 0;font-size:15px;font-weight:800;background:var(--g6)}
+.tk-dir2 button.on.buy{background:var(--red);color:#fff}.tk-dir2 button.on.sell{background:var(--green);color:#fff}
+.tk-dir2 button:not(.on){color:var(--sub)}
+.tk-sec{padding:0 18px}
+.tk-line{display:flex;align-items:center;padding:11px 0;border-bottom:.5px solid var(--line);font-size:13px}
+.tk-line .k{color:var(--sub);width:84px;flex:none}
+.tk-line .v{margin-left:auto;font-weight:600;display:flex;align-items:center;gap:8px}
+.tk-line .v input{text-align:right;border:none;outline:none;font-size:15px;font-weight:700;width:120px;background:transparent}
+.tk-line .v.sel{color:var(--blue);font-weight:500}
+.tk-grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
+.fee-box{margin:12px 18px 0;background:var(--g6);border-radius:10px;padding:10px 14px;font-size:11.5px;color:var(--sub);line-height:1.9}
+.fee-box b{color:var(--ink);font-weight:600}
+.tk-foot{padding:12px 18px 16px;display:flex;gap:12px}
+.tk-foot .bigbtn{flex:1;height:50px}
+.quotes5{display:flex;margin:6px 18px 0;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.quotes5 .q5{flex:1;text-align:center;padding:6px 0;font-size:10.5px;line-height:1.5;border-right:.5px solid var(--line)}
+.quotes5 .q5:last-child{border-right:none}
+.quotes5 .q5 .p{font-weight:700}
+
+/* 方案B 面板分段 */
+.sheet-seg{display:flex;margin:8px 16px 4px;background:var(--g6);border-radius:8px;padding:2px}
+.sheet-seg button{flex:1;font-size:12.5px;font-weight:600;color:var(--sub);border-radius:6px;padding:6px 0}
+.sheet-seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.sheet-seg button .badge{font-size:9px;background:var(--red);color:#fff;border-radius:8px;padding:1px 5px;margin-left:4px}
+
+/* 方案B 模拟页 卡片 */
+.acc-cards{display:flex;gap:12px;padding:12px 16px;flex:none}
+.acc-card{width:218px;flex:none;border-radius:12px;padding:12px 14px;color:#fff;display:flex;flex-direction:column;gap:5px;cursor:pointer}
+.acc-card.add{background:var(--g6);color:var(--blue);align-items:center;justify-content:center;border:1.5px dashed var(--line2);font-size:12.5px;font-weight:600;gap:7px;min-height:104px}
+.acc-card .nm{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px}
+.acc-card .ta{font-size:17px;font-weight:800}
+.acc-card .pl{font-size:11px;opacity:.92;display:flex;justify-content:space-between}
+.mod-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:4px 16px 14px;flex:1;min-height:0}
+.mod-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;cursor:pointer;background:#fff}
+.mod-card h4{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px}
+.mod-card h4 .cnt{font-size:10px;background:var(--g6);color:var(--sub);border-radius:8px;padding:1px 7px;font-weight:600}
+.mod-card .mc-body{flex:1;margin-top:8px;overflow:hidden}
+.mc-row{display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;color:#3a3a3c}
+.mc-row .s{color:var(--sub)}
+.mod-card .more{font-size:11px;color:var(--blue);margin-top:auto;padding-top:6px}
+
+/* 落地说明 */
+.impl{margin-top:40px;background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:22px 24px}
+.impl h2{font-size:18px;font-weight:800;margin-bottom:12px}
+.impl .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.impl .it{background:rgba(255,255,255,.04);border-radius:10px;padding:13px 15px}
+.impl .it h4{font-size:13px;font-weight:700;margin-bottom:6px;color:#fff}
+.impl .it p{font-size:12px;color:var(--gsub);line-height:1.65}
+.impl .it code{background:rgba(255,255,255,.08);border-radius:4px;padding:1px 5px;font-size:11px;color:#9ED0FF}
+.foot{margin-top:34px;text-align:center;font-size:12px;color:#6c7178}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>Kline 交易功能 · UI 布局方案原型</h1>
+    <p>两块需求：① 旧悬浮按钮点开的<b style="color:#fff">快捷面板</b>增加快捷交易；② <b style="color:#fff">模拟 Tab</b> 改造为多账户、完整交易与完整历史。所有画面按真机形态绘制（iPad 横屏 1024×768、涨红跌绿、贴底面板圆角 16、SF 字体），画面内按钮可点。</p>
+    <div class="meta">
+      <span class="chip">样机尺寸 <b>1024×768</b></span>
+      <span class="chip">面板样式对齐 <b>FloatingAccessoryPanel / 指标选择面板</b></span>
+      <span class="chip">示例数据，非真实行情</span>
+      <button class="chip" id="annToggle" style="cursor:pointer">标注：开（点击切换）</button>
+    </div>
+  </div>
+
+  <!-- SVG 图标库 -->
+  <svg width="0" height="0" style="position:absolute" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <symbol id="i-house" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="11" rx="4"/><path d="M7 11.5v4M5 13.5h4M15.5 12.5h.01M18 15h.01"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5h6l1 7.5 2.5 2v1.5h-15v-1.5l2.5-2 1-7.5z"/><path d="M12 14.5v6"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="3.2"/><circle cx="17" cy="12" r="3.2"/><path d="M10.2 12h3.6"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l1 8 3 3v2H5v-2l3-3z"/><path d="M12 16v5"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M3 9h18M16 14.5h2"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-12H12z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.5M4 4v4.5h4.5M4 13a8 8 0 0 0 13.7 4.7L20 15.5M20 20v-4.5h-4.5"/></symbol>
+  </svg>
+
+  <!-- ================= 区块一：快捷面板 ================= -->
+  <div class="section" id="sec1">
+    <div class="sec-head">
+      <span class="sec-no">区块一</span>
+      <h2>旧按钮 · 快捷交易面板</h2>
+      <div class="sub">旧按钮在「自选 / 行情」及其进入的 K 线详情页常驻，点击弹出贴底面板（现为空）。面板有两种打开上下文：<b style="color:#fff">详情页有明确标的</b>，可直接下单；<b style="color:#fff">列表页无标的</b>，先选标的再下单。下面三套方案都兼容这两种上下文。</div>
+    </div>
+
+    <div class="switcher">
+      <span class="lab">方案</span>
+      <button class="seg on" data-opt="qa">A · 上下文自适应交易卡 <span class="tag">推荐</span></button>
+      <button class="seg" data-opt="qb">B · 分页式面板</button>
+      <button class="seg" data-opt="qc">C · 闪电下单条</button>
+      <span class="gap"></span>
+      <span class="lab" id="ctxLab">打开位置</span>
+      <button class="seg on" data-ctx="detail">K 线详情页</button>
+      <button class="seg" data-ctx="list">自选 / 行情列表</button>
+    </div>
+
+    <div class="stage">
+      <div class="frame-col">
+        <div class="bezel">
+          <div class="screen-wrap">
+
+            <!-- ===== 方案 A · 详情页上下文 ===== -->
+            <div class="screen active" id="scr-qa-detail">
+              <div data-bg="detail"></div>
+              <div class="scrim"></div>
+              <div class="sheet" style="height:516px">
+                <div class="sheet-hd">
+                  <span class="t">快捷面板</span>
+                  <span class="x" data-close>关闭</span>
+                </div>
+                <div class="hairline1"></div>
+
+                <div class="acct-strip">
+                  <span class="acct-chip" data-act="toast:弹出账户切换（主策略 / 打板 / 低吸）">主策略账户 <svg><use href="#i-chev-d" xlink:href="#i-chev-d"/></svg></span>
+                  <span class="acct-chip" style="font-weight:500;color:var(--sub)">可用 25.92万</span>
+                  <span class="session"><span class="dot"></span>连续竞价 · 14:52:06</span>
+                </div>
+
+                <div class="tk-quote">
+                  <span class="nm">贵州茅台</span><span class="cd num">600519.SH</span>
+                  <span class="px num" style="color:var(--red)">1466.17</span>
+                  <span class="chg num" style="color:var(--red)">+4.49&nbsp;+0.31%</span>
+                </div>
+
+                <div class="seg3" data-tkseg>
+                  <button class="on buy" data-dir="buy">买入</button>
+                  <button data-dir="sell">卖出</button>
+                  <button data-ptype style="flex:0 0 64px">市价</button>
+                </div>
+
+                <div class="fld">
+                  <span class="lab">委托价</span>
+                  <button class="stp" data-step="price" data-d="-1">−</button>
+                  <input class="num" value="1466.17" data-price>
+                  <button class="stp" data-step="price" data-d="1">＋</button>
+                  <span class="unit">元</span>
+                </div>
+                <div class="fld" style="border-bottom:none">
+                  <span class="lab">数量</span>
+                  <button class="stp" data-step="qty" data-d="-100">−</button>
+                  <input class="num" value="100" data-qty>
+                  <button class="stp" data-step="qty" data-d="100">＋</button>
+                  <span class="unit">股</span>
+                </div>
+                <div class="qchips">
+                  <button data-pos="0.25">1/4 仓</button>
+                  <button data-pos="0.33">1/3 仓</button>
+                  <button data-pos="0.5">半仓</button>
+                  <button data-pos="1">全仓</button>
+                </div>
+                <div class="tk-meta">
+                  <span>100 股整数倍 · <span data-avail>可买 100 股</span></span>
+                  <span class="num">预计金额 146,617.00</span>
+                </div>
+
+                <div class="qacts">
+                  <button data-act="toast:已按全仓数量填入">全仓买入</button>
+                  <button data-act="toast:打开撤单列表（当前 2 笔在途）">一键撤单 (2)</button>
+                  <button class="danger" data-act="toast:卖出 600 股 · 需二次确认">一键清仓</button>
+                </div>
+
+                <div class="hold-mini">
+                  <div class="hm-h"><span>本账户该股持仓</span><span class="num">成本 1452.30</span></div>
+                  <div class="hm-r">
+                    <span class="num" style="font-size:12.5px">持仓 <b>500</b> 股 · 可用 <b>500</b> 股</span>
+                    <span class="num" style="color:var(--red);font-weight:700">+6,935.00（+0.96%）</span>
+                  </div>
+                </div>
+
+                <div class="submit-row">
+                  <button class="bigbtn buy" data-submit>买入下单 · 146,617.00</button>
+                </div>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+            <!-- ===== 方案 A · 列表页上下文 ===== -->
+            <div class="screen" id="scr-qa-list">
+              <div data-bg="list"></div>
+              <div class="scrim"></div>
+              <div class="sheet" style="height:512px">
+                <div class="sheet-hd">
+                  <span class="t">快捷面板</span>
+                  <span class="x" data-close>关闭</span>
+                </div>
+                <div class="hairline1"></div>
+
+                <!-- 列表态 -->
+                <div class="sheet-body" data-listview>
+                  <div class="acct-strip" style="height:58px;align-items:stretch;padding:8px 16px;gap:10px">
+                    <div style="flex:1;background:#fff;border:1px solid var(--line);border-radius:9px;display:flex;align-items:center;justify-content:space-between;padding:0 12px"
+                         data-act="toast:弹出账户切换（主策略 / 打板 / 低息 / 全部汇总）">
+                      <div><div style="font-size:12.5px;font-weight:700">主策略账户</div><div class="num" style="font-size:10px;color:var(--sub)">总资产 102.84万</div></div>
+                      <svg style="width:13px;height:13px;color:var(--sub)"><use href="#i-chev-d" xlink:href="#i-chev-d"/></svg>
+                    </div>
+                    <div style="flex:1;background:#fff;border:1px solid var(--line);border-radius:9px;display:flex;align-items:center;justify-content:space-between;padding:0 12px">
+                      <div><div style="font-size:10px;color:var(--sub)">当日盈亏</div><div class="num" style="font-size:13px;font-weight:700;color:var(--red)">+2,841</div></div>
+                      <div><div style="font-size:10px;color:var(--sub)">可用</div><div class="num" style="font-size:13px;font-weight:700">25.92万</div></div>
+                    </div>
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 16px 6px">
+                    <button class="qentry" data-act="toast:未选择标的：请在下方自选列表点「买」" style="border:none;border-radius:10px;background:rgba(217,41,41,.08);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--red)">
+                      <svg style="width:19px;height:19px"><use href="#i-bolt" xlink:href="#i-bolt"/></svg><span style="font-size:12px;font-weight:700">闪电买入</span></button>
+                    <button class="qentry" data-act="toast:未选择标的：请在下方自选列表点「卖」" style="border:none;border-radius:10px;background:rgba(0,140,89,.08);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--green)">
+                      <svg style="width:19px;height:19px"><use href="#i-bolt" xlink:href="#i-bolt"/></svg><span style="font-size:12px;font-weight:700">闪电卖出</span></button>
+                    <button class="qentry" data-act="toast:打开撤单列表（当前 2 笔在途）" style="border:none;border-radius:10px;background:var(--g6);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--ink)">
+                      <svg style="width:19px;height:19px;color:var(--sub)"><use href="#i-clock" xlink:href="#i-clock"/></svg><span style="font-size:12px;font-weight:700">一键撤单 <span style="color:var(--red)">2</span></span></button>
+                    <button class="qentry" data-act="toast:跳转模拟页 · 资金流水（快捷面板不放重操作）" style="border:none;border-radius:10px;background:var(--g6);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--ink)">
+                      <svg style="width:19px;height:19px;color:var(--sub)"><use href="#i-wallet" xlink:href="#i-wallet"/></svg><span style="font-size:12px;font-weight:700">资金 / 转账</span></button>
+                  </div>
+
+                  <div style="font-size:11px;font-weight:600;color:var(--sub);padding:8px 16px 3px;display:flex;justify-content:space-between">
+                    <span>自选 · 点行内按钮直接下单</span><span style="color:var(--blue)">搜索代码 / 名称</span>
+                  </div>
+                  <div id="wlMini"></div>
+
+                  <div style="font-size:11px;font-weight:600;color:var(--sub);padding:8px 16px 3px">在途委托</div>
+                  <div style="margin:0 16px;border:1px solid var(--line);border-radius:9px;overflow:hidden">
+                    <div style="display:flex;align-items:center;font-size:12px;padding:8px 10px;border-bottom:.5px solid var(--line)">
+                      <span class="dir-tag b">买</span><span style="margin:0 8px;font-weight:600">东方财富</span>
+                      <span class="num" style="color:var(--sub)">市价 · 500 股</span>
+                      <span class="st part" style="margin-left:6px">部成 300</span>
+                      <button class="opbtn ghost" style="margin-left:auto" data-act="toast:已撤剩余 200 股">撤单</button>
+                    </div>
+                    <div style="display:flex;align-items:center;font-size:12px;padding:8px 10px">
+                      <span class="dir-tag s">卖</span><span style="margin:0 8px;font-weight:600">宁德时代</span>
+                      <span class="num" style="color:var(--sub)">203.00 · 100 股</span>
+                      <span class="st open" style="margin-left:6px">已报</span>
+                      <button class="opbtn ghost" style="margin-left:auto" data-act="toast:撤单成功">撤单</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 行内点买/卖后：面板内切到下单卡 -->
+                <div class="sheet-body" data-ticketview style="display:none">
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 16px">
+                    <button style="display:flex;align-items:center;font-size:13px;color:var(--blue)" data-act="back-list"><svg style="width:15px;height:15px"><use href="#i-back" xlink:href="#i-back"/></svg>返回</button>
+                    <span style="font-size:12px;color:var(--sub)">从自选带入标的</span>
+                  </div>
+                  <div class="tk-quote" style="padding-top:2px">
+                    <span class="nm" data-tk-name>东方财富</span><span class="cd num" data-tk-code>300059.SZ</span>
+                    <span class="px num" style="color:var(--red)" data-tk-price>15.86</span>
+                    <span class="chg num" style="color:var(--red)">+1.21%</span>
+                  </div>
+                  <div class="seg3" data-tkseg>
+                    <button class="on buy" data-dir="buy">买入</button>
+                    <button data-dir="sell">卖出</button>
+                    <button data-ptype style="flex:0 0 64px">市价</button>
+                  </div>
+                  <div class="fld">
+                    <span class="lab">委托价</span>
+                    <button class="stp" data-step="price" data-d="-0.01">−</button>
+                    <input class="num" value="15.86" data-price>
+                    <button class="stp" data-step="price" data-d="0.01">＋</button>
+                    <span class="unit">元</span>
+                  </div>
+                  <div class="fld" style="border-bottom:none">
+                    <span class="lab">数量</span>
+                    <button class="stp" data-step="qty" data-d="-100">−</button>
+                    <input class="num" value="1000" data-qty>
+                    <button class="stp" data-step="qty" data-d="100">＋</button>
+                    <span class="unit">股</span>
+                  </div>
+                  <div class="qchips"><button data-pos="0.25">1/4 仓</button><button data-pos="0.33">1/3 仓</button><button data-pos="0.5">半仓</button><button data-pos="1">全仓</button></div>
+                  <div class="tk-meta"><span>100 股整数倍</span><span class="num">预计金额 15,860.00</span></div>
+                  <div class="qacts">
+                    <button data-act="toast:已按全仓数量填入">全仓</button>
+                    <button data-act="toast:打开撤单列表">一键撤单 (2)</button>
+                  </div>
+                  <div class="submit-row"><button class="bigbtn buy" data-submit>买入下单 · 15,860.00</button></div>
+                </div>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+            <!-- ===== 方案 B · 分页式 ===== -->
+            <div class="screen" id="scr-qb">
+              <div data-bg="detail"></div>
+              <div class="scrim"></div>
+              <div class="sheet" style="height:452px">
+                <div class="sheet-hd"><span class="t">快捷面板</span><span class="x" data-close>关闭</span></div>
+                <div class="hairline1"></div>
+                <div class="sheet-seg" data-paneseg>
+                  <button class="on" data-pane="trade">交易</button>
+                  <button data-pane="pos">持仓 <span class="badge">3</span></button>
+                  <button data-pane="order">委托 <span class="badge">2</span></button>
+                </div>
+
+                <div class="sheet-body" data-pane="trade">
+                  <div class="tk-quote"><span class="nm">贵州茅台</span><span class="cd num">600519.SH</span>
+                    <span class="px num" style="color:var(--red)">1466.17</span><span class="chg num" style="color:var(--red)">+0.31%</span></div>
+                  <div class="seg3" data-tkseg><button class="on buy" data-dir="buy">买入</button><button data-dir="sell">卖出</button><button data-ptype style="flex:0 0 64px">市价</button></div>
+                  <div class="fld"><span class="lab">委托价</span>
+                    <button class="stp" data-step="price" data-d="-1">−</button><input class="num" value="1466.17" data-price><button class="stp" data-step="price" data-d="1">＋</button><span class="unit">元</span></div>
+                  <div class="fld" style="border-bottom:none"><span class="lab">数量</span>
+                    <button class="stp" data-step="qty" data-d="-100">−</button><input class="num" value="100" data-qty><button class="stp" data-step="qty" data-d="100">＋</button><span class="unit">股</span></div>
+                  <div class="qchips"><button data-pos="0.25">1/4 仓</button><button data-pos="0.33">1/3 仓</button><button data-pos="0.5">半仓</button><button data-pos="1">全仓</button></div>
+                  <div class="tk-meta"><span>主策略账户 · 可买 100 股</span><span class="num">146,617.00</span></div>
+                  <div class="submit-row"><button class="bigbtn buy" data-submit>买入下单</button></div>
+                </div>
+
+                <div class="sheet-body" data-pane="pos" style="display:none">
+                  <table class="t" style="table-layout:fixed;margin:6px 12px;width:calc(100% - 24px)">
+                    <colgroup><col style="width:26%"><col style="width:16%"><col style="width:22%"><col style="width:20%"><col style="width:16%"></colgroup>
+                    <tr><th class="l">名称</th><th>持仓</th><th>成本/现价</th><th class="l">盈亏</th><th></th></tr>
+                    <tr><td class="l">贵州茅台<div style="font-size:10px;color:var(--sub)">600519</div></td><td class="num">500</td><td class="num">1452.30<br>1466.17</td><td class="l num" style="color:var(--red)">+6,935</td><td><button class="opbtn sell" data-act="toast:切到交易页并填好卖出500股">卖</button></td></tr>
+                    <tr><td class="l">宁德时代<div style="font-size:10px;color:var(--sub)">300750</div></td><td class="num">100</td><td class="num">218.40<br>202.98</td><td class="l num" style="color:var(--green)">−1,542</td><td><button class="opbtn sell" data-act="toast:切到交易页">卖</button></td></tr>
+                    <tr><td class="l">东方财富<div style="font-size:10px;color:var(--sub)">300059</div></td><td class="num">3,000</td><td class="num">14.92<br>15.86</td><td class="l num" style="color:var(--red)">+2,820</td><td><button class="opbtn sell" data-act="toast:切到交易页">卖</button></td></tr>
+                  </table>
+                  <div style="padding:10px 16px;font-size:11px;color:var(--sub)">完整持仓分析在「模拟」Tab，面板内仅做快捷操作。</div>
+                </div>
+
+                <div class="sheet-body" data-pane="order" style="display:none">
+                  <div style="padding:10px 16px;display:flex;flex-direction:column;gap:8px">
+                    <div style="display:flex;align-items:center;font-size:12.5px;border:1px solid var(--line);border-radius:9px;padding:10px">
+                      <span class="dir-tag b">买</span><span style="margin:0 8px;font-weight:600">东方财富</span><span class="num" style="color:var(--sub)">市价 500 · 部成300</span>
+                      <button class="opbtn ghost" style="margin-left:auto" data-act="toast:已撤剩余 200 股">撤单</button></div>
+                    <div style="display:flex;align-items:center;font-size:12.5px;border:1px solid var(--line);border-radius:9px;padding:10px">
+                      <span class="dir-tag s">卖</span><span style="margin:0 8px;font-weight:600">宁德时代</span><span class="num" style="color:var(--sub)">203.00 × 100 · 已报</span>
+                      <button class="opbtn ghost" style="margin-left:auto" data-act="toast:撤单成功">撤单</button></div>
+                    <div style="padding:4px 16px 0"><button data-act="toast:2 笔在途委托已全部撤回" style="width:100%;font-size:12.5px;border-radius:8px;padding:10px;background:rgba(0,140,89,.08);color:var(--green);font-weight:700">全部撤单</button></div>
+                  </div>
+                </div>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+            <!-- ===== 方案 C · 闪电下单条 ===== -->
+            <div class="screen" id="scr-qc">
+              <div data-bg="detail"></div>
+              <div class="scrim"></div>
+              <div class="sheet" style="height:268px">
+                <div class="sheet-hd">
+                  <span class="t">闪电下单</span>
+                  <span style="display:flex;gap:14px;align-items:center">
+                    <span class="acct-chip" style="font-size:11.5px" data-act="toast:弹出账户切换">主策略账户 <svg><use href="#i-chev-d" xlink:href="#i-chev-d"/></svg></span>
+                    <span class="x gray" data-act="toast:上拉展开完整下单卡（限价/仓位/委托）">展开</span>
+                    <span class="x" data-close>关闭</span>
+                  </span>
+                </div>
+                <div class="hairline1"></div>
+                <div class="tk-quote" style="padding:6px 18px">
+                  <span class="nm" style="font-size:16px">贵州茅台</span><span class="cd num">600519.SH</span>
+                  <span class="px num" style="font-size:22px;color:var(--red)">1466.17</span><span class="chg num" style="color:var(--red)">+0.31%</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;padding:2px 18px 8px">
+                  <span style="font-size:12px;color:var(--sub)">市价 · 数量</span>
+                  <button class="stp" style="width:36px;height:36px;font-size:20px" data-step="qty" data-d="-100">−</button>
+                  <input class="num" value="100" data-qty style="flex:1;text-align:center;font-size:22px;font-weight:800;border:none;outline:none;background:var(--g6);border-radius:10px;height:42px">
+                  <button class="stp" style="width:36px;height:36px;font-size:20px" data-step="qty" data-d="100">＋</button>
+                  <span style="font-size:12px;color:var(--sub)">股</span>
+                </div>
+                <div style="display:flex;gap:12px;padding:4px 18px 0;flex:1">
+                  <button class="bigbtn buy" style="height:64px;font-size:19px" data-submit>买入 100 股</button>
+                  <button class="bigbtn sell" style="height:64px;font-size:19px" data-act="toast:卖出下单（方向二次确认）">卖出 500 股</button>
+                </div>
+                <div style="text-align:center;font-size:10.5px;color:var(--sub);padding:8px 0 10px">默认市价即时成交 · 限价 / 仓位比例 / 撤单请点「展开」</div>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+          </div>
+        </div>
+        <div class="frame-cap" id="qaCap"><b>方案 A</b> · 在 K 线详情页打开：标的自动带入，两次点击完成下单</div>
+      </div>
+
+      <div class="notes" id="qaNotes"></div>
+    </div>
+
+    <div class="cmp">
+      <div class="cmp-wrap">
+        <table>
+          <colgroup><col style="width:17%"><col style="width:24%"><col style="width:20%"><col style="width:22%"><col style="width:17%"></colgroup>
+          <tr><th>维度</th><th>A · 上下文自适应交易卡</th><th>B · 分页式面板</th><th>C · 闪电下单条</th><th>建议</th></tr>
+          <tr><td>下单步数</td><td>详情页 2 步；列表页 3 步</td><td>3–4 步（先切 Tab）</td><td class="pick">详情页 1–2 步，最快</td><td rowspan="5" style="vertical-align:middle;color:#fff;line-height:1.7"><b style="color:#ff8a8a">以 A 为定稿</b>：一套面板覆盖两种上下文；把 C 的<b>双大按钮</b>与<b>大数量控件</b>吸收进 A 的主操作区；B 的持仓/委托内联为 A 底部的小块，不做整页分页，避免与模拟 Tab 重复。</td></tr>
+          <tr><td>信息密度</td><td>高：账户/行情/仓位/持仓/在途一屏</td><td class="pick">高，但每屏只看一类</td><td>低：只有标的与数量</td></tr>
+          <tr><td>与模拟页重复度</td><td>低：只放快捷动作，重操作跳模拟页</td><td>高：持仓/委托/成交再做一遍</td><td class="pick">无重复</td></tr>
+          <tr><td>列表页可用性</td><td class="pick">好：自选行内闪电买卖</td><td>一般：需先找标的</td><td>差：无标的上下文</td></tr>
+          <tr><td>学习成本 / 误触</td><td>低 / 买卖分区清晰</td><td>中 / Tab 层级多一层</td><td>极低 / <span style="color:#f08a8a">市价大按钮易误触</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 区块二：模拟页 ================= -->
+  <div class="section" id="sec2">
+    <div class="sec-head">
+      <span class="sec-no">区块二</span>
+      <h2>模拟 Tab · 多账户完整交易</h2>
+      <div class="sub">现状模拟页只有两行占位文字。改造目标：多个独立模拟账户（各自资金 / 持仓 / 委托）、完整下单与撤单、以及可追溯的完整历史（成交、资金流水、操作日志）。先看三套布局，屏内可切换账户、切换模块、点开下单页。</div>
+    </div>
+
+    <div class="switcher">
+      <span class="lab">方案</span>
+      <button class="seg on" data-sim="simA">A · 账户侧栏 + 工作区 <span class="tag">推荐</span></button>
+      <button class="seg" data-sim="simB">B · 账户卡片 + 模块宫格</button>
+      <button class="seg" data-sim="simC">C · 券商经典顶栏式</button>
+    </div>
+
+    <div class="stage">
+      <div class="frame-col">
+        <div class="bezel">
+          <div class="screen-wrap">
+
+            <!-- ============ 方案 A：侧栏 + 工作区 ============ -->
+            <div class="screen active" id="scr-simA">
+              <div class="sim-top">
+                <span class="ttl">模拟交易</span>
+                <button class="act" data-act="toast:入金 / 出金 / 重置该账户（二次确认）"><svg width="14" height="14"><use href="#i-wallet" xlink:href="#i-wallet"/></svg>资金管理</button>
+                <button class="act" data-act="toast:交易规则设置：T+1、佣金、印花税、涨跌停"><svg width="14" height="14"><use href="#i-gear" xlink:href="#i-gear"/></svg>交易设置</button>
+                <span style="margin-left:auto;font-size:11px;color:var(--sub)">2026-09-19 周六 · 最近交易日 09-18 收盘数据</span>
+              </div>
+              <div class="hairline1"></div>
+
+              <div class="sim-body" style="height:715px">
+                <!-- 侧栏 -->
+                <div class="sb">
+                  <div class="sb-lab">账户</div>
+                  <div class="acc-row on" data-acct-sel="all">
+                    <span class="ic" style="background:#3A3D43"><svg width="16" height="16"><use href="#i-globe" xlink:href="#i-globe"/></svg></span>
+                    <span><div class="nm">全部账户汇总</div><div class="sub">3 个账户 · 聚合视图</div></span>
+                    <span class="pl num" style="color:var(--red)">+0.31%</span>
+                  </div>
+                  <div class="acc-row" data-acct-sel="main">
+                    <span class="ic" style="background:#1E5FA8">主</span>
+                    <span><div class="nm">主策略账户</div><div class="sub num">102.84 万</div></span>
+                    <span class="pl num" style="color:var(--red)">+2,841</span>
+                  </div>
+                  <div class="acc-row" data-acct-sel="da">
+                    <span class="ic" style="background:#B4282E">板</span>
+                    <span><div class="nm">打板账户</div><div class="sub num">23.42 万</div></span>
+                    <span class="pl num" style="color:var(--red)">+1,260</span>
+                  </div>
+                  <div class="acc-row" data-acct-sel="di">
+                    <span class="ic" style="background:#1F6E4F">吸</span>
+                    <span><div class="nm">低吸账户</div><div class="sub num">9.68 万</div></span>
+                    <span class="pl num" style="color:var(--green)">−420</span>
+                  </div>
+                  <div class="acc-add" data-act="toast:新建模拟账户：名称 / 初始资金 / 独立规则"><svg width="14" height="14"><use href="#i-plus" xlink:href="#i-plus"/></svg>新建账户</div>
+
+                  <div class="sb-foot">
+                    <div class="fi" data-act="toast:交易设置：T+1、佣金万2.5最低5元、卖出印花税千一"><svg><use href="#i-gear" xlink:href="#i-gear"/></svg>交易规则设置</div>
+                    <div class="fi" data-act="toast:账户备注 / 归档 / 删除（需二次确认）"><svg><use href="#i-doc" xlink:href="#i-doc"/></svg>账户管理</div>
+                  </div>
+                </div>
+
+                <!-- 主工作区 -->
+                <div class="main">
+                  <div class="sum-band">
+                    <div class="stat"><div class="k">总资产（元）</div><div class="v num" data-sum="total">1,028,446.50</div><div class="d" style="color:var(--sub)">初始 1,000,000.00</div></div>
+                    <div class="stat"><div class="k">可用资金</div><div class="v sm num" data-sum="cash">259,203.50</div><div class="d" style="color:var(--sub)">冻结 0.00</div></div>
+                    <div class="stat"><div class="k">持仓市值</div><div class="v sm num" data-sum="mv">769,243.00</div><div class="d" style="color:var(--sub)">仓位 <span data-sum="pospct">74.8%</span></div></div>
+                    <div class="stat"><div class="k">当日盈亏</div><div class="v sm num" style="color:var(--red)" data-sum="daypl">+2,841.00</div><div class="d num" style="color:var(--red)">+0.28%</div></div>
+                    <div class="stat"><div class="k">累计盈亏</div><div class="v sm num" style="color:var(--red)">+28,446.50</div><div class="d num" style="color:var(--red)">+2.84%</div></div>
+                    <div class="spark">
+                      <div class="k">近 30 日净值</div>
+                      <svg id="sparkA" viewBox="0 0 172 56" preserveAspectRatio="none"></svg>
+                    </div>
+                  </div>
+
+                  <div class="mod-row">
+                    <div class="modseg" id="modSeg">
+                      <button class="on" data-mod="pos">持仓 <span class="badge" id="cntPos">3</span></button>
+                      <button data-mod="order">当日委托 <span class="badge" id="cntOrder">2</span></button>
+                      <button data-mod="fill">当日成交</button>
+                      <button data-mod="cash">资金流水</button>
+                      <button data-mod="log">操作日志</button>
+                    </div>
+                    <div class="mod-tools" data-modtools="log" style="display:none">
+                      <span class="mini-in"><svg width="12" height="12"><use href="#i-cal" xlink:href="#i-cal"/></svg><input value="近 30 天 ▾" readonly data-act="toast:选择日期范围（支持单日 / 区间）"></span>
+                      <span class="mini-in" style="width:auto;padding:6px 10px" data-act="toast:类型筛选：委托 / 成交 / 撤单 / 改价 / 资金 / 账户">类型 ▾</span>
+                      <span class="mini-in"><svg width="12" height="12"><use href="#i-search" xlink:href="#i-search"/></svg><input placeholder="搜索标的 / 合同号"></span>
+                      <button class="tbtn2" data-act="toast:导出 CSV（含筛选结果，与屏幕列一致）"><svg width="13" height="13"><use href="#i-download" xlink:href="#i-download"/></svg>导出</button>
+                    </div>
+                    <div class="mod-tools" data-modtools="other">
+                      <span class="mini-in"><svg width="12" height="12"><use href="#i-search" xlink:href="#i-search"/></svg><input placeholder="搜索标的"></span>
+                      <button class="tbtn2" data-act="toast:列表刷新并同步最新模拟成交">刷新</button>
+                    </div>
+                  </div>
+
+                  <div class="table-wrap">
+                    <!-- 持仓 -->
+                    <table class="t" data-modtab="pos">
+                      <colgroup><col style="width:18%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:11%"><col style="width:13%"><col style="width:13%"><col style="width:9%"><col style="width:9%"></colgroup>
+                      <tr><th class="l">名称 / 代码</th><th>持仓</th><th>可用</th><th>成本价</th><th>现价</th><th>持仓市值</th><th>盈亏</th><th>盈亏%</th><th>操作</th></tr>
+                      <tr data-acct="main"><td class="l"><b>贵州茅台</b><div style="font-size:10px;color:var(--sub)">600519.SH</div></td><td class="num">500</td><td class="num">500</td><td class="num">1452.30</td><td class="num" style="color:var(--red)">1466.17</td><td class="num">733,085</td><td class="num" style="color:var(--red)">+6,935</td><td class="num" style="color:var(--red)">+0.96%</td><td><button class="opbtn" data-act="toast:打开买入页并带入贵州茅台">买</button><button class="opbtn sell" data-act="toast:打开卖出页并带入500股">卖</button></td></tr>
+                      <tr data-acct="main"><td class="l"><b>宁德时代</b><div style="font-size:10px;color:var(--sub)">300750.SZ</div></td><td class="num">100</td><td class="num">100</td><td class="num">218.40</td><td class="num" style="color:var(--green)">202.98</td><td class="num">20,298</td><td class="num" style="color:var(--green)">−1,542</td><td class="num" style="color:var(--green)">−7.06%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                      <tr data-acct="main"><td class="l"><b>东方财富</b><div style="font-size:10px;color:var(--sub)">300059.SZ</div></td><td class="num">1,000</td><td class="num">1,000</td><td class="num">14.92</td><td class="num" style="color:var(--red)">15.86</td><td class="num">15,860</td><td class="num" style="color:var(--red)">+940</td><td class="num" style="color:var(--red)">+6.30%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                      <tr data-acct="da"><td class="l"><b>浙江世宝</b><div style="font-size:10px;color:var(--sub)">002703.SZ</div></td><td class="num">1,000</td><td class="num">1,000</td><td class="num">13.05</td><td class="num" style="color:var(--red)">14.05</td><td class="num">14,050</td><td class="num" style="color:var(--red)">+1,000</td><td class="num" style="color:var(--red)">+7.66%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                      <tr data-acct="da"><td class="l"><b>张江高科</b><div style="font-size:10px;color:var(--sub)">600895.SH</div></td><td class="num">600</td><td class="num">600</td><td class="num">31.20</td><td class="num" style="color:var(--red)">31.80</td><td class="num">19,080</td><td class="num" style="color:var(--red)">+360</td><td class="num" style="color:var(--red)">+1.92%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                      <tr data-acct="di"><td class="l"><b>保利联合</b><div style="font-size:10px;color:var(--sub)">002037.SZ</div></td><td class="num">2,000</td><td class="num">2,000</td><td class="num">8.40</td><td class="num" style="color:var(--green)">8.26</td><td class="num">16,520</td><td class="num" style="color:var(--green)">−280</td><td class="num" style="color:var(--green)">−1.67%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                    </table>
+
+                    <!-- 当日委托 -->
+                    <table class="t" data-modtab="order" style="display:none">
+                      <colgroup><col style="width:11%"><col style="width:15%"><col style="width:7%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:8%"><col style="width:12%"><col style="width:19%"></colgroup>
+                      <tr><th class="l">时间</th><th class="l">名称</th><th>方向</th><th>类型</th><th>委托价</th><th>委托量</th><th>已成</th><th>状态</th><th>操作</th></tr>
+                      <tr data-acct="main"><td class="l num">09:35:02</td><td class="l">贵州茅台</td><td><span class="dir-tag b">买入</span></td><td>限价</td><td class="num">1460.00</td><td class="num">200</td><td class="num">200</td><td><span class="st filled">已成交</span></td><td></td></tr>
+                      <tr data-acct="main"><td class="l num">14:51:08</td><td class="l">宁德时代</td><td><span class="dir-tag s">卖出</span></td><td>限价</td><td class="num">203.00</td><td class="num">100</td><td class="num">0</td><td><span class="st open">已报</span></td><td style="text-align:left"><button class="opbtn" data-act="toast:撤单成功">撤单</button><button class="opbtn ghost" data-act="toast:改价：在当前价基础上修改委托">改价</button></td></tr>
+                      <tr data-acct="main"><td class="l num">14:52:30</td><td class="l">东方财富</td><td><span class="dir-tag b">买入</span></td><td>市价</td><td class="num">—</td><td class="num">500</td><td class="num">300</td><td><span class="st part">部成</span></td><td style="text-align:left"><button class="opbtn" data-act="toast:已撤剩余 200 股">撤单</button></td></tr>
+                      <tr data-acct="da"><td class="l num">10:02:11</td><td class="l">浙江世宝</td><td><span class="dir-tag b">买入</span></td><td>限价</td><td class="num">13.05</td><td class="num">1,000</td><td class="num">1,000</td><td><span class="st filled">已成交</span></td><td></td></tr>
+                    </table>
+
+                    <!-- 当日成交 -->
+                    <table class="t" data-modtab="fill" style="display:none">
+                      <colgroup><col style="width:13%"><col style="width:15%"><col style="width:8%"><col style="width:10%"><col style="width:9%"><col style="width:13%"><col style="width:14%"><col style="width:18%"></colgroup>
+                      <tr><th class="l">成交时间</th><th class="l">名称</th><th>方向</th><th>成交价</th><th>成交量</th><th>成交额</th><th>费用</th><th>合同编号</th></tr>
+                      <tr data-acct="main"><td class="l num">09:35:02</td><td class="l">贵州茅台</td><td><span class="dir-tag b">买入</span></td><td class="num">1460.00</td><td class="num">200</td><td class="num">292,000.00</td><td class="num">5.00</td><td class="num" style="color:var(--sub)">20260919-001</td></tr>
+                      <tr data-acct="main"><td class="l num">13:20:44</td><td class="l">东方财富</td><td><span class="dir-tag s">卖出</span></td><td class="num">15.60</td><td class="num">2,000</td><td class="num">31,200.00</td><td class="num">37.44</td><td class="num" style="color:var(--sub)">20260919-002</td></tr>
+                      <tr data-acct="main"><td class="l num">14:52:30</td><td class="l">东方财富</td><td><span class="dir-tag b">买入</span></td><td class="num">15.86</td><td class="num">300</td><td class="num">47,580.00</td><td class="num">5.00</td><td class="num" style="color:var(--sub)">20260919-003</td></tr>
+                      <tr data-acct="da"><td class="l num">10:02:11</td><td class="l">浙江世宝</td><td><span class="dir-tag b">买入</span></td><td class="num">13.05</td><td class="num">1,000</td><td class="num">13,050.00</td><td class="num">5.00</td><td class="num" style="color:var(--sub)">20260919-101</td></tr>
+                    </table>
+
+                    <!-- 资金流水 -->
+                    <table class="t" data-modtab="cash" style="display:none">
+                      <colgroup><col style="width:15%"><col style="width:13%"><col style="width:30%"><col style="width:16%"><col style="width:14%"><col style="width:12%"></colgroup>
+                      <tr><th class="l">时间</th><th class="l">类型</th><th class="l">说明</th><th>发生额</th><th>账户余额</th><th>账户</th></tr>
+                      <tr data-acct="main"><td class="l num">09-19 09:15</td><td class="l">入金</td><td class="l">银证转账入金</td><td class="num" style="color:var(--red)">+1,000,000.00</td><td class="num">1,000,000.00</td><td>主策略</td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 09:35</td><td class="l">买入回款</td><td class="l">买入成交 贵州茅台 200 股（含费）</td><td class="num" style="color:var(--green)">−292,005.00</td><td class="num">707,995.00</td><td>主策略</td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 13:20</td><td class="l">卖出回款</td><td class="l">卖出成交 东方财富 2,000 股（扣费 37.44）</td><td class="num" style="color:var(--red)">+31,162.56</td><td class="num">739,157.56</td><td>主策略</td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 14:52</td><td class="l">买入回款</td><td class="l">买入成交 东方财富 300 股（含费）</td><td class="num" style="color:var(--green)">−47,585.00</td><td class="num">691,572.56</td><td>主策略</td></tr>
+                      <tr data-acct="da"><td class="l num">09-19 09:25</td><td class="l">入金</td><td class="l">新建「打板账户」初始资金</td><td class="num" style="color:var(--red)">+200,000.00</td><td class="num">200,000.00</td><td>打板</td></tr>
+                      <tr data-acct="da"><td class="l num">09-19 10:02</td><td class="l">买入回款</td><td class="l">买入成交 浙江世宝 1,000 股</td><td class="num" style="color:var(--green)">−13,055.00</td><td class="num">186,945.00</td><td>打板</td></tr>
+                    </table>
+
+                    <!-- 操作日志（完整历史操作） -->
+                    <table class="t" data-modtab="log" style="display:none">
+                      <colgroup><col style="width:15%"><col style="width:10%"><col style="width:9%"><col style="width:48%"><col style="width:18%"></colgroup>
+                      <tr><th class="l">时间</th><th class="l">账户</th><th class="l">模块</th><th class="l">操作内容</th><th class="l">结果</th></tr>
+                      <tr data-acct="main"><td class="l num">09-19 14:52:30</td><td class="l">主策略</td><td class="l">委托</td><td class="l">买入 东方财富 500 股 · 市价</td><td class="l"><span class="st part">部成 300 股</span></td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 14:51:08</td><td class="l">主策略</td><td class="l">委托</td><td class="l">卖出 宁德时代 100 股 · 限价 203.00</td><td class="l"><span class="st open">已报</span></td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 14:50:55</td><td class="l">主策略</td><td class="l">撤单</td><td class="l">撤回「买入 东方财富 800 股 · 15.80」</td><td class="l" style="color:var(--green)">成功</td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 13:20:44</td><td class="l">主策略</td><td class="l">成交</td><td class="l">卖出 东方财富 2,000 股 · 15.60，费用 37.44</td><td class="l" style="color:var(--red)">已成交</td></tr>
+                      <tr data-acct="main"><td class="l num">09-19 09:35:02</td><td class="l">主策略</td><td class="l">成交</td><td class="l">买入 贵州茅台 200 股 · 1460.00</td><td class="l" style="color:var(--red)">全部成交</td></tr>
+                      <tr data-acct="da"><td class="l num">09-19 09:25:00</td><td class="l">打板</td><td class="l">账户</td><td class="l">新建账户「打板账户」，初始资金 200,000</td><td class="l" style="color:var(--green)">成功</td></tr>
+                      <tr data-acct="di"><td class="l num">09-18 14:57:20</td><td class="l">低吸</td><td class="l">提醒</td><td class="l">箱体二次探底提醒触发：保利联合 8.40（未破前低）</td><td class="l" style="color:var(--sub)">已触发</td></tr>
+                      <tr data-acct="main"><td class="l num">09-18 14:56:11</td><td class="l">主策略</td><td class="l">成交</td><td class="l">尾盘买入 贵州茅台 300 股 · 1452.30</td><td class="l" style="color:var(--red)">已成交</td></tr>
+                      <tr data-acct="main"><td class="l num">09-17 10:12:38</td><td class="l">主策略</td><td class="l">改价</td><td class="l">委托 #20260917-006 价格 1458.00 → 1460.00</td><td class="l" style="color:var(--green)">成功</td></tr>
+                    </table>
+                    <div style="position:absolute;left:0;right:0;bottom:0;height:30px;background:#FAFAFB;border-top:.5px solid var(--line);display:none;align-items:center;justify-content:space-between;padding:0 14px;font-size:10.5px;color:var(--sub)" data-modfoot="log">共 128 条操作记录 · 已展示近 30 天 · 滚动加载更早记录</div>
+                    <div style="position:absolute;left:0;right:0;bottom:0;height:30px;background:#FAFAFB;border-top:.5px solid var(--line);display:flex;align-items:center;padding:0 14px;font-size:10.5px;color:var(--sub)" data-modfoot="other">数据为示例 · 实际按账户与日期持久化保存</div>
+                  </div>
+
+                  <div class="bbar">
+                    <div class="hint">T+1：当日买入次日可卖 ｜ 佣金万 2.5、最低 5 元 ｜ 卖出印花税千一<br>交易时段外的委托进入「待报」，下一交易时段自动申报</div>
+                    <button class="bb buy" data-ticket="buy" style="margin-left:auto"><svg width="16" height="16"><use href="#i-bolt" xlink:href="#i-bolt"/></svg>买入</button>
+                    <button class="bb sell" data-ticket="sell"><svg width="16" height="16"><use href="#i-bolt" xlink:href="#i-bolt"/></svg>卖出</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 共用全屏下单页 -->
+              <div class="tk-cover" id="ticketA">
+                <div class="scrim" data-tk-close></div>
+                <div class="tk-card">
+                  <div class="sheet-hd">
+                    <span class="t" id="tkATitle">买入下单</span>
+                    <span style="display:flex;gap:12px;align-items:center">
+                      <span class="acct-chip" data-act="toast:切换委托账户">主策略账户 <svg><use href="#i-chev-d" xlink:href="#i-chev-d"/></svg></span>
+                      <span class="x" data-tk-close>关闭</span>
+                    </span>
+                  </div>
+                  <div class="hairline1"></div>
+                  <div class="tk-quote" style="padding:10px 18px 4px">
+                    <span class="nm">贵州茅台</span><span class="cd num">600519.SH</span>
+                    <span class="px num" style="color:var(--red)">1466.17</span><span class="chg num" style="color:var(--red)">+0.31%</span>
+                  </div>
+                  <div class="tk-dir2" id="tkADir">
+                    <button class="on buy" data-dir="buy">买入</button>
+                    <button data-dir="sell">卖出</button>
+                  </div>
+                  <div class="seg3" style="margin:10px 18px 0" id="tkAType">
+                    <button class="on" data-ptype="limit">限价委托</button>
+                    <button data-ptype="market">市价委托</button>
+                  </div>
+                  <div class="tk-sec">
+                    <div class="tk-line"><span class="k">委托价格</span><span class="v">
+                      <button class="stp" data-step="price" data-d="-0.01">−</button>
+                      <input class="num" value="1466.17" data-price>
+                      <button class="stp" data-step="price" data-d="0.01">＋</button>
+                      <span style="font-size:11px;color:var(--sub)">元</span></span></div>
+                    <div class="tk-line"><span class="k">委托数量</span><span class="v">
+                      <button class="stp" data-step="qty" data-d="-100">−</button>
+                      <input class="num" value="100" data-qty>
+                      <button class="stp" data-step="qty" data-d="100">＋</button>
+                      <span style="font-size:11px;color:var(--sub)">股（100 整数倍）</span></span></div>
+                  </div>
+                  <div class="qchips" style="padding:2px 18px 6px"><button data-pos="0.25">1/4 仓</button><button data-pos="0.33">1/3 仓</button><button data-pos="0.5">半仓</button><button data-pos="1">全仓</button></div>
+                  <div class="quotes5">
+                    <div class="q5" data-act="toast:价格已填为涨停价"><div style="color:var(--red)">涨停</div><div class="p num" style="color:var(--red)">1607.80</div></div>
+                    <div class="q5"><div>最新价</div><div class="p num">1466.17</div></div>
+                    <div class="q5" data-act="toast:价格已填为跌停价"><div style="color:var(--green)">跌停</div><div class="p num" style="color:var(--green)">1315.48</div></div>
+                    <div class="q5" id="tkAvail"><div>可买</div><div class="p num">100 股</div></div>
+                    <div class="q5"><div>持仓</div><div class="p num">500 股</div></div>
+                  </div>
+                  <div class="fee-box">
+                    预计成交额 <b class="num" data-fee-amt>146,617.00</b> 元 ｜ 佣金（万2.5，最低5元）<b class="num">5.00</b> ｜ 印花税（买入免）<b class="num">0.00</b><br>
+                    委托后可用资金预计 <b class="num">112,581.50</b> 元 · 委托冻结，成交后多退少补
+                  </div>
+                  <div class="tk-foot"><button class="bigbtn buy" id="tkASubmit">确认买入 · 146,617.00</button></div>
+                </div>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+            <!-- ============ 方案 B：账户卡片 + 模块宫格 ============ -->
+            <div class="screen" id="scr-simB">
+              <div class="sim-top">
+                <span class="ttl">模拟交易</span>
+                <span style="font-size:11px;color:var(--sub);margin-left:12px">点账户卡进入该账户，点模块卡进入明细</span>
+                <button class="act" style="margin-left:auto" data-act="toast:入金 / 出金 / 重置"><svg width="14" height="14"><use href="#i-wallet" xlink:href="#i-wallet"/></svg>资金管理</button>
+              </div>
+              <div class="hairline1"></div>
+
+              <div class="acc-cards">
+                <div class="acc-card" style="background:#3A3D43" data-act="toast:进入全部账户聚合视图">
+                  <div class="nm"><svg width="15" height="15"><use href="#i-globe" xlink:href="#i-globe"/></svg>全部账户汇总</div>
+                  <div class="ta num">1,359,446.50</div>
+                  <div class="pl"><span>当日 <b class="num">+3,681</b></span><span>累计 <b class="num">+59,446</b></span></div>
+                  <svg data-spark="all" viewBox="0 0 190 26" style="width:100%;height:26px;opacity:.85"></svg>
+                </div>
+                <div class="acc-card" style="background:#1E5FA8" data-act="toast:进入主策略账户（方案 A 中即点侧栏）">
+                  <div class="nm">主策略账户</div>
+                  <div class="ta num">1,028,446.50</div>
+                  <div class="pl"><span>当日 <b class="num">+2,841</b></span><span>累计 +2.84%</span></div>
+                  <svg data-spark="main" viewBox="0 0 190 26" style="width:100%;height:26px;opacity:.85"></svg>
+                </div>
+                <div class="acc-card" style="background:#B4282E" data-act="toast:进入打板账户">
+                  <div class="nm">打板账户</div>
+                  <div class="ta num">234,200.00</div>
+                  <div class="pl"><span>当日 <b class="num">+1,260</b></span><span>累计 +17.1%</span></div>
+                  <svg data-spark="da" viewBox="0 0 190 26" style="width:100%;height:26px;opacity:.85"></svg>
+                </div>
+                <div class="acc-card" style="background:#1F6E4F" data-act="toast:进入低吸账户">
+                  <div class="nm">低吸账户</div>
+                  <div class="ta num">96,800.00</div>
+                  <div class="pl"><span>当日 <b class="num" style="color:#B7F0D2">−420</b></span><span>累计 −3.2%</span></div>
+                  <svg data-spark="di" viewBox="0 0 190 26" style="width:100%;height:26px;opacity:.85"></svg>
+                </div>
+                <div class="acc-card add" data-act="toast:新建模拟账户：名称 / 初始资金 / 独立规则"><svg width="20" height="20"><use href="#i-plus" xlink:href="#i-plus"/></svg>新建账户</div>
+              </div>
+
+              <div class="mod-cards">
+                <div class="mod-card" data-act="toast:进入持仓全屏列表（当前账户）">
+                  <h4><svg width="15" height="15" style="color:var(--blue)"><use href="#i-chart" xlink:href="#i-chart"/></svg>持仓 <span class="cnt">6 只 · 3 账户</span></h4>
+                  <div class="mc-body">
+                    <div class="mc-row"><span>贵州茅台 <span style="color:var(--sub)">500股</span></span><span class="num" style="color:var(--red)">+6,935</span></div>
+                    <div class="mc-row"><span>浙江世宝 <span style="color:var(--sub)">1,000股</span></span><span class="num" style="color:var(--red)">+1,000</span></div>
+                    <div class="mc-row"><span>保利联合 <span style="color:var(--sub)">2,000股</span></span><span class="num" style="color:var(--green)">−280</span></div>
+                  </div>
+                  <div class="more">查看全部 6 只 →</div>
+                </div>
+                <div class="mod-card" data-act="toast:进入当日委托全屏列表">
+                  <h4><svg width="15" height="15" style="color:#B07A00"><use href="#i-clock" xlink:href="#i-clock"/></svg>当日委托 <span class="cnt">2 笔在途</span></h4>
+                  <div class="mc-body">
+                    <div class="mc-row"><span><span class="dir-tag s">卖</span> 宁德时代 203.00×100</span><span><span class="st open">已报</span></span></div>
+                    <div class="mc-row"><span><span class="dir-tag b">买</span> 东方财富 市价×500</span><span><span class="st part">部成300</span></span></div>
+                    <div class="mc-row" style="justify-content:flex-end"><button class="opbtn ghost" onclick="event.stopPropagation();showToast(this.closest('.screen'),'2 笔在途委托已全部撤回')">全部撤单</button></div>
+                  </div>
+                  <div class="more">查看全部委托 →</div>
+                </div>
+                <div class="mod-card" data-act="toast:进入当日成交全屏列表">
+                  <h4><svg width="15" height="15" style="color:var(--green)"><use href="#i-doc" xlink:href="#i-doc"/></svg>当日成交 <span class="cnt">4 笔</span></h4>
+                  <div class="mc-body">
+                    <div class="mc-row"><span>09:35 买入 贵州茅台</span><span class="num">292,000.00</span></div>
+                    <div class="mc-row"><span>10:02 买入 浙江世宝</span><span class="num">13,050.00</span></div>
+                    <div class="mc-row"><span>13:20 卖出 东方财富</span><span class="num">31,200.00</span></div>
+                  </div>
+                  <div class="more">查看全部成交 →</div>
+                </div>
+                <div class="mod-card" data-act="toast:进入历史中心：操作日志 / 资金流水 / 导出">
+                  <h4><svg width="15" height="15" style="color:var(--sub)"><use href="#i-list" xlink:href="#i-list"/></svg>历史中心 <span class="cnt">128 条</span></h4>
+                  <div class="mc-body">
+                    <div class="mc-row"><span>09-18 尾盘买入 茅台 300 股</span><span style="color:var(--sub)">已成交</span></div>
+                    <div class="mc-row"><span>09-17 委托改价 1458→1460</span><span style="color:var(--sub)">成功</span></div>
+                    <div class="mc-row"><span>资金流水 / 操作日志 / CSV 导出</span></div>
+                  </div>
+                  <div class="more">进入历史中心 →</div>
+                </div>
+              </div>
+
+              <div class="bbar">
+                <div class="hint">模块卡只放摘要与快捷动作，明细进入全屏列表</div>
+                <button class="bb buy" style="margin-left:auto" data-act="toast:先选择账户卡，再打开下单页"><svg width="16" height="16"><use href="#i-bolt" xlink:href="#i-bolt"/></svg>买入</button>
+                <button class="bb sell" data-act="toast:先选择账户卡，再打开下单页"><svg width="16" height="16"><use href="#i-bolt" xlink:href="#i-bolt"/></svg>卖出</button>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+            <!-- ============ 方案 C：券商经典顶栏式 ============ -->
+            <div class="screen" id="scr-simC">
+              <div class="sim-top">
+                <span class="ttl">模拟交易</span>
+                <span style="margin:0 auto;display:flex;align-items:center;gap:8px;background:var(--g6);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700"
+                      data-act="toast:下拉切换账户（多账户藏在此处）">主策略账户 <svg style="width:13px;height:13px;color:var(--sub)"><use href="#i-chev-d" xlink:href="#i-chev-d"/></svg></span>
+                <button class="act" data-act="toast:入金 / 出金 / 重置"><svg width="14" height="14"><use href="#i-wallet" xlink:href="#i-wallet"/></svg>资金</button>
+                <button class="act" data-act="toast:交易设置"><svg width="14" height="14"><use href="#i-gear" xlink:href="#i-gear"/></svg>设置</button>
+              </div>
+              <div class="hairline1"></div>
+
+              <div style="display:flex;background:#fff;border-bottom:.5px solid var(--line2)">
+                <div class="stat" style="padding:10px 16px"><div class="k">总资产</div><div class="v sm num">1,028,446</div></div>
+                <div class="stat" style="padding:10px 16px"><div class="k">可用</div><div class="v sm num">259,203</div></div>
+                <div class="stat" style="padding:10px 16px"><div class="k">市值</div><div class="v sm num">769,243</div></div>
+                <div class="stat" style="padding:10px 16px"><div class="k">仓位</div><div class="v sm num">74.8%</div></div>
+                <div class="stat" style="padding:10px 16px"><div class="k">当日盈亏</div><div class="v sm num" style="color:var(--red)">+2,841</div></div>
+                <div class="stat" style="padding:10px 16px"><div class="k">累计盈亏</div><div class="v sm num" style="color:var(--red)">+28,446</div></div>
+                <div class="stat" style="padding:10px 16px;border-right:none"><div class="k">在途委托</div><div class="v sm num" style="color:#B07A00">2</div></div>
+              </div>
+
+              <div class="mod-row">
+                <div class="modseg">
+                  <button class="on">持仓</button><button>委托</button><button>成交</button><button>资金流水</button><button>操作日志</button>
+                </div>
+                <div class="mod-tools" style="display:flex">
+                  <span class="mini-in"><svg width="12" height="12"><use href="#i-search" xlink:href="#i-search"/></svg><input placeholder="搜索标的"></span>
+                  <button class="tbtn2" data-act="toast:刷新">刷新</button>
+                </div>
+              </div>
+
+              <div class="table-wrap" style="height:520px">
+                <table class="t">
+                  <colgroup><col style="width:16%"><col style="width:9%"><col style="width:9%"><col style="width:11%"><col style="width:11%"><col style="width:13%"><col style="width:12%"><col style="width:9%"><col style="width:10%"></colgroup>
+                  <tr><th class="l">名称 / 代码</th><th>持仓</th><th>可用</th><th>成本价</th><th>现价</th><th>市值</th><th>盈亏</th><th>盈亏%</th><th>操作</th></tr>
+                  <tr><td class="l"><b>贵州茅台</b><div style="font-size:10px;color:var(--sub)">600519.SH</div></td><td class="num">500</td><td class="num">500</td><td class="num">1452.30</td><td class="num" style="color:var(--red)">1466.17</td><td class="num">733,085</td><td class="num" style="color:var(--red)">+6,935</td><td class="num" style="color:var(--red)">+0.96%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                  <tr><td class="l"><b>宁德时代</b><div style="font-size:10px;color:var(--sub)">300750.SZ</div></td><td class="num">100</td><td class="num">100</td><td class="num">218.40</td><td class="num" style="color:var(--green)">202.98</td><td class="num">20,298</td><td class="num" style="color:var(--green)">−1,542</td><td class="num" style="color:var(--green)">−7.06%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                  <tr><td class="l"><b>东方财富</b><div style="font-size:10px;color:var(--sub)">300059.SZ</div></td><td class="num">1,000</td><td class="num">1,000</td><td class="num">14.92</td><td class="num" style="color:var(--red)">15.86</td><td class="num">15,860</td><td class="num" style="color:var(--red)">+940</td><td class="num" style="color:var(--red)">+6.30%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                  <tr><td class="l"><b>浙江世宝</b><div style="font-size:10px;color:var(--sub)">002703.SZ</div></td><td class="num">2,000</td><td class="num">0</td><td class="num">13.42</td><td class="num" style="color:var(--red)">14.05</td><td class="num">28,100</td><td class="num" style="color:var(--red)">+1,260</td><td class="num" style="color:var(--red)">+4.69%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                  <tr><td class="l"><b>张江高科</b><div style="font-size:10px;color:var(--sub)">600895.SH</div></td><td class="num">600</td><td class="num">600</td><td class="num">31.20</td><td class="num" style="color:var(--red)">31.80</td><td class="num">19,080</td><td class="num" style="color:var(--red)">+360</td><td class="num" style="color:var(--red)">+1.92%</td><td><button class="opbtn" data-act="toast:打开买入页">买</button><button class="opbtn sell" data-act="toast:打开卖出页">卖</button></td></tr>
+                </table>
+                <div style="display:flex;align-items:center;height:34px;padding:0 14px;font-size:11px;color:var(--sub);border-top:.5px solid var(--line2)">主策略账户持仓 5 只 · 打板 / 低吸账户请切换顶部下拉查看</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:6px 14px 0">
+                  <div style="border:1px solid var(--line);border-radius:9px;overflow:hidden">
+                    <div style="font-size:11px;font-weight:700;padding:7px 10px;background:var(--g6);display:flex;justify-content:space-between">在途委托 <span style="color:var(--red);font-weight:700">2</span></div>
+                    <div style="display:flex;align-items:center;font-size:11.5px;padding:8px 10px;border-bottom:.5px solid var(--line)"><span class="dir-tag b">买</span><b style="margin:0 8px">东方财富</b><span class="num" style="color:var(--sub)">市价 500 · 部成300</span><button class="opbtn ghost" style="margin-left:auto" data-act="toast:已撤剩余 200 股">撤单</button></div>
+                    <div style="display:flex;align-items:center;font-size:11.5px;padding:8px 10px"><span class="dir-tag s">卖</span><b style="margin:0 8px">宁德时代</b><span class="num" style="color:var(--sub)">203.00 × 100</span><button class="opbtn ghost" style="margin-left:auto" data-act="toast:撤单成功">撤单</button></div>
+                  </div>
+                  <div style="border:1px solid var(--line);border-radius:9px;overflow:hidden">
+                    <div style="font-size:11px;font-weight:700;padding:7px 10px;background:var(--g6);display:flex;justify-content:space-between">当日成交 <span style="color:var(--sub);font-weight:500">3 笔</span></div>
+                    <div style="display:flex;align-items:center;font-size:11.5px;padding:8px 10px;border-bottom:.5px solid var(--line)"><span class="num" style="color:var(--sub);width:52px">09:35</span><b style="margin:0 8px">贵州茅台</b><span class="num" style="color:var(--red)">买 100</span><span class="num" style="margin-left:auto">1465.20</span></div>
+                    <div style="display:flex;align-items:center;font-size:11.5px;padding:8px 10px;border-bottom:.5px solid var(--line)"><span class="num" style="color:var(--sub);width:52px">10:02</span><b style="margin:0 8px">东方财富</b><span class="num" style="color:var(--red)">买 3,000</span><span class="num" style="margin-left:auto">15.84</span></div>
+                    <div style="display:flex;align-items:center;font-size:11.5px;padding:8px 10px"><span class="num" style="color:var(--sub);width:52px">14:57</span><b style="margin:0 8px">浙江世宝</b><span class="num" style="color:var(--red)">买 2,000</span><span class="num" style="margin-left:auto">14.02</span></div>
+                  </div>
+                </div>
+                <div style="text-align:center;padding-top:8px"><button class="tbtn2" data-act="toast:进入完整委托 / 成交 / 流水 / 日志查询">查看全部委托与成交</button></div>
+              </div>
+
+              <div class="bbar">
+                <div class="hint">最接近通达信 / 同花顺 iPad 的经典布局，表格最宽；多账户收进顶部下拉</div>
+                <button class="bb buy" style="margin-left:auto" data-act="toast:打开全屏下单页"><svg width="16" height="16"><use href="#i-bolt" xlink:href="#i-bolt"/></svg>买入</button>
+                <button class="bb sell" data-act="toast:打开全屏下单页"><svg width="16" height="16"><use href="#i-bolt" xlink:href="#i-bolt"/></svg>卖出</button>
+              </div>
+              <div class="toast" data-toast></div>
+            </div>
+
+          </div>
+        </div>
+        <div class="frame-cap" id="simCap"><b>方案 A</b> · 侧栏切换账户，右侧完成持仓 / 委托 / 成交 / 流水 / 日志全部操作</div>
+      </div>
+      <div class="notes" id="simNotes"></div>
+    </div>
+
+    <div class="cmp">
+      <div class="cmp-wrap">
+        <table>
+          <colgroup><col style="width:16%"><col style="width:27%"><col style="width:24%"><col style="width:21%"><col style="width:12%"></colgroup>
+          <tr><th>维度</th><th>A · 账户侧栏 + 工作区</th><th>B · 账户卡片 + 模块宫格</th><th>C · 券商经典顶栏式</th><th>建议</th></tr>
+          <tr><td>多账户切换</td><td class="pick">一键切换，始终可见全部账户与盈亏</td><td>横滑选卡，账户最直观</td><td>下拉切换，账户被折叠</td><td rowspan="6" style="vertical-align:middle;color:#fff;line-height:1.7"><b style="color:#ff8a8a">以 A 为定稿</b>：iPad 横屏 216pt 侧栏是最被浪费、也最值钱的空间，恰好承载多账户；B 的账户卡思路可用于「全部账户汇总」顶部；C 的大表格密度直接用在 A 的表格区。</td></tr>
+          <tr><td>信息密度</td><td class="pick">高：一屏完成看盘到下单</td><td>中：模块卡只放摘要</td><td class="pick">高：全宽大表</td></tr>
+          <tr><td>iPad 横屏利用</td><td class="pick">充分（master-detail 原生形态）</td><td>一般：卡片下方易留白</td><td>充分</td></tr>
+          <tr><td>查看完整历史</td><td class="pick">日志 / 流水 / 成交三类并存，可筛选导出</td><td>需再进二级页</td><td>可做，但层级挤在顶栏</td></tr>
+          <tr><td>下单效率</td><td>底部常驻买卖 + 共用全屏下单页</td><td>同左，但要点两次进模块</td><td class="pick">常驻买卖条</td></tr>
+          <tr><td>可扩展性</td><td class="pick">账户与模块各自独立扩展</td><td>卡片数量膨胀后乱</td><td>顶栏越加越挤</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 落地说明 ================= -->
+  <div class="impl">
+    <h2>落地说明（给开发的备注）</h2>
+    <div class="grid">
+      <div class="it">
+        <h4>1 · 下单表单做成一个共用组件</h4>
+        <p>新增 <code>TradeTicketView</code>，三种形态复用同一套内核：快捷面板内嵌紧凑态（方案 A）、模拟页全屏 <code>fullScreenCover</code>、详情页工具栏将来也可挂同一入口。方向 / 报价类型 / 价格 / 数量 / 仓位 / 费用预览全部参数化，避免三处各写一遍。</p>
+      </div>
+      <div class="it">
+        <h4>2 · 面板高度与上下文</h4>
+        <p><code>FloatingAccessoryPanel</code> 现固定 0.5 高度且内容为空。两种上下文建议 <code>heightFraction ≈ 0.67</code>（闪电条约 0.35，均受 660 上限保护）；面板通过环境拿到当前 <code>MetaItem</code>（详情页有值、列表页为 nil 走选标的态）。旧按钮显示范围（<code>selectedTab == 1 || 2</code>）无需改动。</p>
+      </div>
+      <div class="it">
+        <h4>3 · 多账户数据模型（6 个实体）</h4>
+        <p><code>SimAccount</code>（账户 / 初始资金 / 规则）、<code>SimPosition</code>（持仓 / 可用 / 成本）、<code>SimOrder</code>（委托 / 状态机）、<code>SimFill</code>（成交）、<code>LedgerEntry</code>（资金流水）、<code>ActionLog</code>（操作日志）。一个 <code>SimStore</code> 统一持久化（SwiftData 或 JSON），账户之间完全隔离，「全部账户」为聚合视图。</p>
+      </div>
+      <div class="it">
+        <h4>4 · 「完整历史」的口径</h4>
+        <p><b>操作日志是全量事件流</b>（委托、成交回报、撤单、改价、资金出入、账户变更、提醒触发，只追加不改写）；成交、资金流水是它的两个业务视图。日志支持按日期区间 / 类型 / 标的 / 账户筛选与 CSV 导出，分页加载——这就是「查看完整历史操作」的落点。</p>
+      </div>
+      <div class="it">
+        <h4>5 · 交易规则集中在交易设置</h4>
+        <p>T+1 可用股数、100 股整数倍、涨跌停与最小报价档位校验、佣金万 2.5 最低 5 元、卖出印花税千一、盘后委托转「待报」下一交易时段申报——规则全部进 <code>SimTradingRules</code>，下单组件只做展示与校验提示，多账户可各自挂规则。</p>
+      </div>
+      <div class="it">
+        <h4>6 · 代码落点</h4>
+        <p>新增 <code>Kline/Simulation/</code>：<code>SimStore.swift</code>、模型文件、<code>SimulationView.swift</code>（按方案 A 重建：侧栏 + 工作区）、<code>TradeTicketView.swift</code>、各表格 Cell；<code>FloatingAccessoryPanel</code> 内填充快捷交易态。行情取数复用 <code>MarketRowCache</code> / 详情页已加载的收盘价，盘后用最后收盘价做模拟成交。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">Kline 交易功能 UI 方案 · 静态可交互原型 · 全部数据为示例 · 配色与尺寸对齐现 App（iPad 横屏 1024×768）</div>
+
+</div>
+
+<script>
+/* =============== 数据：标注 / 优劣势 =============== */
+const SCREENS = {
+  'qa-detail': {cap:'<b>方案 A</b> · 在 K 线详情页打开：标的自动带入，两次点击完成下单', badge:'推荐',
+    desc:'面板感知到当前详情页标的，直接给出完整快捷下单卡；账户、行情、仓位、持仓、在途委托同屏可见。',
+    ann:[[1,'账户条：委托记入所选模拟账户，可随时切换'],
+         [2,'标的行情：自动带入当前详情页，切标的后面板跟随'],
+         [3,'买入 / 卖出分段（红买绿卖）+ 市价 / 限价'],
+         [4,'委托价步进器，步长按最小报价档位（茅台 0.01）'],
+         [5,'数量步进 + 1/4、1/3、半仓、全仓快捷填入'],
+         [6,'快捷动作：全仓、一键撤单、一键清仓（卖出类二次确认）'],
+         [7,'该股持仓 / 可用 / 浮盈内联，卖的时候不用切页查'],
+         [8,'主操作按钮：实时金额，可用不足时置灰并说明原因']],
+    pro:['详情页下单只需 2 次点击','信息一屏闭环，不离开 K 线','与模拟页不重复：只做快捷动作'],
+    con:['面板高度需提到约 0.64','面板内密度较高，需做好分组']},
+  'qa-list': {cap:'<b>方案 A</b> · 在自选 / 行情列表打开：先选标的，面板内切下单卡', badge:'推荐',
+    desc:'列表页没有标的上下文：上半区是账户与快捷入口，自选行内直接放买 / 卖按钮，点击后面板在原地切到下单卡（不跳页）。',
+    ann:[[1,'账户摘要：总资产 / 当日盈亏 / 可用，点击切换账户'],
+         [2,'四个快捷入口：闪电买、闪电卖、一键撤单、资金'],
+         [3,'自选行内「买 / 卖」：点哪只带哪只，面板内切下单卡'],
+         [4,'在途委托直达撤单，部成 / 已报状态一眼可见']],
+    pro:['无标的上下文也成立','行内买卖符合尾盘快速操作','重操作（转账等）收敛到模拟页'],
+    con:['比详情页多一步选标的','自选很多时需要搜索框（已预留）']},
+  'qb': {cap:'<b>方案 B</b> · 分页式：交易 / 持仓 / 委托三个 Tab', badge:'备选',
+    desc:'面板内部分页，每类信息独占一屏，功能最全。',
+    ann:[[1,'三个分页：交易、持仓、委托，角标提示数量'],
+         [2,'交易页与方案 A 的下单卡一致'],
+         [3,'持仓 / 委托在面板内各做一份列表']],
+    pro:['每屏宽松、不拥挤','习惯券商 App 的用户熟悉'],
+    con:['下单要先确认在「交易」页，多一步','持仓 / 委托与模拟 Tab 重复建设','面板高度要容纳整页表格']},
+  'qc': {cap:'<b>方案 C</b> · 闪电下单条：极简双大按钮', badge:'备选',
+    desc:'面板只留标的、数量和两个巨型按钮，默认市价，追求极限速度；其余功能收进「展开」。',
+    ann:[[1,'展开：进入完整下单卡（限价 / 仓位 / 委托）'],
+         [2,'大字号数量控件，步进 100 股'],
+         [3,'买入 / 卖出巨型按钮，拇指热区最大']],
+    pro:['下单最快，适合盯盘瞬发','面板只占 1/3 屏，K 线几乎不挡'],
+    con:['只适用于详情页有标的时','市价 + 大按钮误触风险高','无账户 / 持仓 / 撤单信息']},
+  'simA': {cap:'<b>方案 A</b> · 账户侧栏 + 工作区：一屏完成全部交易与历史', badge:'推荐定稿',
+    desc:'iPad 横屏用 216pt 侧栏承载多账户，右侧是资产总览、五个业务模块和常驻买卖条；点买卖弹出共用全屏下单页。',
+    ann:[[1,'多账户侧栏：各账户独立资金 / 持仓 / 委托，含「全部汇总」，可新建'],
+         [2,'资产总览：总资产、可用、市值、仓位、当日 / 累计盈亏 + 30 日净值'],
+         [3,'五个模块分段：持仓、当日委托、当日成交、资金流水、操作日志'],
+         [4,'持仓表：成本 / 现价 / 浮盈 / 行内买卖，随侧栏账户即时过滤'],
+         [5,'操作日志：全量历史操作，支持日期 / 类型 / 关键词筛选与导出'],
+         [6,'底部常驻买卖条 → 弹出全屏下单页（与快捷面板共用组件）'],
+         [7,'交易规则设置：T+1、佣金、印花税、涨跌停、盘后待报']],
+    pro:['账户切换最快、始终可见','横屏空间利用充分，信息密度高','历史三类并存且可导出','账户与模块各自独立扩展'],
+    con:['首次使用需要理解侧栏（学习成本中等）','竖屏 / 窄屏需退化为方案 B 的卡片式']},
+  'simB': {cap:'<b>方案 B</b> · 账户卡片横滑 + 模块宫格', badge:'备选',
+    desc:'账户做成一排彩色卡片，下面用 2×2 模块卡放摘要，明细进二级页。',
+    ann:[[1,'账户卡片：盈亏与迷你净值最直观，可横滑'],
+         [2,'模块宫格：持仓 / 委托 / 成交 / 历史各一张摘要卡'],
+         [3,'新建账户与账户卡并列，引导性强']],
+    pro:['账户存在感最强，新手友好','卡片式在竖屏也成立'],
+    con:['看明细必须再进一层，高频操作偏慢','账户 / 模块多了之后卡片膨胀','横屏下半屏密度不均']},
+  'simC': {cap:'<b>方案 C</b> · 券商经典顶栏式：账户收进下拉', badge:'备选',
+    desc:'对齐通达信 / 同花顺 iPad：顶部下拉选账户、一行资产指标、全宽大表。',
+    ann:[[1,'账户下拉切换：最省空间但最隐蔽'],
+         [2,'一行七项资产指标，紧凑'],
+         [3,'全宽大表，与现有行情页表格观感一致']],
+    pro:['表格最宽、最符合老股民习惯','实现最直接'],
+    con:['多账户切换效率最低','账户盈亏不可见，弱化了「多账户」主题','历史筛选等入口会把顶栏挤满']}
+};
+
+/* 屏内编号标注坐标（1024×768 坐标系） */
+const MARKS = {
+  'qa-detail':[[1,14,318],[2,1010,354],[3,14,389],[4,1010,427],[5,1010,465],[6,14,575],[7,14,626],[8,1010,686]],
+  'qa-list':[[1,14,330],[2,14,406],[3,1010,548],[4,1010,672]],
+  'qb':[[1,170,390],[2,520,378],[3,14,470]],
+  'qc':[[1,14,522],[2,512,608],[3,512,668]],
+  'simA':[[1,108,300],[2,846,62],[3,222,178],[4,222,210],[5,618,168],[6,692,722],[7,14,745]],
+  'simB':[[1,14,58],[2,220,250],[3,700,620]],
+  'simC':[[1,460,26],[2,1010,104],[3,14,150]]
+};
+
+/* =============== 工具 =============== */
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+const fmt=(n,d=2)=>n.toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmt0=n=>Math.round(n).toLocaleString('zh-CN');
+function showToast(root,msg){const t=$( '[data-toast]',root);if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),1600);}
+function seeded(seed){let s=seed;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
+
+/* =============== 屏内背景：详情页 / 自选列表 =============== */
+const WATCH=[['贵州茅台','600519.SH',1466.17,0.31,1],['宁德时代','300750.SZ',202.98,-1.18,-1],['东方财富','300059.SZ',15.86,1.21,1],
+  ['浙江世宝','002703.SZ',14.05,2.11,1],['张江高科','600895.SH',31.80,0.63,1],['保利联合','002037.SZ',8.26,-0.84,-1],
+  ['赛力斯','601127.SH',91.20,1.84,1],['中航产融','600705.SH',4.32,-0.46,-1],['中京电子','002579.SZ',9.88,3.13,1]];
+function detailBg(){return `
+<div style="height:2px;flex:none"></div>
+<div class="ios-topbar">
+  <div class="back"><svg width="9" height="15" viewBox="0 0 9 15" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 1.5 L1.8 7.5 L7.5 13.5"/></svg></div>
+  <span class="tname">贵州茅台</span><span class="tcode num">600519.SH</span>
+  <div style="flex:1"></div>
+  <div class="tbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8E8E8E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-pin" xlink:href="#i-pin"/></svg></div>
+  <div class="tbtn small" style="font-size:12px;font-weight:700">联</div>
+  <div class="tbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8E8E8E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-gear" xlink:href="#i-gear"/></svg></div>
+</div>
+<div class="hairline"></div>
+<div class="legend"><span class="ind-btn">日线: MA</span>
+  <span class="li num" style="color:#404040">5:1462.14</span><span class="li num" style="color:#FF9500">10:1455.49</span><span class="li num" style="color:#FF2D55">20:1449.91</span><span class="li num" style="color:#007AFF">30:1437.30</span></div>
+<svg data-candles viewBox="0 0 1024 250" preserveAspectRatio="none" style="width:1024px;height:250px;display:block"></svg>
+<div class="legend"><span class="li" style="font-size:10px;color:#404040">VOL:1.25万</span></div>
+<svg data-vol viewBox="0 0 1024 64" preserveAspectRatio="none" style="width:1024px;height:64px;display:block"></svg>
+<div class="quote-bar"><span class="qk">开</span><span class="qv num">1469.01</span><span class="qk">收</span><span class="qv num" style="color:var(--green)">1466.17</span><span class="qk">高</span><span class="qv num" style="color:var(--red)">1474.02</span><span class="qk">低</span><span class="qv num" style="color:var(--green)">1460.87</span><span class="qk">幅</span><span class="qv num" style="color:var(--red)">+0.31%</span></div>
+<div class="taxis"><span class="num">2026/04/27</span><span class="num">2026/09/18</span></div>`;}
+function listBg(){let rows=WATCH.map(w=>{const c=w[4]>0?'var(--red)':'var(--green)';
+ return `<div class="wl-row"><span class="nm">${w[0]}</span><span class="cd num">${w[1]}</span><span class="sp"></span>
+ <span class="px num" style="color:${c}">${fmt(w[2],w[2]<20?2:2)}</span>
+ <span class="pct num" style="background:${c}">${w[3]>0?'+':''}${w[3]}%</span></div>`}).join('');
+ return `<div class="lv-title">自选 <span style="margin-left:auto;font-size:13px;color:var(--blue);font-weight:400">编辑</span></div>
+ <div style="height:calc(100% - 52px - 47px);overflow:hidden">${rows}</div>
+ <div class="tabbar">
+  <div class="tab"><svg><use href="#i-house" xlink:href="#i-house"/></svg><span>首页</span></div>
+  <div class="tab on"><svg><use href="#i-folder" xlink:href="#i-folder"/></svg><span>自选</span></div>
+  <div class="tab"><svg><use href="#i-chart" xlink:href="#i-chart"/></svg><span>行情</span></div>
+  <div class="tab"><svg><use href="#i-game" xlink:href="#i-game"/></svg><span>模拟</span></div></div>`;}
+$$('[data-bg]').forEach(el=>{el.innerHTML=el.dataset.bg==='detail'?detailBg():listBg();});
+
+/* =============== K 线 / 成交量（背景示意） =============== */
+function drawCandles(svg){const rnd=seeded(7),N=96,cw=1024/N,bw=5.4;let p=1430,rows=[],lo=1e9,hi=0;
+ for(let i=0;i<N;i++){const o=p;p=Math.max(1300,p+(rnd()-0.47)*22);const h=Math.max(o,p)+rnd()*9,l=Math.min(o,p)-rnd()*9;rows.push([o,p,h,l]);lo=Math.min(lo,l);hi=Math.max(hi,h);}
+ const y=v=>10+(hi-v)/(hi-lo)*230;let html='';
+ rows.forEach((k,i)=>{const[o,c,h,l]=k,up=c>=o,col=up?'#D92929':'#008C59',x=i*cw+cw/2;
+  html+=`<line x1="${x}" y1="${y(h)}" x2="${x}" y2="${y(l)}" stroke="${col}" stroke-width="1"/>`;
+  const yo=y(o),yc=y(c),top=Math.min(yo,yc),hgt=Math.max(1.2,Math.abs(yc-yo));
+  html+=`<rect x="${x-bw/2}" y="${top}" width="${bw}" height="${hgt}" fill="${col}"/>`;});
+ svg.innerHTML=html;}
+function drawVol(svg){const rnd=seeded(19),N=96,cw=1024/N;let html='',p=1430;
+ for(let i=0;i<N;i++){const o=p;p=p+(rnd()-0.47)*22;const h=12+rnd()*50,col=p>=o?'rgba(217,41,41,.45)':'rgba(0,140,89,.45)';
+  html+=`<rect x="${i*cw+cw/2-2.7}" y="${64-h}" width="5.4" height="${h}" fill="${col}"/>`;}
+ svg.innerHTML=html;}
+$$('[data-candles]').forEach(drawCandles);$$('[data-vol]').forEach(drawVol);
+
+/* =============== 注入编号标注 =============== */
+Object.entries(MARKS).forEach(([id,ms])=>{const scr=$('#scr-'+id);if(!scr)return;
+ ms.forEach(([n,x,y])=>{const d=document.createElement('div');d.className='marker';d.textContent=n;d.style.left=(x-10)+'px';d.style.top=(y-10)+'px';scr.appendChild(d);});});
+
+/* =============== 标注栏渲染 =============== */
+function renderNotes(boxId,screenId){const d=SCREENS[screenId],box=$('#'+boxId);if(!d||!box)return;
+ const badge=d.badge.includes('推荐')?`<span class="rec">${d.badge}</span>`:`<span class="rec" style="background:#6c7178">${d.badge}</span>`;
+ box.innerHTML=`
+  <div class="ncard"><h3>${badge}${screenId.startsWith('qa')||screenId==='qb'||screenId==='qc'?'快捷面板方案':'模拟页方案'}</h3>
+   <div class="desc">${d.desc}</div></div>
+  <div class="ncard"><h3>布局标注</h3><ul class="ann">${d.ann.map(a=>`<li><span class="n">${a[0]}</span><span><b>${a[1].split('：')[0]}</b>${a[1].includes('：')?'：'+a[1].split('：').slice(1).join('：'):''}</span></li>`).join('')}</ul></div>
+  <div class="ncard"><div class="pc">
+   <div class="box pro"><h4>优势</h4>${d.pro.map(p=>`<div>${p}</div>`).join('')}</div>
+   <div class="box con"><h4>代价</h4>${d.con.map(p=>`<div>${p}</div>`).join('')}</div></div></div>`;}
+
+/* =============== 区块一：方案 / 上下文切换 =============== */
+const s1={opt:'qa',ctx:'detail'};
+function showS1(){
+ $$('[data-opt]').forEach(b=>b.classList.toggle('on',b.dataset.opt===s1.opt));
+ $$('[data-ctx]').forEach(b=>b.classList.toggle('on',b.dataset.ctx===s1.ctx));
+ const id=s1.opt==='qa'?'scr-qa-'+s1.ctx:'scr-'+s1.opt;
+ $$('#scr-qa-detail,#scr-qa-list,#scr-qb,#scr-qc').forEach(s=>s.classList.toggle('active',s.id===id));
+ $('#ctxLab').style.visibility=s1.opt==='qa'?'visible':'hidden';
+ $$('[data-ctx]').forEach(b=>b.style.display=s1.opt==='qa'?'':'none');
+ $('#qaCap').innerHTML=SCREENS[id.replace('scr-','')].cap;
+ renderNotes('qaNotes',id.replace('scr-',''));}
+$$('[data-opt]').forEach(b=>b.onclick=()=>{s1.opt=b.dataset.opt;showS1();});
+$$('[data-ctx]').forEach(b=>b.onclick=()=>{s1.ctx=b.dataset.ctx;showS1();});
+
+/* 区块二：方案切换 */
+function showSim(id){$$('[data-sim]').forEach(b=>b.classList.toggle('on',b.dataset.sim===id));
+ ['simA','simB','simC'].forEach(k=>$('#scr-'+k).classList.toggle('active',k===id));
+ $('#simCap').innerHTML=SCREENS[id].cap;renderNotes('simNotes',id);}
+$$('[data-sim]').forEach(b=>b.onclick=()=>showSim(b.dataset.sim));
+
+/* =============== 通用点击委托 =============== */
+document.addEventListener('click',e=>{
+ const act=e.target.closest('[data-act]');
+ if(act){const k=act.dataset.act;const root=act.closest('.screen')||document;
+  if(k.startsWith('toast:'))showToast(root,k.slice(6));
+  if(k==='back-list'){const scr=$('#scr-qa-list');$('[data-listview]',scr).style.display='';$('[data-ticketview]',scr).style.display='none';}
+ }
+ const close=e.target.closest('[data-close]');if(close){showToast(close.closest('.screen'),'演示中原型保持面板打开，便于对比布局');}
+ const simcTab=e.target.closest('#scr-simC .modseg button');if(simcTab){showToast($('#scr-simC'),'方案 C 的模块切换：委托 / 成交 / 流水 / 日志结构同方案 A');}
+});
+
+/* =============== 下单卡逻辑 =============== */
+const TICKET_CFG=[
+ ['#scr-qa-detail .sheet',{cash:259203.50,hold:500,price:1466.17,tick:0.01,name:'贵州茅台',code:'600519.SH',kind:'panel'}],
+ ['#scr-qa-list [data-ticketview]',{cash:259203.50,hold:1000,price:15.86,tick:0.01,name:'东方财富',code:'300059.SZ',kind:'panel'}],
+ ['#scr-qb .sheet-body[data-pane="trade"]',{cash:259203.50,hold:500,price:1466.17,tick:0.01,name:'贵州茅台',code:'600519.SH',kind:'panel'}],
+ ['#scr-qc .sheet',{cash:259203.50,hold:500,price:1466.17,tick:0.01,name:'贵州茅台',code:'600519.SH',kind:'bolt',ptype:'market'}],
+ ['#ticketA .tk-card',{cash:259203.50,hold:500,price:1466.17,tick:0.01,name:'贵州茅台',code:'600519.SH',kind:'full'}]
+];
+const LOT=100;
+function tkNums(root){const st=root._tk;const price=st.ptype==='market'?root._cfg.price:st.price;
+ const buy=Math.floor(root._cfg.cash/price/LOT)*LOT;
+ return {price,buyAvail:buy,sellAvail:root._cfg.hold,avail:st.dir==='buy'?buy:root._cfg.hold,amount:price*st.qty};}
+function tkRender(root){const cfg=root._cfg,st=root._tk,{price,avail,amount,buyAvail,sellAvail}=tkNums(root);
+ const buy=st.dir==='buy';
+ $$('[data-dir]',root).forEach(b=>{const isB=b.dataset.dir==='buy';b.classList.toggle('on',isB?buy:!buy);b.classList.toggle('buy',isB);b.classList.toggle('sell',!isB);});
+ const ptypeBtn=$('[data-ptype]',root);
+ if(ptypeBtn&&ptypeBtn.dataset.ptype===undefined){ptypeBtn.textContent=st.ptype==='market'?'市价':'限价';}
+ $$('[data-ptype]',root).forEach(b=>{if(b.dataset.ptype)b.classList.toggle('on',b.dataset.ptype===st.ptype);});
+ const pi=$('[data-price]',root);if(pi){pi.value=fmt(price,2);pi.disabled=st.ptype==='market';pi.style.color=st.ptype==='market'?'var(--sub)':'var(--ink)';}
+ const qi=$('[data-qty]',root);if(qi)qi.value=st.qty;
+ $$('[data-pos]',root).forEach(b=>b.classList.remove('on'));
+ const av=$('[data-avail]',root);if(av)av.textContent=buy?`可买 ${buyAvail} 股`:`可卖 ${sellAvail} 股`;
+ const av5=$('#tkAvail',root);if(av5)av5.innerHTML=`<div>${buy?'可买':'可卖'}</div><div class="p num">${avail} 股</div>`;
+ const fa=$('[data-fee-amt]',root);if(fa)fa.textContent=fmt(amount,2);
+ const sub=$('[data-submit]',root);
+ if(sub){const pre=cfg.kind==='bolt'?(buy?'买入':'卖出')+' '+st.qty+' 股':(cfg.kind==='full'?(buy?'确认买入':'确认卖出'):(buy?'买入下单':'卖出下单'));
+  sub.textContent=cfg.kind==='bolt'?pre:pre+' · '+fmt0(amount)+'.00';
+  sub.className='bigbtn '+(buy?'buy':'sell');}
+ const title=$('#tkATitle',root);if(title){title.textContent=buy?'买入下单':'卖出下单';title.style.color=buy?'var(--red)':'var(--green)';}
+ const fsub=$('#tkASubmit',root);if(fsub){fsub.className='bigbtn '+(buy?'buy':'sell');}
+ const meta=$$('.tk-meta .num',root);if(meta[meta.length-1])meta[meta.length-1].textContent='预计金额 '+fmt(amount,2);
+}
+TICKET_CFG.forEach(([sel,cfg])=>{const root=$(sel);if(!root)return;root._cfg=cfg;
+ root._tk={dir:'buy',ptype:cfg.ptype||'limit',price:cfg.price,qty:cfg.kind==='bolt'?100:100};
+ root.addEventListener('click',e=>{
+  const step=e.target.closest('[data-step]');const pos=e.target.closest('[data-pos]');
+  const dir=e.target.closest('[data-dir]');const pt=e.target.closest('[data-ptype]');const sub=e.target.closest('[data-submit]');
+  if(dir){root._tk.dir=dir.dataset.dir;tkRender(root);}
+  if(pt){if(pt.dataset.ptype){root._tk.ptype=pt.dataset.ptype;}else{root._tk.ptype=root._tk.ptype==='market'?'limit':'market';}tkRender(root);}
+  if(step){const k=step.dataset.step,d=parseFloat(step.dataset.d);
+   if(k==='price'){root._tk.ptype='limit';root._tk.price=Math.max(0.01,Math.round((root._tk.price+d)*100)/100);}
+   else{root._tk.qty=Math.max(0,root._tk.qty+d);}
+   tkRender(root);}
+  if(pos){const {avail}=tkNums(root);root._tk.qty=Math.floor(avail*parseFloat(pos.dataset.pos)/LOT)*LOT;tkRender(root);}
+  if(sub){const st=root._tk,{amount,avail}=tkNums(root),buy=st.dir==='buy';
+   if(st.qty<=0){showToast(root.closest('.screen')||root,'数量需为 100 股的整数倍');return;}
+   if(buy&&amount>root._cfg.cash){showToast(root.closest('.screen')||root,'可用资金不足，可买 '+avail+' 股');return;}
+   if(!buy&&st.qty>root._cfg.hold){showToast(root.closest('.screen')||root,'可卖数量不足（T+1：当日买入不可卖）');return;}
+   const px=st.ptype==='market'?'市价':fmt(root._tk.price,2);
+   const msg=`委托已提交：${buy?'买入':'卖出'} ${root._cfg.name} ${st.qty} 股 · ${px}（模拟）`;
+   const cover=$('#ticketA');if(cover.classList.contains('show'))cover.classList.remove('show');
+   showToast(root.closest('.screen')||root,msg);}
+ });
+ $$('input',root).forEach(inp=>inp.addEventListener('input',()=>{
+  if(inp.dataset.price)root._tk.price=parseFloat(inp.value)||0;
+  if(inp.dataset.qty)root._tk.qty=Math.max(0,Math.floor((parseInt(inp.value)||0)/LOT)*LOT);
+  tkRender(root);}));
+ tkRender(root);
+});
+
+/* 方案 B 面板分页 */
+$$('#scr-qb .sheet-seg [data-pane]').forEach(b=>b.onclick=()=>{
+ $$('#scr-qb .sheet-seg [data-pane]').forEach(x=>x.classList.toggle('on',x===b));
+ ['trade','pos','order'].forEach(p=>{const el=$(`#scr-qb .sheet-body[data-pane="${p}"]`);
+  if(el)el.style.display=p===b.dataset.pane?'':'none';});
+});
+
+/* 列表态自选行 → 面板内切下单卡 */
+(function(){const host=$('#wlMini');if(!host)return;
+ host.innerHTML=WATCH.slice(0,4).map((w,i)=>{const c=w[4]>0?'var(--red)':'var(--green)';
+  return `<div style="display:flex;align-items:center;font-size:12px;padding:7px 16px;border-bottom:.5px solid var(--line)">
+   <b style="width:74px">${w[0]}</b><span class="num" style="color:var(--sub);width:84px;font-size:10.5px">${w[1]}</span>
+   <span class="num" style="width:70px;text-align:right;color:${c}">${fmt(w[2],2)}</span>
+   <span style="flex:1"></span>
+   <button class="opbtn" data-wl="${i}" data-wldir="buy" style="margin-left:6px">买</button>
+   <button class="opbtn sell" data-wl="${i}" data-wldir="sell">卖</button></div>`;}).join('');
+ host.onclick=e=>{const b=e.target.closest('[data-wl]');if(!b)return;const w=WATCH[b.dataset.wl],root=$('#scr-qa-list [data-ticketview]');
+  $('[data-tk-name]',root).textContent=w[0];$('[data-tk-code]',root).textContent=w[1];
+  const px=$('[data-tk-price]',root);px.textContent=fmt(w[2],2);px.style.color=w[4]>0?'var(--red)':'var(--green)';
+  root._cfg={cash:259203.50,hold:(w[0]==='东方财富'?1000:w[0]==='贵州茅台'?500:0),price:w[2],tick:0.01,name:w[0],code:w[1],kind:'panel'};
+  root._tk={dir:b.dataset.wldir,ptype:'limit',price:w[2],qty:100};tkRender(root);
+  $('[data-listview]',$('#scr-qa-list')).style.display='none';root.style.display='';};
+})();
+
+/* =============== 模拟页方案 A：账户 / 模块 / 下单页 =============== */
+const ACCT={
+ all:{total:'1,359,446.50',cash:'540,553.50',mv:'818,893.00',pospct:'60.2%',day:['+3,681.00','red'],daypct:'+0.27%',cum:['+59,446.50','red'],cumpct:'+4.57%'},
+ main:{total:'1,028,446.50',cash:'259,203.50',mv:'769,243.00',pospct:'74.8%',day:['+2,841.00','red'],daypct:'+0.28%',cum:['+28,446.50','red'],cumpct:'+2.84%'},
+ da:{total:'234,200.00',cash:'201,070.00',mv:'33,130.00',pospct:'14.1%',day:['+1,260.00','red'],daypct:'+0.54%',cum:['+34,200.00','red'],cumpct:'+17.10%'},
+ di:{total:'96,800.00',cash:'80,280.00',mv:'16,520.00',pospct:'17.1%',day:['−420.00','green'],daypct:'−0.43%',cum:['−3,200.00','green'],cumpct:'−3.20%'}
+};
+let curAcct='main';
+function applyAcct(sel){curAcct=sel;
+ $$('#scr-simA .acc-row').forEach(r=>r.classList.toggle('on',r.dataset.acctSel===sel));
+ $$('#scr-simA table.t tr[data-acct]').forEach(tr=>{tr.style.display=(sel==='all'||tr.dataset.acct===sel)?'':'none';});
+ const a=ACCT[sel],C={red:'var(--red)',green:'var(--green)'};
+ const sim=$('#scr-simA');
+ const set=(k,v)=>{const el=$(`[data-sum="${k}"]`,sim);if(el){el.textContent=v;}};
+ set('total',a.total);set('cash',a.cash);set('mv',a.mv);set('pospct',a.pospct);
+ const dayEl=$('[data-sum="daypl"]',sim);dayEl.textContent=a.day[0];dayEl.style.color=C[a.day[1]];dayEl.parentElement.querySelector('.d').innerHTML=`<span class="num" style="color:${C[a.day[1]]}">${a.daypct}</span>`;
+ const cumEl=$('[data-sum="cum"]')||$('[data-sum="daypl"]');
+ const stats=$$('#scr-simA .sum-band .stat');
+ stats[4].querySelector('.v').textContent=a.cum[0];stats[4].querySelector('.v').style.color=C[a.cum[1]];
+ stats[4].querySelector('.d').innerHTML=`<span class="num" style="color:${C[a.cum[1]]}">${a.cumpct}</span>`;
+ updateCounts();}
+function updateCounts(){
+ const vis=sel=>$$(`#scr-simA table.t tr[data-acct]`).filter(tr=>tr.style.display!=='none'&&tr.closest('table').dataset.modtab===sel);
+ $('#cntPos').textContent=vis('pos').length;
+ $('#cntOrder').textContent=vis('order').filter(tr=>tr.querySelector('.st.open,.st.part')).length;}
+$$('#scr-simA .acc-row[data-acct-sel]').forEach(r=>r.onclick=()=>applyAcct(r.dataset.acctSel));
+
+$$('#modSeg button').forEach(b=>b.onclick=()=>{
+ $$('#modSeg button').forEach(x=>x.classList.toggle('on',x===b));
+ $$('#scr-simA [data-modtab]').forEach(t=>t.style.display=t.dataset.modtab===b.dataset.mod?'':'none');
+ const isLog=b.dataset.mod==='log';
+ $('[data-modtools="log"]').style.display=isLog?'':'none';
+ $('[data-modtools="other"]').style.display=isLog?'none':'flex';
+ $('[data-modfoot="log"]').style.display=isLog?'flex':'none';
+ $('[data-modfoot="other"]').style.display=isLog?'none':'flex';
+});
+
+/* 全屏下单页 */
+const ticketA=$('#ticketA'),tkRoot=$('#ticketA .tk-card');
+$$('#scr-simA [data-ticket]').forEach(b=>b.onclick=()=>{
+ tkRoot._tk.dir=b.dataset.ticket;tkRender(tkRoot);ticketA.classList.add('show');});
+$$('[data-tk-close]').forEach(b=>b.onclick=()=>ticketA.classList.remove('show'));
+
+/* =============== 净值迷你曲线 =============== */
+function spark(svg,seed,up,color){const rnd=seeded(seed),N=44,w=svg.viewBox.baseVal.width,h=svg.viewBox.baseVal.height;
+ let v=1,pts=[];for(let i=0;i<N;i++){v+=(rnd()-(up?0.42:0.58))*(up?0.06:0.05);pts.push(v);}
+ const mn=Math.min(...pts),mx=Math.max(...pts);
+ const xy=pts.map((p,i)=>`${(i/(N-1)*w).toFixed(1)},${(h-3-(p-mn)/(mx-mn)*(h-8)).toFixed(1)}`).join(' ');
+ const area=`0,${h} ${xy} ${w},${h}`;
+ svg.innerHTML=`<polygon points="${area}" fill="${color}" opacity="0.12"/><polyline points="${xy}" fill="none" stroke="${color}" stroke-width="1.4"/>
+  <circle cx="${w}" cy="${(h-3-(pts[N-1]-mn)/(mx-mn)*(h-8)).toFixed(1)}" r="2" fill="${color}"/>`;}
+spark($('#sparkA'),31,true,'#D92929');
+const cardColors={all:'#fff',main:'#fff',da:'#fff',di:'#B7F0D2'};
+$$('[data-spark]').forEach(s=>spark(s,{all:5,main:31,da:77,di:99}[s.dataset.spark],s.dataset.spark!=='di',cardColors[s.dataset.spark]));
+
+/* =============== 标注开关 / 初始化 =============== */
+$('#annToggle').onclick=function(){document.body.classList.toggle('hide-ann');
+ this.textContent=document.body.classList.contains('hide-ann')?'标注：关（点击开启）':'标注：开（点击切换）';};
+applyAcct('main');
+showS1();showSim('simA');
+
+</script>
+</body>
+</html>
