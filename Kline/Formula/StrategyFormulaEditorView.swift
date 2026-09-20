@@ -298,6 +298,16 @@ struct StrategyFormulaEditorView: View {
                 Spacer(minLength: 0)
             }
 
+            // 样例行情未就绪时提示：此时语法校验被旁路，待行情到达后才会试算拦截
+            if mode == .inline
+                && !pickBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && data.isEmpty {
+                Text("样例行情未就绪，语法校验待行情到达后进行")
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if let testMessage {
                 Text(testMessage)
                     .font(.system(size: 12))

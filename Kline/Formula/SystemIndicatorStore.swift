@@ -62,6 +62,15 @@ final class SystemIndicatorStore: ObservableObject {
         var coord: Int? = nil
         var template: [String] = []
         var inFormula = false
+        // 头部预扫描：兜住 KIND= 被写在 FORMULA: 之后的手工粘贴场景——
+        // 遍历所有行，只要出现 KIND= 且取值不是 TECH（含无法解析的未知值），一律不装载
+        for raw in content.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("KIND=") {
+                let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces).uppercased()
+                if FormulaKind(rawValue: value) != .tech { return nil }
+            }
+        }
         for raw in content.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if inFormula {

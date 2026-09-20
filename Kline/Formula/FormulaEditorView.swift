@@ -276,11 +276,13 @@ struct IndicatorEditSheet: View {
                         .font(.system(size: 12)).foregroundColor(.blue)
                     Button("测试公式") { runTest() }
                         .font(.system(size: 12, weight: .medium)).foregroundColor(.blue)
-                    // 恢复编译时内容：仅系统指标可点（自定义指标禁用）
-                    Button("恢复编译时内容") { restoreBuiltin() }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(canRestoreBuiltin ? .orange : .gray)
-                        .disabled(!canRestoreBuiltin)
+                    // 恢复编译时内容：仅系统指标可点（自定义指标禁用）；选股模式整块不显示
+                    if !isPicker {
+                        Button("恢复编译时内容") { restoreBuiltin() }
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(canRestoreBuiltin ? .orange : .gray)
+                            .disabled(!canRestoreBuiltin)
+                    }
                     Button("保存") { save() }
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)

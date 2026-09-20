@@ -103,6 +103,8 @@ final class FavoritesStore: ObservableObject {
     private let fm = FileManager.default
     /// 档结构版本：2 起公式分组只存 `formulaID` 引用（1 为内嵌 formula 文本的旧档）
     private let currentSchema = 2
+    /// 读到的档版本低于 `currentSchema` 时为 true：即使没有任何分组改动也要回写一次
+    private var needsSchemaRewrite = false
 
     // MARK: - Lifecycle
 
@@ -110,7 +112,9 @@ final class FavoritesStore: ObservableObject {
         // 立即读档；档不存在则写入默认的"我的自选"分组
         if loadFromDisk() {
             // 迁移发生在读档后、写档前，因此只写一次
-            migrateFormulaGroupsIfNeeded()
+            let migrated = migrateFormulaGroupsIfNeeded()
+            // 读到旧版本档即无条件回写一次，把 schemaVersion 落到 2（即便是无需迁移的手动分组档）
+            if migrated || needsSchemaRewrite { saveToDisk() }
         } else {
             let def = FavoritesGroup.manual(name: "我的自选")
             groups = [def]
@@ -125,7 +129,9 @@ final class FavoritesStore: ObservableObject {
     ///
     /// 迁移只在读档成功后执行一次（读档后、写档前）：`formulaID != nil` 的分组直接
     /// 跳过，已迁移的档（schemaVersion 2）不会再重复导入。
-    private func migrateFormulaGroupsIfNeeded() {
+    /// 返回值表示本次迁移是否对分组数据做了改动（有改动则由调用方统一写盘一次）。
+    @discardableResult
+    private func migrateFormulaGroupsIfNeeded() -> Bool {
         var changed = false
         for i in groups.indices where groups[i].kind == .formula {
             // 已有引用 → 已完成迁移，跳过
@@ -151,8 +157,8 @@ final class FavoritesStore: ObservableObject {
                 DebugLogger.shared.log("[FavoritesStore] migrate formula group failed: \(groups[i].name)")
             }
         }
-        // 有改动立即落盘：把 schemaVersion 写成 2，迁移结果只写一次
-        if changed { saveToDisk() }
+        // 迁移结果交给调用方统一写盘（把 schemaVersion 写成 2，只写一次）
+        return changed
     }
 
     // MARK: - 读档/存档
@@ -175,6 +181,8 @@ final class FavoritesStore: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let root = try decoder.decode(FavoritesRoot.self, from: data)
+            // 旧版本档（schemaVersion < 当前版本）打上回写标记：由 init 读档后无条件写回一次
+            if root.schemaVersion < currentSchema { needsSchemaRewrite = true }
             self.groups = root.groups.sorted { (a, b) -> Bool in
                 // 保持原数组顺序（sorted 是稳定的）
                 return true
