@@ -34,12 +34,28 @@ private enum PickMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// 交易指令的「数量 / 金额」输入口径（二选一，切换时清掉另一侧，保证字段互斥）
+private enum TradeSizeMode {
+    case qty       // 按数量（股，整手）
+    case amount    // 按金额（元，生成条件单时按最新价折算整手）
+}
+
+/// 交易指令里的分段项（用字符串 id 驱动回调，避免多处写泛型控件）
+private struct TradeChipOption: Identifiable {
+    let id: String
+    let title: String
+    /// 选中态文字色（nil 表示用语义 primary）
+    var tint: Color? = nil
+    var selected: Bool = false
+}
+
 // MARK: - 策略公式编辑器
 
 /// 交易策略公式编辑器（全屏 overlay 页面）
 ///
-/// 本阶段只做「定义与校验」：只把策略文档写入公式库（Documents/formula/strategy/*.tdx），
-/// 不调用 SimStore、不生成条件单、不写任何模拟账户数据；成交指令留待执行阶段接入。
+/// 本阶段只做「定义与校验」：把策略文档（选股条件 + 交易指令 + 绑定账户 + 交易规则）
+/// 写入公式库（Documents/formula/strategy/*.tdx）。绑定账户只读 SimStore.accounts，
+/// 不生成条件单、不写任何模拟账户数据；条件单生成与回测留待执行阶段接入。
 struct StrategyFormulaEditorView: View {
     /// 编辑中的策略文档；id 为空串表示新建
     var initialDoc: FormulaDoc
@@ -51,6 +67,8 @@ struct StrategyFormulaEditorView: View {
 
     /// 公式库（引用模式下单选列表的数据源，保存也走它）
     @ObservedObject private var library = FormulaLibraryStore.shared
+    /// 模拟交易总仓库（只读 accounts，列出可绑定账户；本页不写入任何模拟数据）
+    @ObservedObject private var sim = SimStore.shared
 
     @State private var name: String
     /// 选股条件来源（内嵌 / 引用），切换只改显示，不清数据
@@ -59,6 +77,18 @@ struct StrategyFormulaEditorView: View {
     @State private var pickBody: String
     /// 引用的选股公式 id（空串表示未选）
     @State private var pickRef: String
+    /// 交易指令（方向 / 数量或金额 / 报价方式 / 有效期 / 绑定账户），实时写回
+    @State private var trade: StrategyTradeSpec
+    /// 数量 / 金额 的输入口径（切换时清掉另一侧字段）
+    @State private var sizeMode: TradeSizeMode
+    /// 数量输入框原文（与 trade.qty 双向同步，避免输入中间态被截断）
+    @State private var qtyText: String
+    /// 金额输入框原文（与 trade.amount 双向同步）
+    @State private var amountText: String
+    /// 偏移档次输入框原文（与 trade.offsetTicks 双向同步）
+    @State private var offsetText: String
+    /// 指定日期有效期的到期日（与 trade.expiresAt 双向同步）
+    @State private var expiryDate: Date
     /// 规则行模型（每次改动都会序列化回 doc.rules 文本）
     @State private var rows: [RuleRow]
     /// 初始 RULES 文本的解析报错（在规则区上方就地红字提示，仍允许继续编辑）
@@ -87,6 +117,15 @@ struct StrategyFormulaEditorView: View {
         let parsed = StrategyRuleParser.parse(lines: initialDoc.rules)
         _rows = State(initialValue: parsed.rules.map { RuleRow(kind: $0.kind, params: $0.params) })
         _parseErrors = State(initialValue: parsed.errors)
+        // 交易指令回显：数量优先（QTY 与 AMOUNT 互斥），未配置时两侧都空
+        _trade = State(initialValue: initialDoc.trade)
+        _sizeMode = State(initialValue: initialDoc.trade.qty != nil ? .qty
+                          : (initialDoc.trade.amount != nil ? .amount : .qty))
+        _qtyText = State(initialValue: initialDoc.trade.qty.map(String.init) ?? "")
+        _amountText = State(initialValue: initialDoc.trade.amount.map { Self.plainNumber($0) } ?? "")
+        _offsetText = State(initialValue: initialDoc.trade.offsetTicks.map(String.init) ?? "")
+        _expiryDate = State(initialValue: initialDoc.trade.expiresAt
+                            ?? (Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date()))
     }
 
     // MARK: - 文档投影（保存与校验都只面对 FormulaDoc）
@@ -98,7 +137,8 @@ struct StrategyFormulaEditorView: View {
                    name: name.trimmingCharacters(in: .whitespaces),
                    pickBody: mode == .inline ? pickBody : "",
                    pickRef: mode == .reference ? pickRef : nil,
-                   rules: rulesText)
+                   rules: rulesText,
+                   trade: trade)
     }
 
     /// 规则行 → RULES 文本（逐行按 specs 顺序拼 KEY=VAL，行间换行）
@@ -162,6 +202,8 @@ struct StrategyFormulaEditorView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     nameField
                     pickSection
+                    tradeSection
+                    accountsSection
                     rulesSection
                     previewCard
                     validationSection(issues)
@@ -369,6 +411,334 @@ struct StrategyFormulaEditorView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - 交易指令（方向 / 数量或金额 / 报价方式 / 有效期）
+
+    /// 交易指令区块：所有选择实时写回 trade，未选的方向保持 nil
+    private var tradeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("交易指令")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.primary)
+
+            VStack(alignment: .leading, spacing: 14) {
+                directionControl
+                sizeControl
+                priceTypeControl
+                validityControl
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(10)
+        }
+    }
+
+    /// 方向：买入（红）/ 卖出（绿）二选一；未选时提示「请选择」
+    private var directionControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("方向")
+                    .font(.system(size: 13))
+                    .foregroundColor(.primary)
+                if trade.direction == nil {
+                    Text("请选择")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                }
+            }
+            tradeSegment([
+                TradeChipOption(id: "buy", title: "买入", tint: Color(.systemRed), selected: trade.direction == .buy),
+                TradeChipOption(id: "sell", title: "卖出", tint: Color(.systemGreen), selected: trade.direction == .sell)
+            ]) { id in
+                let picked: SimOrderDirection = (id == "buy") ? .buy : .sell
+                // 再点一次已选项 = 取消选择（回到 nil）
+                trade.direction = (trade.direction == picked) ? nil : picked
+            }
+        }
+    }
+
+    /// 数量 / 金额：先选口径，再显示对应输入框（切换时清掉另一侧，保证互斥）
+    private var sizeControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("数量 / 金额")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            tradeSegment([
+                TradeChipOption(id: "qty", title: "按数量", selected: sizeMode == .qty),
+                TradeChipOption(id: "amount", title: "按金额", selected: sizeMode == .amount)
+            ]) { id in
+                if id == "qty" {
+                    sizeMode = .qty
+                    trade.amount = nil
+                    amountText = ""
+                } else {
+                    sizeMode = .amount
+                    trade.qty = nil
+                    qtyText = ""
+                }
+            }
+            if sizeMode == .qty {
+                qtyInput
+            } else {
+                amountInput
+            }
+        }
+    }
+
+    /// 按数量：数字键盘 + 单位「股」+ 右侧整手快捷 chips
+    private var qtyInput: some View {
+        HStack(spacing: 8) {
+            TextField("100", text: $qtyText)
+                .font(.system(size: 14))
+                .keyboardType(.numberPad)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .background(Color(uiColor: .systemGray6))
+                .cornerRadius(6)
+                .frame(maxWidth: 84)
+                .onChange(of: qtyText) { text in
+                    let digits = text.filter { $0.isNumber }
+                    trade.qty = digits.isEmpty ? nil : Int(digits)
+                }
+
+            Text("股")
+                .font(.system(size: 13))
+                .foregroundColor(.gray)
+
+            Spacer(minLength: 4)
+
+            ForEach([100, 500, 1000], id: \.self) { value in
+                chip("\(value)", selected: trade.qty == value) {
+                    // 快捷填入：点击顺序 = 选择顺序，值恒为 100 的整数倍
+                    trade.qty = value
+                    qtyText = "\(value)"
+                }
+            }
+        }
+    }
+
+    /// 按金额：小数键盘 + 单位「元」+ 折算说明
+    private var amountInput: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("50000", text: $amountText)
+                    .font(.system(size: 14))
+                    .keyboardType(.decimalPad)
+                    .padding(.horizontal, 10)
+                    .frame(height: 36)
+                    .background(Color(uiColor: .systemGray6))
+                    .cornerRadius(6)
+                    .frame(maxWidth: 140)
+                    .onChange(of: amountText) { text in
+                        let value = Double(text)
+                        trade.amount = (value ?? 0) > 0 ? value : nil
+                    }
+
+                Text("元")
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray)
+
+                Spacer(minLength: 0)
+            }
+            Text("生成条件单时按最新价折算并向下取整到 100 股")
+                .font(.system(size: 11))
+                .foregroundColor(.gray)
+        }
+    }
+
+    /// 报价方式：市价 / 限价；限价时多一行偏移档次
+    private var priceTypeControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("报价方式")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            tradeSegment([
+                TradeChipOption(id: "market", title: "市价", selected: trade.priceType == .market),
+                TradeChipOption(id: "limit", title: "限价", selected: trade.priceType == .limit)
+            ]) { id in
+                if id == "market" {
+                    trade.priceType = .market
+                    trade.offsetTicks = nil
+                    offsetText = ""
+                } else {
+                    trade.priceType = .limit
+                    // 限价默认触发价本身（0 档），避免选完限价却缺偏移被拦
+                    if trade.offsetTicks == nil {
+                        trade.offsetTicks = 0
+                        offsetText = "0"
+                    }
+                }
+            }
+
+            if trade.priceType == .limit {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("偏移档次")
+                            .font(.system(size: 13))
+                            .foregroundColor(.primary)
+                        TextField("0", text: $offsetText)
+                            .font(.system(size: 14))
+                            .keyboardType(.numbersAndPunctuation)
+                            .padding(.horizontal, 10)
+                            .frame(height: 36)
+                            .background(Color(uiColor: .systemGray6))
+                            .cornerRadius(6)
+                            .frame(maxWidth: 96)
+                            .onChange(of: offsetText) { text in
+                                let trimmed = text.trimmingCharacters(in: .whitespaces)
+                                trade.offsetTicks = trimmed.isEmpty ? nil : Int(trimmed)
+                            }
+                        Text("档")
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray)
+                        Spacer(minLength: 0)
+                    }
+                    Text("触达触发价 ± N 档委托")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+    }
+
+    /// 有效期：当日 / 长期 / 指定日期 三段 chips；指定日期时显示到期日选择
+    private var validityControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("有效期")
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            HStack(spacing: 8) {
+                chip("当日", selected: trade.validity == .day) {
+                    trade.validity = .day
+                    trade.expiresAt = nil
+                }
+                chip("长期", selected: trade.validity == .longTerm) {
+                    trade.validity = .longTerm
+                    trade.expiresAt = nil
+                }
+                chip("指定日期", selected: trade.validity == .untilDate) {
+                    trade.validity = .untilDate
+                    trade.expiresAt = expiryDate
+                }
+                Spacer(minLength: 0)
+            }
+
+            if trade.validity == .untilDate {
+                DatePicker("到期日", selection: expiryBinding, displayedComponents: .date)
+                    .font(.system(size: 14))
+            }
+        }
+    }
+
+    /// 到期日双向绑定：选日期时同时写回 trade.expiresAt，保证可往返
+    private var expiryBinding: Binding<Date> {
+        Binding(get: { expiryDate }, set: { newValue in
+            expiryDate = newValue
+            trade.expiresAt = newValue
+        })
+    }
+
+    // MARK: - 绑定账户（可多选）
+
+    /// 绑定账户区块：列出全部账户，多选（选择顺序 = 点击顺序），已归档不可选
+    private var accountsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("绑定账户（可多选）")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.primary)
+
+            if staleAccountCount > 0 {
+                Text("\(staleAccountCount) 个已归档/失效账户已自动跳过")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+            }
+
+            if sim.accounts.isEmpty {
+                Text("还没有模拟账户，请先到模拟页创建")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(10)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(sim.accounts) { account in
+                        accountRow(account)
+                    }
+                }
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(10)
+            }
+
+            Text("生成条件单时会为每个账户各生成一套；多账户并行执行")
+                .font(.system(size: 11))
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 单个账户行：色点 + badge + 名称 + 可买资金 + 多选标记
+    private func accountRow(_ account: SimAccount) -> some View {
+        let selected = trade.accountIDs.contains(account.id)
+        let archived = account.isArchived
+        return Button {
+            toggleAccount(account.id)
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color(hex: account.colorHex) ?? Color(.systemGray))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Text(account.badge)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.name)
+                        .font(.system(size: 15))
+                        .foregroundColor(archived ? Color(.secondaryLabel) : Color.primary)
+                    Text("可买资金 \(SimFormat.amount(account.cash))")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                }
+                Spacer(minLength: 8)
+                if archived {
+                    Text("已归档")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                } else {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 18))
+                        .foregroundColor(selected ? .blue : .gray)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(archived)
+        .opacity(archived ? 0.6 : 1)
+    }
+
+    /// 切换某账户的选中态（保留点击顺序，即执行顺序）
+    private func toggleAccount(_ id: UUID) {
+        if let idx = trade.accountIDs.firstIndex(of: id) {
+            trade.accountIDs.remove(at: idx)
+        } else {
+            trade.accountIDs.append(id)
+        }
+    }
+
+    /// 已绑定但已归档 / 已不存在的账户数（生成条件单时会被跳过）
+    private var staleAccountCount: Int {
+        trade.accountIDs.filter { id in
+            guard let account = sim.accounts.first(where: { $0.id == id }) else { return true }
+            return account.isArchived
+        }.count
+    }
+
     // MARK: - 交易规则（RULES）
 
     private var rulesSection: some View {
@@ -430,6 +800,10 @@ struct StrategyFormulaEditorView: View {
         let kind = row.wrappedValue.kind
         let specs = StrategyRuleCatalog.specs(for: kind)
         let rowID = row.wrappedValue.id
+        // 规则行内的指令覆盖（ORD* 保留键）；只读展示，绝不改动 params，保证编辑其它参数时不丢
+        let directiveOverride = StrategyTradeParser.override(in: StrategyRuleCall(kind: kind,
+                                                                                 params: row.wrappedValue.params,
+                                                                                 raw: ""))
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -438,6 +812,13 @@ struct StrategyFormulaEditorView: View {
                     Text(kind.conditionOrderTitle)
                         .font(.system(size: 11))
                         .foregroundColor(.gray)
+                    // 该规则自带的指令覆盖（优先于交易指令区块）
+                    if !directiveOverride.isEmpty, let summary = directiveOverride.summary {
+                        Text("指令：\(summary)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 8)
                 Button {
@@ -560,6 +941,10 @@ struct StrategyFormulaEditorView: View {
 
     private var previewCard: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text(StrategyPreview.tradeSummary(doc: doc))
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(StrategyPreview.summary(doc: doc, pickerName: referencedPickerName))
                 .font(.system(size: 13))
                 .foregroundColor(.primary)
@@ -670,5 +1055,54 @@ struct StrategyFormulaEditorView: View {
     private func oneLine(_ body: String) -> String {
         let s = body.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         return s.isEmpty ? "（空公式）" : s
+    }
+
+    /// 交易指令里的二/三选一分段（选中态白色药丸 + 选中色文字，命中区 ≥44pt）
+    private func tradeSegment(_ options: [TradeChipOption], onTap: @escaping (String) -> Void) -> some View {
+        HStack(spacing: 4) {
+            ForEach(options) { opt in
+                Button {
+                    onTap(opt.id)
+                } label: {
+                    Text(opt.title)
+                        .font(.system(size: 13, weight: opt.selected ? .semibold : .regular))
+                        .foregroundColor(opt.selected ? (opt.tint ?? Color.primary) : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(opt.selected ? Color(.systemBackground) : Color.clear)
+                        .cornerRadius(8)
+                        .shadow(color: opt.selected ? Color.black.opacity(0.1) : Color.clear,
+                                radius: 2, y: 1)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color(uiColor: .systemGray6))
+        .cornerRadius(8)
+    }
+
+    /// 小 chip（选中蓝底白字，命中区 ≥44pt）
+    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+                .foregroundColor(selected ? .white : Color.primary)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(selected ? Color.blue : Color(uiColor: .systemGray6))
+                .cornerRadius(8)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 纯数值文案：整数不带小数，非整数最多两位且去掉尾随 0（金额输入框回显用）
+    private static func plainNumber(_ v: Double) -> String {
+        if v == v.rounded() { return String(format: "%.0f", v) }
+        return String(format: "%g", v)
     }
 }

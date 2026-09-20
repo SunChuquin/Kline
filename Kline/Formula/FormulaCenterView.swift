@@ -63,6 +63,8 @@ struct FormulaCenterView: View {
     /// 策略公式新建 / 编辑浮层
     @State private var showStrategySheet = false
     @State private var editingStrategy: FormulaDoc?
+    /// 策略详情浮层（只读展示，编辑从详情页跳回编辑器）
+    @State private var detailStrategy: FormulaDoc?
     /// 待删除的选股公式：被自选分组引用时先弹确认，确认后再解绑 + 删除
     @State private var pendingDeletePicker: FormulaDoc?
     /// 页面样例行情数据（候选池首只标的的 K 线），供三个编辑器的「测试公式」使用
@@ -388,6 +390,16 @@ struct FormulaCenterView: View {
             }
             Spacer(minLength: 8)
             Button {
+                detailStrategy = doc
+            } label: {
+                Text("详情")
+                    .font(.system(size: 13))
+                    .foregroundColor(.blue)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button {
                 editingStrategy = doc
                 showStrategySheet = true
             } label: {
@@ -491,6 +503,18 @@ struct FormulaCenterView: View {
             )
             .transition(.opacity)
             .zIndex(1000)
+        }
+        if let doc = detailStrategy {
+            // 策略详情页：只读展示；点「编辑」关详情并打开策略编辑器（editingStrategy 传被编辑的 doc，不能是 nil）
+            StrategyDetailView(doc: doc,
+                               onClose: { detailStrategy = nil },
+                               onEdit: {
+                                   detailStrategy = nil
+                                   editingStrategy = doc
+                                   showStrategySheet = true
+                               })
+                .transition(.opacity)
+                .zIndex(1000)
         }
     }
 

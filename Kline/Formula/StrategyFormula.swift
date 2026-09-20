@@ -209,6 +209,7 @@ enum StrategyRuleParser {
     /// 解析多行 RULES 文本：返回规则数组 + 中文错误清单（错误文案带行号，如「第 1 行：未知规则 PRICE2」）
     /// 规则：空行与 `{...}` 注释行跳过；行格式 `KEYWORD(KEY=VAL, KEY=VAL)`，也容忍 `KEYWORD(KEY = VAL)`、
     /// 中文全角逗号「，」与全角括号；值里的空格去掉；未知关键字 / 未识别参数键 / 括号不闭合 → 报错
+    /// （`ORDDIR` / `ORDQTY` / `ORDAMT` / `ORDPT` / `ORDOFF` 为交易指令覆盖保留键，照常收进 params 且不报错）
     static func parse(lines: String) -> (rules: [StrategyRuleCall], errors: [String]) {
         var rules: [StrategyRuleCall] = []
         var errors: [String] = []
@@ -261,7 +262,7 @@ enum StrategyRuleParser {
                     errors.append("第 \(n) 行：参数格式应为 KEY=VAL（\(t)）")
                     continue
                 }
-                if !known.contains(key) {
+                if !known.contains(key) && !StrategyTradeParser.isReservedKey(key) {
                     errors.append("第 \(n) 行：\(kind.title) 未识别参数 \(key)")
                     continue
                 }
@@ -274,11 +275,16 @@ enum StrategyRuleParser {
     }
 
     /// 序列化一条规则：`STOP_LOSS(BASE=COST, MODE=PCT, PROFIT=10, LOSS=5)`（按 specs 顺序）
+    /// 交易指令覆盖保留键（ORD*）按固定顺序追加在末尾，保证 parse → line → parse 可逆
     static func line(for call: StrategyRuleCall) -> String {
         var parts: [String] = []
         for spec in StrategyRuleCatalog.specs(for: call.kind) {
             guard let v = call.params[spec.key], !v.isEmpty else { continue }
             parts.append("\(spec.key)=\(v)")
+        }
+        for key in StrategyTradeParser.reservedKeys {
+            guard let v = call.params[key], !v.isEmpty else { continue }
+            parts.append("\(key)=\(v)")
         }
         return "\(call.kind.rawValue)(\(parts.joined(separator: ", ")))"
     }
@@ -409,6 +415,43 @@ enum StrategyValidator {
             errors.append("网格交易与分批建仓不宜同一策略并存，请保留其一")
         }
 
+        // 13. 交易指令（TRADE 段）与逐规则指令覆盖（仅策略文档）
+        if doc.kind == .strategy {
+            let trade = doc.trade
+            if !trade.isEmpty {
+                if trade.direction == nil {
+                    errors.append("请选择交易方向")
+                }
+                if trade.qty != nil && trade.amount != nil {
+                    errors.append("交易指令的数量与金额只能二选一")
+                }
+                if let q = trade.qty, q % 100 != 0 {
+                    errors.append("交易指令数量需为 100 股的整数倍")
+                }
+                if let a = trade.amount, a <= 0 {
+                    errors.append("交易指令金额需大于 0")
+                }
+                if trade.priceType == .limit && trade.offsetTicks == nil {
+                    errors.append("限价委托需设置偏移档次（OFFSETTICKS）")
+                }
+                if trade.validity == .untilDate && trade.expiresAt == nil {
+                    errors.append("指定日期有效期需设置到期日（EXPIRES）")
+                }
+            }
+            // 逐规则覆盖：委托数量整手 / 数量与金额互斥（账户为空只提示不阻断，不在校验里报错）
+            for c in calls {
+                let o = StrategyTradeParser.override(in: c)
+                if o.isEmpty { continue }
+                let prefix = c.line > 0 ? "第 \(c.line) 行：" : ""
+                if let q = o.qty, q % 100 != 0 {
+                    errors.append("\(prefix)委托数量需为 100 股的整数倍")
+                }
+                if o.qty != nil && o.amount != nil {
+                    errors.append("\(prefix)委托数量与金额只能二选一")
+                }
+            }
+        }
+
         return errors
     }
 
@@ -479,10 +522,56 @@ enum StrategyPreview {
         return "内嵌选股条件：\(truncated)"
     }
 
+    /// 交易指令摘要（单独可用）：方向 / 数量或金额 / 报价方式 / 有效期 / 绑定账户数；未配置时返回提示
+    static func tradeSummary(doc: FormulaDoc) -> String {
+        let trade = doc.trade
+        guard !trade.isEmpty else { return "未配置交易指令" }
+
+        var parts: [String] = []
+        // 方向 + 数量（或金额：按最新价折算）
+        let qtyOrAmount: String? = trade.qty.map { "\($0) 股" }
+            ?? trade.amount.map { "\(num($0)) 元（按最新价折算）" }
+        if let d = trade.direction {
+            parts.append(qtyOrAmount.map { "\(d.title) \($0)" } ?? d.title)
+        } else if let qtyOrAmount {
+            parts.append(qtyOrAmount)
+        }
+        // 报价方式
+        if let pt = trade.priceType {
+            if pt == .limit, let off = trade.offsetTicks {
+                parts.append("限价委托（触发价 \(offsetText(off))）")
+            } else {
+                parts.append(pt == .limit ? "限价委托" : "市价委托")
+            }
+        }
+        // 有效期
+        if let v = trade.validity {
+            switch v {
+            case .day:
+                parts.append("当日有效")
+            case .longTerm:
+                parts.append("长期有效")
+            case .untilDate:
+                if let e = trade.expiresAt {
+                    parts.append("有效期至 \(StrategyTradeParser.text(from: e))")
+                } else {
+                    parts.append("指定日期有效")
+                }
+            }
+        } else if let e = trade.expiresAt {
+            parts.append("有效期至 \(StrategyTradeParser.text(from: e))")
+        }
+        // 绑定账户数
+        if !trade.accountIDs.isEmpty {
+            parts.append("绑定 \(trade.accountIDs.count) 个账户")
+        }
+        return parts.isEmpty ? "未配置交易指令" : parts.joined(separator: " · ")
+    }
+
     // MARK: - 单条规则语义
 
-    /// 一条规则的触发语义（按 MODE / OP / DIR 生成中文）
-    private static func triggerText(_ c: StrategyRuleCall) -> String {
+    /// 一条规则的触发语义（按 MODE / OP / DIR 生成中文）；internal 供策略详情页逐条复用
+    static func triggerText(_ c: StrategyRuleCall) -> String {
         switch c.kind {
         case .price:
             let symbol = (value(c, "OP") == "<=") ? "≤" : "≥"
@@ -589,5 +678,10 @@ enum StrategyPreview {
         let magnitude = num(abs(v))
         if v < 0 { return "−\(magnitude)%" }
         return "\(plus ? "+" : "−")\(magnitude)%"
+    }
+
+    /// 偏移档次文案：正数带 "+"，如 "+2 档"
+    private static func offsetText(_ n: Int) -> String {
+        n >= 0 ? "+\(n) 档" : "\(n) 档"
     }
 }

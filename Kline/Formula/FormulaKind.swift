@@ -45,6 +45,7 @@ struct FormulaDoc: Identifiable, Equatable {
     var pickBody: String = ""     // 选股公式文本；策略时表示内嵌的选股条件
     var pickRef: String? = nil    // 仅 strategy：引用选股公式库中某条目的 id
     var rules: String = ""        // 仅 strategy：RULES 段原文（多行文本）
+    var trade: StrategyTradeSpec = StrategyTradeSpec()  // 仅 strategy：TRADE 段（交易指令），默认空 = 未配置
 }
 
 /// 选股公式测试结果
@@ -277,8 +278,13 @@ final class FormulaLibraryStore: ObservableObject {
         var out = "KIND=\(doc.kind.rawValue)\n"
         out += "NAME=\(doc.name)\n"
         if doc.kind == .strategy {
+            // 顺序固定：PICKREF（头部键）→ TRADE: 段 → PICK: 段 → RULES: 段。
+            // 头部键必须写在 TRADE: 段之前，否则会被当成 TRADE 段内容吞掉
             if let ref = doc.pickRef, !ref.isEmpty {
                 out += "PICKREF=\(ref)\n"
+            }
+            if !doc.trade.isEmpty {
+                out += "TRADE:\n" + StrategyTradeParser.serialize(doc.trade) + "\n"
             }
             if !doc.pickBody.isEmpty {
                 out += "PICK:\n\(doc.pickBody)\n"
@@ -297,8 +303,10 @@ final class FormulaLibraryStore: ObservableObject {
         var pickRef: String? = nil
         var pickLines: [String] = []
         var ruleLines: [String] = []
+        var tradeLines: [String] = []
         var inPick = false
         var inRules = false
+        var inTrade = false
 
         for raw in content.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -307,14 +315,34 @@ final class FormulaLibraryStore: ObservableObject {
             if line == "FORMULA:" || line == "PICK:" {
                 inPick = true
                 inRules = false
+                inTrade = false
                 continue
             }
             if line == "RULES:" {
                 inRules = true
                 inPick = false
+                inTrade = false
+                continue
+            }
+            // TRADE: 仅策略使用；头部仍只认 KIND= / NAME= / PICKREF=
+            if line == "TRADE:" {
+                inTrade = true
+                inPick = false
+                inRules = false
                 continue
             }
 
+            if inTrade {
+                // 兜底：头部键若出现在 TRADE: 段之后（手工编辑 / 旧顺序文件），退出 trade 段按头部键处理，
+                // 避免 PICKREF= 被当成 TRADE 段内容吞掉导致引用丢失
+                if line.hasPrefix("KIND=") || line.hasPrefix("NAME=") || line.hasPrefix("PICKREF=") {
+                    inTrade = false
+                } else {
+                    // 段内忽略空行；{...} 注释行保留原样（交给 trade 解析器跳过）
+                    if !line.isEmpty { tradeLines.append(line) }
+                    continue
+                }
+            }
             if inPick {
                 // 段内忽略空行；{...} 注释行保留原样
                 if !line.isEmpty { pickLines.append(line) }
@@ -353,6 +381,8 @@ final class FormulaLibraryStore: ObservableObject {
         if kind == .strategy {
             doc.pickRef = pickRef
             doc.rules = ruleLines.joined(separator: "\n")
+            // TRADE 段缺失（旧文件）→ 保持默认空值；段内解析错误不阻断文件加载，交给校验层报出
+            doc.trade = StrategyTradeParser.parse(lines: tradeLines).spec
         }
         return doc
     }
