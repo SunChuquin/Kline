@@ -215,8 +215,8 @@ struct FloatingAccessoryButton: View {
 
 /// 悬浮按钮点开的底部面板：样式对齐「指标选择面板」——35% 黑色遮罩（点击关闭）、
 /// 贴底面板（只圆顶部两角，底边直达物理屏幕底边）、头部标题 + 关闭按钮。
-/// 内容区按 TradingLayoutStore.shared.panelLayout 分发到 QuickPanelLayouts.swift 的三套布局：
-/// A 上下文自适应交易卡（真实实现）、B / C（阶段二替换占位）。
+/// 内容区按 TradingLayoutStore.shared.panelLayout 分发：A 上下文自适应交易卡
+/// （QuickPanelLayouts.swift）、B 分页式面板 / C 闪电下单条（QuickPanelLayoutsBC.swift）。
 struct FloatingAccessoryPanel: View {
     let onClose: () -> Void
 
@@ -279,9 +279,9 @@ struct FloatingAccessoryPanel: View {
         case .a:
             QuickPanelAView(onClose: onClose)
         case .b:
-            QuickPanelPlaceholderView(styleTitle: QuickPanelLayoutStyle.b.title, onClose: onClose)
+            QuickPanelBView(onClose: onClose)
         case .c:
-            QuickPanelPlaceholderView(styleTitle: QuickPanelLayoutStyle.c.title, onClose: onClose)
+            QuickPanelCView(onClose: onClose)
         }
     }
 

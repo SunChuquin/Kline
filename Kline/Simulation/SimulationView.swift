@@ -30,15 +30,15 @@ struct SimulationView: View {
             // 分隔线
             Divider()
 
-            // 主内容区域：按布局偏好分发（B / C 于阶段二替换为真实实现）
+            // 主内容区域：按布局偏好分发（A 账户侧栏 / B 账户卡片宫格 / C 券商经典顶栏）
             Group {
                 switch layoutStore.simulationLayout {
                 case .a:
                     SimulationLayoutAView()
                 case .b:
-                    SimulationLayoutPlaceholderView(styleTitle: SimulationLayoutStyle.b.title)
+                    SimulationLayoutBView()
                 case .c:
-                    SimulationLayoutPlaceholderView(styleTitle: SimulationLayoutStyle.c.title)
+                    SimulationLayoutCView()
                 }
             }
             .frame(maxHeight: .infinity)

@@ -2,9 +2,10 @@
 //  QuickPanelLayouts.swift
 //  Kline
 //
-//  快捷面板三套布局：方案 A（上下文自适应交易卡）的真实实现，以及方案 B / C 的
-//  阶段二占位。底部面板容器 FloatingAccessoryPanel 按 TradingLayoutStore.shared.panelLayout
-//  分发到这里（面板只收到 onClose，故分发与取数都由本文件自行完成）。
+//  快捷面板三套布局：方案 A（上下文自适应交易卡）的真实实现。
+//  方案 B（分页式面板）/ C（闪电下单条）见同目录 QuickPanelLayoutsBC.swift。
+//  底部面板容器 FloatingAccessoryPanel 按 TradingLayoutStore.shared.panelLayout
+//  分发到这两处（面板只收到 onClose，故分发与取数都由各自文件自行完成）。
 //
 //  方案 A 按 DetailRouter.shared.item 是否存在分两种上下文：
 //  - 详情页态（有标的）：账户条 + 行情头 + 下单卡 + 该股持仓内联 + 快捷动作行；
@@ -701,7 +702,7 @@ struct QuickPanelAView: View {
     }
 }
 
-// MARK: - 方案 B / C 占位（阶段二替换为真实实现）
+// MARK: - 占位视图（方案 B / C 已在 QuickPanelLayoutsBC.swift 实现，本占位保留备用）
 
 struct QuickPanelPlaceholderView: View {
     let styleTitle: String
@@ -736,7 +737,8 @@ struct QuickPanelPlaceholderView: View {
 // MARK: - 金额压缩（面板内的大额统一按「万」展示）
 
 /// 金额文案：≥ 1 万时压缩成两位小数的「万」，否则退回千分位整数
-private func qpAmountText(_ value: Double) -> String {
+/// （方案 A / B / C 共用，故为文件外可见）
+func qpAmountText(_ value: Double) -> String {
     if abs(value) >= 10_000 {
         return String(format: "%.2f万", value / 10_000)
     }
