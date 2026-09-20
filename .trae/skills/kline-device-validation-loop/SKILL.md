@@ -13,11 +13,12 @@ Kline（iOS）功能开发与修复标准打法：**小步分阶段，每阶段�
 
 ## 闭环命令（唯一随平台变化的部分，前台阻塞执行）
 
-- **macOS（家里，本机直连真机 XIAO iPad）**：
+- **macOS（家里，本机构建直装）**：
   `bash scripts/kline_deploy_mac.sh "<提交描述>"`
-  脚本一条龙：xcodebuild 构建 → devicectl 安装启动 → git 提交推送；任一步失败非零退出且不提交代码。
+  脚本自动跟随 **Xcode 当前选中的运行设备**（模拟器或真机皆可）：已启动的模拟器优先，否则取已连接真机；
+  构建 → 安装启动（模拟器走 simctl、真机走 devicectl）→ git 提交推送一条龙；任一步失败非零退出且不提交代码。
   注意：xcodebuild 必须**非沙箱**执行，否则 #Preview 宏插件被拦截会误报 macro implementation not found；
-  设备 id 默认 `00008020-000D48E11E78003A`，换机用 `KLINE_DEVICE_ID=<id>` 覆盖（`xcrun devicectl list devices` 查询）。
+  要用别的设备时 `KLINE_DEVICE_ID=<模拟器UDID或真机ECID> bash scripts/...` 覆盖。
 - **Windows（公司，GitHub Actions 构建 + TrollStore 部署到 iPad mini 4）**：
   `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "<提交描述>"`
   退出码 **0=部署成功 / 6=云端构建成功 / 7=云端构建中网络抖动（稍后重试）** 均可交付；其它退出码自行排查。

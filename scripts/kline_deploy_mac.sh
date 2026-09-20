@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Kline macOS 本地交付闭环：构建 → 安装 → 启动 → 提交推送
-# 与 Windows 的 build_and_deploy.py 对应：公司走 CI + TrollStore，家里走本机直连真机。
+# Kline macOS 本地交付闭环：按 Xcode 当前选中的运行目的地构建 → 安装 → 启动 → 提交推送
+# 与 Windows 的 build_and_deploy.py 对应：公司走 CI + TrollStore，家里走本机直连设备。
 #
 # 用法（前台阻塞执行）：
 #   bash scripts/kline_deploy_mac.sh "<提交描述>"
 #
-# 环境变量：
-#   KLINE_DEVICE_ID  真机 id（默认 XIAO iPad；可用 xcrun devicectl list devices 查）
+# 目标选择（自动模拟 Xcode 工具栏当前选中的运行设备）：
+#   1. KLINE_DEVICE_ID=<id>  强制指定（模拟器 UDID 或真机 ECID）
+#   2. 已 Booted 的模拟器    Xcode 选中模拟器时它一定处于启动状态
+#   3. 已连接的真机          取 -showdestinations 中的物理设备
+#   4. 都没有                报错退出（请在 Xcode 选好设备，或插线/启动模拟器）
 #
 # 退出码：0 全部成功；非 0 = 构建/安装/启动失败，此时不会提交代码。
 set -euo pipefail
 
-DEFAULT_DEVICE_ID="00008020-000D48E11E78003A"   # XIAO iPad✨（USB/ECID 形态的 id）
 PROJECT="Kline.xcodeproj"
 SCHEME="Kline"
 BUNDLE_ID="com.sunck.Kline"
@@ -24,60 +26,113 @@ if [ -z "$MSG" ]; then
   exit 2
 fi
 
-# 选定目标真机：
-#   1) KLINE_DEVICE_ID 显式指定 → 必须已连接，否则报错；
-#   2) 默认 XIAO iPad 在线 → 用它；
-#   3) 否则自动取第一台已连接的物理 iOS 设备；
-#   4) 都没有 → 简短报错（请插线/解锁设备）。
-pick_device() {
+# ---- 1. 选定目标设备 -------------------------------------------------------
+
+# 已启动的模拟器 UDID（取第一个；一般同时只开一个）
+booted_simulator() {
+  xcrun simctl list devices booted --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(""); sys.exit(0)
+out = [x["udid"] for devs in d.get("devices", {}).values()
+       for x in devs if x.get("state") == "Booted"]
+print(out[0] if out else "")'
+}
+
+# 已连接真机 ECID（00008020-XXXXXXXX 形态；排除占位符与 4 连字符的模拟器 UUID）
+connected_device() {
   xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showdestinations 2>/dev/null \
   | python3 -c '
 import re, sys
-want = sys.argv[1] or None
-ids = []
 for line in sys.stdin:
     if "platform:iOS" not in line:
         continue
-    m = re.search(r"id:([0-9A-Fa-f-]{8,})", line)
-    if not m:
-        continue
-    i = m.group(1)
-    # -showdestinations 里：已连接真机 = ECID 形态（仅 1 个连字符，如 00008020-000D…）；
-    # 模拟器 UUID 含 4 个连字符；Any iOS Device 占位符不含 8 位以上连续十六进制。
-    if i.count("-") == 4:
-        continue
-    ids.append(i)
-if want:
-    if want in ids:
-        print(want); sys.exit(0)
-    sys.exit(11)
-print(ids[0] if ids else "")
-' "${KLINE_DEVICE_ID:-}"
+    m = re.search(r"id:([0-9A-Fa-f]{8,16}-[0-9A-Fa-f]{8,})", line)
+    if m:
+        print(m.group(1)); break'
+}
+
+# 指定的 id 是模拟器 UDID（8-4-4-4-12，共 4 个连字符）还是真机 ECID（1 个连字符）
+classify_id() {
+  case "$1" in
+    *-*-*-*-*) echo "sim" ;;
+    *-*)       echo "device" ;;
+    *)         echo "" ;;
+  esac
 }
 
 if [ -n "${KLINE_DEVICE_ID:-}" ]; then
-  DEVICE_ID="$KLINE_DEVICE_ID"
-  if ! pick_device >/dev/null 2>&1; then
-    echo "指定的设备 ${DEVICE_ID} 当前未连接（插线并解锁后重试）"
+  TARGET_KIND="$(classify_id "$KLINE_DEVICE_ID")"
+  TARGET_ID="$KLINE_DEVICE_ID"
+  if [ "$TARGET_KIND" = "sim" ]; then
+    if ! xcrun simctl list devices --json 2>/dev/null | grep -q "\"$TARGET_ID\""; then
+      echo "指定的模拟器 ${TARGET_ID} 不存在（用 xcrun simctl list devices 查可用 UDID）"
+      exit 10
+    fi
+  elif [ "$TARGET_KIND" = "device" ]; then
+    if [ "$(connected_device)" != "$TARGET_ID" ]; then
+      echo "指定的真机 ${TARGET_ID} 当前未连接（插线并解锁后重试）"
+      exit 10
+    fi
+  else
+    echo "无法识别 KLINE_DEVICE_ID=${TARGET_ID}（需要模拟器 UDID 或真机 ECID）"
     exit 10
   fi
 else
-  CONNECTED=$(pick_device 2>/dev/null || true)
-  if [ -z "$CONNECTED" ]; then
-    echo "没有已连接的物理 iOS 设备（插线、解锁并信任后重试，或用 KLINE_DEVICE_ID=<id> 指定）"
-    exit 10
+  TARGET_ID="$(booted_simulator)"
+  if [ -n "$TARGET_ID" ]; then
+    TARGET_KIND="sim"
+  else
+    TARGET_ID="$(connected_device)"
+    if [ -n "$TARGET_ID" ]; then
+      TARGET_KIND="device"
+    fi
   fi
-  DEVICE_ID="$CONNECTED"
 fi
 
-echo "==> [1/4] xcodebuild 构建真机包（设备 ${DEVICE_ID}）"
-xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
-  -destination "id=$DEVICE_ID" -allowProvisioningUpdates build
+if [ -z "${TARGET_ID:-}" ]; then
+  echo "没有可用的运行目标：请在 Xcode 选中一个模拟器（模拟器会自动启动），或插好真机后重试；"
+  echo "也可用 KLINE_DEVICE_ID=<UDID或ECID> 显式指定。"
+  exit 10
+fi
+
+# ---- 2. 构建前准备 ---------------------------------------------------------
+
+XCODEBUILD_ARGS=(-project "$PROJECT" -scheme "$SCHEME" -destination "id=$TARGET_ID")
+
+if [ "$TARGET_KIND" = "sim" ]; then
+  # 模拟器若处于关机状态：先按约定打开带 GUI 的 Simulator（禁止无头后台运行），再启动它
+  SIM_STATE="$(xcrun simctl list devices --json 2>/dev/null | python3 -c '
+import json, sys
+want = sys.argv[1]
+for devs in json.load(sys.stdin).get("devices", {}).values():
+    for x in devs:
+        if x.get("udid") == want:
+            print(x.get("state", "")); sys.exit(0)
+print("")' "$TARGET_ID")"
+  if [ "$SIM_STATE" != "Booted" ]; then
+    echo "==> 启动模拟器 ${TARGET_ID}（Simulator.app）"
+    open -a Simulator
+    xcrun simctl boot "$TARGET_ID" 2>/dev/null || true
+  fi
+  echo "==> 运行目标：模拟器 ${TARGET_ID}"
+else
+  # 真机需要自动签名
+  XCODEBUILD_ARGS+=(-allowProvisioningUpdates)
+  echo "==> 运行目标：真机 ${TARGET_ID}"
+fi
+
+# ---- 3. 构建 ---------------------------------------------------------------
+
+echo "==> [1/4] xcodebuild 构建"
+xcodebuild "${XCODEBUILD_ARGS[@]}" build
+
+# ---- 4. 定位构建产物 Kline.app（同一 destination 的 buildSettings 会给出正确的 Products 目录）
 
 echo "==> [2/4] 定位构建产物 Kline.app"
-# 必须带 -destination：不带时 BUILT_PRODUCTS_DIR 是通用 Debug 目录而非 Debug-iphoneos
-APP_PATH=$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
-  -destination "id=$DEVICE_ID" -showBuildSettings -json 2>/dev/null \
+APP_PATH=$(xcodebuild "${XCODEBUILD_ARGS[@]}" -showBuildSettings -json 2>/dev/null \
   | python3 -c '
 import json, os, sys
 for target in json.load(sys.stdin):
@@ -86,17 +141,30 @@ for target in json.load(sys.stdin):
         p = os.path.join(s.get("BUILT_PRODUCTS_DIR", ""), s.get("FULL_PRODUCT_NAME", ""))
         if os.path.isdir(p):
             print(p)
-            break
-')
+            break')
 if [ -z "${APP_PATH:-}" ]; then
   echo "未找到 Kline.app（检查构建配置与 DerivedData）"
   exit 3
 fi
-echo "    $APP_PATH"
+echo "    ${APP_PATH}"
 
-echo "==> [3/4] 安装并启动到真机"
-xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"
-xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"
+# ---- 5. 安装并启动 ---------------------------------------------------------
+
+if [ "$TARGET_KIND" = "sim" ]; then
+  TARGET_LABEL="模拟器"
+else
+  TARGET_LABEL="真机"
+fi
+echo "==> [3/4] 安装并启动到${TARGET_LABEL}"
+if [ "$TARGET_KIND" = "sim" ]; then
+  xcrun simctl install "$TARGET_ID" "$APP_PATH"
+  xcrun simctl launch "$TARGET_ID" "$BUNDLE_ID"
+else
+  xcrun devicectl device install app --device "$TARGET_ID" "$APP_PATH"
+  xcrun devicectl device process launch --device "$TARGET_ID" "$BUNDLE_ID"
+fi
+
+# ---- 6. 提交并推送 ---------------------------------------------------------
 
 echo "==> [4/4] 提交并推送"
 if git diff --quiet --cached; then
@@ -109,4 +177,4 @@ else
   git push
 fi
 
-echo "==> 完成：构建已安装并在真机启动"
+echo "==> 完成：构建已安装并在目标上启动"
