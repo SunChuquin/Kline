@@ -1,0 +1,360 @@
+//
+//  LayoutNodeInspector.swift
+//  Kline
+//
+//  布局编辑器 - 右侧检查器：按选中节点的 type 生成字段表单。
+//  所有取值绑定都经过 PageLayoutEditorModel 的 setter（不直接绑定 class 属性，
+//  否则就地改动不会触发重绘）；行高固定 44 + Divider 分隔。
+//  底部固定「删除本节点」（根节点禁用并说明）。
+//
+
+import SwiftUI
+
+struct LayoutNodeInspector: View {
+    @ObservedObject var editor: PageLayoutEditorModel
+
+    var body: some View {
+        Group {
+            if let node = editor.selectedNode {
+                inspector(for: node)
+            } else {
+                VStack {
+                    Spacer()
+                    Text("在左侧选择节点开始编辑")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    // MARK: - 主体
+
+    private func inspector(for node: PageLayoutNode) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                headerRow(node)
+                Divider()
+                switch node.type {
+                case "vstack", "hstack", "zstack":
+                    stackFields(node)
+                case "scroll":
+                    scrollFields(node)
+                case "card":
+                    cardFields(node)
+                case "frame":
+                    frameFields(node)
+                case "widget":
+                    widgetFields(node)
+                default:
+                    noFieldsRow("该节点无可调字段")
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) { deleteBar }
+        .background(Color(.systemBackground))
+    }
+
+    private func headerRow(_ node: PageLayoutNode) -> some View {
+        HStack(spacing: 12) {
+            Text(primaryTitle(node))
+                .font(.system(size: 17, weight: .semibold))
+            Spacer(minLength: 12)
+            Text(String(node.uuid.uuidString.prefix(8)))
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 44)
+    }
+
+    // MARK: - 容器字段
+
+    @ViewBuilder
+    private func stackFields(_ node: PageLayoutNode) -> some View {
+        row("间距") { doubleStepper({ node.spacing ?? 0 }, range: 0...64, step: 2) { editor.setSpacing($0, on: node) } }
+        if node.type != "zstack" {
+            row("对齐") {
+                Menu {
+                    ForEach(alignmentOptions(node.type), id: \.self) { option in
+                        Button(alignmentTitle(option)) { editor.setAlignment(option, on: node) }
+                    }
+                } label: {
+                    menuLabel(alignmentTitle(node.alignment ?? "center"))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func scrollFields(_ node: PageLayoutNode) -> some View {
+        row("方向") {
+            Menu {
+                ForEach(["vertical", "horizontal"], id: \.self) { option in
+                    Button(axisTitle(option)) { editor.setAxis(option, on: node) }
+                }
+            } label: {
+                menuLabel(axisTitle(node.axis ?? "vertical"))
+            }
+        }
+        row("间距") { doubleStepper({ node.spacing ?? 0 }, range: 0...64, step: 2) { editor.setSpacing($0, on: node) } }
+        paddingRow(node, "顶部内边距", "top")
+        paddingRow(node, "左侧内边距", "leading")
+        paddingRow(node, "底部内边距", "bottom")
+        paddingRow(node, "右侧内边距", "trailing")
+        row("显示滚动条") {
+            Toggle("", isOn: Binding(get: { node.showsIndicators ?? false },
+                                     set: { editor.setShowsIndicators($0, on: node) }))
+                .labelsHidden()
+        }
+    }
+
+    @ViewBuilder
+    private func cardFields(_ node: PageLayoutNode) -> some View {
+        row("标题") {
+            TextField("卡片标题", text: Binding(get: { node.title ?? "" },
+                                              set: { editor.setNodeTitle($0, on: node) }))
+                .font(.system(size: 15))
+                .multilineTextAlignment(.trailing)
+                .disableAutocorrection(true)
+        }
+        row("紧凑") {
+            Toggle("", isOn: Binding(get: { node.compact ?? false },
+                                     set: { editor.setCompact($0, on: node) }))
+                .labelsHidden()
+        }
+    }
+
+    @ViewBuilder
+    private func frameFields(_ node: PageLayoutNode) -> some View {
+        row("无限宽（infinity）") {
+            Toggle("", isOn: Binding(get: { isInfinityWidth(node.maxWidth) },
+                                     set: { editor.setMaxWidthInfinity($0, on: node) }))
+                .labelsHidden()
+        }
+        row("对齐") {
+            Menu {
+                ForEach(Self.frameAlignments, id: \.self) { option in
+                    Button(alignmentTitle(option)) { editor.setAlignment(option, on: node) }
+                }
+            } label: {
+                menuLabel(alignmentTitle(node.alignment ?? "center"))
+            }
+        }
+        row("最小高度") {
+            doubleStepper({ node.minHeight ?? 0 }, range: 0...400, step: 4) { editor.setMinHeight($0, on: node) }
+        }
+    }
+
+    // MARK: - 控件字段
+
+    @ViewBuilder
+    private func widgetFields(_ node: PageLayoutNode) -> some View {
+        row("控件") {
+            Menu {
+                ForEach(HomeWidgetEditorSchema.all, id: \.name) { descriptor in
+                    Button(descriptor.title) { editor.setWidgetName(descriptor.name, on: node) }
+                }
+            } label: {
+                menuLabel(HomeWidgetEditorSchema.descriptor(for: node.name ?? "")?.title ?? (node.name ?? "未选择"))
+            }
+        }
+
+        if let descriptor = HomeWidgetEditorSchema.descriptor(for: node.name ?? ""), !descriptor.params.isEmpty {
+            ForEach(descriptor.params, id: \.key) { param in
+                paramRow(param, node: node)
+            }
+        } else {
+            noFieldsRow("该控件无可调参数")
+        }
+    }
+
+    @ViewBuilder
+    private func paramRow(_ param: WidgetParamDescriptor, node: PageLayoutNode) -> some View {
+        switch param.kind {
+        case .toggle(let defaultValue):
+            row(param.title) {
+                Toggle("", isOn: Binding(get: { node.params?.bool(param.key, default: defaultValue) ?? defaultValue },
+                                         set: { editor.setBool(param.key, $0, on: node) }))
+                    .labelsHidden()
+            }
+
+        case .stepper(let defaultValue, let range, let note):
+            row(param.title) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text("\(node.params?.int(param.key, default: defaultValue) ?? defaultValue)")
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                        Stepper("", value: Binding(get: { node.params?.int(param.key, default: defaultValue) ?? defaultValue },
+                                                   set: { editor.setInt(param.key, $0, on: node) }),
+                                in: range, step: 1)
+                            .labelsHidden()
+                    }
+                    if let note = note {
+                        Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+                    }
+                }
+            }
+
+        case .options(let options, let defaultValue):
+            row(param.title) {
+                Menu {
+                    ForEach(options, id: \.self) { option in
+                        Button(option) { editor.setString(param.key, option, on: node) }
+                    }
+                } label: {
+                    menuLabel(node.params?.string(param.key, default: defaultValue) ?? defaultValue)
+                }
+            }
+        }
+    }
+
+    // MARK: - 底部删除
+
+    private var deleteBar: some View {
+        VStack(spacing: 4) {
+            if !editor.canRemoveSelected {
+                Text("根节点不可删除")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            Button {
+                editor.removeSelected()
+            } label: {
+                Text("删除本节点")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(editor.canRemoveSelected ? .red : .secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!editor.canRemoveSelected)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - 通用行
+
+    private func row<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.system(size: 15))
+                Spacer(minLength: 12)
+                content()
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            Divider()
+        }
+    }
+
+    private func noFieldsRow(_ text: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(text)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            Divider()
+        }
+    }
+
+    private func paddingRow(_ node: PageLayoutNode, _ title: String, _ key: String) -> some View {
+        row(title) {
+            doubleStepper({ paddingValue(node, key) }, range: 0...64, step: 1) {
+                editor.setPaddingEdge(key, $0, on: node)
+            }
+        }
+    }
+
+    /// 数值 + 步进器（Double 显示整数）；`get` 每次现取，避免连点步进器时读到旧快照
+    private func doubleStepper(_ get: @escaping () -> Double, range: ClosedRange<Double>, step: Double,
+                               set: @escaping (Double) -> Void) -> some View {
+        HStack(spacing: 8) {
+            Text("\(Int(get()))")
+                .font(.system(size: 15))
+                .foregroundColor(.secondary)
+                .frame(minWidth: 28, alignment: .trailing)
+            Stepper("", value: Binding(get: get, set: set), in: range, step: step)
+                .labelsHidden()
+        }
+    }
+
+    private func menuLabel(_ title: String) -> some View {
+        HStack(spacing: 3) {
+            Text(title).font(.system(size: 15)).foregroundColor(.blue)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - 取值 / 文案
+
+    private static let frameAlignments = [
+        "top", "center", "bottom", "leading", "trailing",
+        "topLeading", "topTrailing", "bottomLeading", "bottomTrailing"
+    ]
+
+    private func alignmentOptions(_ type: String) -> [String] {
+        if type == "hstack" {
+            return ["top", "center", "bottom", "firstTextBaseline", "lastTextBaseline"]
+        }
+        return ["leading", "center", "trailing"]
+    }
+
+    private func alignmentTitle(_ raw: String) -> String {
+        switch raw {
+        case "top": return "顶部"
+        case "bottom": return "底部"
+        case "leading": return "左对齐"
+        case "trailing": return "右对齐"
+        case "center": return "居中"
+        case "firstTextBaseline": return "首行基线"
+        case "lastTextBaseline": return "末行基线"
+        case "topLeading": return "左上"
+        case "topTrailing": return "右上"
+        case "bottomLeading": return "左下"
+        case "bottomTrailing": return "右下"
+        default: return raw
+        }
+    }
+
+    private func axisTitle(_ raw: String) -> String {
+        raw == "horizontal" ? "水平" : "垂直"
+    }
+
+    private func paddingValue(_ node: PageLayoutNode, _ key: String) -> Double {
+        guard let padding = node.padding else { return 0 }
+        switch key {
+        case "top": return padding.top
+        case "leading": return padding.leading
+        case "bottom": return padding.bottom
+        default: return padding.trailing
+        }
+    }
+
+    private func isInfinityWidth(_ width: PageLayoutWidth?) -> Bool {
+        if case .infinity? = width { return true }
+        return false
+    }
+
+    private func primaryTitle(_ node: PageLayoutNode) -> String {
+        if node.type == "widget" {
+            return HomeWidgetEditorSchema.descriptor(for: node.name ?? "")?.title ?? "控件"
+        }
+        return HomeWidgetEditorSchema.nodeTypeTitles[node.type] ?? node.type
+    }
+}

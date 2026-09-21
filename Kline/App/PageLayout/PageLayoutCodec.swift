@@ -17,8 +17,24 @@ enum PageLayoutCodec {
 
     /// 解析配置文本；失败（含未知节点 type）返回 nil
     static func decode(_ text: String) -> PageLayoutFile? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(PageLayoutFile.self, from: data)
+        try? decodeResult(text).get()
+    }
+
+    /// 解析配置文本并把失败原因带出来（编辑器的 JSON 页签要显示可读错误）：
+    /// UTF-8 转换失败 → `dataCorrupted`；否则为 `JSONDecoder().decode` 的 do/catch 结果。
+    /// 与 `decode(_:)` 同一口径（后者即 `try? decodeResult(_:).get()`）。
+    static func decodeResult(_ text: String) -> Result<PageLayoutFile, Error> {
+        guard let data = text.data(using: .utf8) else {
+            return .failure(DecodingError.dataCorrupted(
+                DecodingError.Context(codingPath: [],
+                                      debugDescription: "配置文本不是合法的 UTF-8")
+            ))
+        }
+        do {
+            return .success(try JSONDecoder().decode(PageLayoutFile.self, from: data))
+        } catch {
+            return .failure(error)
+        }
     }
 
     /// 编码为落盘 / 展示用文本；失败返回 nil

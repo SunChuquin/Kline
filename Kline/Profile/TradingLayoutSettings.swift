@@ -178,3 +178,26 @@ struct HomeLayoutSettingRow: View {
         .frame(minHeight: 36)
     }
 }
+
+/// 「布局编辑器」设置行（整行可点打开全屏编辑器）
+struct LayoutEditorSettingRow: View {
+    var onOpen: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("布局编辑器")
+                .font(.system(size: 16))
+            Spacer(minLength: 12)
+            HStack(spacing: 3) {
+                Text("首页")
+                    .font(.system(size: 12))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+            }
+            .foregroundColor(.blue)
+        }
+        .frame(minHeight: 36)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+    }
+}

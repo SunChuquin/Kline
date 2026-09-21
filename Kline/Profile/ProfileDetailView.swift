@@ -23,6 +23,8 @@ struct ProfileDetailView: View {
     @State private var showHomeLayoutPanel = false
     /// 公式管理中心页（全屏 overlay）开合
     @State private var showFormulaCenter = false
+    /// 布局编辑器（全屏 overlay）开合
+    @State private var showLayoutEditor = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @ObservedObject private var tradingLayoutStore = TradingLayoutStore.shared
     @ObservedObject private var pageLayoutStore = PageLayoutStore.shared
@@ -104,6 +106,12 @@ struct ProfileDetailView: View {
 
                     // 首页布局（A / B / C / D 四套方案，默认 B）：点右侧下拉弹出选择面板
                     HomeLayoutSettingRow(isOpen: $showHomeLayoutPanel)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+
+                    // 布局编辑器（全屏页面）：编辑首页 JSON 布局配置
+                    LayoutEditorSettingRow { showLayoutEditor = true }
                         .padding()
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
@@ -222,28 +230,37 @@ struct ProfileDetailView: View {
                 .transition(.opacity)
                 .zIndex(1000)
             }
+            // 布局编辑器：全屏页面（铺满，无遮罩），关闭走页内「返回」
+            if showLayoutEditor {
+                ZStack { PageLayoutEditorView(onClose: { showLayoutEditor = false }) }
+                    .transition(.opacity)
+                    .zIndex(1000)
+            }
         }
         // 浮层互斥：任一打开时关掉其余（iOS 15 的 onChange 为单参数闭包）
         .onChange(of: showThemePanel) { newValue in
-            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false; showLayoutEditor = false }
         }
         .onChange(of: showPanelLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false; showLayoutEditor = false }
         }
         .onChange(of: showSimulationLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false; showLayoutEditor = false }
         }
         .onChange(of: showFavoritesLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false; showLayoutEditor = false }
         }
         .onChange(of: showMarketLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false; showLayoutEditor = false }
         }
         .onChange(of: showHomeLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false; showLayoutEditor = false }
         }
         .onChange(of: showFormulaCenter) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showLayoutEditor = false }
+        }
+        .onChange(of: showLayoutEditor) { newValue in
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
         }
     }
 }
