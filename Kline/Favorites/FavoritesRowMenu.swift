@@ -418,7 +418,7 @@ struct FavoritesBatchAlertSheet: View {
     }
 
     /// 弹窗按钮：合法数值才可点（非法时置灰 + 不用 disabled 避免吞掉命中区）
-    private func dialogButton(_ title: String, color: Color, bold: Bool,
+    private func dialogButton(_ title: String, color: Color, bold: Bool = false,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
