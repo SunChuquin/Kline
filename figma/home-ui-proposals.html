@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kline 首页布局重设计方案 · 4 档</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='4' y='10' width='3.4' height='10' fill='%23D92929'/%3E%3Crect x='10.3' y='5' width='3.4' height='15' fill='%23008C59'/%3E%3Crect x='16.6' y='8' width='3.4' height='12' fill='%23D92929'/%3E%3C/svg%3E">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --red:#D92929; --green:#008C59; --blue:#007AFF; --orange:#FF9500;
+  --ink:#000; --sub:#8E8E8E; --sub2:#AEAEB2;
+  --line:rgba(60,60,67,.14); --line2:rgba(127,127,127,.30);
+  --g6:#F2F2F7; --fill:#EDEDED; --gray5:#E5E5EA;
+  --scrim:rgba(0,0,0,.35);
+  --gallery:#26282C; --card:#33363B; --card2:#3C4046; --gtext:#E9EBEF; --gsub:#A6ABB4;
+}
+html,body{background:var(--gallery)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;
+  color:var(--gtext); padding:34px 28px 80px; -webkit-font-smoothing:antialiased;
+}
+.num,.mono{font-variant-numeric:tabular-nums;font-family:"SF Mono",Menlo,Consolas,"SF Pro Text",monospace;letter-spacing:-.2px}
+.wrap{max-width:1080px;margin:0 auto}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::selection{background:rgba(0,122,255,.25)}
+
+/* ===== 画廊头部 ===== */
+.hero{margin-bottom:26px}
+.hero h1{font-size:26px;font-weight:800;letter-spacing:.2px}
+.hero p{color:var(--gsub);font-size:14px;line-height:1.7;margin-top:8px;max-width:920px}
+.hero .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:12px;color:var(--gsub);border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:3px 11px;background:rgba(255,255,255,.04)}
+.chip b{color:var(--gtext);font-weight:600}
+
+/* ===== 区块 ===== */
+.section{margin-top:42px}
+.sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--blue);border-radius:6px;padding:2px 8px}
+.sec-head h2{font-size:20px;font-weight:800}
+.sec-head .sub{font-size:13px;color:var(--gsub);line-height:1.6;width:100%;margin-top:4px;max-width:960px}
+
+.switcher{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 14px;align-items:center}
+.switcher .lab{font-size:12px;color:var(--gsub);margin-right:2px}
+.seg{font-size:13px;font-weight:600;color:var(--gsub);background:var(--card);border:1px solid rgba(255,255,255,.10);
+  border-radius:8px;padding:7px 14px;transition:.15s}
+.seg:hover{border-color:rgba(255,255,255,.28)}
+.seg.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.seg .tag{font-size:10px;font-weight:700;background:rgba(255,255,255,.18);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:1px}
+.seg.on .tag{background:rgba(255,255,255,.25)}
+
+/* ===== 舞台：设备框 + 标注栏 ===== */
+.stage{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.frame-col{flex:none}
+.bezel{background:#0C0D0F;padding:11px;border-radius:20px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.screen-wrap{width:573px;height:430px;overflow:hidden;position:relative;border-radius:7px;background:#fff}
+.screen{width:1024px;height:768px;transform-origin:top left;transform:scale(.55957);
+  position:absolute;top:0;left:0;background:#fff;display:none;overflow:hidden;color:var(--ink)}
+.screen.active{display:flex;flex-direction:column}
+.frame-cap{font-size:12px;color:var(--gsub);margin-top:10px;text-align:center}
+.frame-cap b{color:var(--gtext)}
+
+.notes{width:340px;flex:1;min-width:280px}
+.ncard{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:15px 16px;margin-bottom:10px}
+.ncard h3{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+.rec{font-size:10px;font-weight:800;color:#fff;background:var(--red);border-radius:4px;padding:2px 6px;letter-spacing:.5px}
+.ncard .desc{font-size:12.5px;color:var(--gsub);line-height:1.65;margin-top:7px}
+.ann{list-style:none;margin-top:4px}
+.ann li{display:flex;gap:9px;font-size:12.5px;line-height:1.55;color:#D7DAE0;padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+.ann li:last-child{border-bottom:none}
+.ann .n{flex:none;width:19px;height:19px;border-radius:50%;background:var(--blue);color:#fff;font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;margin-top:1px}
+.ann b{color:#fff;font-weight:600}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.pc .box{background:rgba(255,255,255,.04);border-radius:8px;padding:8px 10px}
+.pc .box h4{font-size:11px;font-weight:700;margin-bottom:5px;letter-spacing:.5px}
+.pc .pro h4{color:#54c98f}.pc .con h4{color:#f08a8a}
+.pc .box div{font-size:11.5px;color:var(--gsub);line-height:1.55;padding-left:11px;position:relative}
+.pc .pro div::before{content:"＋";position:absolute;left:0;color:#54c98f}
+.pc .con div::before{content:"－";position:absolute;left:0;color:#f08a8a}
+
+/* ===== 方案对比表 ===== */
+.cmp{margin-top:18px;border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:var(--card)}
+.cmp table{width:100%;border-collapse:collapse;font-size:12.5px}
+.cmp th,.cmp td{padding:10px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,.07);line-height:1.5}
+.cmp th{background:rgba(255,255,255,.05);font-weight:700;color:#fff;font-size:12px}
+.cmp td:first-child{color:var(--gtext);font-weight:600;white-space:nowrap}
+.cmp tr:last-child td{border-bottom:none}
+.cmp .pick{color:#7ce0ac}
+.cmp-wrap{overflow-x:auto}
+.foot{margin-top:34px;text-align:center;font-size:12px;color:#6c7178}
+
+/* ===== 屏内通用 ===== */
+.page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.up{color:var(--red)}
+.dn{color:var(--green)}
+.hairline1{height:1px;background:var(--line)}
+.sp{flex:1}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.25);z-index:30}
+.marker{position:absolute;z-index:80;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;
+  font-size:11.5px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 7px rgba(0,0,0,.35);border:1.5px solid #fff}
+body.hide-ann .marker{display:none}
+
+.tabbar{height:47px;flex:none;background:#fff;border-top:.5px solid var(--line2);display:flex;z-index:5}
+.tabbar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--sub)}
+.tabbar .tab.on{color:var(--blue)}
+.tabbar .tab svg{width:19px;height:19px}
+.tabbar .tab span{font-size:10px}
+
+/* ===== 首页：标题栏（四档共用） ===== */
+.hm-top{height:56px;flex:none;display:flex;align-items:center;padding:0 16px;background:#fff;position:relative}
+.hm-brand{display:flex;align-items:center;gap:6px}
+.hm-brand svg{width:24px;height:24px;color:var(--red);flex:none}
+.hm-brand .bt{font-size:18px;font-weight:700}
+.login-pill{display:flex;align-items:center;gap:5px;background:var(--gray5);border-radius:20px;padding:3px 12px 3px 5px}
+.login-pill svg{width:28px;height:28px;color:var(--blue);flex:none}
+.login-pill span{font-size:16px;color:var(--ink)}
+
+.hm-body{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.hm-center{align-items:center;justify-content:center;gap:6px}
+.hm-big{font-size:28px;font-weight:700;line-height:1.3}
+.hm-subx{font-size:17px;color:var(--sub);line-height:1.3}
+
+.hm-search{height:36px;flex:none;margin:12px 16px 0;background:var(--gray5);border-radius:8px;
+  display:flex;align-items:center;gap:7px;padding:0 12px;color:var(--sub)}
+.hm-search svg{width:17px;height:17px;flex:none}
+.hm-search span{font-size:15px}
+
+.hm-grp{font-size:13px;color:var(--sub);line-height:18px;padding:14px 16px 8px}
+
+.icb{color:var(--blue)}
+.ico{color:var(--orange)}
+.icr{color:var(--red)}
+.icg{color:var(--green)}
+
+/* 首页 B：4 列宫格 */
+.hm-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 12px;padding:0 16px}
+.hm-cell{height:88px;background:var(--g6);border-radius:12px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:7px}
+.hm-cell svg{width:28px;height:28px;flex:none}
+.hm-cell span{font-size:13px;color:var(--ink);line-height:1.2}
+
+/* 首页 C：分区列表 */
+.hm-row{height:56px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line)}
+.hm-ibox{width:28px;height:28px;flex:none;border-radius:7px;background:var(--g6);
+  display:flex;align-items:center;justify-content:center}
+.hm-ibox svg{width:17px;height:17px}
+.hm-txt{min-width:0}
+.hm-tt{font-size:16px;line-height:1.25}
+.hm-st{font-size:12px;color:var(--sub);line-height:1.3}
+.hm-chev{margin-left:auto;flex:none;display:flex;color:var(--sub2)}
+.hm-chev svg{width:13px;height:13px}
+
+/* 首页 D：卡片工作台 */
+.hm-hero{margin:16px 16px 0;height:76px;flex:none;background:var(--g6);border-radius:12px;
+  display:flex;align-items:center;gap:12px;padding:0 18px}
+.hm-hero>svg{width:26px;height:26px;flex:none}
+.hm-hero .ht{font-size:16px;font-weight:600;line-height:1.3}
+.hm-hero .hd{margin-left:auto;font-size:12px;color:var(--sub);line-height:1.3}
+.hm-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:12px 16px 0}
+.hm-mcard{height:104px;background:var(--g6);border-radius:12px;padding:14px 18px;
+  display:flex;flex-direction:column;justify-content:center;gap:5px}
+.hm-mcard>svg{width:22px;height:22px;flex:none}
+.hm-mcard .mt{font-size:15px;font-weight:600;line-height:1.25}
+.hm-mcard .md{font-size:11.5px;color:var(--sub);line-height:1.3}
+.hm-smcard{margin:12px 16px 0;height:64px;flex:none;background:var(--g6);border-radius:12px;
+  display:flex;align-items:center;gap:12px;padding:0 18px}
+.hm-smcard>svg{width:22px;height:22px;flex:none}
+.hm-smcard .mt{font-size:15px;font-weight:600;line-height:1.25}
+
+/* ===== 个人中心 ===== */
+.hp-nav{height:56px;flex:none;display:flex;align-items:center;gap:18px;padding:0 16px}
+.hp-nav .pb{display:flex;align-items:center;gap:1px;color:var(--blue);font-size:17px}
+.hp-nav .pb svg{width:13px;height:22px}
+.hp-nav .pt{font-size:20px;font-weight:700}
+.hp-body{flex:1;min-height:0;overflow:hidden;padding:12px 20px 0;display:flex;flex-direction:column;gap:10px}
+.hp-row{height:36px;flex:none;display:flex;align-items:center;padding:0 14px;background:var(--g6);border-radius:12px}
+.hp-row .rl{font-size:16px;line-height:1.25}
+.hp-row.open{background:rgba(0,122,255,.10);box-shadow:inset 0 0 0 1px rgba(0,122,255,.35)}
+.hp-dd{margin-left:auto;display:flex;align-items:center;gap:4px;color:var(--blue);font-size:12px;font-weight:600}
+.hp-dd svg{width:14px;height:14px}
+.opt-panel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:210px;background:#fff;
+  border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.28);z-index:31;overflow:hidden;display:flex;flex-direction:column}
+.opt-row{display:flex;align-items:center;padding:10px 12px;font-size:14px;line-height:1.35;
+  border-bottom:.5px solid var(--line);text-align:left}
+.opt-row .ot{flex:1}
+.opt-row .ok{color:var(--blue);flex:none;margin-left:8px;display:flex}
+.opt-row .ok svg{width:15px;height:15px}
+.opt-done{padding:11px 0;text-align:center;font-size:15px;font-weight:700;color:var(--blue);border-top:.5px solid var(--line2)}
+
+/* ===== 单屏截图模式 #shot=<id> ===== */
+body.shot{padding:0;display:flex;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+body.shot .wrap{max-width:none;margin:0}
+body.shot .hero,body.shot .sec-head,body.shot .switcher,body.shot .notes,
+body.shot .cmp,body.shot .frame-cap,body.shot .foot{display:none!important}
+body.shot .section{display:none;margin:0}
+body.shot .section.shot-on{display:block}
+body.shot .stage{display:block;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>Kline 首页布局重设计方案 · 4 档</h1>
+    <p>现状首页只有标题栏 + 一句「首页 / 欢迎来到首页」，1024×768 的横屏画布几乎完全空置，也不承担任何导航作用。
+      本次为首页出 4 档布局：<b style="color:#fff">A 档为现有实现的 1:1 复刻</b>（作为基线），
+      <b style="color:#fff">B / C / D 为重设计方案</b>，分别探索「宫格快捷入口」「分区列表入口」「卡片工作台」三条路线。
+      所有画面按真机形态绘制（iPad 横屏 1024×768、涨红跌绿、底部四项 Tab：首页 / 自选 / 行情 / 模拟），屏内按钮与切换器均可点。
+      四档布局在「个人中心 → 首页布局」里独立选择，见区块二。</p>
+    <div class="meta">
+      <span class="chip">样机尺寸 <b>1024×768</b>（iPad mini 4 横屏）</span>
+      <span class="chip">A 档 = <b>现有实现复刻</b></span>
+      <span class="chip">B / C / D = <b>重设计</b></span>
+      <span class="chip">默认档 <b>B · 宫格快捷入口</b></span>
+      <span class="chip">示例数据，非真实行情</span>
+      <button class="chip" id="annToggle" style="cursor:pointer">标注：开（点击切换）</button>
+    </div>
+  </div>
+
+  <!-- SVG 图标库 -->
+  <svg width="0" height="0" style="position:absolute" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-uptrend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5V20.5h16.5"/><path d="M7 15.8l4.2-4.2 2.9 2.6 4.4-5.9"/></symbol>
+    <symbol id="i-house" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-folder-f" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="11" rx="4"/><path d="M7 11.5v4M5 13.5h4M15.5 12.5h.01M18 15h.01"/></symbol>
+    <symbol id="i-fx" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6.5 21c2.6 0 3.7-1.7 4.4-4.4L14 5.6C14.7 2.9 15.8 1.5 18 1.5"/><path d="M8.6 10.6h8"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M9 6v12M15 6v12"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5 16 12l-6.5 6.5"/></symbol>
+    <symbol id="i-star-f" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.6l2.7 5.6 6.1.8-4.4 4.3 1.1 6.1L12 17.5 6.5 20.4l1.1-6.1L3.2 10l6.1-.8z"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="11" opacity=".15"/><circle cx="12" cy="9.4" r="3.6"/><path d="M5.2 19.6a7 7 0 0 1 13.6 0 10.6 10.6 0 0 1-13.6 0z"/></symbol>
+  </svg>
+
+  <!-- ================= 区块一：首页 4 档 ================= -->
+  <div class="section" id="sec-home">
+    <div class="sec-head">
+      <span class="sec-no">区块一</span>
+      <h2>首页 · 4 档布局</h2>
+      <div class="sub">现状（A 档）首页是「标题栏 + 一句欢迎语」，除登录外没有任何入口，用户进任何功能都要先走底部 Tab。
+        重设计三条路线：<b style="color:#fff">B</b> 用 4 列宫格把 6 个入口一屏铺满，点击 1 步到位；
+        <b style="color:#fff">C</b> 换成带副标题的分区列表，用一句说明解释每个入口；
+        <b style="color:#fff">D</b> 用大 / 中 / 小三种尺寸的卡片搭一个工作台，兼顾入口与说明。四档共用同一批入口，仅渲染层不同。</div>
+    </div>
+
+    <div class="switcher">
+      <span class="lab">方案</span>
+      <button class="seg" data-home="homeA">A · 现有实现（保留）</button>
+      <button class="seg on" data-home="homeB">B · 宫格快捷入口<span class="tag">默认</span></button>
+      <button class="seg" data-home="homeC">C · 分区列表入口</button>
+      <button class="seg" data-home="homeD">D · 卡片工作台</button>
+    </div>
+
+    <div class="stage">
+      <div class="frame-col">
+        <div class="bezel">
+          <div class="screen-wrap">
+
+            <!-- ===== 首页 A：现有实现 ===== -->
+            <div class="screen active" id="scr-homeA">
+              <div class="page">
+                <div class="hm-top">
+                  <span class="hm-brand"><svg><use href="#i-uptrend"/></svg><span class="bt">Kline</span></span>
+                  <span class="sp"></span>
+                  <span class="login-pill"><svg><use href="#i-person"/></svg><span>登录</span></span>
+                </div>
+                <div class="hairline1"></div>
+                <div class="hm-body hm-center">
+                  <div class="hm-big">首页</div>
+                  <div class="hm-subx">欢迎来到首页</div>
+                </div>
+              </div>
+              <div class="tabbar" data-tab="0"></div>
+            </div>
+
+            <!-- ===== 首页 B：宫格快捷入口 ===== -->
+            <div class="screen" id="scr-homeB">
+              <div class="page">
+                <div class="hm-top">
+                  <span class="hm-brand"><svg><use href="#i-uptrend"/></svg><span class="bt">Kline</span></span>
+                  <span class="sp"></span>
+                  <span class="login-pill"><svg><use href="#i-person"/></svg><span>登录</span></span>
+                </div>
+                <div class="hairline1"></div>
+                <div class="hm-body">
+                  <div class="hm-search"><svg><use href="#i-search"/></svg><span>搜索</span></div>
+                  <div class="hm-grp">快捷入口</div>
+                  <div class="hm-grid" id="hmQuick"></div>
+                </div>
+              </div>
+              <div class="tabbar" data-tab="0"></div>
+            </div>
+
+            <!-- ===== 首页 C：分区列表入口 ===== -->
+            <div class="screen" id="scr-homeC">
+              <div class="page">
+                <div class="hm-top">
+                  <span class="hm-brand"><svg><use href="#i-uptrend"/></svg><span class="bt">Kline</span></span>
+                  <span class="sp"></span>
+                  <span class="login-pill"><svg><use href="#i-person"/></svg><span>登录</span></span>
+                </div>
+                <div class="hairline1"></div>
+                <div class="hm-body" id="hmSections"></div>
+              </div>
+              <div class="tabbar" data-tab="0"></div>
+            </div>
+
+            <!-- ===== 首页 D：卡片工作台 ===== -->
+            <div class="screen" id="scr-homeD">
+              <div class="page">
+                <div class="hm-top">
+                  <span class="hm-brand"><svg><use href="#i-uptrend"/></svg><span class="bt">Kline</span></span>
+                  <span class="sp"></span>
+                  <span class="login-pill"><svg><use href="#i-person"/></svg><span>登录</span></span>
+                </div>
+                <div class="hairline1"></div>
+                <div class="hm-body">
+                  <div class="hm-hero">
+                    <svg class="icb"><use href="#i-search"/></svg>
+                    <span class="ht">搜索标的</span>
+                    <span class="hd">双击首页或点这里进入搜索</span>
+                  </div>
+                  <div class="hm-cards" id="hmCards"></div>
+                  <div class="hm-smcard">
+                    <svg class="icb"><use href="#i-person"/></svg>
+                    <span class="mt">个人中心</span>
+                    <span class="hm-chev"><svg><use href="#i-chev-r"/></svg></span>
+                  </div>
+                </div>
+              </div>
+              <div class="tabbar" data-tab="0"></div>
+            </div>
+
+          </div>
+        </div>
+        <div class="frame-cap" id="homeCap"></div>
+      </div>
+      <div class="notes" id="homeNotes"></div>
+    </div>
+  </div>
+
+  <!-- ================= 区块二：个人中心 ================= -->
+  <div class="section" id="sec-profile">
+    <div class="sec-head">
+      <span class="sec-no">区块二</span>
+      <h2>个人中心 · 首页布局切换</h2>
+      <div class="sub">四档首页布局在个人中心里选择：六行设置（Kline 显示主题、快捷面板布局、模拟页布局、自选页布局、行情页布局、<b style="color:#fff">首页布局</b>）共用同一个 210pt 宽的选择浮层面板。
+        面板居中弹出、当前档右侧蓝色对勾、点击立即生效（不关面板），底部蓝色「完成」关闭。下图演示点开「首页布局」的状态，当前档为 B · 宫格快捷入口。</div>
+    </div>
+
+    <div class="stage">
+      <div class="frame-col">
+        <div class="bezel">
+          <div class="screen-wrap">
+            <div class="screen active" id="scr-profileHomeLayout">
+              <div class="page">
+                <div class="hp-nav">
+                  <span class="pb"><svg><use href="#i-back"/></svg>返回</span>
+                  <span class="pt">个人中心</span>
+                </div>
+                <div class="hairline1"></div>
+                <div class="hp-body" id="hpRows"></div>
+              </div>
+              <div class="scrim"></div>
+              <div class="opt-panel">
+                <div class="opt-row"><span class="ot">A · 现有首页（保留）</span></div>
+                <div class="opt-row"><span class="ot">B · 宫格快捷入口（默认）</span><span class="ok"><svg><use href="#i-check"/></svg></span></div>
+                <div class="opt-row"><span class="ot">C · 分区列表入口</span></div>
+                <div class="opt-row"><span class="ot">D · 卡片工作台</span></div>
+                <div class="opt-done">完成</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-cap" id="pfCap"></div>
+      </div>
+      <div class="notes" id="pfNotes"></div>
+    </div>
+  </div>
+
+  <!-- ================= 方案对比表 ================= -->
+  <div class="section" id="sec-cmp">
+    <div class="sec-head">
+      <span class="sec-no">区块三</span>
+      <h2>方案对比表 · 4 档 × 6 维度</h2>
+      <div class="sub">A 档为现有实现的复刻，作为基线；B / C / D 为三条重设计路线。绿色为该项表现最好的一档。</div>
+    </div>
+    <div class="cmp">
+      <div class="cmp-wrap">
+        <table>
+          <colgroup><col style="width:19%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:12%"><col style="width:13%"><col style="width:14%"></colgroup>
+          <tr><th>方案</th><th>信息密度</th><th>横屏利用</th><th>首屏信息量</th><th>操作步数</th><th>实现复杂度</th><th>适配场景</th></tr>
+          <tr><td>homeA · 现有实现（保留）</td><td>极低：整屏只有 2 行字</td><td>浪费：内容居中、两侧与下方全空</td><td>0 个入口 + 1 句欢迎语</td><td>进任一功能 1 步（走底部 Tab）</td><td class="pick">低：现有实现，零改动</td><td>基线对照 / 保留老用户习惯</td></tr>
+          <tr><td>homeB · 宫格快捷入口（B）</td><td>中：6 格 × 1 图标 1 名称</td><td class="pick">充分：4 列宫格铺满 1024 宽</td><td>6 个入口 + 搜索条</td><td class="pick">1 步（宫格直达）</td><td>中：宫格 + 图标语义映射</td><td>新用户、高频跨页跳转</td></tr>
+          <tr><td>homeC · 分区列表入口</td><td>中高：6 行 × 标题 + 副标题</td><td>好：单列长行，右侧留白</td><td>6 个入口 + 每组分类说明</td><td class="pick">1 步（列表直达）</td><td class="pick">低：复用个人中心设置行组件</td><td>需要解释文案 / 功能还在增加的版本</td></tr>
+          <tr><td>homeD · 卡片工作台</td><td class="pick">高：1 大卡 + 4 中卡 + 1 小卡</td><td class="pick">极充分：三段式，卡片均分横屏</td><td class="pick">6 个入口 + 每张卡一句说明</td><td class="pick">1 步（卡片直达）</td><td>中高：三种卡片尺寸 + 说明文案</td><td>平板为主、要一眼看懂每个功能</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">Kline 首页布局方案 · 静态原型 · 全部数据为示例 · 配色与尺寸对齐现 App（iPad 横屏 1024×768）</div>
+
+</div>
+
+<script>
+/* =============== 工具 =============== */
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+/* =============== 数据：底部导航 =============== */
+const TABS=[['i-house','首页'],['i-folder','自选'],['i-chart','行情'],['i-game','模拟']];
+function fillTabbar(){
+  $$('.tabbar').forEach(b=>{
+    const k=parseInt(b.dataset.tab,10);
+    b.innerHTML=TABS.map((t,i)=>`<div class="tab${i===k?' on':''}"><svg><use href="#${t[0]}"/></svg><span>${t[1]}</span></div>`).join('');
+  });
+}
+
+/* =============== 数据：入口 =============== */
+const QUICK=[
+  {n:'搜索标的',ic:'i-search',c:'icb'},
+  {n:'自选',ic:'i-star-f',c:'ico'},
+  {n:'行情',ic:'i-chart',c:'icb'},
+  {n:'模拟交易',ic:'i-game',c:'icb'},
+  {n:'公式管理',ic:'i-fx',c:'icb'},
+  {n:'个人中心',ic:'i-person',c:'icb'}
+];
+const SECTIONS=[
+  {t:'行情',items:[
+    {n:'行情',s:'沪深主板 / ETF 指数行情表',ic:'i-chart'},
+    {n:'自选',s:'分组自选与公式选股结果',ic:'i-folder-f'}]},
+  {t:'研究',items:[
+    {n:'搜索标的',s:'按名称 / 代码检索标的',ic:'i-search'},
+    {n:'公式管理',s:'技术指标 / 选股指标 / 交易策略',ic:'i-fx'}]},
+  {t:'账户',items:[
+    {n:'模拟交易',s:'账户、持仓、委托与条件单',ic:'i-game'},
+    {n:'个人中心',s:'主题、页面布局与本地更新',ic:'i-person'}]}
+];
+const DCARDS=[
+  {n:'自选',d:'我的分组与持仓',ic:'i-star-f',c:'ico'},
+  {n:'行情',d:'沪深主板 + ETF 指数',ic:'i-chart',c:'icb'},
+  {n:'模拟交易',d:'账户资产与持仓盈亏',ic:'i-game',c:'icb'},
+  {n:'公式管理',d:'指标 / 选股 / 策略',ic:'i-fx',c:'icb'}
+];
+const SETROWS=[
+  {n:'Kline 显示主题',v:'跟随系统'},
+  {n:'快捷面板布局',v:'B'},
+  {n:'模拟页布局',v:'A'},
+  {n:'自选页布局',v:'A'},
+  {n:'行情页布局',v:'A'},
+  {n:'首页布局',v:'B',open:1}
+];
+
+/* =============== 渲染屏内内容 =============== */
+fillTabbar();
+
+$('#hmQuick').innerHTML=QUICK.map(q=>
+  `<div class="hm-cell"><svg class="${q.c}"><use href="#${q.ic}"/></svg><span>${q.n}</span></div>`).join('');
+
+$('#hmSections').innerHTML=SECTIONS.map(s=>
+  `<div class="hm-grp">${s.t}</div>`+s.items.map(it=>
+    `<div class="hm-row">`
+    +`<span class="hm-ibox icb"><svg><use href="#${it.ic}"/></svg></span>`
+    +`<span class="hm-txt"><span class="hm-tt">${it.n}</span><br><span class="hm-st">${it.s}</span></span>`
+    +`<span class="hm-chev"><svg><use href="#i-chev-r"/></svg></span>`
+    +`</div>`).join('')
+).join('');
+
+$('#hmCards').innerHTML=DCARDS.map(c=>
+  `<div class="hm-mcard"><svg class="${c.c}"><use href="#${c.ic}"/></svg>`
+  +`<span class="mt">${c.n}</span><span class="md">${c.d}</span></div>`).join('');
+
+$('#hpRows').innerHTML=SETROWS.map(r=>
+  `<div class="hp-row${r.open?' open':''}"><span class="rl">${r.n}</span>`
+  +`<span class="hp-dd">${r.v}<svg><use href="#i-grid"/></svg></span></div>`).join('');
+
+/* =============== 数据：标注 / 优劣势 =============== */
+const SCREENS={
+ 'homeA':{kind:'首页方案 A',badge:'现有实现',
+  cap:'<b>方案 A</b> · 现有实现（保留）：标题栏 + 居中欢迎语',
+  desc:'现有首页：顶部标题栏（左侧 Kline 图标与文字、右侧登录胶囊），下方一条分隔线，主内容区居中显示「首页」与「欢迎来到首页」，底部四项 Tab 栏。除标题栏外整屏没有任何功能入口。',
+  ann:[[1,'顶部标题栏：chart.line.uptrend.xyaxis 图标 24pt 红 + 「Kline」18pt 加粗'],
+       [2,'右侧「登录」胶囊：person.circle.fill 28pt 蓝 + 「登录」16pt，灰底 #E5E5EA、圆角 20'],
+       [3,'主内容区居中大字「首页」：约 28pt'],
+       [4,'下方「欢迎来到首页」约 17pt 灰字，主内容区占满标题栏与 Tab 栏之间的全部高度'],
+       [5,'底部 Tab 栏：首页 / 自选 / 行情 / 模拟，「首页」蓝色高亮']],
+  pro:['改动量为零，完全保留老用户的进入习惯','作为 B / C / D 三档的对照基线'],
+  con:['整屏没有任何入口，进任何功能都要先走底部 Tab','1024×768 的横屏横向空间完全闲置','首屏只有两行文字，信息量几乎为零']},
+ 'homeB':{kind:'首页方案 B',badge:'重设计',
+  cap:'<b>方案 B</b> · 宫格快捷入口（默认档）：6 个入口一屏全见',
+  desc:'在标题栏下加一条搜索条，再接一行分组标题与 4 列宫格：搜索标的 / 自选 / 行情 / 模拟交易 / 公式管理 / 个人中心。每格约 242×88 的浅灰卡片，内含 28pt 图标与 13pt 名称。',
+  ann:[[1,'顶部标题栏与 A 档完全一致（Kline 图标 + 登录胶囊 + 分隔线）'],
+       [2,'搜索条：高 36、左右外边距 16、灰底 #E5E5EA 圆角 8，点击进入搜索'],
+       [3,'分组标题「快捷入口」：13pt 灰字、左对齐 16'],
+       [4,'宫格第 1 格「搜索标的」：28pt 蓝色搜索图标 + 13pt 名称，卡片 242×88'],
+       [5,'宫格第 4 格「模拟交易」：与其它格等宽等高，4 列铺满 1024 宽'],
+       [6,'第 2 行第 2 格「公式管理」：图标语义为 ƒx，与行情 / 自选等入口同构']],
+  pro:['6 个入口一屏全见，任一入口点击 1 步到位','4 列宫格把 1024 宽的横屏铺满，横向利用率最高','图标色做语义区分（自选橙色、其余蓝色），扫视定位快'],
+  con:['入口无说明文案，新用户需先熟悉每个图标含义','6 格只占上半屏，下半屏仍有约 386pt 留白','入口增到 8 个以上时需要滚动，或改成 5 列缩小格子']},
+ 'homeC':{kind:'首页方案 C',badge:'重设计',
+  cap:'<b>方案 C</b> · 分区列表入口：三组六行，每行带一句说明',
+  desc:'把入口按「行情 / 研究 / 账户」分成三组，每行 56pt：左侧 28pt 图标方块、中间标题 16pt + 副标题 12pt、右侧 chevron.right，行与行之间 1pt 分隔线。',
+  ann:[[1,'顶部标题栏与 A 档完全一致'],
+       [2,'分组标题：行情 / 研究 / 账户，13pt 灰字、左对齐 16'],
+       [3,'入口行：28pt 图标方块（浅灰底 #F2F2F7 圆角 7）+ 标题 16pt + 副标题 12pt 灰字'],
+       [4,'行右侧 chevron.right 13pt 灰，行与行之间 1pt 分隔线'],
+       [5,'账户组：模拟交易（账户 / 持仓 / 委托 / 条件单）、个人中心（主题 / 布局 / 本地更新）'],
+       [6,'底部 Tab 栏，「首页」蓝色高亮']],
+  pro:['每行带一句说明，新用户不看图标也能懂','分区把 6 个入口归类，层级比宫格更清晰','行组件与个人中心设置页同构，实现成本低'],
+  con:['列表只占上半屏，下半屏约 208pt 留白','一屏只放 6 行，入口继续增加就要滚动','横向空间利用一般，右侧 chevron 之外没有内容']},
+ 'homeD':{kind:'首页方案 D',badge:'重设计',
+  cap:'<b>方案 D</b> · 卡片工作台：大卡 + 2×2 中卡 + 小卡',
+  desc:'顶部一张 992×76 的大卡作为搜索标的入口，中间 2×2 中卡网格给出自选 / 行情 / 模拟交易 / 公式管理，底部一张 992×64 小卡放个人中心；三种卡片尺寸形成主次。',
+  ann:[[1,'顶部标题栏与 A 档完全一致'],
+       [2,'顶部大卡：magnifyingglass + 「搜索标的」16pt semibold，右侧一行 12pt 灰字说明'],
+       [3,'2×2 中卡：每张 490×104，图标 22pt + 标题 15pt semibold + 11.5pt 灰字说明'],
+       [4,'中卡「行情」：说明文案「沪深主板 + ETF 指数」，与其它卡等宽等高'],
+       [5,'中卡「公式管理」：说明文案「指标 / 选股 / 策略」'],
+       [6,'底部小卡：个人中心，图标 22pt + 标题 + chevron，高度 64']],
+  pro:['大 / 中 / 小三种卡片形成主次，搜索标的被突出为第一入口','每张卡都带一句说明，理解成本最低','卡片尺寸有节奏，横屏三段式利用极充分'],
+  con:['三种卡片尺寸 × 横竖屏，实现与适配成本最高','同为一屏 6 个入口，卡片占高更多、下方仍留约 264pt','阴影 / 圆角 / 说明文案都要逐卡维护，视觉元素最多']},
+ 'profileHomeLayout':{kind:'个人中心 · 首页布局',badge:'入口',
+  cap:'<b>个人中心</b> · 首页布局：六行设置 + 居中四选项面板',
+  desc:'个人中心六行设置（Kline 显示主题、快捷面板布局、模拟页布局、自选页布局、行情页布局、首页布局）共用同一个 210pt 宽的选择面板。点「首页布局」右侧下拉按钮，面板在屏幕中央弹出，当前档 B 右侧显示蓝色对勾，底部蓝色「完成」关闭。',
+  ann:[[1,'顶部导航：返回按钮 + 「个人中心」标题'],
+       [2,'六行设置卡片：每行 36pt、浅灰底 #F2F2F7 圆角 12，文案 16pt 左对齐'],
+       [3,'行右侧下拉触发按钮：小图标 + 当前档名 12pt 蓝色'],
+       [4,'「首页布局」行：本屏主角，面板打开时整行淡蓝底高亮，当前档 B'],
+       [5,'居中选择面板：宽 210、白底圆角 12、带投影，背后 25% 黑色遮罩'],
+       [6,'选中项（B）右侧蓝色 checkmark，点击立即生效；底部蓝色「完成」关闭面板']],
+  pro:['与自选页 / 行情页布局设置共用一套面板组件，实现成本低','选中即生效，可边看边切，不用反复开关','面板宽度固定 210pt，四档方案名都能容纳'],
+  con:['设置项已增加到六行，继续加页面就要滚动','面板居中会遮挡页面内容，必须加黑色遮罩','同一时间只能开一个面板，需要做互斥处理']}
+};
+
+/* 屏内编号标注坐标（1024×768 坐标系） */
+const MARKS={
+ 'homeA':[[1,110,28],[2,858,28],[3,640,374],[4,640,424],[5,128,744]],
+ 'homeB':[[1,110,28],[2,520,87],[3,70,128],[4,38,159],[5,800,159],[6,292,261]],
+ 'homeC':[[1,110,28],[2,70,80],[3,330,125],[4,988,125],[5,330,429],[6,128,744]],
+ 'homeD':[[1,110,28],[2,200,111],[3,260,213],[4,750,213],[5,750,329],[6,600,425]],
+ 'profileHomeLayout':[[1,200,28],[2,500,87],[3,900,87],[4,760,317],[5,392,505],[6,512,463]]
+};
+
+/* =============== 注入编号标注 =============== */
+Object.entries(MARKS).forEach(([id,ms])=>{
+  const scr=$('#scr-'+id); if(!scr) return;
+  ms.forEach(([n,x,y])=>{
+    const d=document.createElement('div');
+    d.className='marker'; d.textContent=n;
+    d.style.left=(x-10)+'px'; d.style.top=(y-10)+'px';
+    scr.appendChild(d);
+  });
+});
+
+/* =============== 标注栏渲染 =============== */
+function renderNotes(boxId,id){
+  const d=SCREENS[id], box=$('#'+boxId); if(!d||!box) return;
+  const badge=d.badge==='重设计'
+    ? '<span class="rec" style="background:#007AFF">重设计</span>'
+    : (d.badge==='现有实现' ? '<span class="rec" style="background:#6c7178">现有实现</span>' : `<span class="rec">${d.badge}</span>`);
+  box.innerHTML=
+   `<div class="ncard"><h3>${badge}${d.kind}</h3><div class="desc">${d.desc}</div></div>`
+  +`<div class="ncard"><h3>布局标注</h3><ul class="ann">${d.ann.map(a=>
+      `<li><span class="n">${a[0]}</span><span><b>${a[1].split('：')[0]}</b>${a[1].includes('：')?'：'+a[1].split('：').slice(1).join('：'):''}</span></li>`).join('')}</ul></div>`
+  +`<div class="ncard"><div class="pc">`
+  +`<div class="box pro"><h4>优势</h4>${d.pro.map(p=>`<div>${p}</div>`).join('')}</div>`
+  +`<div class="con box"><h4>代价</h4>${d.con.map(p=>`<div>${p}</div>`).join('')}</div>`
+  +`</div></div>`;
+}
+
+/* =============== 方案切换 =============== */
+const HOME_IDS=['homeA','homeB','homeC','homeD'];
+function showHome(id){
+  $$('[data-home]').forEach(b=>b.classList.toggle('on',b.dataset.home===id));
+  HOME_IDS.forEach(k=>$('#scr-'+k).classList.toggle('active',k===id));
+  $('#homeCap').innerHTML=SCREENS[id].cap;
+  renderNotes('homeNotes',id);
+}
+$$('[data-home]').forEach(b=>b.onclick=()=>showHome(b.dataset.home));
+
+/* =============== 标注开关 =============== */
+$('#annToggle').onclick=function(){
+  document.body.classList.toggle('hide-ann');
+  this.textContent=document.body.classList.contains('hide-ann')?'标注：关（点击开启）':'标注：开（点击切换）';
+};
+
+/* =============== 单屏截图模式：#shot=<屏 id> =============== */
+const SHOT_IDS=HOME_IDS.concat(['profileHomeLayout']);
+function applyShot(){
+  const m=/#shot=([A-Za-z0-9_-]+)/.exec(location.hash||'');
+  const id=m?m[1]:null;
+  document.body.classList.remove('shot');
+  $$('.section').forEach(s=>s.classList.remove('shot-on'));
+  if(!id||SHOT_IDS.indexOf(id)<0) return false;
+  const scr=$('#scr-'+id); if(!scr) return false;
+  document.body.classList.add('shot');
+  $$('.screen').forEach(s=>s.classList.remove('active'));
+  scr.classList.add('active');
+  const sec=scr.closest('.section'); if(sec) sec.classList.add('shot-on');
+  document.title='shot:'+id;
+  return true;
+}
+window.addEventListener('hashchange',()=>{ if(!applyShot()) initNormal(); });
+
+/* =============== 初始化 =============== */
+function initNormal(){
+  document.title='Kline 首页布局重设计方案 · 4 档';
+  showHome('homeB');
+  $('#pfCap').innerHTML=SCREENS['profileHomeLayout'].cap;
+  renderNotes('pfNotes','profileHomeLayout');
+}
+if(!applyShot()) initNormal();
+</script>
+</body>
+</html>

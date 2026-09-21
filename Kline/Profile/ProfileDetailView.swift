@@ -19,6 +19,8 @@ struct ProfileDetailView: View {
     @State private var showFavoritesLayoutPanel = false
     /// 行情页布局选择弹窗开合
     @State private var showMarketLayoutPanel = false
+    /// 首页布局选择弹窗开合
+    @State private var showHomeLayoutPanel = false
     /// 公式管理中心页（全屏 overlay）开合
     @State private var showFormulaCenter = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
@@ -96,6 +98,12 @@ struct ProfileDetailView: View {
 
                     // 行情页布局（A / B / C / D 四套方案）：点右侧下拉弹出选择面板
                     MarketLayoutSettingRow(isOpen: $showMarketLayoutPanel)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+
+                    // 首页布局（A / B / C / D 四套方案，默认 B）：点右侧下拉弹出选择面板
+                    HomeLayoutSettingRow(isOpen: $showHomeLayoutPanel)
                         .padding()
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
@@ -191,6 +199,21 @@ struct ProfileDetailView: View {
                 .transition(.opacity)
                 .zIndex(1000)
             }
+            if showHomeLayoutPanel {
+                ZStack {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.15)) { showHomeLayoutPanel = false }
+                        }
+                    LayoutOptionsPanel(options: HomeLayoutStyle.allCases,
+                                              selection: $pageLayoutStore.homeLayout,
+                                              titleFor: { $0.title },
+                                              onClose: { showHomeLayoutPanel = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
             // 公式管理中心：全屏页面（铺满，无遮罩），关闭走页内「返回」
             if showFormulaCenter {
                 ZStack {
@@ -202,22 +225,25 @@ struct ProfileDetailView: View {
         }
         // 浮层互斥：任一打开时关掉其余（iOS 15 的 onChange 为单参数闭包）
         .onChange(of: showThemePanel) { newValue in
-            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showPanelLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showSimulationLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showFavoritesLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showMarketLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
+        }
+        .onChange(of: showHomeLayoutPanel) { newValue in
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showFormulaCenter) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false }
         }
     }
 }

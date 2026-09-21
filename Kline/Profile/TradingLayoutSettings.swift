@@ -4,8 +4,8 @@
 //
 //  个人中心的布局偏好设置：快捷面板布局（QuickPanelLayoutStyle）、
 //  模拟页布局（SimulationLayoutStyle）、自选页布局（FavoritesLayoutStyle）、
-//  行情页布局（MarketLayoutStyle）四行设置共用的下拉触发按钮
-//  （LayoutDropdownButton）与泛型选择浮层面板（LayoutOptionsPanel）。
+//  行情页布局（MarketLayoutStyle）、首页布局（HomeLayoutStyle）五行布局设置
+//  共用的下拉触发按钮（LayoutDropdownButton）与泛型选择浮层面板（LayoutOptionsPanel）。
 //  样式逐项对齐 KlineTheme.swift 的
 //  KlineThemeDropdownButton / KlineThemeOptionsPanel，只换文案与数据源。
 //
@@ -97,7 +97,7 @@ where Style.AllCases == [Style] {
     }
 }
 
-// MARK: - 个人中心的四行布局设置
+// MARK: - 个人中心的五行布局设置
 
 /// 「快捷面板布局」设置行
 struct QuickPanelLayoutSettingRow: View {
@@ -158,6 +158,22 @@ struct MarketLayoutSettingRow: View {
                 .font(.system(size: 16))
             Spacer(minLength: 12)
             LayoutDropdownButton(title: store.marketLayout.shortTitle, isOpen: $isOpen)
+        }
+        .frame(minHeight: 36)
+    }
+}
+
+/// 「首页布局」设置行
+struct HomeLayoutSettingRow: View {
+    @ObservedObject private var store = PageLayoutStore.shared
+    @Binding var isOpen: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("首页布局")
+                .font(.system(size: 16))
+            Spacer(minLength: 12)
+            LayoutDropdownButton(title: store.homeLayout.shortTitle, isOpen: $isOpen)
         }
         .frame(minHeight: 36)
     }
