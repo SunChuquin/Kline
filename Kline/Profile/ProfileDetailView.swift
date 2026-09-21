@@ -15,10 +15,15 @@ struct ProfileDetailView: View {
     @State private var showPanelLayoutPanel = false
     /// 模拟页布局选择弹窗开合
     @State private var showSimulationLayoutPanel = false
+    /// 自选页布局选择弹窗开合
+    @State private var showFavoritesLayoutPanel = false
+    /// 行情页布局选择弹窗开合
+    @State private var showMarketLayoutPanel = false
     /// 公式管理中心页（全屏 overlay）开合
     @State private var showFormulaCenter = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
-    @ObservedObject private var layoutStore = TradingLayoutStore.shared
+    @ObservedObject private var tradingLayoutStore = TradingLayoutStore.shared
+    @ObservedObject private var pageLayoutStore = PageLayoutStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,6 +88,18 @@ struct ProfileDetailView: View {
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
 
+                    // 自选页布局（A / B / C / D 四套方案）：点右侧下拉弹出选择面板
+                    FavoritesLayoutSettingRow(isOpen: $showFavoritesLayoutPanel)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+
+                    // 行情页布局（A / B / C / D 四套方案）：点右侧下拉弹出选择面板
+                    MarketLayoutSettingRow(isOpen: $showMarketLayoutPanel)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+
                     // 公式管理（技术指标 / 选股指标 / 交易策略 三类公式分域入口）
                     FormulaCenterSettingRow { showFormulaCenter = true }
                         .padding()
@@ -121,8 +138,8 @@ struct ProfileDetailView: View {
                         .onTapGesture {
                             withAnimation(.easeOut(duration: 0.15)) { showPanelLayoutPanel = false }
                         }
-                    TradingLayoutOptionsPanel(options: QuickPanelLayoutStyle.allCases,
-                                              selection: $layoutStore.panelLayout,
+                    LayoutOptionsPanel(options: QuickPanelLayoutStyle.allCases,
+                                              selection: $tradingLayoutStore.panelLayout,
                                               titleFor: { $0.title },
                                               onClose: { showPanelLayoutPanel = false })
                 }
@@ -136,10 +153,40 @@ struct ProfileDetailView: View {
                         .onTapGesture {
                             withAnimation(.easeOut(duration: 0.15)) { showSimulationLayoutPanel = false }
                         }
-                    TradingLayoutOptionsPanel(options: SimulationLayoutStyle.allCases,
-                                              selection: $layoutStore.simulationLayout,
+                    LayoutOptionsPanel(options: SimulationLayoutStyle.allCases,
+                                              selection: $tradingLayoutStore.simulationLayout,
                                               titleFor: { $0.title },
                                               onClose: { showSimulationLayoutPanel = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
+            if showFavoritesLayoutPanel {
+                ZStack {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.15)) { showFavoritesLayoutPanel = false }
+                        }
+                    LayoutOptionsPanel(options: FavoritesLayoutStyle.allCases,
+                                              selection: $pageLayoutStore.favoritesLayout,
+                                              titleFor: { $0.title },
+                                              onClose: { showFavoritesLayoutPanel = false })
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
+            if showMarketLayoutPanel {
+                ZStack {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.15)) { showMarketLayoutPanel = false }
+                        }
+                    LayoutOptionsPanel(options: MarketLayoutStyle.allCases,
+                                              selection: $pageLayoutStore.marketLayout,
+                                              titleFor: { $0.title },
+                                              onClose: { showMarketLayoutPanel = false })
                 }
                 .transition(.opacity)
                 .zIndex(1000)
@@ -155,16 +202,22 @@ struct ProfileDetailView: View {
         }
         // 浮层互斥：任一打开时关掉其余（iOS 15 的 onChange 为单参数闭包）
         .onChange(of: showThemePanel) { newValue in
-            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showPanelLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showSimulationLayoutPanel) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFormulaCenter = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+        }
+        .onChange(of: showFavoritesLayoutPanel) { newValue in
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showMarketLayoutPanel = false; showFormulaCenter = false }
+        }
+        .onChange(of: showMarketLayoutPanel) { newValue in
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showFormulaCenter = false }
         }
         .onChange(of: showFormulaCenter) { newValue in
-            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false }
+            if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false }
         }
     }
 }

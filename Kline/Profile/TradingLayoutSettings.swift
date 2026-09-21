@@ -2,9 +2,11 @@
 //  TradingLayoutSettings.swift
 //  Kline
 //
-//  个人中心的交易布局偏好设置：快捷面板布局（QuickPanelLayoutStyle）与
-//  模拟页布局（SimulationLayoutStyle）的下拉触发按钮、泛型选择浮层面板，
-//  以及两行设置行。样式逐项对齐 KlineTheme.swift 的
+//  个人中心的布局偏好设置：快捷面板布局（QuickPanelLayoutStyle）、
+//  模拟页布局（SimulationLayoutStyle）、自选页布局（FavoritesLayoutStyle）、
+//  行情页布局（MarketLayoutStyle）四行设置共用的下拉触发按钮
+//  （LayoutDropdownButton）与泛型选择浮层面板（LayoutOptionsPanel）。
+//  样式逐项对齐 KlineTheme.swift 的
 //  KlineThemeDropdownButton / KlineThemeOptionsPanel，只换文案与数据源。
 //
 
@@ -14,7 +16,7 @@ import Combine
 // MARK: - 下拉触发按钮（对齐 KlineThemeDropdownButton 的字号/高度/配色）
 
 /// 布局下拉触发按钮（对齐 KlineThemeDropdownButton 的字号/高度/配色）
-struct TradingLayoutDropdownButton: View {
+struct LayoutDropdownButton: View {
     /// 显示当前方案短名，如 "A"
     let title: String
     @Binding var isOpen: Bool
@@ -37,10 +39,10 @@ struct TradingLayoutDropdownButton: View {
     }
 }
 
-// MARK: - 选择浮层面板（泛型，两个布局共用）
+// MARK: - 选择浮层面板（泛型，四行布局共用）
 
 /// 布局选择浮层面板（容器层居中显示，样式对齐 KlineThemeOptionsPanel）
-struct TradingLayoutOptionsPanel<Style: CaseIterable & Hashable & Identifiable>: View
+struct LayoutOptionsPanel<Style: CaseIterable & Hashable & Identifiable>: View
 where Style.AllCases == [Style] {
     let options: [Style]
     @Binding var selection: Style
@@ -95,7 +97,7 @@ where Style.AllCases == [Style] {
     }
 }
 
-// MARK: - 个人中心的两行布局设置
+// MARK: - 个人中心的四行布局设置
 
 /// 「快捷面板布局」设置行
 struct QuickPanelLayoutSettingRow: View {
@@ -107,7 +109,7 @@ struct QuickPanelLayoutSettingRow: View {
             Text("快捷面板布局")
                 .font(.system(size: 16))
             Spacer(minLength: 12)
-            TradingLayoutDropdownButton(title: store.panelLayout.shortTitle, isOpen: $isOpen)
+            LayoutDropdownButton(title: store.panelLayout.shortTitle, isOpen: $isOpen)
         }
         .frame(minHeight: 36)
     }
@@ -123,7 +125,39 @@ struct SimulationLayoutSettingRow: View {
             Text("模拟页布局")
                 .font(.system(size: 16))
             Spacer(minLength: 12)
-            TradingLayoutDropdownButton(title: store.simulationLayout.shortTitle, isOpen: $isOpen)
+            LayoutDropdownButton(title: store.simulationLayout.shortTitle, isOpen: $isOpen)
+        }
+        .frame(minHeight: 36)
+    }
+}
+
+/// 「自选页布局」设置行
+struct FavoritesLayoutSettingRow: View {
+    @ObservedObject private var store = PageLayoutStore.shared
+    @Binding var isOpen: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("自选页布局")
+                .font(.system(size: 16))
+            Spacer(minLength: 12)
+            LayoutDropdownButton(title: store.favoritesLayout.shortTitle, isOpen: $isOpen)
+        }
+        .frame(minHeight: 36)
+    }
+}
+
+/// 「行情页布局」设置行
+struct MarketLayoutSettingRow: View {
+    @ObservedObject private var store = PageLayoutStore.shared
+    @Binding var isOpen: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("行情页布局")
+                .font(.system(size: 16))
+            Spacer(minLength: 12)
+            LayoutDropdownButton(title: store.marketLayout.shortTitle, isOpen: $isOpen)
         }
         .frame(minHeight: 36)
     }

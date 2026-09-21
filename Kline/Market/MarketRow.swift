@@ -21,6 +21,9 @@ final class MarketRow: Identifiable, Hashable {
     /// K 线是否已就绪（非 nil 且非空）。空数组也被视为未就绪，便于触发重取
     var hasBars: Bool { (recentBars?.isEmpty ?? true) == false }
 
+    /// 近 N 根日线收盘价（升序，旧→新），供卡片 / 磁贴的迷你走势使用；无数据返回空数组
+    var recentCloses: [Double] { (recentBars ?? []).map(\.close) }
+
     /// 缓存字典：计算过一次的字段 Double 值
     private var cache: [MarketField: Any] = [:]
     /// 文本渲染缓存：字段 key 是 rawValue + _txt 后缀
