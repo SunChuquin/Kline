@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kline 自选页操作增强 · 3 屏交互稿</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='4' y='10' width='3.4' height='10' fill='%23D92929'/%3E%3Crect x='10.3' y='5' width='3.4' height='15' fill='%23008C59'/%3E%3Crect x='16.6' y='8' width='3.4' height='12' fill='%23D92929'/%3E%3C/svg%3E">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --red:#D92929; --green:#008C59; --blue:#007AFF; --orange:#FF9500;
+  --ink:#000; --sub:#8E8E8E; --sub2:#AEAEB2;
+  --line:rgba(60,60,67,.14); --line2:rgba(127,127,127,.30);
+  --g6:#F2F2F7; --fill:#EDEDED; --gray5:#E5E5EA;
+  --scrim:rgba(0,0,0,.25);
+  --gallery:#26282C; --card:#33363B; --card2:#3C4046; --gtext:#E9EBEF; --gsub:#A6ABB4;
+}
+html,body{background:var(--gallery)}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;
+  color:var(--gtext); padding:34px 28px 80px; -webkit-font-smoothing:antialiased;
+}
+.num,.mono{font-variant-numeric:tabular-nums;font-family:"SF Mono",Menlo,Consolas,"SF Pro Text",monospace;letter-spacing:-.2px}
+.wrap{max-width:1080px;margin:0 auto}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::selection{background:rgba(0,122,255,.25)}
+
+/* ===== 画廊头部 ===== */
+.hero{margin-bottom:26px}
+.hero h1{font-size:26px;font-weight:800;letter-spacing:.2px}
+.hero p{color:var(--gsub);font-size:14px;line-height:1.7;margin-top:8px;max-width:940px}
+.hero .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:12px;color:var(--gsub);border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:3px 11px;background:rgba(255,255,255,.04)}
+.chip b{color:var(--gtext);font-weight:600}
+
+/* ===== 区块 ===== */
+.section{margin-top:42px}
+.sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.sec-no{font-size:13px;font-weight:700;color:#fff;background:var(--blue);border-radius:6px;padding:2px 8px}
+.sec-head h2{font-size:20px;font-weight:800}
+.sec-head .sub{font-size:13px;color:var(--gsub);line-height:1.6;width:100%;margin-top:4px;max-width:960px}
+
+.switcher{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 14px;align-items:center}
+.switcher .lab{font-size:12px;color:var(--gsub);margin-right:2px}
+.seg{font-size:13px;font-weight:600;color:var(--gsub);background:var(--card);border:1px solid rgba(255,255,255,.10);
+  border-radius:8px;padding:7px 14px;transition:.15s}
+.seg:hover{border-color:rgba(255,255,255,.28)}
+.seg.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.seg .tag{font-size:10px;font-weight:700;background:rgba(255,255,255,.18);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:1px}
+.seg.on .tag{background:rgba(255,255,255,.25)}
+
+/* ===== 舞台：设备框 + 标注栏 ===== */
+.stage{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+.frame-col{flex:none}
+.bezel{background:#0C0D0F;padding:11px;border-radius:20px;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.screen-wrap{width:573px;height:430px;overflow:hidden;position:relative;border-radius:7px;background:#fff}
+.screen{width:1024px;height:768px;transform-origin:top left;transform:scale(.55957);
+  position:absolute;top:0;left:0;background:#fff;display:none;overflow:hidden;color:var(--ink)}
+.screen.active{display:flex;flex-direction:column}
+.frame-cap{font-size:12px;color:var(--gsub);margin-top:10px;text-align:center}
+.frame-cap b{color:var(--gtext)}
+
+.notes{width:340px;flex:1;min-width:280px}
+.ncard{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:15px 16px;margin-bottom:10px}
+.ncard h3{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+.rec{font-size:10px;font-weight:800;color:#fff;background:var(--red);border-radius:4px;padding:2px 6px;letter-spacing:.5px}
+.ncard .desc{font-size:12.5px;color:var(--gsub);line-height:1.65;margin-top:7px}
+.ann{list-style:none;margin-top:4px}
+.ann li{display:flex;gap:9px;font-size:12.5px;line-height:1.55;color:#D7DAE0;padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+.ann li:last-child{border-bottom:none}
+.ann .n{flex:none;width:19px;height:19px;border-radius:50%;background:var(--blue);color:#fff;font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;margin-top:1px}
+.ann b{color:#fff;font-weight:600}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.pc .box{background:rgba(255,255,255,.04);border-radius:8px;padding:8px 10px}
+.pc .box h4{font-size:11px;font-weight:700;margin-bottom:5px;letter-spacing:.5px}
+.pc .pro h4{color:#54c98f}.pc .con h4{color:#f08a8a}
+.pc .box div{font-size:11.5px;color:var(--gsub);line-height:1.55;padding-left:11px;position:relative}
+.pc .pro div::before{content:"＋";position:absolute;left:0;color:#54c98f}
+.pc .con div::before{content:"－";position:absolute;left:0;color:#f08a8a}
+
+.foot{margin-top:34px;text-align:center;font-size:12px;color:#6c7178}
+
+/* ===== 屏内通用 ===== */
+.page{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.up{color:var(--red)}
+.dn{color:var(--green)}
+.hairline1{height:1px;background:var(--line)}
+.sp{flex:1}
+.marker{position:absolute;z-index:80;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;
+  font-size:11.5px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 7px rgba(0,0,0,.35);border:1.5px solid #fff}
+body.hide-ann .marker{display:none}
+
+.tabbar{height:47px;flex:none;background:#fff;border-top:.5px solid var(--line2);display:flex;z-index:5}
+.tabbar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--sub)}
+.tabbar .tab.on{color:var(--blue)}
+.tabbar .tab svg{width:19px;height:19px}
+.tabbar .tab span{font-size:10px}
+
+.pg-top{height:48px;flex:none;display:flex;align-items:center;padding:0 4px 0 16px;position:relative}
+.pg-top .ttl{font-size:18px;font-weight:800}
+.ibtn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--sub);flex:none}
+.ibtn svg{width:17px;height:17px}
+.ibtn.blue{color:var(--blue)}
+.ibtn.blue svg{width:19px;height:19px}
+
+/* 分组 Tab 条（自选页） */
+.gtabs{height:44px;flex:none;display:flex;align-items:flex-end;gap:4px;padding:0 12px;overflow:hidden}
+.gtab{display:flex;align-items:center;gap:4px;font-size:14px;color:var(--sub);padding:0 9px;height:31px;position:relative;white-space:nowrap;flex:none}
+.gtab svg{width:13px;height:13px}
+.gtab .c{font-size:12px;font-variant-numeric:tabular-nums}
+.gtab.on{color:var(--blue);font-weight:700}
+.gtab.on::after{content:"";position:absolute;left:9px;right:9px;bottom:0;height:2px;background:var(--blue)}
+
+/* 表格（复用自选页 A 档视觉） */
+.tbl{flex:1;min-height:0;overflow:hidden}
+table.qt{width:100%;border-collapse:collapse;table-layout:fixed}
+table.qt th{background:var(--g6);font-size:10.5px;font-weight:600;color:var(--sub);text-align:right;
+  padding:0 8px;height:34px;white-space:nowrap;border-bottom:.5px solid var(--line2)}
+table.qt th.l{text-align:left}
+table.qt th .sort{font-size:8px;margin-left:2px;color:var(--sub2)}
+table.qt th.sorted{color:var(--ink);font-weight:700}
+table.qt th.sorted .sort{color:var(--red)}
+table.qt td{font-size:12.5px;text-align:right;padding:0 8px;border-bottom:.5px solid var(--line);
+  white-space:nowrap;overflow:hidden;height:45px;vertical-align:middle}
+table.qt td.l{text-align:left}
+.nm2{font-size:13.5px;font-weight:600;line-height:1.3;overflow:hidden}
+.cd2{font-size:10.5px;color:var(--sub);line-height:1.3;font-variant-numeric:tabular-nums}
+table.qt tr.ops-hit{background:rgba(0,122,255,.10)}
+table.qt tr.sel{background:rgba(0,122,255,.10)}
+table.qt td.cc{text-align:center;padding:0}
+
+/* 勾选圈 */
+.ck{width:22px;height:22px;border-radius:50%;border:1.6px solid var(--sub2);display:inline-flex;
+  align-items:center;justify-content:center;color:#fff;vertical-align:middle}
+.ck svg{width:13px;height:13px;display:none}
+.ck.on{background:var(--blue);border-color:var(--blue)}
+.ck.on svg{display:block}
+
+/* ===== 屏 1：长按操作面板 ===== */
+.os-head{position:absolute;left:0;top:0;width:1024px;height:44px;display:flex;align-items:center;gap:12px;
+  padding:0 20px;border-bottom:.5px solid var(--line2);background:#fff}
+.os-head .t{font-size:15px;font-weight:800}
+.os-head .s{font-size:11.5px;color:var(--sub)}
+.os-cap{position:absolute;top:52px;width:472px;height:26px;display:flex;align-items:center;gap:6px;
+  font-size:11.5px;color:var(--sub)}
+.os-cap b{color:var(--ink);font-weight:700}
+.os-tbl{position:absolute;top:78px;width:472px;height:530px;overflow:hidden}
+.os-cap.a,.os-tbl.a{left:20px}
+.os-cap.b,.os-tbl.b{left:532px}
+.os-scrim{position:absolute;left:532px;top:78px;width:472px;height:530px;background:var(--scrim);z-index:30}
+.os-panel{position:absolute;left:638px;top:193px;width:260px;background:#fff;border-radius:12px;
+  box-shadow:0 6px 22px rgba(0,0,0,.32);z-index:31;overflow:hidden}
+.os-panel .ph{height:32px;display:flex;align-items:center;padding:0 12px;font-size:13px;color:var(--sub);
+  background:var(--g6);border-bottom:.5px solid var(--line)}
+.os-item{height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border-top:.5px solid var(--line);font-size:14px}
+.os-item svg{width:17px;height:17px;flex:none;color:var(--blue)}
+.os-item .tx{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.os-item .hint{margin-left:auto;flex:none;font-size:11px;color:var(--sub2);max-width:104px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.os-item.danger{color:var(--red)}
+.os-item.danger svg{color:var(--red)}
+.os-cancel{height:44px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;
+  color:var(--blue);border-top:.5px solid var(--line2)}
+.os-note{position:absolute;left:20px;top:620px;width:472px;height:136px;border:1px solid var(--line);
+  border-radius:12px;background:#FAFAFC;padding:12px 14px}
+.os-note .nn-h{font-size:12px;font-weight:800;color:var(--ink)}
+.os-note .nn-l{font-size:11.5px;color:var(--sub);line-height:1.6;margin-top:5px}
+.os-cmp{position:absolute;left:532px;top:620px;width:472px;height:136px;display:flex;gap:10px}
+.os-cmp .half{flex:1;border:1px dashed var(--line2);border-radius:10px;padding:9px 11px;background:#FCFCFD}
+.os-cmp .ch-t{font-size:11.5px;font-weight:800}
+.os-cmp .mo .ch-t{color:var(--red)}
+.os-cmp .mn .ch-t{color:var(--green)}
+.os-cmp .ch-d{font-size:11px;color:var(--sub);line-height:1.5;margin-top:6px}
+.mini{margin-top:7px}
+.mrow{display:flex;gap:3px;margin-bottom:3px}
+.mrow i{display:block;height:8px;border-radius:2px;background:#D9DCE1}
+.mo .mrow:nth-child(2){transform:translate(-6px,-2px) scale(1.06);transform-origin:left center}
+.mo .mrow:nth-child(2) i{background:#F2C9C9}
+.mn .mrow:nth-child(2) i{background:#BFE5CE}
+
+/* ===== 屏 2：批量编辑 ===== */
+.ops2-tools{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:.5px solid var(--line2)}
+.ops2-tools .wt-name{font-size:16px;font-weight:800}
+.ops2-tools .wt-cnt{font-size:11.5px;color:var(--sub)}
+.mtbtn{font-size:12px;color:var(--blue);background:var(--g6);border-radius:7px;padding:6px 11px;
+  display:flex;align-items:center;gap:5px;white-space:nowrap}
+.mtbtn svg{width:13px;height:13px}
+.mtbtn.done{background:rgba(0,122,255,.12);font-weight:700}
+.ops2-bar{position:absolute;left:0;right:0;bottom:0;height:56px;display:flex;align-items:center;gap:14px;
+  padding:0 16px;background:#FBFBFC;border-top:.5px solid var(--line2);z-index:20}
+.ops2-bar .bsel{flex:none;font-size:13px;color:var(--sub);white-space:nowrap}
+.ops2-bar .bsel b{font-size:15px;color:var(--blue);font-weight:800}
+.ops2-bar .brail{flex:1;min-width:0;display:flex;gap:8px;overflow:hidden}
+.bact{flex:none;height:40px;display:flex;align-items:center;gap:6px;padding:0 18px;border-radius:9px;
+  background:#fff;border:1px solid var(--line);font-size:13px;color:var(--ink);white-space:nowrap}
+.bact svg{width:15px;height:15px;color:var(--blue)}
+.ops2-note{position:absolute;left:24px;top:544px;width:480px;height:104px;background:#FFF9EC;
+  border:1px solid rgba(255,149,0,.35);border-radius:10px;padding:9px 12px;z-index:15}
+.ops2-note .nn-h{font-size:12px;font-weight:800;color:#B26A00}
+.ops2-note .nn-l{font-size:11.5px;color:#8A6A33;line-height:1.55;margin-top:4px}
+.ops2-note em{font-style:normal;background:rgba(255,149,0,.18);border-radius:3px;padding:0 3px}
+
+/* ===== 屏 3：预警记录 + 备注弹窗 ===== */
+.os3-nav{height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;border-bottom:.5px solid var(--line2)}
+.os3-nav .pb{display:flex;align-items:center;gap:2px;color:var(--blue);font-size:15px}
+.os3-nav .pb svg{width:12px;height:20px}
+.os3-nav .pt{font-size:18px;font-weight:800}
+.os3-nav .clr{font-size:14px;color:var(--red);font-weight:600}
+.al-list{flex:none}
+.al-row{height:52px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:.5px solid var(--line)}
+.al-row .tm{flex:none;width:126px;font-size:12px;color:var(--sub)}
+.al-row .tg{flex:none;width:186px;display:flex;align-items:baseline;gap:8px;min-width:0}
+.al-row .tg b{font-size:14px;font-weight:600;white-space:nowrap}
+.al-row .tg i{font-style:normal;font-size:11px;color:var(--sub)}
+.al-row .pr{flex:none;width:88px;text-align:right;font-size:14px;font-weight:600}
+.al-row .tx{flex:1;min-width:0;font-size:12.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.al-row .del{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--sub2)}
+.al-row .del svg{width:17px;height:17px}
+.al-empty{position:absolute;left:20px;top:430px;width:470px;height:122px;border:1px dashed var(--line2);
+  border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.al-empty svg{width:34px;height:34px;color:var(--sub2)}
+.al-empty .ee-t{font-size:15px;font-weight:600;color:var(--sub)}
+.al-empty .ee-s{font-size:11.5px;color:var(--sub2)}
+.nt-dlg{position:absolute;top:556px;width:320px;height:208px;background:#fff;border-radius:14px;
+  border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.22);display:flex;flex-direction:column;overflow:hidden}
+.nt-dlg.a{left:180px}
+.nt-dlg.b{left:524px}
+.nt-dlg .dl-h{height:42px;flex:none;display:flex;align-items:center;padding:0 14px;font-size:13px;font-weight:700;
+  background:var(--g6);border-bottom:.5px solid var(--line)}
+.nt-dlg .dl-b{flex:1;min-height:0;padding:10px 14px}
+.nt-dlg .dl-tf{height:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;
+  line-height:1.45;background:#fff}
+.nt-dlg .dl-tf.ph{color:var(--sub2);border-style:dashed}
+.nt-dlg .dl-f{height:52px;flex:none;display:flex;align-items:center;gap:4px;padding:0 10px;border-top:.5px solid var(--line)}
+.dlb{font-size:14px;color:var(--blue);padding:8px 12px;border-radius:8px}
+.dlb.danger{color:var(--red)}
+.dlb.pri{font-weight:700;background:rgba(0,122,255,.10)}
+
+/* ===== 单屏截图模式 #shot=<id> ===== */
+body.shot{padding:0;display:flex;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+body.shot .wrap{max-width:none;margin:0}
+body.shot .hero,body.shot .sec-head,body.shot .switcher,body.shot .notes,
+body.shot .frame-cap,body.shot .foot{display:none!important}
+body.shot .section{display:none;margin:0}
+body.shot .section.shot-on{display:block}
+body.shot .stage{display:block;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>Kline 自选页 · 操作增强方案 · 3 屏</h1>
+    <p>本画廊只画「自选页操作」的交互稿：<b style="color:#fff">屏 1 长按操作面板</b>（左右并排同一张自选页表格的长按前 / 长按后，验证「行零缩放零位移零重排」）、
+      <b style="color:#fff">屏 2 批量编辑</b>（勾选多行后底部浮出批量工具栏）、<b style="color:#fff">屏 3 预警记录页 + 备注弹窗</b>（预警复用条件单的「仅提醒」，不在 App 内弹窗，只在记录页查看）。
+      三屏都按真机形态绘制（iPad mini 4 横屏 1024×768、涨红跌绿、底部四项 Tab：首页 / 自选 / 行情 / 模拟），共用自选页 A 档的表头 + 数据行视觉。</p>
+    <p>本次要表达 6 件事：<b style="color:#fff">1</b> 修掉「长按让表格行变形」；<b style="color:#fff">2</b> 固顶（分组内、优先于排序规则）；
+      <b style="color:#fff">3</b> 移到最前 / 移到最后；<b style="color:#fff">4</b> 批量编辑；<b style="color:#fff">5</b> 备注（全局、弹窗里看）；
+      <b style="color:#fff">6</b> 预警（复用条件单「仅提醒」+ 独立的预警记录页）。</p>
+    <div class="meta">
+      <span class="chip">样机尺寸 <b>1024×768</b>（iPad mini 4 横屏）</span>
+      <span class="chip">屏 1 <b>长按操作面板</b>（重点）</span>
+      <span class="chip">屏 2 <b>批量编辑</b></span>
+      <span class="chip">屏 3 <b>预警记录 + 备注弹窗</b></span>
+      <span class="chip">复用自选页 A 档表格视觉</span>
+      <span class="chip">示例数据，非真实行情</span>
+      <button class="chip" id="annToggle" style="cursor:pointer">标注：开（点击切换）</button>
+    </div>
+  </div>
+
+  <!-- SVG 图标库 -->
+  <svg width="0" height="0" style="position:absolute" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-house" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-folder-f" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-tray" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h9"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="11" rx="4"/><path d="M7 11.5v4M5 13.5h4M15.5 12.5h.01M18 15h.01"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-slider" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="9" cy="7" r="2.2" fill="#fff"/><circle cx="15" cy="12" r="2.2" fill="#fff"/><circle cx="7" cy="17" r="2.2" fill="#fff"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24" fill="currentColor"><path d="M14.2 2.3l7.5 7.5-1.7 1.7-1.6-.5-3.9 3.9.4 3.6-1.7 1.7-4.4-4.4-5.3 5.3-1.4-1.4 5.3-5.3-4.4-4.4 1.7-1.7 3.6.4 3.9-3.9-.5-1.6z"/></symbol>
+    <symbol id="i-pin-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 2.3l7.5 7.5-1.7 1.7-1.6-.5-3.9 3.9.4 3.6-1.7 1.7-4.4-4.4-5.3 5.3-1.4-1.4 5.3-5.3-4.4-4.4 1.7-1.7 3.6.4 3.9-3.9-.5-1.6z"/><path d="M3.5 3.5l17 17"/></symbol>
+    <symbol id="i-move-top" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16"/><path d="M12 20V8"/><path d="M7.5 12.5 12 8l4.5 4.5"/></symbol>
+    <symbol id="i-move-bottom" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M12 4v12"/><path d="M7.5 11.5 12 16l4.5-4.5"/></symbol>
+    <symbol id="i-folder-add" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11.5v5M9.5 14h5"/></symbol>
+    <symbol id="i-folder-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9.5 14h5"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h11l3.5 3.5v13.5H5z"/><path d="M8 9h8M8 12.5h8M8 16h5"/></symbol>
+    <symbol id="i-note-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h11l3.5 3.5v13.5H5z"/><path d="M8 12.5h5"/><path d="M4 4l16 16"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 1 1 12 0c0 3.9.9 5.3 1.6 6.1H4.4C5.1 15.3 6 13.9 6 10z"/><path d="M10 19.4a2.2 2.2 0 0 0 4 0"/></symbol>
+    <symbol id="i-bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 0 1 9.6-4.9M18 10c0 3.9.9 5.3 1.6 6.1H9"/><path d="M10 19.4a2.2 2.2 0 0 0 4 0"/><path d="M3.5 3.5l17 17"/></symbol>
+    <symbol id="i-check-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/></symbol>
+    <symbol id="i-star-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.6l2.7 5.6 6.1.8-4.4 4.3 1.1 6.1L12 17.5 6.5 20.4l1.1-6.1L3.2 10l6.1-.8z"/><path d="M3.5 3.5l17 17"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"/><path d="M9 6.5V4.5h6v2"/><path d="M6.6 6.5 7.6 20h8.8l1-13.5"/><path d="M10 10v6M14 10v6"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="11" opacity=".15"/><circle cx="12" cy="9.4" r="3.6"/><path d="M5.2 19.6a7 7 0 0 1 13.6 0 10.6 10.6 0 0 1-13.6 0z"/></symbol>
+  </svg>
+
+  <!-- ================= 自选操作增强 · 3 屏 ================= -->
+  <div class="section" id="sec-ops">
+    <div class="sec-head">
+      <span class="sec-no">交互稿</span>
+      <h2>自选操作增强 · 3 屏</h2>
+      <div class="sub">屏 1 是本方案的重点：把长按从「系统菜单 + 行抬升预览」改成「表格不动 + 居中面板 + 遮罩」，
+        并在同一屏里左右并排放「长按前 / 长按后」两张同一张表的截图，供逐值对照行高、列宽与横向偏移是否一致。
+        屏 2 演示编辑态 + 底部批量工具栏，屏 3 演示预警记录页（复用条件单「仅提醒」）与备注弹窗的两态。</div>
+    </div>
+
+    <div class="switcher">
+      <span class="lab">屏</span>
+      <button class="seg on" data-ops="opsRowMenu">屏 1 · 长按操作面板<span class="tag">重点</span></button>
+      <button class="seg" data-ops="opsBatch">屏 2 · 批量编辑</button>
+      <button class="seg" data-ops="opsAlert">屏 3 · 预警记录 + 备注弹窗</button>
+    </div>
+
+    <div class="stage">
+      <div class="frame-col">
+        <div class="bezel">
+          <div class="screen-wrap">
+
+            <!-- ============ 屏 1：长按操作面板 ============ -->
+            <div class="screen active" id="scr-opsRowMenu">
+              <div class="page">
+                <div class="os-head">
+                  <span class="t">自选 · 长按操作面板</span>
+                  <span class="s">左「长按前」/ 右「长按后」为同一张自选页表格，行高 45pt、列宽、横向偏移逐值一致</span>
+                </div>
+
+                <div class="os-cap a"><b>长按前</b>· 自选页表格常态，第 1 行为「将要长按的行」</div>
+                <div class="os-tbl a"><table class="qt" id="opsTblL"></table></div>
+
+                <div class="os-cap b"><b>长按后</b>· 表格不动，仅叠加居中面板</div>
+                <div class="os-tbl b"><table class="qt" id="opsTblR"></table></div>
+
+                <div class="os-scrim"></div>
+                <div class="os-panel" id="opsPanel"></div>
+
+                <div class="os-note">
+                  <div class="nn-h">长按期间的滚动行为</div>
+                  <div class="nn-l">面板弹出后，表格的横向拖动滚动被临时禁用（该手势由面板接管）；纵向仍可轻扫，但一旦产生位移面板即关闭。</div>
+                  <div class="nn-l">因此「长按 → 选操作」全程不需要任何横向位移，也就不会再触发旧实现里那套「抬升预览 + 重排」。</div>
+                </div>
+
+                <div class="os-cmp">
+                  <div class="half mo">
+                    <div class="ch-t">旧实现</div>
+                    <div class="mini">
+                      <div class="mrow"><i style="width:30px"></i><i style="width:20px"></i><i style="width:26px"></i><i style="width:18px"></i></div>
+                      <div class="mrow"><i style="width:30px"></i><i style="width:20px"></i><i style="width:26px"></i><i style="width:18px"></i></div>
+                    </div>
+                    <div class="ch-d">系统菜单会抬升预览 → 行被换宿主重排，列错位 / 被裁（现在这样）</div>
+                  </div>
+                  <div class="half mn">
+                    <div class="ch-t">新实现</div>
+                    <div class="mini">
+                      <div class="mrow"><i style="width:30px"></i><i style="width:20px"></i><i style="width:26px"></i><i style="width:18px"></i></div>
+                      <div class="mrow"><i style="width:30px"></i><i style="width:20px"></i><i style="width:26px"></i><i style="width:18px"></i></div>
+                    </div>
+                    <div class="ch-d">行零缩放零位移零重排：只加一层遮罩 + 一个居中面板</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ============ 屏 2：批量编辑 ============ -->
+            <div class="screen" id="scr-opsBatch">
+              <div class="page">
+                <div class="pg-top">
+                  <span class="ttl">自选</span>
+                  <span class="sp"></span>
+                  <div class="ibtn"><svg><use href="#i-list"/></svg></div>
+                  <div class="ibtn"><svg><use href="#i-slider"/></svg></div>
+                  <div class="ibtn"><svg><use href="#i-folder"/></svg></div>
+                  <div class="ibtn blue"><svg><use href="#i-plus"/></svg></div>
+                </div>
+                <div class="gtabs" id="opsTabs"></div>
+                <div class="ops2-tools">
+                  <span class="wt-name">全部</span><span class="wt-cnt">14 只</span>
+                  <span class="sp"></span>
+                  <span class="mtbtn"><svg><use href="#i-slider"/></svg>表头设置</span>
+                  <span class="mtbtn done">完成</span>
+                </div>
+                <div class="tbl" style="flex:none;height:529px"><table class="qt" id="opsTbl"></table></div>
+
+                <div class="ops2-note" id="opsNote"></div>
+                <div class="ops2-bar" id="opsBar"></div>
+              </div>
+              <div class="tabbar" data-tab="1"></div>
+            </div>
+
+            <!-- ============ 屏 3：预警记录 + 备注弹窗 ============ -->
+            <div class="screen" id="scr-opsAlert">
+              <div class="page">
+                <div class="os3-nav">
+                  <span class="pb"><svg><use href="#i-back"/></svg>返回</span>
+                  <span class="pt">预警记录</span>
+                  <span class="sp"></span>
+                  <span class="clr">清空全部</span>
+                </div>
+                <div class="al-list" id="alList"></div>
+
+                <div class="al-empty">
+                  <svg><use href="#i-bell-off"/></svg>
+                  <div class="ee-t">暂无预警记录</div>
+                  <div class="ee-s">触发后的提醒会按时间倒序出现在这里</div>
+                </div>
+
+                <div class="nt-dlg a">
+                  <div class="dl-h">备注 · 贵州茅台 600519</div>
+                  <div class="dl-b"><div class="dl-tf">等待 2400 附近</div></div>
+                  <div class="dl-f">
+                    <span class="dlb danger">清空</span><span class="sp"></span>
+                    <span class="dlb">取消</span><span class="dlb pri">保存</span>
+                  </div>
+                </div>
+
+                <div class="nt-dlg b">
+                  <div class="dl-h">备注 · 宁德时代 300750</div>
+                  <div class="dl-b"><div class="dl-tf ph">写点什么都行：买点 / 止损 / 关注理由</div></div>
+                  <div class="dl-f">
+                    <span class="dlb danger">清空</span><span class="sp"></span>
+                    <span class="dlb">取消</span><span class="dlb pri">保存</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <div class="frame-cap" id="opsCap"></div>
+      </div>
+      <div class="notes" id="opsNotes"></div>
+    </div>
+  </div>
+
+  <div class="foot">Kline 自选操作增强 · 静态原型 · 全部数据为示例 · 配色与尺寸对齐现 App（iPad 横屏 1024×768）</div>
+
+</div>
+
+<script>
+/* =============== 工具 =============== */
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+/* =============== 底部导航 =============== */
+const TABS=[['i-house','首页'],['i-folder','自选'],['i-chart','行情'],['i-game','模拟']];
+function fillTabbar(){
+  $$('.tabbar').forEach(b=>{const k=parseInt(b.dataset.tab,10);
+    b.innerHTML=TABS.map((t,i)=>`<div class="tab${i===k?' on':''}"><svg><use href="#${t[0]}"/></svg><span>${t[1]}</span></div>`).join('');});
+}
+
+/* =============== 数据：自选股（与自选页画廊同一批数据） =============== */
+const FAV=[
+ {n:'贵州茅台',c:'600519.SH',p:'1466.17',pct:'+0.31%',chg:'+4.49',v:'1.25万',t:'18.32亿',o:'1469.01',h:'1474.02',l:'1460.87',a:'0.90%',vr:'1.12',up:1},
+ {n:'宁德时代',c:'300750.SZ',p:'202.98',pct:'-1.18%',chg:'-2.42',v:'8.64万',t:'17.63亿',o:'205.60',h:'206.10',l:'202.30',a:'1.85%',vr:'0.94',up:0},
+ {n:'东方财富',c:'300059.SZ',p:'15.86',pct:'+1.21%',chg:'+0.19',v:'412.5万',t:'65.18亿',o:'15.72',h:'15.98',l:'15.68',a:'1.91%',vr:'1.34',up:1},
+ {n:'浙江世宝',c:'002703.SZ',p:'14.05',pct:'+2.11%',chg:'+0.29',v:'186.3万',t:'26.05亿',o:'13.80',h:'14.22',l:'13.76',a:'3.34%',vr:'1.86',up:1},
+ {n:'张江高科',c:'600895.SH',p:'31.80',pct:'+0.63%',chg:'+0.20',v:'62.4万',t:'19.85亿',o:'31.62',h:'32.05',l:'31.50',a:'1.74%',vr:'1.05',up:1},
+ {n:'保利联合',c:'002037.SZ',p:'8.26',pct:'-0.84%',chg:'-0.07',v:'48.2万',t:'3.99亿',o:'8.33',h:'8.36',l:'8.22',a:'1.68%',vr:'0.88',up:0},
+ {n:'赛力斯',c:'601127.SH',p:'91.20',pct:'+1.84%',chg:'+1.65',v:'34.6万',t:'31.42亿',o:'89.80',h:'91.86',l:'89.55',a:'2.58%',vr:'1.28',up:1},
+ {n:'中航产融',c:'600705.SH',p:'4.32',pct:'-0.46%',chg:'-0.02',v:'268.9万',t:'11.63亿',o:'4.34',h:'4.36',l:'4.29',a:'1.61%',vr:'0.79',up:0},
+ {n:'中京电子',c:'002579.SZ',p:'9.88',pct:'+3.13%',chg:'+0.30',v:'96.7万',t:'9.51亿',o:'9.62',h:'10.05',l:'9.58',a:'4.90%',vr:'2.14',up:1},
+ {n:'紫光国微',c:'002049.SZ',p:'68.42',pct:'+0.92%',chg:'+0.62',v:'21.5万',t:'14.68亿',o:'67.90',h:'68.90',l:'67.72',a:'1.74%',vr:'1.03',up:1},
+ {n:'三花智控',c:'002050.SZ',p:'24.16',pct:'-2.06%',chg:'-0.51',v:'58.3万',t:'14.13亿',o:'24.60',h:'24.72',l:'24.02',a:'2.85%',vr:'1.21',up:0},
+ {n:'沪电股份',c:'002463.SZ',p:'37.55',pct:'+1.35%',chg:'+0.50',v:'42.1万',t:'15.78亿',o:'37.10',h:'37.88',l:'37.02',a:'2.32%',vr:'1.15',up:1},
+ {n:'长江电力',c:'600900.SH',p:'28.74',pct:'+0.14%',chg:'+0.04',v:'36.8万',t:'10.57亿',o:'28.70',h:'28.86',l:'28.62',a:'0.84%',vr:'0.86',up:1},
+ {n:'中国平安',c:'601318.SH',p:'52.36',pct:'-0.38%',chg:'-0.20',v:'64.2万',t:'33.62亿',o:'52.60',h:'52.78',l:'52.18',a:'1.14%',vr:'0.92',up:0}
+];
+const GROUPS=[
+ {n:'全部',ic:'i-tray',c:14},{n:'我的自选',ic:'i-folder-f',c:9},{n:'科技龙头',ic:'i-folder-f',c:5},
+ {n:'新能源',ic:'i-folder-f',c:3},{n:'多头排列',ic:'i-tray',c:6,formula:1},{n:'放量突破',ic:'i-tray',c:4,formula:1},
+ {n:'低估值',ic:'i-folder-f',c:4},{n:'打板备选',ic:'i-folder-f',c:3}
+];
+
+/* =============== 屏 1：5 列表格（左右两块必须逐值一致） =============== */
+const OPS_COLS=[
+ {t:'名称 / 代码',w:'30%',l:1},
+ {t:'现价',w:'15%',s:1,sorted:1},
+ {t:'涨跌幅',w:'16%',s:1,sorted:1},
+ {t:'涨跌额',w:'15%'},
+ {t:'成交额',w:'24%',s:1}
+];
+function opsHead(cols){
+  return `<colgroup>${cols.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>`
+   +`<tr>${cols.map(c=>`<th class="${c.l?'l':''}${c.sorted?' sorted':''}">${c.t}${c.s?'<span class="sort">▼</span>':''}</th>`).join('')}</tr>`;
+}
+function ops5Row(r){
+  const k=r.up?'up':'dn';
+  return `<tr><td class="l"><div class="nm2">${r.n}</div><div class="cd2">${r.c}</div></td>`
+   +`<td class="${k}">${r.p}</td><td class="${k}">${r.pct}</td><td class="${k}">${r.chg}</td>`
+   +`<td>${r.t}</td></tr>`;
+}
+const OPS_ROWS=FAV.slice(0,11);
+const OPS_HTML=opsHead(OPS_COLS)+OPS_ROWS.map(ops5Row).join('');
+/* 关键：左右两块用同一串 HTML / 同一个 colgroup / 同样 472pt 容器宽度 →
+   行高 45pt、列宽、横向偏移天然逐值一致；左侧仅给第 1 行加一个只改背景的 class。 */
+$('#opsTblL').innerHTML=OPS_HTML;
+$('#opsTblR').innerHTML=OPS_HTML;
+const LTROWS=$('#opsTblL').querySelectorAll('tr');
+if(LTROWS[1]) LTROWS[1].classList.add('ops-hit');
+
+const OPS_MENU=[
+ ['固顶','i-pin',''],
+ ['移到最前','i-move-top',''],
+ ['移到最后','i-move-bottom',''],
+ ['加入其它分组','i-folder-add',''],
+ ['备注…','i-note','等待 2400 附近'],
+ ['设置预警','i-bell',''],
+ ['取消自选','i-star-off','danger']
+];
+$('#opsPanel').innerHTML='<div class="ph">贵州茅台 600519</div>'
+ +OPS_MENU.map(m=>`<div class="os-item${m[2]==='danger'?' danger':''}"><svg><use href="#${m[1]}"/></svg>`
+   +`<span class="tx">${m[0]}</span>${m[2]&&m[2]!=='danger'?`<span class="hint">${m[2]}</span>`:''}</div>`).join('')
+ +'<div class="os-cancel">取消</div>';
+
+/* =============== 屏 2：编辑态表格（12 列：勾选 + 11 列） =============== */
+const OPS2_COLS=[
+ {t:'',w:'4.5%'},
+ {t:'名称 / 代码',w:'14.5%',l:1},
+ {t:'现价',w:'8%',s:1,sorted:1},
+ {t:'涨跌幅',w:'8.5%',s:1,sorted:1},
+ {t:'涨跌额',w:'8%'},
+ {t:'成交量',w:'10%'},
+ {t:'成交额',w:'11%',s:1},
+ {t:'今开',w:'8%'},
+ {t:'最高',w:'8%'},
+ {t:'最低',w:'8%'},
+ {t:'振幅',w:'7%'},
+ {t:'量比',w:'4.5%'}
+];
+const SEL=[0,2,4];
+function opsEditRow(r,sel){
+  const k=r.up?'up':'dn';
+  const ck=sel?'<span class="ck on"><svg><use href="#i-check"/></svg></span>':'<span class="ck"></span>';
+  return `<tr class="${sel?'sel':''}"><td class="cc">${ck}</td>`
+   +`<td class="l"><div class="nm2">${r.n}</div><div class="cd2">${r.c}</div></td>`
+   +`<td class="${k}">${r.p}</td><td class="${k}">${r.pct}</td><td class="${k}">${r.chg}</td>`
+   +`<td>${r.v}</td><td>${r.t}</td><td>${r.o}</td><td>${r.h}</td><td>${r.l}</td>`
+   +`<td>${r.a}</td><td>${r.vr}</td></tr>`;
+}
+$('#opsTbl').innerHTML=opsHead(OPS2_COLS)+OPS_ROWS.map((r,i)=>opsEditRow(r,SEL.indexOf(i)>=0)).join('');
+
+$('#opsTabs').innerHTML=GROUPS.map((g,i)=>`<div class="gtab${i===0?' on':''}">`
+ +`<svg><use href="#${g.ic}"/></svg><span>${g.n}</span><span class="c">${g.c}</span></div>`).join('');
+
+const OPS2_ACT=[
+ ['移出','i-folder-minus'],['移到分组','i-folder-add'],['固顶','i-pin'],['取消固顶','i-pin-off'],
+ ['设置备注','i-note'],['清除备注','i-note-off'],['设置预警','i-bell'],['取消预警','i-bell-off'],
+ ['全选','i-check'],['取消全选','i-check-off']
+];
+$('#opsBar').innerHTML='<span class="bsel">已选 <b>3</b> 只</span><span class="brail">'
+ +OPS2_ACT.map(a=>`<span class="bact"><svg><use href="#${a[1]}"/></svg><span>${a[0]}</span></span>`).join('')+'</span>';
+
+$('#opsNote').innerHTML='<div class="nn-h">分组能力差异</div>'
+ +'<div class="nn-l"><b>公式分组</b>（多头排列 / 放量突破）：<em>移出 / 移到分组 / 拖拽排序</em> 置灰 —— 顺序由公式计算得到</div>'
+ +'<div class="nn-l"><b>「全部」组</b>：只保留 <em>取消自选 / 备注 / 预警</em> 三项</div>';
+
+/* =============== 屏 3：预警记录数据 =============== */
+const ALERTS=[
+ ['09-21 10:32','贵州茅台','600519','1512.30','现价 1512.30 上穿 1500.00',1],
+ ['09-21 10:08','宁德时代','300750','198.60','现价 198.60 下破 200.00',0],
+ ['09-21 09:55','东方财富','300059','16.20','现价 16.20 上穿 16.00',1],
+ ['09-21 09:47','赛力斯','601127','92.80','现价 92.80 上穿 92.00',1],
+ ['09-20 14:59','中际旭创','300308','168.00','现价 168.00 触及 168.00（当日新低）',0],
+ ['09-20 14:20','沪电股份','002463','38.10','现价 38.10 上穿 38.00',1],
+ ['09-20 10:36','中国平安','601318','51.80','现价 51.80 下破 52.00',0]
+];
+$('#alList').innerHTML=ALERTS.map(a=>
+ `<div class="al-row"><span class="tm num">${a[0]}</span>`
+ +`<span class="tg"><b>${a[1]}</b><i class="num">${a[2]}</i></span>`
+ +`<span class="pr num ${a[5]?'up':'dn'}">${a[3]}</span>`
+ +`<span class="tx">${a[4]}</span>`
+ +`<span class="del"><svg><use href="#i-trash"/></svg></span></div>`).join('');
+
+/* =============== 渲染底部导航 =============== */
+fillTabbar();
+
+/* =============== 数据：标注 / 优劣势 =============== */
+const SCREENS={
+ 'opsRowMenu':{kind:'屏 1 · 长按操作面板',badge:'重点',
+  cap:'<b>屏 1</b> · 长按操作面板：左「长按前」/ 右「长按后」为同一张自选页表格，表格不动，仅叠加居中面板',
+  desc:'同一张自选页表格并排两次：左为长按前常态（第 1 行「贵州茅台 600519」淡蓝底标出将要长按的行），右为长按后（表格完全不动，只多一层 25% 黑色遮罩与一个居中面板）。'+
+       '面板宽 260、圆角 12、带投影，标题行显示「贵州茅台 600519」13pt 灰字，下面 7 个操作项（行高 44、项间 1pt 分隔线、左侧图标）：固顶 / 移到最前 / 移到最后 / 加入其它分组 / 备注…（右侧灰字预览已有备注）/ 设置预警 / 取消自选（红字），底部蓝色「取消」。'+
+       '本屏的核心诉求：修掉长按让表格行变形（旧实现靠系统菜单抬升预览，行被换宿主重排，列错位或被裁），新实现做到「行零缩放零位移零重排」。',
+  ann:[[1,'顶部说明条：本屏为同一张自选页表格的长按前 / 长按后对照，左列常态、右列长按后'],
+       [2,'左侧表格（长按前）：表头「名称 / 代码 · 现价 · 涨跌幅 · 涨跌额 · 成交额」+ 11 行数据，第 1 行「贵州茅台 600519」用淡蓝底标出「将要长按的行」'],
+       [3,'右侧表格（长按后）：行高 45pt、列宽、横向偏移与左侧逐值一致，无缩放 / 位移 / 重排；两块由同一串 HTML 与同一个 colgroup 渲染'],
+       [4,'居中操作面板：宽 260、圆角 12、带投影；标题行「贵州茅台 600519」13pt 灰字 + 7 个操作项（行高 44、1pt 分隔线、左侧图标）+ 底部蓝色「取消」15pt'],
+       [5,'面板外 25% 黑色遮罩：只压暗右侧表格，左列保持原亮度，便于长按前后对照'],
+       [6,'长按期间横向拖动被禁用：手势被面板接管，纵向一旦位移面板即关闭，需先关面板才能继续横滑表格'],
+       [7,'右下角对照图：旧实现（系统菜单抬升预览 → 行被换宿主重排，列错位 / 被裁）vs 新实现（行零缩放零位移零重排）']],
+  pro:['面板居中且从第 2 行开始覆盖，被操作的「贵州茅台」行完全不被遮挡 → 长按前后可逐值对照',
+       '行不动、表不动，长按只加一层遮罩与一个面板，从根上避开旧实现里行被换宿主导致的列错位 / 裁切',
+       '固顶 / 移到最前 / 移到最后 / 加入分组 / 备注 / 预警 / 取消自选 七项一次给全，不需要二次跳转'],
+  con:['多一层遮罩，长按后需再点一下「取消」或遮罩才能关闭，比系统菜单多一步',
+       '面板固定 260pt 宽，备注预览只能显示首行，完整内容要进备注弹窗',
+       '长按期间禁用表格横滑，想对照被面板挡住的列需要先关面板']},
+ 'opsBatch':{kind:'屏 2 · 批量编辑',badge:'重设计',
+  cap:'<b>屏 2</b> · 批量编辑：编辑态列表 + 已选 3 行 + 底部批量工具栏',
+  desc:'自选页进入编辑态：顶部工具条右侧由「编辑」变为蓝色「完成」，每行左侧出现勾选圈，已选 3 行（贵州茅台 / 东方财富 / 张江高科）显示蓝色实心勾 + 淡蓝底。'+
+       '底部浮出一条高 56 的批量工具栏（浅色上分隔线）：左侧「已选 3 只」，右侧一排可左右横滚的动作按钮（44pt 命中区）——移出 / 移到分组 / 固顶 / 取消固顶 / 设置备注 / 清除备注 / 设置预警 / 取消预警 / 全选 / 取消全选。'+
+       '屏内左下角另有一块小注，说明分组能力差异：公式分组下「移出 / 移到分组 / 拖拽排序」置灰，原因是「顺序由公式计算得到」；「全部」组下只保留 取消自选 / 备注 / 预警。',
+  ann:[[1,'顶部工具条：编辑态的「编辑」按钮变为蓝色「完成」，点击退出编辑态并清空选择'],
+       [2,'每行左侧勾选圈：直径 22pt、命中区覆盖整行左侧；已选 3 行显示蓝色实心勾 + 淡蓝底，未选行常态'],
+       [3,'底部批量工具栏（高 56、浅色上分隔线）：左侧「已选 3 只」，数量随勾选实时变化'],
+       [4,'右侧一排横向可滚动作按钮（44pt 命中区、图标 + 文字）：移出 / 移到分组 / 固顶 / 取消固顶 / 设置备注 / 清除备注 / 设置预警 / 取消预警 / 全选 / 取消全选'],
+       [5,'小注：公式分组下「移出 / 移到分组 / 拖拽排序」置灰并显示原因「顺序由公式计算得到」'],
+       [6,'小注：「全部」组下只保留 取消自选 / 备注 / 预警 三项']],
+  pro:['批量工具栏贴着底部，勾选后不遮挡正在核对的表格行，一次可对多只做同一操作',
+       '动作按钮横向排列，10 项一屏基本给全，右侧略微溢出即表达可横滑，不用二次展开菜单',
+       '已选 3 行用「实心勾 + 淡蓝底」双重标记，与屏幕 1 的「将要长按的行」用同一种淡蓝，语义一致'],
+  con:['编辑态下每行左侧多出勾选列，11 列被压成 12 列，名称列略窄',
+       '10 个动作一次铺开会降低单个动作的可发现性，需靠图标辅助识别',
+       '批量操作不可撤销，误点「移出 / 取消自选」会一次影响多只，需要二次确认']},
+ 'opsAlert':{kind:'屏 3 · 预警记录 + 备注弹窗',badge:'重设计',
+  cap:'<b>屏 3</b> · 预警记录页：7 条触发记录 + 空态示例 + 备注弹窗两态',
+  desc:'整页为「预警记录」：顶部导航「‹ 返回 + 预警记录」，右侧红字「清空全部」；下面 7 条记录按时间倒序，每行左侧时间（灰字）+ 标的名称与代码 + 触发价（红 / 绿着色）+ 文案（如「现价 1512.30 上穿 1500.00」），行右侧一个垃圾桶删除按钮（44pt 命中区）。'+
+       '左下方另附「暂无预警记录」空态示例。下方叠两张备注弹窗：左侧为已有备注态（「等待 2400 附近」），右侧为空态（占位「写点什么都行：买点 / 止损 / 关注理由」），底部均为「清空 / 取消 / 保存」。'+
+       '预警复用条件单的「仅提醒」——不在 App 内弹窗打断，只在记录页集中查看。',
+  ann:[[1,'顶部导航：‹ 返回 + 「预警记录」标题'],
+       [2,'右侧「清空全部」红字，一键清空全部记录（建议加二次确认）'],
+       [3,'记录行字段：时间（09-21 10:32 灰字）+ 标的名称与代码（贵州茅台 600519）+ 触发价（红 / 绿着色）+ 文案（现价 1512.30 上穿 1500.00）'],
+       [4,'每行右侧删除按钮：垃圾桶图标，44pt 命中区，删除单条记录'],
+       [5,'空态示例：图标 + 「暂无预警记录」+ 说明「触发后的提醒会按时间倒序出现在这里」'],
+       [6,'备注弹窗两态：已有备注「等待 2400 附近」/ 空态占位「写点什么都行：买点 / 止损 / 关注理由」；底部「清空 / 取消 / 保存」'],
+       [7,'预警不在 App 内弹窗，只在记录页查看（复用条件单的「仅提醒」），避免打断盯盘']],
+  pro:['记录行字段一眼可读：时间 / 标的 / 触发价 / 触发文案四段对齐，触发价直接红绿着色',
+       '备注弹窗给出已有备注与空态两种写法，占位文案直接提示能写什么，降低首次使用门槛',
+       '预警走「仅提醒 + 记录页」，不弹窗不打断，触发历史可回溯、可单条删除或清空'],
+  con:['记录页与自选页是两个入口，查看预警要离开当前列表，路径多一步',
+       '删除单条与「清空全部」都是破坏性操作，误触不可恢复，需要二次确认或撤销',
+       '两条占位示例并排展示占地方，真实页面只会出现其中一种状态']}
+};
+
+/* 屏内编号标注坐标（1024×768 坐标系） */
+const MARKS={
+ 'opsRowMenu':[[1,988,22],[2,10,95],[3,1014,95],[4,916,200],[5,556,596],[6,106,608],[7,520,608]],
+ 'opsBatch':[[1,940,72],[2,26,176],[3,78,645],[4,700,645],[5,528,552],[6,528,596]],
+ 'opsAlert':[[1,200,28],[2,1012,28],[3,330,82],[4,1012,82],[5,36,442],[6,168,550],[7,860,470]]
+};
+
+/* =============== 注入编号标注 =============== */
+Object.entries(MARKS).forEach(([id,ms])=>{
+  const scr=$('#scr-'+id); if(!scr) return;
+  ms.forEach(([n,x,y])=>{
+    const d=document.createElement('div');
+    d.className='marker'; d.textContent=n;
+    d.style.left=(x-10)+'px'; d.style.top=(y-10)+'px';
+    scr.appendChild(d);
+  });
+});
+
+/* =============== 标注栏渲染 =============== */
+function renderNotes(boxId,id){
+  const d=SCREENS[id], box=$('#'+boxId); if(!d||!box) return;
+  const badge=d.badge==='重点'
+    ? '<span class="rec" style="background:#007AFF">重点</span>'
+    : (d.badge==='重设计' ? '<span class="rec" style="background:#007AFF">重设计</span>' : `<span class="rec">${d.badge}</span>`);
+  box.innerHTML=
+   `<div class="ncard"><h3>${badge}${d.kind}</h3><div class="desc">${d.desc}</div></div>`
+  +`<div class="ncard"><h3>标注</h3><ul class="ann">${d.ann.map(a=>
+      `<li><span class="n">${a[0]}</span><span><b>${a[1].split('：')[0]}</b>${a[1].includes('：')?'：'+a[1].split('：').slice(1).join('：'):''}</span></li>`).join('')}</ul></div>`
+  +`<div class="ncard"><div class="pc">`
+  +`<div class="box pro"><h4>优势</h4>${d.pro.map(p=>`<div>${p}</div>`).join('')}</div>`
+  +`<div class="con box"><h4>代价</h4>${d.con.map(p=>`<div>${p}</div>`).join('')}</div>`
+  +`</div></div>`;
+}
+
+/* =============== 方案切换 =============== */
+const OPS_IDS=['opsRowMenu','opsBatch','opsAlert'];
+function showOps(id){
+  $$('[data-ops]').forEach(b=>b.classList.toggle('on',b.dataset.ops===id));
+  OPS_IDS.forEach(k=>$('#scr-'+k).classList.toggle('active',k===id));
+  $('#opsCap').innerHTML=SCREENS[id].cap;
+  renderNotes('opsNotes',id);
+}
+$$('[data-ops]').forEach(b=>b.onclick=()=>showOps(b.dataset.ops));
+
+/* =============== 标注开关 =============== */
+$('#annToggle').onclick=function(){
+  document.body.classList.toggle('hide-ann');
+  this.textContent=document.body.classList.contains('hide-ann')?'标注：关（点击开启）':'标注：开（点击切换）';
+};
+
+/* =============== 单屏截图模式：#shot=<屏 id> =============== */
+function applyShot(){
+  const m=/#shot=([A-Za-z0-9_-]+)/.exec(location.hash||'');
+  const id=m?m[1]:null;
+  document.body.classList.remove('shot');
+  $$('.section').forEach(s=>s.classList.remove('shot-on'));
+  if(!id||OPS_IDS.indexOf(id)<0) return false;
+  const scr=$('#scr-'+id); if(!scr) return false;
+  document.body.classList.add('shot');
+  $$('.screen').forEach(s=>s.classList.remove('active'));
+  scr.classList.add('active');
+  const sec=scr.closest('.section'); if(sec) sec.classList.add('shot-on');
+  document.title='shot:'+id;
+  return true;
+}
+window.addEventListener('hashchange',()=>{ if(!applyShot()) initNormal(); });
+
+/* =============== 初始化 =============== */
+function initNormal(){
+  document.title='Kline 自选页操作增强 · 3 屏交互稿';
+  showOps('opsRowMenu');
+}
+if(!applyShot()) initNormal();
+</script>
+</body>
+</html>

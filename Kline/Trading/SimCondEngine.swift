@@ -9,6 +9,8 @@
 //  约定：整轮结算只在结尾写盘一次；写回一律先比较再赋值（沿用 @Published 写入守卫）；
 //  单次类型触发成功置 triggered、失败置 rejected（不重试）；多触发类型（网格 / 分批）
 //  失败保持 monitoring 并记因，走完全部档位 / 批次后置 completed。
+//  另：指令为 isAlertOnly 的「仅提醒」条件单触发时**不下单**（不产生任何委托 / 成交），
+//  只写运行时状态并追加一条 SimAlertRecord（多触发类型每次触发都追加，不覆盖历史）。
 //
 
 import Foundation
@@ -135,9 +137,15 @@ extension SimStore {
     // MARK: - 触发分支
 
     /// 触发：组装草稿 → 走既有 submit → 回写状态；返回更新后的条件单
+    /// （「仅提醒」指令不进下单分支，见 `fireAlertOnly`）
     private func fireCondOrder(_ order: SimCondOrder, qty: Int, at triggerPrice: Double,
                                snapshot: SimCondSnapshot, now: Date,
                                result: inout SimCondSweepResult) -> SimCondOrder {
+        if order.directive.isAlertOnly {
+            return fireAlertOnly(order, triggerPrice: triggerPrice,
+                                 snapshot: snapshot, now: now, result: &result)
+        }
+
         var target = order
         let direction = fireDirection(order: order, triggerPrice: triggerPrice)
         let price = executionPrice(directive: order.directive, triggerPrice: triggerPrice)
@@ -191,6 +199,92 @@ extension SimStore {
                                    result: target.status.title, at: now))
         }
         return target
+    }
+
+    // MARK: - 触发分支：「仅提醒」
+
+    /// 「仅提醒」触发：不组装草稿、不调用 `submit`（因此不产生任何委托 / 成交 / 资金变动），
+    /// 只写运行时状态（触发时间 / 触发价 / 文案）并追加一条 `SimAlertRecord`。
+    /// 多触发类型（网格 / 分批）与下单分支同口径推进档位 / 批次，且**每次触发都追加一条记录**。
+    private func fireAlertOnly(_ order: SimCondOrder, triggerPrice: Double,
+                               snapshot: SimCondSnapshot, now: Date,
+                               result: inout SimCondSweepResult) -> SimCondOrder {
+        var target = order
+        let message = alertMessage(order: order, triggerPrice: triggerPrice)
+
+        target.runtime.lastEvaluatedAt = now
+        target.runtime.lastPrice = snapshot.last ?? target.runtime.lastPrice
+        target.runtime.lastTriggerPrice = triggerPrice
+        target.triggeredCount += 1
+        target.updatedAt = now
+
+        if target.kind.repeatable {
+            target.runtime = advanceRepeatable(order: target, triggerPrice: triggerPrice)
+            if repeatableFinished(order: target) {
+                target.status = .completed
+                target.runtime.lastMessage = target.kind == .grid ? "已完成全部档位" : "已完成全部批次"
+            } else {
+                target.runtime.lastMessage = message
+            }
+        } else {
+            target.status = .triggered
+            target.triggeredAt = now
+            target.runtime.lastMessage = message
+        }
+        result.fired += 1
+
+        // 记录不覆盖历史：多触发类型每触发一次都追加（appendAlertRecord 内部落盘）
+        appendAlertRecord(SimAlertRecord(id: UUID(), condID: order.id, metaID: order.metaID,
+                                         code: order.code, name: order.name,
+                                         price: triggerPrice, message: message, occurredAt: now))
+        return target
+    }
+
+    /// 预警文案：形如「预警：现价 1512.30 上穿 1500.00」（仅入记录 / 运行时，不做 App 内弹窗）
+    private func alertMessage(order: SimCondOrder, triggerPrice: Double) -> String {
+        let priceText = SimFormat.price(triggerPrice)
+        let p = order.params
+        switch order.kind {
+        case .price:
+            guard let target = p.triggerPrice else { return "预警：现价 \(priceText) 触发价格条件" }
+            let verb = (p.compareUp ?? true) ? "上穿" : "下破"
+            return "预警：现价 \(priceText) \(verb) \(SimFormat.price(target))"
+
+        case .stopLoss:
+            if let stop = p.stopLossPrice, triggerPrice <= stop {
+                return "预警：现价 \(priceText) 下破止损价 \(SimFormat.price(stop))"
+            }
+            if let take = p.takeProfitPrice {
+                return "预警：现价 \(priceText) 上穿止盈价 \(SimFormat.price(take))"
+            }
+            return "预警：现价 \(priceText) 触发止盈止损条件"
+
+        case .trailing:
+            if p.floorEnabled, let floor = p.floorPrice, triggerPrice <= floor {
+                return "预警：现价 \(priceText) 跌破保底价 \(SimFormat.price(floor))"
+            }
+            let word = order.directive.direction == .sell ? "回落" : "反弹"
+            return "预警：现价 \(priceText) \(word)达到 \(String(format: "%.1f", p.trailPct ?? 0))%"
+
+        case .time:
+            return "预警：现价 \(priceText) 到达触发时间"
+
+        case .changePct:
+            let threshold = p.changeThreshold ?? 0
+            let word = threshold > 0 ? "涨幅" : "跌幅"
+            return "预警：现价 \(priceText) 日\(word)达到 \(String(format: "%.1f", abs(threshold)))%"
+
+        case .maCross:
+            let period = p.maPeriod ?? 20
+            let word = (p.maAbove ?? true) ? "上穿" : "下破"
+            return "预警：现价 \(priceText) \(word) MA\(period)"
+
+        case .grid:
+            return "预警：现价 \(priceText) 触发网格档位"
+
+        case .batch:
+            return "预警：现价 \(priceText) 触发分批第 \(order.runtime.batchDone + 1) 批"
+        }
     }
 
     // MARK: - 有效期

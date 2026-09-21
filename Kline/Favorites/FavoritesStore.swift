@@ -8,6 +8,7 @@
 //  - 支持「自定义分组」：用户手动增删、拖动排序
 //  - 支持「指标公式自动分组」：用户编写通达信公式，打开分组时根据公式
 //    最新一期输出值是否 > 0 动态组成分组（结果可手动刷新）
+//  - schema 3：分组内固顶（pinnedMetaIDs，纯显示层）+ 全局备注（notes，key = String(metaID)）
 //  - 所有配置写入 Documents/Favorites/favorites.json，启动时自动加载
 //
 
@@ -39,6 +40,10 @@ struct FavoritesGroup: Identifiable, Codable, Hashable {
     var updatedAt: Date?
     /// 是否显示在自选 Tab（用户可"隐藏"某分组）
     var isHidden: Bool
+    /// schema 3：分组内固顶的 metaID（数组顺序 = 固顶顺序，可多只；纯显示层，
+    /// 与 `cachedMatches` 无关，公式分组刷新选股后固顶保持）。
+    /// 必须是可选：本结构没有自定义 `init(from:)`，非可选新增字段会让旧档 decode 失败 → 整档丢
+    var pinnedMetaIDs: [Int]? = nil
 
     static func manual(name: String) -> FavoritesGroup {
         FavoritesGroup(id: UUID(), name: name, kind: .manual,
@@ -66,6 +71,9 @@ private struct FavoritesRoot: Codable {
     var groups: [FavoritesGroup]
     var selectedGroupID: UUID?
     var schemaVersion: Int
+    /// schema 3：全局备注，key = `String(metaID)`，顺序无关；nil / 缺字段 = 无备注。
+    /// 禁止改成 `[Int: String]`：Swift 对非 String key 的字典会被 `JSONEncoder` 编码成交替数组
+    var notes: [String: String]? = nil
 }
 
 // MARK: - Store
@@ -79,6 +87,10 @@ final class FavoritesStore: ObservableObject {
 
     /// 当前选中的分组
     @Published var selectedGroupID: UUID?
+
+    /// schema 3：全局备注（同一标的在手动分组 / 公式分组 /「全部」/ 行情页内容一致）。
+    /// key = `String(metaID)`；空 / 不存在的 key = 无备注（空串一律按删除处理，不存空串）
+    @Published private(set) var notes: [String: String] = [:]
 
     /// 「全部」虚拟分组的固定 id：它不是 groups 里的实体，但 Tab 选中、计数、取数都要靠
     /// 一个稳定标识反查。若用 `UUID()` 每次新建，`resolveMetaItems` 永远查不到 → 计数恒为 0、
@@ -101,8 +113,9 @@ final class FavoritesStore: ObservableObject {
     }
 
     private let fm = FileManager.default
-    /// 档结构版本：2 起公式分组只存 `formulaID` 引用（1 为内嵌 formula 文本的旧档）
-    private let currentSchema = 2
+    /// 档结构版本：2 起公式分组只存 `formulaID` 引用（1 为内嵌 formula 文本的旧档）；
+    /// 3 起新增「分组内固顶」与「全局备注」（二者都是可选字段，旧档解码即为 nil / 空）
+    private let currentSchema = 3
     /// 读到的档版本低于 `currentSchema` 时为 true：即使没有任何分组改动也要回写一次
     private var needsSchemaRewrite = false
 
@@ -112,9 +125,10 @@ final class FavoritesStore: ObservableObject {
         // 立即读档；档不存在则写入默认的"我的自选"分组
         if loadFromDisk() {
             // 迁移发生在读档后、写档前，因此只写一次
-            let migrated = migrateFormulaGroupsIfNeeded()
-            // 读到旧版本档即无条件回写一次，把 schemaVersion 落到 2（即便是无需迁移的手动分组档）
-            if migrated || needsSchemaRewrite { saveToDisk() }
+            let migratedFormula = migrateFormulaGroupsIfNeeded()
+            let migratedItemOps = migrateItemOpsIfNeeded()
+            // 读到旧版本档即无条件回写一次，把 schemaVersion 落到 3（即便是无需迁移的手动分组档）
+            if migratedFormula || migratedItemOps || needsSchemaRewrite { saveToDisk() }
         } else {
             let def = FavoritesGroup.manual(name: "我的自选")
             groups = [def]
@@ -161,6 +175,29 @@ final class FavoritesStore: ObservableObject {
         return changed
     }
 
+    /// 幂等迁移（schema 3）：新增「分组内固顶」与「全局备注」两个可选字段。
+    ///
+    /// 二者都是可选字段：旧档里没有这两个 key，synthesized Codable 走 `decodeIfPresent`
+    /// 得到 nil，读取侧一律按「无固顶 / 无备注」处理，因此这里不需要逐条补值 —— 只做两件事：
+    /// 1) 固顶列表去重（只清理列表自身，**绝不触碰** `manualMetaIDs` / `cachedMatches`
+    /// 的成员与顺序，也不按 `manualMetaIDs` 过滤固顶，否则公式分组的固顶会被误清）；
+    /// 2) 回传本次是否有实际改动（是否需要把 schemaVersion 回写成 3，由调用方结合
+    ///    `needsSchemaRewrite` 决定，口径与 `migrateFormulaGroupsIfNeeded` 一致）。
+    @discardableResult
+    private func migrateItemOpsIfNeeded() -> Bool {
+        var changed = false
+        for i in groups.indices {
+            guard let pinned = groups[i].pinnedMetaIDs, !pinned.isEmpty else { continue }
+            var seen = Set<Int>()
+            let deduped = pinned.filter { seen.insert($0).inserted }
+            if deduped != pinned {
+                groups[i].pinnedMetaIDs = deduped
+                changed = true
+            }
+        }
+        return changed
+    }
+
     // MARK: - 读档/存档
 
     private var fileURL: URL {
@@ -195,6 +232,9 @@ final class FavoritesStore: ObservableObject {
             } else {
                 self.selectedGroupID = groups.first?.id
             }
+            // schema 3 全局备注（旧档无该字段 → 空）
+            let loadedNotes = root.notes ?? [:]
+            if notes != loadedNotes { notes = loadedNotes }
             return true
         } catch {
             DebugLogger.shared.log("[FavoritesStore] load failed \(error)")
@@ -203,8 +243,12 @@ final class FavoritesStore: ObservableObject {
     }
 
     func saveToDisk() {
+        // 写档前兜底：内存里若还残留旧结构（如绕过 init 的写入路径），先迁移再写；
+        // 写出的 schemaVersion 恒为 currentSchema，即本次写入顺便把旧档升到 3
+        _ = migrateItemOpsIfNeeded()
         let root = FavoritesRoot(groups: groups, selectedGroupID: selectedGroupID,
-                                 schemaVersion: currentSchema)
+                                 schemaVersion: currentSchema,
+                                 notes: notes.isEmpty ? nil : notes)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -344,6 +388,108 @@ final class FavoritesStore: ObservableObject {
         guard let idx = groups.firstIndex(where: { $0.id == id }) else { return }
         guard groups[idx].kind == .manual else { return }
         groups[idx].manualMetaIDs.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        saveToDisk()
+    }
+
+    // MARK: - 分组内固顶（纯显示层：手动分组与公式分组都可固顶）
+
+    /// 是否已在该分组固顶。
+    /// 「全部」是虚拟分组（没有实体、`groups` 里查不到），因此恒为 false。
+    func isPinned(groupID: UUID, metaID: Int) -> Bool {
+        guard groupID != Self.allGroupID,
+              let g = groups.first(where: { $0.id == groupID }) else { return false }
+        return (g.pinnedMetaIDs ?? []).contains(metaID)
+    }
+
+    /// 该分组的固顶顺序（数组顺序 = 展示顺序，可多只）；无固顶 / 虚拟分组返回空
+    func pinnedIDs(groupID: UUID) -> [Int] {
+        guard groupID != Self.allGroupID,
+              let g = groups.first(where: { $0.id == groupID }) else { return [] }
+        return g.pinnedMetaIDs ?? []
+    }
+
+    /// 固顶 / 取消固顶：固顶 = 追加到 `pinnedMetaIDs` 尾部（多只按加入顺序排列），
+    /// 取消 = 移除该 id。
+    ///
+    /// 语义：固顶是纯显示层，与 `cachedMatches` 无关 —— 公式分组刷新选股后固顶依然保持；
+    /// 「全部」虚拟分组没有实体，直接 no-op（与 addToGroup / removeFromGroup 的 guard 风格一致）。
+    func togglePin(groupID: UUID, metaID: Int) {
+        guard groupID != Self.allGroupID,
+              let idx = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        var pinned = groups[idx].pinnedMetaIDs ?? []
+        if let at = pinned.firstIndex(of: metaID) {
+            pinned.remove(at: at)
+        } else {
+            pinned.append(metaID)
+        }
+        // 空列表归一化为 nil（JSON 里不写空数组）
+        let next: [Int]? = pinned.isEmpty ? nil : pinned
+        guard groups[idx].pinnedMetaIDs != next else { return }   // 同值不写
+        groups[idx].pinnedMetaIDs = next
+        saveToDisk()
+    }
+
+    // MARK: - 移到最前 / 移到最后（仅 manual 实体分组）
+
+    /// 移到分组最前：只重排该分组的 `manualMetaIDs`（该 id 提到首位，其它成员相对顺序不变）
+    func moveToFirst(groupID: UUID, metaID: Int) {
+        reorderMember(groupID: groupID, metaID: metaID, toFront: true)
+    }
+
+    /// 移到分组最后：只重排该分组的 `manualMetaIDs`（该 id 挪到末位，其它成员相对顺序不变）
+    func moveToLast(groupID: UUID, metaID: Int) {
+        reorderMember(groupID: groupID, metaID: metaID, toFront: false)
+    }
+
+    /// 重排实现。
+    ///
+    /// 关键：只在 `manualMetaIDs` 上做「取出一只 → 插入首 / 末」的原地重排，
+    /// **绝对不能**用 `resolveMetaItems` / `items()` 的 `compactMap` 结果整组覆写 ——
+    /// `resolveMetaItems` 会丢掉不在 `db.metaList` 里的历史 metaID（停牌 / 退市 / 库未就绪），
+    /// 整组覆写等于永久删除分组成员。
+    ///
+    /// 生效条件（不满足则静默 no-op）：非「全部」虚拟组（`allGroup` 的 id 是固定常量、
+    /// 不在 `groups` 里）、且在 `groups` 中的实体分组必须是 `kind == .manual`
+    /// （公式分组的顺序由公式结果决定，不接受手动定位）。
+    private func reorderMember(groupID: UUID, metaID: Int, toFront: Bool) {
+        guard groupID != Self.allGroupID else { return }
+        guard let idx = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        guard groups[idx].kind == .manual else { return }
+
+        var ids = groups[idx].manualMetaIDs
+        guard let at = ids.firstIndex(of: metaID) else { return }   // 不在组内：no-op
+        let target = toFront ? 0 : ids.count - 1
+        guard at != target else { return }                          // 已就位：同值不写
+        ids.remove(at: at)
+        ids.insert(metaID, at: toFront ? 0 : ids.count)
+        groups[idx].manualMetaIDs = ids
+        saveToDisk()
+    }
+
+    // MARK: - 全局备注（同一标的跨分组 / 跨页面共用一份）
+
+    /// 备注 key：`String(metaID)`（禁用 `[Int: String]`，避免 JSONEncoder 编成交替数组）
+    private static func noteKey(_ metaID: Int) -> String { String(metaID) }
+
+    /// 读备注；未设置（或已被清空）返回 nil
+    func note(for metaID: Int) -> String? {
+        guard let text = notes[Self.noteKey(metaID)], !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// 写备注：传入空串（或去空白后为空）= 删除该 key（不存空串）；否则存入去首尾空白后的文本
+    func setNote(metaID: Int, text: String) {
+        let key = Self.noteKey(metaID)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var next = notes
+        if trimmed.isEmpty {
+            guard next[key] != nil else { return }          // 同值不写
+            next.removeValue(forKey: key)
+        } else {
+            guard next[key] != trimmed else { return }      // 同值不写
+            next[key] = trimmed
+        }
+        notes = next
         saveToDisk()
     }
 

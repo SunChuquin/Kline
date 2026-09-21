@@ -2,11 +2,12 @@
 //  SimStore.swift
 //  Kline
 //
-//  模拟交易总仓库：账户 / 持仓 / 委托 / 成交 / 资金流水 / 操作日志六类数据的
+//  模拟交易总仓库：账户 / 持仓 / 委托 / 成交 / 资金流水 / 操作日志 / 预警记录七类数据的
 //  唯一写入口，负责落盘（Documents/Simulation/sim.json）、首次播种、下单撮合、
 //  撤单改价、一键平仓与账户资金操作，并提供给视图的聚合查询与汇总口径。
 //  约定：所有写操作先比较值再赋值（同值赋值同样会触发 @Published 发布风暴），
 //  校验失败（SimTradingRules）一律不写任何数据。
+//  schema 3：新增预警记录（alertRecords，仅保留最近 alertRecordLimit 条）。
 //
 
 import Foundation
@@ -25,15 +26,18 @@ private struct SimRoot: Codable {
     var logs: [ActionLog]
     var conditionalOrders: [SimCondOrder]
     var selectedAccountID: UUID?
+    /// schema 3 新增：条件单「仅提醒」触发的预警记录（缺字段 / 解码失败为空数组）
+    var alertRecords: [SimAlertRecord]?
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, accounts, positions, orders, fills, ledger, logs
-        case conditionalOrders, selectedAccountID
+        case conditionalOrders, selectedAccountID, alertRecords
     }
 
     init(schemaVersion: Int, accounts: [SimAccount], positions: [SimPosition],
          orders: [SimOrder], fills: [SimFill], ledger: [LedgerEntry],
-         logs: [ActionLog], conditionalOrders: [SimCondOrder], selectedAccountID: UUID?) {
+         logs: [ActionLog], conditionalOrders: [SimCondOrder], selectedAccountID: UUID?,
+         alertRecords: [SimAlertRecord]?) {
         self.schemaVersion = schemaVersion
         self.accounts = accounts
         self.positions = positions
@@ -43,6 +47,7 @@ private struct SimRoot: Codable {
         self.logs = logs
         self.conditionalOrders = conditionalOrders
         self.selectedAccountID = selectedAccountID
+        self.alertRecords = alertRecords
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +61,7 @@ private struct SimRoot: Codable {
         logs = (try? c.decode([ActionLog].self, forKey: .logs)) ?? []
         conditionalOrders = (try? c.decode([SimCondOrder].self, forKey: .conditionalOrders)) ?? []
         selectedAccountID = try? c.decode(UUID.self, forKey: .selectedAccountID)
+        alertRecords = try? c.decodeIfPresent([SimAlertRecord].self, forKey: .alertRecords)
     }
 }
 
@@ -77,6 +83,8 @@ final class SimStore: ObservableObject {
     @Published private(set) var ledger: [LedgerEntry] = []
     @Published private(set) var logs: [ActionLog] = []
     @Published private(set) var conditionalOrders: [SimCondOrder] = []
+    /// 预警记录（条件单「仅提醒」触发时追加；按写入顺序存放，展示请用 `alertRecordsSorted`）
+    @Published private(set) var alertRecords: [SimAlertRecord] = []
 
     /// 当前选中账户；nil 或 allAccountID 表示「全部账户汇总」
     @Published var selectedAccountID: UUID?
@@ -84,7 +92,10 @@ final class SimStore: ObservableObject {
     // MARK: 内部状态
 
     private let fm = FileManager.default
-    private let currentSchema = 2
+    /// 档结构版本：3 起新增 `alertRecords`（可选字段，旧档解码即为空数组）
+    private let currentSchema = 3
+    /// 预警记录条数上限（超出丢最旧）
+    private let alertRecordLimit = 200
     private let tPlus1Key = "kline.sim.lastTPlus1Refresh"
 
     /// 条件单结算重入保护（引擎在 SimCondEngine.swift 中读写）
@@ -160,6 +171,7 @@ final class SimStore: ObservableObject {
             assignLedger(root.ledger)
             assignLogs(root.logs)
             assignConditionalOrders(root.conditionalOrders)
+            assignAlertRecords(root.alertRecords ?? [])
 
             if let sel = root.selectedAccountID,
                sel == Self.allAccountID || accounts.contains(where: { $0.id == sel }) {
@@ -183,7 +195,8 @@ final class SimStore: ObservableObject {
                            ledger: ledger,
                            logs: logs,
                            conditionalOrders: conditionalOrders,
-                           selectedAccountID: selectedAccountID)
+                           selectedAccountID: selectedAccountID,
+                           alertRecords: alertRecords)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -223,6 +236,11 @@ final class SimStore: ObservableObject {
 
     func assignConditionalOrders(_ value: [SimCondOrder]) {
         if conditionalOrders != value { conditionalOrders = value }
+    }
+
+    /// 预警记录写入守卫（private：外部只能通过 append / delete / clear 三个口子改）
+    private func assignAlertRecords(_ value: [SimAlertRecord]) {
+        if alertRecords != value { alertRecords = value }
     }
 
     // MARK: - 首次播种
@@ -1059,6 +1077,42 @@ final class SimStore: ObservableObject {
         assignConditionalOrders(conditionalOrders.filter { $0.id != id })
         saveToDisk()
     }
+
+    // MARK: - 预警记录（条件单「仅提醒」触发写入；落盘在方法内部完成，与条件单写入口风格一致）
+
+    /// 追加一条预警记录：写到尾部 + 落盘；超过 `alertRecordLimit` 丢最旧（保序裁剪）
+    func appendAlertRecord(_ record: SimAlertRecord) {
+        var next = alertRecords
+        next.append(record)
+        if next.count > alertRecordLimit {
+            next.removeFirst(next.count - alertRecordLimit)
+        }
+        assignAlertRecords(next)
+        saveToDisk()
+    }
+
+    /// 删除单条预警记录（不存在则不写不落盘）
+    func deleteAlertRecord(id: UUID) {
+        let next = alertRecords.filter { $0.id != id }
+        guard next.count != alertRecords.count else { return }
+        assignAlertRecords(next)
+        saveToDisk()
+    }
+
+    /// 清空全部预警记录（本来就是空则不写不落盘）
+    func clearAlertRecords() {
+        guard !alertRecords.isEmpty else { return }
+        assignAlertRecords([])
+        saveToDisk()
+    }
+
+    /// 按触发时间倒序（预警记录页直接展示用）
+    var alertRecordsSorted: [SimAlertRecord] {
+        alertRecords.sorted { $0.occurredAt > $1.occurredAt }
+    }
+
+    /// 预警记录条数
+    var alertRecordCount: Int { alertRecords.count }
 
     // MARK: - 汇总
 

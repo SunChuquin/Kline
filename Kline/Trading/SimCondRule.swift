@@ -7,6 +7,8 @@
 //  以及快照取数助手 SimCondSnapshotCenter（走既有 SimQuoteCenter / MarketRowCache）。
 //  约定：本层纯计算、无副作用——不写 SimStore、不落盘、不取数（取数在 SnapshotCenter）。
 //  本项目的「最新价」是本地日线库最后一根 K 线的 close，没有盘中 tick 推送。
+//  「仅提醒」（SimCondDirective.isAlertOnly）只在本层放行数量 / 持仓校验与网格 / 分批的数量缺省，
+//  普通条件单的判定与校验一律零变化。
 //
 
 import Foundation
@@ -156,9 +158,14 @@ nonisolated enum SimCondRule {
 
         case .grid:
             guard let lower = p.gridLower, let upper = p.gridUpper,
-                  let step = p.gridStepPct, step > 0,
-                  let perLevel = p.gridQtyPerLevel, perLevel > 0 else {
+                  let step = p.gridStepPct, step > 0 else {
                 return .abort("网格参数不完整")
+            }
+            // 「仅提醒」不产生委托：每格数量允许缺省 / 为 0，预警照样可触发
+            if !order.directive.isAlertOnly {
+                guard let perLevel = p.gridQtyPerLevel, perLevel > 0 else {
+                    return .abort("网格参数不完整")
+                }
             }
             guard price >= lower, price <= upper else { return .complete("价格已越出网格区间") }
             var runtime = order.runtime
@@ -172,15 +179,20 @@ nonisolated enum SimCondRule {
             let level = max(runtime.gridLevel ?? 0, 0)
             let multiplier = min(max(p.gridMultiplier ?? 1, 1), 5)
             let factor = pow(multiplier, Double(min(level, 4)))
-            let qty = perLevel * Int(round(factor))
+            let qty = (p.gridQtyPerLevel ?? 0) * Int(round(factor))
             return .fire(qty: max(qty, 0), at: price)
 
         case .batch:
-            guard let totalQty = p.batchTotalQty, totalQty > 0,
-                  let count = p.batchCount, count >= 2,
+            guard let count = p.batchCount, count >= 2,
                   let firstPrice = p.batchFirstPrice, firstPrice > 0,
                   let stepPct = p.batchStepPct, stepPct > 0 else {
                 return .abort("分批参数不完整")
+            }
+            // 「仅提醒」不产生委托：总数量允许缺省 / 为 0
+            if !order.directive.isAlertOnly {
+                guard let totalQty = p.batchTotalQty, totalQty > 0 else {
+                    return .abort("分批参数不完整")
+                }
             }
             let done = max(order.runtime.batchDone, 0)
             let index = done + 1
@@ -191,7 +203,8 @@ nonisolated enum SimCondRule {
             let target = isBuy ? firstPrice * (1 - offset) : firstPrice * (1 + offset)
             let reached = isBuy ? (price <= target) : (price >= target)
             guard reached else { return .hold(order.runtime) }
-            return .fire(qty: batchQty(totalQty: totalQty, count: count, index: index), at: price)
+            return .fire(qty: batchQty(totalQty: p.batchTotalQty ?? 0, count: count, index: index),
+                         at: price)
         }
     }
 
@@ -229,27 +242,31 @@ nonisolated enum SimCondRule {
         let lot = max(rules.lotSize, 1)
         let p = order.params
 
-        // 数量：网格用每格数量、分批用总数量，其余类型用委托指令数量
-        switch order.kind {
-        case .grid:
-            guard let perLevel = p.gridQtyPerLevel, perLevel > 0, perLevel % lot == 0 else {
-                return .invalidQty(lot: lot)
-            }
-        case .batch:
-            guard let totalQty = p.batchTotalQty, totalQty > 0, totalQty % lot == 0 else {
-                return .invalidQty(lot: lot)
-            }
-        default:
-            if order.directive.qty <= 0 || order.directive.qty % lot != 0 {
-                return .invalidQty(lot: lot)
+        // 「仅提醒」（isAlertOnly）不产生委托：数量校验整段放行（允许数量为 0）。
+        // 普通条件单保持原判序与原文案，不放宽任何一项。
+        if !order.directive.isAlertOnly {
+            // 数量：网格用每格数量、分批用总数量，其余类型用委托指令数量
+            switch order.kind {
+            case .grid:
+                guard let perLevel = p.gridQtyPerLevel, perLevel > 0, perLevel % lot == 0 else {
+                    return .invalidQty(lot: lot)
+                }
+            case .batch:
+                guard let totalQty = p.batchTotalQty, totalQty > 0, totalQty % lot == 0 else {
+                    return .invalidQty(lot: lot)
+                }
+            default:
+                if order.directive.qty <= 0 || order.directive.qty % lot != 0 {
+                    return .invalidQty(lot: lot)
+                }
             }
         }
 
         // 行情：触发判定必须有最新价
         guard let last = snapshot.last, last > 0 else { return .noQuote }
 
-        // 卖出方向必须有可卖持仓
-        if order.directive.direction == .sell {
+        // 卖出方向必须有可卖持仓（「仅提醒」不下单，允许无持仓）
+        if !order.directive.isAlertOnly, order.directive.direction == .sell {
             if rules.sellableQty(position: position) <= 0 { return .noPosition }
         }
 
@@ -302,8 +319,11 @@ nonisolated enum SimCondRule {
                 return .missingParam("首批价格")
             }
             guard let stepPct = p.batchStepPct, stepPct > 0 else { return .missingParam("每批价差") }
-            let totalQty = p.batchTotalQty ?? 0
-            if totalQty < count * lot { return .batchTooSmall(lot: lot) }
+            // 每批手数校验同属数量校验：「仅提醒」放行（不产生委托，总量可为 0）
+            if !order.directive.isAlertOnly {
+                let totalQty = p.batchTotalQty ?? 0
+                if totalQty < count * lot { return .batchTooSmall(lot: lot) }
+            }
         }
 
         // 有效期：指定日期必须给出到期日，否则该单永不失效

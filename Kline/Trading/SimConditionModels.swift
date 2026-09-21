@@ -7,6 +7,7 @@
 //  约定：参数一律用扁平原生可选字段 + 逐项兜底解码（decodeIfPresent），
 //  缺字段的老档案不会使整条条件单解码失败；分段归类（SimCondSegment）也在此定义，
 //  供管理页与 SimStore 查询共用。
+//  另含「仅提醒」指令开关（SimCondDirective.alertOnly）与预警记录实体（SimAlertRecord）。
 //
 
 import Foundation
@@ -127,9 +128,12 @@ nonisolated struct SimCondDirective: Codable, Hashable {
     var priceType: SimPriceType = .market
     var offsetTicks: Int = 0        // 触发价 ± N 档，仅 priceType == .limit 时使用
     var qty: Int = 0                // 网格类型不使用（用 params.gridQtyPerLevel）
+    /// 「仅提醒」形态（不下单）：触发时只记触发时间 / 触发价 / 文案并追加一条预警记录。
+    /// 可选 + 解码兜底 false：旧 sim.json 没有该字段也不会整条条件单解码失败
+    var alertOnly: Bool? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case direction, priceType, offsetTicks, qty
+        case direction, priceType, offsetTicks, qty, alertOnly
     }
 }
 
@@ -140,7 +144,11 @@ extension SimCondDirective {
         priceType = (try? c.decode(SimPriceType.self, forKey: .priceType)) ?? .market
         offsetTicks = (try? c.decode(Int.self, forKey: .offsetTicks)) ?? 0
         qty = (try? c.decode(Int.self, forKey: .qty)) ?? 0
+        alertOnly = try? c.decodeIfPresent(Bool.self, forKey: .alertOnly)
     }
+
+    /// 是否「仅提醒」（nil / 缺字段一律按普通条件单处理）
+    var isAlertOnly: Bool { alertOnly ?? false }
 }
 
 // MARK: - 类型参数
@@ -325,4 +333,19 @@ extension SimCondOrder {
         case .expired, .cancelled, .rejected: return .invalid
         }
     }
+}
+
+// MARK: - 预警记录
+
+/// 预警记录：条件单「仅提醒」形态（`SimCondDirective.isAlertOnly`）每次触发追加一条，
+/// 不产生任何委托 / 成交。存在 sim.json（`SimRoot.alertRecords`），只保留最近若干条。
+struct SimAlertRecord: Identifiable, Codable, Hashable {
+    var id: UUID
+    var condID: UUID?      // 来源条件单（可为空：条件单被删后记录仍保留）
+    var metaID: Int
+    var code: String
+    var name: String
+    var price: Double?     // 触发价
+    var message: String    // 触发文案
+    var occurredAt: Date
 }
