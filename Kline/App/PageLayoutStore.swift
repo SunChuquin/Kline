@@ -76,9 +76,9 @@ enum HomeLayoutStyle: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .a: return "A · 现有首页（保留）"
-        case .b: return "B · 宫格快捷入口（默认）"
-        case .c: return "C · 分区列表入口"
-        case .d: return "D · 卡片工作台"
+        case .b: return "B · 横滑入口 + 卡片网格（默认）"
+        case .c: return "C · 横滑入口 + 分区列表"
+        case .d: return "D · 横滑入口 + 工作台混排"
         }
     }
 

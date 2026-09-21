@@ -135,6 +135,13 @@
 - [ ] Task 23: 逐条核验 checklist 的「变更二」章节（入口行 / 内容区 / 数据口径 / 浮层 / figma 同步 / 工程），失败条目回填 tasks 修复后重验
 - [ ] Task 24: 最终交付说明（build 号、入口与内容区一览、真机验证路径与回归点、`git status` 无遗留改动）
 
+## 阶段九（变更二收尾）：档位名称同步
+
+- [ ] Task 25: 修正档位名称（变更二漏项）：三档形态已从「宫格 / 分组列表 / 大卡」变为「横滑入口 + 内容区」，`HomeLayoutStyle.title` 仍是旧名，个人中心面板会误导用户
+  - [ ] SubTask 25.1: [PageLayoutStore.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/App/PageLayoutStore.swift#L76-L83) 的 `HomeLayoutStyle.title` 改为：`A · 现有首页（保留）` / `B · 横滑入口 + 卡片网格（默认）` / `C · 横滑入口 + 分区列表` / `D · 横滑入口 + 工作台混排`
+  - [ ] SubTask 25.2: `figma/home-ui-proposals.html` 的个人中心演示屏（`#scr-profileHomeLayout`）四个选项文案同步为新名（保持 A 屏不动），并重截 `figma/_shots/home_profile.png`
+  - [ ] SubTask 25.3: 执行闭环命令 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "fix(home-layout): 首页档位名称同步为横滑入口形态"`
+
 # Task Dependencies
 
 - Task 2 依赖 Task 1（同一 HTML 文件、共用画廊骨架与 `SCREENS` 表）
