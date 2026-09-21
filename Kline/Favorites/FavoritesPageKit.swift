@@ -39,6 +39,11 @@ final class FavoritesPageModel: ObservableObject {
     @Published var showAddSheet: Bool = false
     @Published var formulaEditorTarget: FavoritesGroup? = nil
     @Published var addGroupTarget: MetaItem? = nil
+    /// C 档列表形态：true = 卡片流（默认），false = 表格
+    @Published var showsCardMode: Bool = true
+    /// 布局自身常驻占据的横向宽度（B 档左侧分组侧栏 216pt；其余档 0），
+    /// 由容器按当前布局写入：容器实测的是整页宽度，含侧栏时必须扣掉才是表格可视宽
+    @Published var tableWidthInset: CGFloat = 0
 
     // MARK: 内部（横向拖拽，不参与渲染，无需 Published）
     var hDragStart: CGFloat = 0
@@ -77,8 +82,10 @@ final class FavoritesPageModel: ObservableObject {
 
     /// 可视列里冻结前 N 列后，其余列的最大可左移量（整表横向滚动上限）
     var maxHOffset: CGFloat {
-        // 可视宽度用实测宿主宽（安全区内）；首帧未测量完成前退回 UIScreen 估算
-        let visW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
+        // 可视宽度用实测宿主宽（安全区内）再扣掉布局自带的常驻横向占位（B 档侧栏）；
+        // 首帧未测量完成前退回 UIScreen 估算
+        let hostW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
+        let visW = max(0, hostW - tableWidthInset)
         return max(0, MarketTableRow.scrollContentWidth(for: .favorites, config: colCfg, frozenCount: frozenCount)
              - visW)
     }
@@ -89,8 +96,10 @@ final class FavoritesPageModel: ObservableObject {
     }
 
     /// 指定分组内的行（已按列配置排序规则排序）
-    func sortedRows(groupID: UUID) -> [MarketRow] {
-        let all = rowCache.rows(for: items(groupID: groupID))
+    /// - Parameter prefetch: true → 未就绪的行触发后台预取（列表渲染用）；
+    ///   false → 只读缓存快照（D 档统计快照用：避免统计重算 → 预取 → objectWillChange → 再重算的回环）
+    func sortedRows(groupID: UUID, prefetch: Bool = true) -> [MarketRow] {
+        let all = rowCache.rows(for: items(groupID: groupID), prefetch: prefetch)
         if let rule = colCfg.sortRule(for: .favorites) {
             return all.sorted(by: rule)
         }
@@ -340,18 +349,22 @@ struct FavoritesGroupTabs: View {
 
 /// 表格主体：A/B/C/D 四档共用，行高与字号参数化。
 ///
-/// ⚠️ `MarketTableRow` 内部行高与字号目前写死（表头 38 / 数据行 45 / 字号 18），本次不越界修改它，
-/// 因此：
-/// - `rowHeight` 作用在「数据行外层容器 frame」上：默认 45 与内部值相等 → 恒等变换，A 档渲染零变化；
-/// - `fontSize` 通过环境字体（`\.font`）下发，只影响容器自己渲染的文字（表格内文字均为显式字号，
-///   会被内层显式 `.font` 覆盖）→ A 档渲染零变化；后续紧凑档可据此统一收口。
-/// D 档若要真正压缩行内行高 / 字号，需要给 `MarketTableRow` 增加可选 `rowHeight` / `fontSize` 参数。
+/// `rowHeight` / `fontSize` 直接透传给 `MarketTableRow` 的 `heightOverride` / `fontSizeOverride`
+/// （表头与数据行统一按该行高渲染、主字号按该字号渲染，副行按 0.72 比例）：
+/// - 默认 45 / 18 时不传覆盖值（nil），`MarketTableRow` 沿用既有写死值（表头 38 / 数据行 45 / 主字号 18）
+///   → A 档渲染零变化；
+/// - D 档紧凑表传 34 / 15，行高与字号真正落到行内部（不再靠外层 frame 硬压，避免溢出重叠）。
 struct FavoritesTableBody: View {
     @ObservedObject var model: FavoritesPageModel
-    /// 数据行外层容器行高（A 档 45；D 档紧凑表 34）
+    /// 数据行高（A 档 45；D 档紧凑表 34）
     var rowHeight: CGFloat = 45
-    /// 数据行外层字号（A 档 18；D 档紧凑表 15）
+    /// 数据行主字号（A 档 18；D 档紧凑表 15）
     var fontSize: CGFloat = 18
+
+    /// 行高覆盖值：默认 45 与既有写死值一致 → 传 nil 保持 A 档零变化
+    private var rowHeightOverride: CGFloat? { rowHeight == 45 ? nil : rowHeight }
+    /// 字号覆盖值：默认 18 与既有写死值一致 → 传 nil 保持 A 档零变化
+    private var fontSizeOverride: CGFloat? { fontSize == 18 ? nil : fontSize }
 
     var body: some View {
         if !model.dbm.isLoaded {
@@ -369,7 +382,8 @@ struct FavoritesTableBody: View {
         } else {
             // 表头（吸顶，冻结前3列，横向跟随整表滚动）
             MarketTableRow(page: .favorites, mode: .header, config: model.colCfg, rowCache: model.rowCache,
-                           frozenCount: model.frozenCount, xOffset: model.hScrollOffset)
+                           frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
+                           heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
             .background(Color(.systemBackground))
             listBody
         }
@@ -378,7 +392,9 @@ struct FavoritesTableBody: View {
     @ViewBuilder
     private var listBody: some View {
         if model.showEditingMode, model.currentGroup.kind == .manual {
-            FavoritesManualEditingList(model: model)
+            FavoritesManualEditingList(model: model,
+                                       heightOverride: rowHeightOverride,
+                                       fontSizeOverride: fontSizeOverride)
         } else {
             standardList
         }
@@ -393,8 +409,6 @@ struct FavoritesTableBody: View {
                     Divider().padding(.leading, 30)
                 }
             }
-            // 字号参数下发（行内文字均为显式字号，A 档渲染不变；供后续紧凑布局的容器文字使用）
-            .environment(\.font, Font.system(size: fontSize))
         }
         .simultaneousGesture(model.horizontalDragGesture)
         .refreshable {
@@ -412,7 +426,8 @@ struct FavoritesTableBody: View {
             MarketTableRow(page: .favorites, mode: .data(meta: meta), config: model.colCfg, rowCache: model.rowCache,
                            onOpen: { m in
                 model.detailRouter.open(m, in: items)
-            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false)
+            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false,
+                           heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
         }
         .padding(.trailing, 8)
         .frame(height: rowHeight)
@@ -493,6 +508,10 @@ func favoritesRowMenuContent(model: FavoritesPageModel, meta: MetaItem) -> some 
 /// 手动分组在编辑模式下的可拖动排序列表：拖动后顺序立即落盘。
 struct FavoritesManualEditingList: View {
     @ObservedObject var model: FavoritesPageModel
+    /// 行高覆盖（nil = 既有 45）；D 档紧凑表传 34，编辑态与只读态行高一致
+    var heightOverride: CGFloat? = nil
+    /// 主字号覆盖（nil = 既有 18）；D 档紧凑表传 15
+    var fontSizeOverride: CGFloat? = nil
 
     var body: some View {
         let gid = model.currentGroup.id
@@ -511,7 +530,8 @@ struct FavoritesManualEditingList: View {
                     MarketTableRow(page: .favorites, mode: .data(meta: mm), config: model.colCfg, rowCache: model.rowCache,
                                    onOpen: { m in
                         model.detailRouter.open(m, in: model.items(groupID: gid))
-                    }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false)
+                    }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false,
+                                   heightOverride: heightOverride, fontSizeOverride: fontSizeOverride)
                     .contextMenu {
                         Button(role: .destructive) {
                             model.fav.removeFromGroup(id: gid, metaID: mm.id)

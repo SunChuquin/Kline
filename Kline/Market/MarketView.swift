@@ -95,15 +95,18 @@ struct MarketView: View {
             }
     }
 
-    /// 布局分发：A 档为现有实现；B/C/D 暂回落 A。
+    /// 布局分发：A 档经典表格 / B 档分类侧栏 + 表格 / C 档磁贴网格 / D 档概览 + 紧凑表格。
     @ViewBuilder
     private var layoutContent: some View {
         switch layoutStore.marketLayout {
         case .a:
             MarketLayoutAView(model: model)
-        case .b, .c, .d:
-            // TODO: 后续阶段接入 B / C / D 三套布局，当前暂回落 A
-            MarketLayoutAView(model: model)
+        case .b:
+            MarketLayoutBView(model: model)
+        case .c:
+            MarketLayoutCView(model: model)
+        case .d:
+            MarketLayoutDView(model: model)
         }
     }
 }

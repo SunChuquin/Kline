@@ -42,6 +42,12 @@ struct MarketTableRow: View {
     /// 是否为自选（置顶）标：高亮整行背景 + 标的文字变红；默认 false
     var isFaved: Bool = false
 
+    // === 行高 / 字号覆盖（紧凑布局用；nil = 沿用既有写死值，A 档渲染零变化） ===
+    /// 行高覆盖：nil 时沿用既有 38（表头）/ 45（数据行）
+    var heightOverride: CGFloat? = nil
+    /// 主字号覆盖：nil 时沿用既有 18；代码副行按 0.72 比例缩放（下限 10）
+    var fontSizeOverride: CGFloat? = nil
+
     /// 自选高亮背景色：比普通行更深（浅灰底）
     private var rowBackground: Color {
         isFaved ? Color(.systemGray5) : Color(.systemBackground)
@@ -112,7 +118,10 @@ struct MarketTableRow: View {
     }
 
     var body: some View {
-        let rowHeight: CGFloat = mode.isHeader ? 38 : 45
+        // 行高 / 字号：未传覆盖值时与既有写死值完全一致（表头 38 / 数据行 45 / 主字号 18 / 副字号 13）
+        let rowHeight: CGFloat = heightOverride ?? (mode.isHeader ? 38 : 45)
+        let mainFont: CGFloat = fontSizeOverride ?? 18
+        let subFont: CGFloat = fontSizeOverride.map { max(10, $0 * 0.72) } ?? 13
         let cols = renderColumns(config.visibleColumns(for: page))
         let frozenCols = Array(cols.prefix(frozenCount))
         let scrollCols = Array(cols.dropFirst(frozenCount))
@@ -131,7 +140,8 @@ struct MarketTableRow: View {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: frozenW)
                     ForEach(scrollCols) { col in
-                        content(col, header: mode.isHeader, meta: metaOf, rule: rule)
+                        content(col, header: mode.isHeader, meta: metaOf, rule: rule,
+                                mainFont: mainFont, subFont: subFont)
                             .padding(.horizontal, col.isNameCode ? 8 : 6)
                             .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                             .frame(maxHeight: .infinity)
@@ -151,7 +161,8 @@ struct MarketTableRow: View {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Self.lineW)   // 列边界线已隐藏，仅保留宽度占位
                     ForEach(frozenCols) { col in
-                        content(col, header: mode.isHeader, meta: metaOf, rule: rule)
+                        content(col, header: mode.isHeader, meta: metaOf, rule: rule,
+                                mainFont: mainFont, subFont: subFont)
                             .padding(.horizontal, col.isNameCode ? 8 : 6)
                             .frame(width: col.width, alignment: col.isNameCode ? .leading : (col.field.alignRight ? .trailing : .leading))
                             .frame(maxHeight: .infinity)
@@ -186,8 +197,10 @@ struct MarketTableRow: View {
 
     /// 单元格内容：表头 = 字段名(+排序箭头)；数据 = 字段文本(红涨绿跌)。
     /// 合并列（代码+名称）渲染为双行：名称在上、代码在下。
+    /// `mainFont` / `subFont` 为字号（未传覆盖值时分别等于既有 18 / 13）。
     @ViewBuilder
-    private func content(_ col: ColumnLayout, header: Bool, meta: MetaItem?, rule: MarketSortRule?) -> some View {
+    private func content(_ col: ColumnLayout, header: Bool, meta: MetaItem?, rule: MarketSortRule?,
+                         mainFont: CGFloat, subFont: CGFloat) -> some View {
         if header {
             // 合并列表头：显示「名称/代码」
             let active = rule?.field == col.field
@@ -198,7 +211,7 @@ struct MarketTableRow: View {
                 if col.isNameCode {
                     HStack(spacing: 3) {
                         Text("名称/代码")
-                            .font(.system(size: 18, weight: .medium))
+                            .font(.system(size: mainFont, weight: .medium))
                             .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
                             .lineLimit(1)
                         if active, let r = rule {
@@ -211,7 +224,7 @@ struct MarketTableRow: View {
                 } else {
                     HStack(spacing: 3) {
                         Text(col.field.title)
-                            .font(.system(size: 18, weight: .medium))
+                            .font(.system(size: mainFont, weight: .medium))
                             .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
                             .lineLimit(1)
                         // 已配置筛选的字段：显示漏斗小图标（没有选中排序箭头时也显示）
@@ -236,11 +249,11 @@ struct MarketTableRow: View {
                 let fg: Color = isFaved ? .red : .primary
                 VStack(alignment: .leading, spacing: 1) {
                     Text(meta.name)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(size: mainFont, weight: .medium))
                         .foregroundColor(fg)
                         .lineLimit(1)
                     Text(meta.displayCode)
-                        .font(.system(size: 13))
+                        .font(.system(size: subFont))
                         .foregroundColor(isFaved ? fg : Color(.secondaryLabel))
                         .lineLimit(1)
                 }
@@ -249,7 +262,7 @@ struct MarketTableRow: View {
                 let isLabel = col.field == .name || col.field == .code || col.field == .type
                 let cellFg: Color = isFaved && isLabel ? Color.red : rowCache.colorFor(meta.id, col.field)
                 Text(rowCache.textFor(meta.id, col.field))
-                    .font(.system(size: 18))
+                    .font(.system(size: mainFont))
                     .foregroundColor(cellFg)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)

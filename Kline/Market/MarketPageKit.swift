@@ -14,12 +14,11 @@ import UIKit
 // MARK: - 行高 / 字号参数
 
 /// 表格行高与字号参数：A 档沿用 `.regular`（= 改造前写死的 38 表头 / 45 数据行 / 18 字号），
-/// 紧凑布局（如后续 D 档的 34 / 15）传入更小的值。
+/// 紧凑布局（D 档 = 32 / 34 / 15）传入更小的值。
 ///
-/// ⚠️ `MarketTableRow` 内部行高与字号目前写死（表头 38 / 数据行 45 / 字号 18），本次改造不越界修改它，
-/// 因此这里的高度作用在「行外层 frame」上：`.regular` 与内部值相等 → 恒等变换，A 档渲染零变化；
-/// `fontSize` 通过环境字体下发，只影响容器自己渲染的文字（表格内文字均为显式字号）。
-/// D 档若要真正压缩行内行高 / 字号，需要 `MarketTableRow` 增加可选 `rowHeight` / `fontSize` 参数。
+/// `MarketTableBody` 把这三个值**透传**给 `MarketTableRow` 的 `heightOverride` / `fontSizeOverride`：
+/// `.regular` 与改动前逐值相等 → A 档渲染零变化；紧凑档由行内部真实压缩行高与字号
+/// （不能靠行外层 frame 硬压——那样行内容仍按原高度渲染，会溢出重叠）。
 struct MarketRowMetrics: Equatable {
     var headerHeight: CGFloat = 38
     var rowHeight: CGFloat = 45
@@ -27,6 +26,36 @@ struct MarketRowMetrics: Equatable {
 
     /// 现有实现（A 档）的取值
     static let regular = MarketRowMetrics()
+}
+
+// MARK: - 市场宽度概览（D 档概览条）
+
+/// 当前分类快照的聚合统计：由 `MarketPageModel.scheduleRefresh()` 一次性算好写入 `model.overview`，
+/// 布局视图只读取、不在 `body` 里遍历全表。
+struct MarketOverview: Equatable {
+    /// 有效行数（`changePct` 非 nil 的行）
+    var validCount: Int = 0
+    var up: Int = 0
+    var down: Int = 0
+    var flat: Int = 0
+    /// 涨停 / 跌停：主板 10% 口径，pct >= 9.8 / <= -9.8
+    var limitUp: Int = 0
+    var limitDown: Int = 0
+    /// 有效行的成交额合计（元）
+    var totalTurnover: Double = 0
+}
+
+// MARK: - B 档侧栏条目
+
+/// 侧栏条目（B 档）：一级分区 + 其下二级条目；`badge` 为数量角标，nil 表示无真实数据源（界面显示 "-"）。
+/// 放在文件级（而非 `MarketPageModel` 内嵌）以避开 `@MainActor` 类型的内嵌类型隔离约束。
+struct MarketTopMenuItem: Identifiable {
+    let field: TopField
+    let title: String
+    /// 二级分类的 rawValue（选中判定用）
+    let key: String
+    let badge: String?
+    var id: String { "\(field.rawValue)_\(key)" }
 }
 
 // MARK: - 页面状态模型（四档布局共用）
@@ -52,6 +81,10 @@ final class MarketPageModel: ObservableObject {
     // MARK: 列表快照与配置
     /// **渲染用的行快照**：由 `scheduleRefresh()` 写入，避免在计算属性里做预取副作用（否则会死循环触发重绘）。
     @Published var displayRows: [MarketRow] = []
+    /// D 档概览统计：在 `scheduleRefresh()` 里对 filtered 快照一次性算好（布局视图禁止在 body 内遍历全表）
+    @Published var overview: MarketOverview? = nil
+    /// C 档「磁贴 / 表格」分段切换：true = 磁贴网格，false = 复用表格主体
+    @Published var showsTileMode: Bool = true
     /// 「边」边线调节模式：开启后表头/数据行列边界显示可拖分隔线，左右拖动调整列宽并持久化
     @Published var edgeAdjust = false
     /// 整表横向滚动偏移（冻结前 N 列固定，其余列平移）
@@ -72,6 +105,8 @@ final class MarketPageModel: ObservableObject {
     var panAxisIsH: Bool? = nil
     /// 有字段筛选生效时，合并 bars 陆续到位触发的重筛选（防抖，避免每行刷全表）
     var filterDebounce: DispatchWorkItem? = nil
+    /// 概览统计的防抖重算任务（bars 陆续到位时合并触发，避免逐行 O(n) 重算）
+    var overviewDebounce: DispatchWorkItem? = nil
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -96,10 +131,69 @@ final class MarketPageModel: ObservableObject {
     /// 当前「市场」二级分类对应的 meta.type 取值集合
     /// （ETF指数 合并展示原「指数」+「ETF」两类内容）
     private var currentTypes: [String] {
-        switch selectedTab {
+        selectedTypes(for: selectedTab)
+    }
+
+    /// 给定「市场」二级分类 → 对应的 meta.type 取值集合（B 档侧栏数量角标也用它）
+    func selectedTypes(for tab: MarketTab) -> [String] {
+        switch tab {
         case .mainBoard: return ["沪深主板"]
         case .etfIndex: return ["沪深京指数", "扩展行情指数"]
         }
+    }
+
+    /// 当前二级分类名（B 档右侧工作区标题；选股/自选按各自二级状态）
+    var currentCategoryTitle: String {
+        switch topMenu {
+        case .market: return selectedTab.rawValue
+        case .picker: return pickerSeg.rawValue
+        case .fav: return favSeg.rawValue
+        }
+    }
+
+    /// 某个一级分区下的二级条目（B 档侧栏用）
+    func topMenuItems(for field: TopField) -> [MarketTopMenuItem] {
+        switch field {
+        case .market:
+            return MarketTab.allCases.map { tab in
+                MarketTopMenuItem(field: .market, title: tab.rawValue, key: tab.rawValue,
+                                  badge: "\(itemCount(tab: tab))")
+            }
+        case .picker:
+            // 选股 / 自选暂无真实数据源：角标显示 "-"
+            return PickerField.allCases.map { p in
+                MarketTopMenuItem(field: .picker, title: p.rawValue, key: p.rawValue, badge: nil)
+            }
+        case .fav:
+            return FavField.allCases.map { f in
+                MarketTopMenuItem(field: .fav, title: f.rawValue, key: f.rawValue, badge: nil)
+            }
+        }
+    }
+
+    /// 「市场」某二级分类的标的数量（B 档侧栏角标）
+    func itemCount(tab: MarketTab) -> Int {
+        let types = selectedTypes(for: tab)
+        return databaseManager.metaList.filter { types.contains($0.type) }.count
+    }
+
+    /// B 档侧栏点击某条目：写一级 + 对应二级状态，再刷新（分类状态与 A 档共用）
+    func setSidebarSelection(_ item: MarketTopMenuItem) {
+        topMenu = item.field
+        switch item.field {
+        case .market:
+            if let tab = MarketTab(rawValue: item.key), selectedTab != tab { selectedTab = tab }
+        case .picker:
+            if let p = PickerField(rawValue: item.key), pickerSeg != p { pickerSeg = p }
+        case .fav:
+            if let f = FavField(rawValue: item.key), favSeg != f { favSeg = f }
+        }
+        scheduleRefresh()
+    }
+
+    /// C 档「磁贴 / 表格」切换（同值赋值加守卫）
+    func toggleTileMode(_ tile: Bool) {
+        if showsTileMode != tile { showsTileMode = tile }
     }
 
     /// 当前「市场」二级分类下的全部标的（搜索已改为独立搜索页，不在此就地过滤）
@@ -144,6 +238,7 @@ final class MarketPageModel: ObservableObject {
     func scheduleRefresh() {
         guard databaseManager.isLoaded else {
             displayRows = []
+            if overview != nil { overview = nil }
             return
         }
         let metas = tabItems
@@ -188,6 +283,48 @@ final class MarketPageModel: ObservableObject {
         if filtered.map(\.id) != displayRows.map(\.id) {
             displayRows = filtered
         }
+        // 6) D 档概览统计：对同一份 filtered 快照一次性算好（后续行内取值走 MarketRow 缓存，无额外副作用）
+        let stats = Self.makeOverview(filtered)
+        if overview != stats { overview = stats }
+    }
+
+    /// 概览统计口径（D 档）：
+    /// - 只统计 `row.number(.changePct)` 非 nil 的行（有效行）；
+    /// - 涨 / 跌 / 平 = pct > 0 / < 0 / == 0；
+    /// - 涨停 = pct >= 9.8、跌停 = pct <= -9.8（主板 10% 口径）；
+    /// - 总成交额 = 有效行中 `number(.turnover)` 可用值的合计（元）。
+    private static func makeOverview(_ rows: [MarketRow]) -> MarketOverview {
+        var up = 0, down = 0, flat = 0, limitUp = 0, limitDown = 0
+        var turnover: Double = 0
+        var valid = 0
+        for row in rows {
+            guard let pct = row.number(.changePct) else { continue }
+            valid += 1
+            if pct > 0 { up += 1 } else if pct < 0 { down += 1 } else { flat += 1 }
+            if pct >= 9.8 { limitUp += 1 }
+            if pct <= -9.8 { limitDown += 1 }
+            if let t = row.number(.turnover) { turnover += t }
+        }
+        return MarketOverview(validCount: valid, up: up, down: down, flat: flat,
+                              limitUp: limitUp, limitDown: limitDown, totalTurnover: turnover)
+    }
+
+    /// 用当前 `displayRows`（已是筛选后的快照）重算概览：不改列表、不触发预取
+    func refreshOverview() {
+        let next: MarketOverview? = databaseManager.isLoaded ? Self.makeOverview(displayRows) : nil
+        if overview != next { overview = next }
+    }
+
+    /// bars 陆续到位时防抖（250ms）重算概览：避免每行到达都做一次 O(n) 全表聚合
+    func scheduleOverviewRefresh() {
+        overviewDebounce?.cancel()
+        // 显式切回 MainActor 再调用（DispatchWorkItem 的 block 不保证隔离继承）
+        let m = self
+        let item = DispatchWorkItem {
+            Task { @MainActor in m.refreshOverview() }
+        }
+        overviewDebounce = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
     }
 
     /// 一级菜单点击：
@@ -403,9 +540,62 @@ struct MarketSecondLevelBar: View {
     }
 }
 
+// MARK: - 工具条（B / D 档共用）
+
+/// 工作区工具条按钮组：表头设置 / 边线调整 / 搜索（「选股」一级额外给公式入口）。
+/// 视觉为小胶囊（28pt 高），命中区撑到 44pt 高。
+struct MarketToolBar: View {
+    @ObservedObject var model: MarketPageModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            MarketToolButton(icon: "slider.horizontal.3", title: "表头设置") {
+                model.showColumnPanel = true
+            }
+            MarketToolButton(icon: "arrow.left.and.right.square", title: "边线调整") {
+                model.edgeAdjust.toggle()
+            }
+            MarketToolButton(icon: "magnifyingglass", title: "搜索") {
+                model.homeSearchActive = true
+            }
+            if model.topMenu == .picker {
+                MarketToolButton(icon: "function", title: "公式") {
+                    model.showFormulaCenter = true
+                }
+            }
+        }
+    }
+}
+
+/// 工具条单个按钮：图标 + 文案（蓝色小胶囊），外层 44pt 命中区
+struct MarketToolButton: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 12, weight: .medium))
+                Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+            }
+            .foregroundColor(.blue)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Color(.systemGray6))
+            .cornerRadius(7)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+    }
+}
+
 // MARK: - 表格主体（吸顶表头 + 数据行 + 横向滚动 + 边线覆盖层 + 下拉刷新）
 
-/// 表格主体：A/B/C/D 四档共用，行高与字号由 `metrics` 参数化。
+/// 表格主体：A/B/C/D 四档共用，行高与字号由 `metrics` 参数化
+/// （透传给 `MarketTableRow` 的 `heightOverride` / `fontSizeOverride`，紧凑档才真正压进行内）。
 struct MarketTableBody: View {
     @ObservedObject var model: MarketPageModel
     var metrics: MarketRowMetrics = .regular
@@ -415,8 +605,8 @@ struct MarketTableBody: View {
             VStack(spacing: 0) {
                 // 表头（吸顶，冻结前 N 列）
                 MarketTableRow(page: .marketBoard, mode: .header, config: model.colCfg, rowCache: model.rowCache,
-                               frozenCount: model.frozenCount, xOffset: model.hScrollOffset)
-                    .frame(height: metrics.headerHeight)
+                               frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
+                               heightOverride: headerHeightOverride, fontSizeOverride: fontSizeOverride)
                     .background(Color(.systemBackground))
                 // 列表：外层垂直 ScrollView 保留上下滚动/懒加载；
                 // 横向用手势驱动 hScrollOffset（冻结前 N 列不动，其余列平移）
@@ -449,6 +639,12 @@ struct MarketTableBody: View {
         }
     }
 
+    /// 行高 / 字号覆盖值：`.regular` 时统一传 nil → 行内取值与改动前逐值一致
+    /// （高度 38 / 45 虽相等，但副字号 18×0.72=12.96 与既有 13 有亚像素差，故整组一起走 nil）
+    private var headerHeightOverride: CGFloat? { metrics == .regular ? nil : metrics.headerHeight }
+    private var rowHeightOverride: CGFloat? { metrics == .regular ? nil : metrics.rowHeight }
+    private var fontSizeOverride: CGFloat? { metrics == .regular ? nil : metrics.fontSize }
+
     private func rowCard(row: MarketRow) -> some View {
         let meta = row.meta
         let isFaved = model.fav.isFavorited(meta.id)
@@ -459,12 +655,10 @@ struct MarketTableBody: View {
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = model.displayRows.map { $0.meta }
                 DetailRouter.shared.open(meta, in: ctx)
-            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: isFaved)
+            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: isFaved,
+               heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
         }
         .padding(.trailing, 8)
-        .frame(height: metrics.rowHeight)
-        // 字号参数：只作环境默认值，行内 Text 均显式设了字号 → A 档（18）渲染零变化
-        .font(.system(size: metrics.fontSize))
         .accessibilityIdentifier("market.rowCard")
         // 长按弹菜单：加自选 / 取消自选 / 加入指定分组
         .contextMenu {

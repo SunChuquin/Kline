@@ -30,15 +30,26 @@ struct FavoritesView: View {
             switch layoutStore.favoritesLayout {
             case .a:
                 FavoritesLayoutAView(model: model)
-            case .b, .c, .d:
-                // TODO: 后续阶段接入 B / C / D 三套布局，当前暂回落 A
-                FavoritesLayoutAView(model: model)
+            case .b:
+                FavoritesLayoutBView(model: model)
+            case .c:
+                FavoritesLayoutCView(model: model)
+            case .d:
+                FavoritesLayoutDView(model: model)
             }
         }
         // 异形屏横屏贴边已由 ContentView 根布局统一处理，此处仅实测宿主宽度
         // （贴边后的真实可视宽），供 maxHOffset 计算横向滚动上限
         .marketTableHostWidth(to: $model.tableVisibleWidth)
-        .onAppear { if dbm.isLoaded { model.prefetchAllGroups() } }
+        // 布局自带的常驻横向占位（B 档分组侧栏）→ 修正表格横向滚动上限（容器实测的是整页宽度）
+        .onAppear {
+            if dbm.isLoaded { model.prefetchAllGroups() }
+            model.tableWidthInset = layoutStore.favoritesLayout == .b ? FavoritesGroupSidebar.width : 0
+        }
+        .onChange(of: layoutStore.favoritesLayout) { style in
+            let inset: CGFloat = style == .b ? FavoritesGroupSidebar.width : 0
+            if model.tableWidthInset != inset { model.tableWidthInset = inset }
+        }
         .onChange(of: dbm.isLoaded) { loaded in
             if loaded { model.prefetchAllGroups() }
         }
