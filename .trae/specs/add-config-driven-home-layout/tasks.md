@@ -17,10 +17,10 @@
   - [x] SubTask 1.12: 删除 `Kline/Home/HomeContentBlocks.swift`（内容已全部迁出），并全量编译确认无残留引用
   - [x] SubTask 1.13: [HomeLayoutAView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutAView.swift) 改为组合 `HomePlaceholderBlock`（呈现不变，`home.welcome` 仍在）
 
-- [ ] Task 2: 阶段一闭环
-  - [ ] SubTask 2.1: 编码自查（`Color.opacity` 入参 Double、勿遮蔽同名参数、`@Published` 同值赋值守卫、只改本阶段相关文件、不顺手改样式）
-  - [ ] SubTask 2.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "refactor(home-widgets): 首页控件抽取为一控件一文件（呈现零变化）"`
-  - [ ] SubTask 2.3: 交付说明（build 号 / 改动与理由 / 真机验证路径：切 A/B/C/D 四档与改造前逐项一致；点快捷入口、开详情、进搜索、进公式中心、进条件单均正常）
+- [x] Task 2: 阶段一闭环
+  - [x] SubTask 2.1: 编码自查（`Color.opacity` 入参 Double、勿遮蔽同名参数、`@Published` 同值赋值守卫、只改本阶段相关文件、不顺手改样式）
+  - [x] SubTask 2.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "refactor(home-widgets): 首页控件抽取为一控件一文件（呈现零变化）"` —— 云端构建成功 run=35611144835（设备锁屏未安装）
+  - [x] SubTask 2.3: 交付说明（build 号 / 改动与理由 / 真机验证路径：切 A/B/C/D 四档与改造前逐项一致；点快捷入口、开详情、进搜索、进公式中心、进条件单均正常）
 
 ## 阶段二：通用 JSON 布局引擎 + 首页接入
 
@@ -55,10 +55,10 @@
   - [x] SubTask 7.4: `HomeView.onAppear` 调 `registerBuiltInDefaults` + `PageLayoutConfigStore.shared.reloadIfChanged(page: "home")`
   - [x] SubTask 7.5: 编码自查（不在 `body` 内重解码 / 重排节点树；`AnyView` 树结构稳定未强制 `id()` 重建；`@Published` 同值不写；`SWIFT_VERSION=5.0` 无严格并发要求）
 
-- [ ] Task 8: 阶段二闭环
-  - [ ] SubTask 8.1: 编译通过（无警告级错误、无残留引用）
-  - [ ] SubTask 8.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(page-layout): 通用 JSON 布局引擎 + 首页配置驱动（含硬编码回退）"`
-  - [ ] SubTask 8.3: 交付说明（build 号 / 改动与理由 / 真机验证路径）
+- [x] Task 8: 阶段二闭环
+  - [x] SubTask 8.1: 编译通过（首发 run=35613259031 报 `PageLayoutNode` 递归存储属性「infinite size」；已改为 `final class`，复跑 run=35613504027 构建成功）
+  - [x] SubTask 8.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(page-layout): 通用 JSON 布局引擎 + 首页配置驱动（含硬编码回退）"` —— exit 6 云端构建成功，设备锁屏未安装
+  - [x] SubTask 8.3: 交付说明（build 号 / 改动与理由 / 真机验证路径）
 
 ## 阶段三：等价性验收
 

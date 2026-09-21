@@ -148,7 +148,7 @@
           { "type": "divider" },
           { "type": "widget", "name": "home.quickEntryRow" },
           {
-            "type": "scroll", "axis": "vertical",
+            "type": "scroll", "axis": "vertical", "showsIndicators": true,
             "padding": { "top": 16, "leading": 16, "bottom": 16, "trailing": 16 },
             "spacing": 12,
             "children": [
@@ -184,7 +184,7 @@
           { "type": "divider" },
           { "type": "widget", "name": "home.quickEntryRow" },
           {
-            "type": "scroll", "axis": "vertical",
+            "type": "scroll", "axis": "vertical", "showsIndicators": true,
             "padding": { "top": 16, "leading": 16, "bottom": 16, "trailing": 16 },
             "spacing": 12,
             "children": [
@@ -215,7 +215,7 @@
           { "type": "divider" },
           { "type": "widget", "name": "home.quickEntryRow" },
           {
-            "type": "scroll", "axis": "vertical",
+            "type": "scroll", "axis": "vertical", "showsIndicators": true,
             "padding": { "top": 16, "leading": 16, "bottom": 16, "trailing": 16 },
             "spacing": 12,
             "children": [
