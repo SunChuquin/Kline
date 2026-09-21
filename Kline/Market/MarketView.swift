@@ -63,7 +63,12 @@ struct MarketView: View {
             // （贴边后的真实可视宽），供 maxHOffset 计算横向滚动上限
             .marketTableHostWidth(to: $model.tableVisibleWidth)
             // 键盘避让已由 ContentView 根部全局禁用，此处无需重复处理
-            .onAppear { model.scheduleRefresh() }
+            .onAppear {
+                model.scheduleRefresh()
+                syncTableWidthInset()
+            }
+            // 布局自带的常驻横向占位（B 档分类侧栏）→ 修正表格横向滚动上限（容器实测的是整页宽度）
+            .onChange(of: layoutStore.marketLayout) { _ in syncTableWidthInset() }
             // 切 Tab / 数据库加载完毕
             .onChange(of: model.selectedTab) { _ in model.scheduleRefresh() }
             .onChange(of: databaseManager.isLoaded) { _ in model.scheduleRefresh() }
@@ -108,6 +113,13 @@ struct MarketView: View {
         case .d:
             MarketLayoutDView(model: model)
         }
+    }
+
+    /// 把「当前布局自带常驻横向占位」写进 model（B 档分类侧栏 200pt，其余档 0）。
+    /// 只在值变化时写入，避免 @Published 同值赋值触发无谓发布。
+    private func syncTableWidthInset() {
+        let inset: CGFloat = layoutStore.marketLayout == .b ? MarketCategorySidebar.width : 0
+        if model.tableWidthInset != inset { model.tableWidthInset = inset }
     }
 }
 

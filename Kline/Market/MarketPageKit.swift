@@ -91,6 +91,9 @@ final class MarketPageModel: ObservableObject {
     @Published var hScrollOffset: CGFloat = 0
     /// 表格宿主实测宽度（安全区内，异形屏横屏已扣除刘海侧 inset）
     @Published var tableVisibleWidth: CGFloat = 0
+    /// 布局自身常驻占据的横向宽度（B 档左侧分类侧栏 200pt；其余档 0），
+    /// 由容器按当前布局写入：容器实测的是整页宽度，含侧栏时必须扣掉才是表格可视宽
+    @Published var tableWidthInset: CGFloat = 0
 
     // MARK: 浮层
     @Published var showColumnPanel = false
@@ -225,8 +228,10 @@ final class MarketPageModel: ObservableObject {
 
     /// 可视列里冻结前 N 列后，其余列的最大可左移量（整表横向滚动上限）
     var maxHOffset: CGFloat {
-        // 可视宽度用实测宿主宽（安全区内）；首帧未测量完成前退回 UIScreen 估算
-        let visW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
+        // 可视宽度用实测宿主宽（安全区内）再扣掉布局自带的常驻横向占位（B 档侧栏）；
+        // 首帧未测量完成前退回 UIScreen 估算
+        let hostW = tableVisibleWidth > 0 ? tableVisibleWidth : UIScreen.main.bounds.width
+        let visW = max(0, hostW - tableWidthInset)
         return max(0, MarketTableRow.scrollContentWidth(for: .marketBoard, config: colCfg, frozenCount: frozenCount)
              - visW)
     }

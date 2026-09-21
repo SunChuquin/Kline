@@ -18,7 +18,7 @@ struct MarketLayoutBView: View {
     var body: some View {
         HStack(spacing: 0) {
             MarketCategorySidebar(model: model)
-                .frame(width: 200)
+                .frame(width: MarketCategorySidebar.width)
             Divider()
             VStack(spacing: 0) {
                 MarketWorkspaceBar(model: model)
@@ -51,8 +51,11 @@ struct MarketLayoutBView: View {
 
 /// 分类侧栏：按一级分区（市场 / 选股 / 自选）列出全部二级条目，
 /// 条目不折叠、点击即切（一级分区标题行复用无障碍标识 `market.topMenu.<一级名>`）。
-private struct MarketCategorySidebar: View {
+struct MarketCategorySidebar: View {
     @ObservedObject var model: MarketPageModel
+
+    /// 侧栏宽度（容器据此写入 model.tableWidthInset 修正表格横向滚动上限）
+    static let width: CGFloat = 200
 
     var body: some View {
         ScrollView {
