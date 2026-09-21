@@ -99,8 +99,10 @@
 - Affected specs: `redesign-home-layouts`（A/B/C/D 四档的呈现契约不变，仅渲染来源由硬编码改为配置驱动）
 - Affected code（新增，工程文件无需改动 —— Swift 文件走同步组）：
   - 新增 `Kline/App/PageLayout/PageLayoutSchema.swift`、`PageWidgetRegistry.swift`、`PageLayoutRenderer.swift`、`PageLayoutConfigStore.swift`
-  - 新增 `Kline/Home/Widgets/` 下 11 个控件文件
-  - 新增 `Kline/Home/HomeLayoutContext.swift`、`HomeWidgetRegistry.swift`、`Kline/Home/Layouts/home.json`
+  - 新增 `Kline/Home/Widgets/` 下 11 个控件文件（含共享配色助手 `HomeWidgetPalette.swift`）
+  - 新增 `Kline/Home/HomeLayoutContext.swift`、`HomeWidgetRegistry.swift`
+  - 新增 `Kline/Home/HomeLayoutDefaults.swift`
+- **实现调整（内置默认的承载方式）**：原计划把内置默认放在资源文件 `Kline/Home/Layouts/home.json`。实测判定该路径不可靠 —— `Kline.xcodeproj` 用的是 `PBXFileSystemSynchronizedRootGroup`，同步组只按文件类型默认归档，未知类型（仓库里 `.tdx` 就靠 `PBXFileSystemSynchronizedBuildFileExceptionSet.membershipExceptions` 才进 Resources），`.json` 同样有不被纳入 Resources 的风险，而当前环境（Windows）无法本地构建验证。故改为放在 Swift 多行字符串常量 [HomeLayoutDefaults.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutDefaults.swift)（编译期必然进二进制），内容与「配置样例」逐字一致；由 `HomeView.onAppear` 通过 `registerBuiltInDefaults(page:json:)` 注入，`PageLayoutConfigStore` 保持与页面无关。**用户可见的沙盒配置文件 `Documents/Layouts/home.json` 与「沙盒改配置即时生效」行为完全不变**。工程文件仍无需改动
 - Affected code（修改）：
   - [HomePageKit.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomePageKit.swift)（抽出控件后只留 `HomeEntryKind` / `HomeOverlayTarget` / `HomeOverlays`）
   - [HomeLayoutAView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutAView.swift)（改为组合 `HomePlaceholderBlock`，保底回退角色）

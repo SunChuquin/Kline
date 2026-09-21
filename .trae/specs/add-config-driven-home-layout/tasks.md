@@ -24,36 +24,36 @@
 
 ## 阶段二：通用 JSON 布局引擎 + 首页接入
 
-- [ ] Task 3: 引擎数据模型 `Kline/App/PageLayout/PageLayoutSchema.swift`
-  - [ ] SubTask 3.1: `PageLayoutFile`（`schemaVersion` / `page` / `default` / `layouts`）、`PageLayoutDefinition`（`title` / `shortTitle` / `root` / `id` 由字典键提供）
-  - [ ] SubTask 3.2: `PageLayoutNode`：`type` + 各类型专属可选字段 + `children` / `child`；用 `init(from:)` 按 `type` 解码；未知 `type` 抛错
-  - [ ] SubTask 3.3: `PageLayoutAxis` / `PageLayoutAlignment` / `PageLayoutPadding` 等枚举与结构，`alignment` 支持 `top` / `center` / `bottom` / `leading` / `trailing`
-  - [ ] SubTask 3.4: `WidgetParams`：`[String: WidgetParamValue]`（bool / int / double / string）+ 带默认值取值方法；缺 key 或类型不符一律取默认值
+- [x] Task 3: 引擎数据模型 `Kline/App/PageLayout/PageLayoutSchema.swift`
+  - [x] SubTask 3.1: `PageLayoutFile`（`schemaVersion` / `page` / `default` / `layouts`）、`PageLayoutDefinition`（`title` / `shortTitle` / `root`；档位 id 由 `layouts` 字典键在取用时提供，未做字段回填）
+  - [x] SubTask 3.2: `PageLayoutNode`：`type` + 各类型专属可选字段 + `children` / `child`；用 `init(from:)` 按 `type` 解码；未知 `type` 抛错
+  - [x] SubTask 3.3: `PageLayoutWidth`（`"infinity"` / 数字）、`PageLayoutPadding`（缺省 0）、三套 alignment 字符串映射（HStack 用 VerticalAlignment / VStack 用 HorizontalAlignment / frame 用 Alignment）
+  - [x] SubTask 3.4: `WidgetParams`：`[String: WidgetParamValue]`（bool / int / double / string）+ 带默认值取值方法；缺 key 或类型不符一律取默认值
 
-- [ ] Task 4: 注册表与渲染器
-  - [ ] SubTask 4.1: `Kline/App/PageLayout/PageWidgetRegistry.swift`：泛型 `PageWidgetRegistry<Context>`（`register(_ name:builder:)` / `builder(for:) -> ((Context, WidgetParams) -> AnyView)?`）
-  - [ ] SubTask 4.2: `Kline/App/PageLayout/PageLayoutRenderer.swift`：`PageLayoutRenderer<Context>`，`func view(for node: PageLayoutNode) -> AnyView`
-  - [ ] SubTask 4.3: 容器节点语义逐项对齐：`vstack`/`hstack`/`scroll`（padding 写内层 VStack）/`card`（对齐 `HomeSectionCard` 的 13pt secondary 标题、`cornerRadius(12)`、内边距 10/12）/`frame`（`maxWidth: infinity` + `alignment`）/`divider`/`spacer`
-  - [ ] SubTask 4.4: 未注册控件名渲染可诊断占位（含控件名文案 + 语义灰底），不崩溃、不静默空白
+- [x] Task 4: 注册表与渲染器
+  - [x] SubTask 4.1: `Kline/App/PageLayout/PageWidgetRegistry.swift`：泛型 `PageWidgetRegistry<Context>`（`typealias Builder` / `register(_:builder:)` / `builder(for:)`）
+  - [x] SubTask 4.2: `Kline/App/PageLayout/PageLayoutRenderer.swift`：`PageLayoutRenderer<Context>`，`func view(for node: PageLayoutNode) -> AnyView`
+  - [x] SubTask 4.3: 容器节点语义逐项对齐：`vstack`/`hstack`/`zstack`/`scroll`（padding 写内层容器）/`card`（13pt secondary 标题、`cornerRadius(12)`、内边距 10/12、`secondarySystemBackground`）/`frame`（`maxWidth: infinity` + `alignment`）/`divider`/`spacer`
+  - [x] SubTask 4.4: 未注册控件名渲染可诊断占位（含控件名文案 + 语义灰底 + 最小高 44），不崩溃、不静默空白
 
-- [ ] Task 5: 配置仓库 `Kline/App/PageLayout/PageLayoutConfigStore.swift`
-  - [ ] SubTask 5.1: 沙盒路径 `Documents/Layouts/<page>.json`；`loadFromDisk()` 用 `JSONDecoder`（写法对齐 `MarketConfigStore`），`saveToDisk()` 用 `.prettyPrinted + .sortedKeys + .atomic`
-  - [ ] SubTask 5.2: 内置默认种入：沙盒缺文件时把内置默认写入沙盒并返回该默认；解析失败时同样降级到内置默认并重种
-  - [ ] SubTask 5.3: 回退链实现：沙盒 → 内置默认 → `nil`（`nil` 表示该页退硬编码视图），全程不崩溃；`@Published` 暴露 `home: PageLayoutFile?`（同值不写）
-  - [ ] SubTask 5.4: `reloadIfChanged(page:)`：比对文件修改时间，变了才重解码（供页面 `onAppear` 调用）
-  - [ ] SubTask 5.5: `layout(id:for page:) -> PageLayoutDefinition?`：按 id 取档，缺失回退 `default`，再缺失返回 `nil`
+- [x] Task 5: 配置仓库 `Kline/App/PageLayout/PageLayoutConfigStore.swift`
+  - [x] SubTask 5.1: 沙盒路径 `Documents/Layouts/<page>.json`；`JSONDecoder` 解码，`Data.write(to:options:.atomic)` 落盘
+  - [x] SubTask 5.2: 内置默认种入：沙盒缺失或解码失败时用已注册的内置默认文本解码成功并原样写回沙盒
+  - [x] SubTask 5.3: 回退链实现：沙盒 → 内置默认 → `nil`（`nil` 表示该页退硬编码视图），全程不崩溃；`@Published private(set) var home: PageLayoutFile?`（文本未变不写）
+  - [x] SubTask 5.4: `reloadIfChanged(page:)`：比对文件修改时间；沙盒文件不存在时也走一次完整 reload 以触发首启种入
+  - [x] SubTask 5.5: `layout(id:for:) -> PageLayoutDefinition?`：按 id 取档，缺失回退 `defaultLayoutID`，再缺失返回 `nil`
 
-- [ ] Task 6: 内置默认配置 `Kline/Home/Layouts/home.json`
-  - [ ] SubTask 6.1: 按 spec「配置样例」写入 A/B/C/D 四档（逐项复刻 `HomeLayout{A,B,C,D}View`：A 标题栏+分隔线+占位；B 大盘概览非紧凑 + 自选/模拟半宽 + 涨幅榜 list；C 四块通栏紧凑 + 涨幅榜 list；D 大盘概览非紧凑 + 模拟/自选半宽紧凑（自选 `limit: 3`）+ 涨幅榜 chips）
-  - [ ] SubTask 6.2: 内置默认的读取方式：优先 `Bundle.main.url(forResource: "home", withExtension: "json", subdirectory: "Layouts")`；**验证同步组是否自动把该 JSON 纳入 Resources**（查看构建产物的 `Kline.app` 根目录与 `Layouts/` 子目录）
-  - [ ] SubTask 6.3: 若未被自动纳入：改为在 `Kline/Home/Layouts/` 下新增 `HomeLayoutDefaults.swift` 内嵌同一份 JSON 字符串常量（内容与 `home.json` 逐字一致，仅保留一条默认来源，不长期留双路径），并在 spec 的 Impact 里补一行说明
+- [x] Task 6: 内置默认配置（**实现方式调整**：改为 Swift 常量，见下）
+  - [x] SubTask 6.1: 按 spec「配置样例」写入 A/B/C/D 四档（逐项复刻 `HomeLayout{A,B,C,D}View`：A 标题栏+分隔线+占位；B 大盘概览非紧凑 + 自选/模拟半宽 + 涨幅榜 list；C 四块通栏紧凑 + 涨幅榜 list；D 大盘概览非紧凑 + 模拟/自选半宽紧凑（自选 `limit: 3`）+ 涨幅榜 chips）
+  - [x] SubTask 6.2: 内置默认的读取方式：判定为**不能用 Bundle 资源**——`Kline.xcodeproj` 的同步组只按类型默认归档，未知类型（`.tdx`）需借助 `PBXFileSystemSynchronizedBuildFileExceptionSet.membershipExceptions` 才进 Resources，`.json` 同样有不被纳入的风险，且 Windows 端无法本地构建验证。故内置默认落在 Swift 多行字符串常量（编译期必然进二进制）
+  - [x] SubTask 6.3: 常量文件为 `Kline/Home/HomeLayoutDefaults.swift`（`let homeLayoutDefaultsJSON`），内容与 spec 配置样例逐字一致；由 `HomeView.onAppear` 调 `registerBuiltInDefaults(page:json:)` 注入（本类不引用任何页面类型，保持引擎与页面无关）。已在 spec 的 Impact 中补记
 
-- [ ] Task 7: 首页接入
-  - [ ] SubTask 7.1: `Kline/Home/HomeLayoutContext.swift`：`model: HomePageModel` + `onProfile` / `onEntryTap` / `onSelectTab` / `onOpenFormula` / `onOpenCondOrder`
-  - [ ] SubTask 7.2: `Kline/Home/HomeWidgetRegistry.swift`：注册 `home.header` / `home.quickEntryRow` / `home.placeholder` / `home.marketOverview` / `home.favorites`（读 `compact` / `showsSparkline` / `limit`）/ `home.simSummary` / `home.topGainers`（读 `style` / `compact`）；入口动作映射与现有 `perform(_:)` 逐项一致
-  - [ ] SubTask 7.3: [HomeView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeView.swift#L28-L54) 非搜索态改为 JSON 优先：`config.home` 可用且含所选档 → `PageLayoutRenderer` 渲染；否则回落现有 `HomeLayout{A,B,C,D}View`；搜索态与 `.homeOverlays` 挂载方式不变
-  - [ ] SubTask 7.4: `HomeView.onAppear` 调 `PageLayoutConfigStore.shared.reloadIfChanged(page: "home")`
-  - [ ] SubTask 7.5: 编码自查（不在 `body` 内重解码 / 重排节点树；`AnyView` 树结构稳定不强制 `id()` 重建；`@Published` 同值不写）
+- [x] Task 7: 首页接入
+  - [x] SubTask 7.1: `Kline/Home/HomeLayoutContext.swift`：`model: HomePageModel` + `onProfile` / `onEntry`（快捷入口动作映射）/ `onSelectTab`
+  - [x] SubTask 7.2: `Kline/Home/HomeWidgetRegistry.swift`：注册 `home.header` / `home.quickEntryRow` / `home.placeholder` / `home.marketOverview` / `home.favorites`（读 `compact` / `showsSparkline` / `limit`）/ `home.simSummary` / `home.topGainers`（读 `style` / `compact`）；`openDetail` 与各档现有实现同机制
+  - [x] SubTask 7.3: [HomeView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeView.swift#L28-L54) 非搜索态改为 JSON 优先：`configRoot()` 可用 → `PageLayoutRenderer` 渲染；否则回落现有 `HomeLayout{A,B,C,D}View`；搜索态与 `.homeOverlays` 挂载方式不变
+  - [x] SubTask 7.4: `HomeView.onAppear` 调 `registerBuiltInDefaults` + `PageLayoutConfigStore.shared.reloadIfChanged(page: "home")`
+  - [x] SubTask 7.5: 编码自查（不在 `body` 内重解码 / 重排节点树；`AnyView` 树结构稳定未强制 `id()` 重建；`@Published` 同值不写；`SWIFT_VERSION=5.0` 无严格并发要求）
 
 - [ ] Task 8: 阶段二闭环
   - [ ] SubTask 8.1: 编译通过（无警告级错误、无残留引用）
