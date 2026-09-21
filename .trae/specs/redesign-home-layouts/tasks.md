@@ -69,15 +69,15 @@
   - [x] SubTask 12.3: [KlineUITests](file:///c:/Users/sunck/home/projects/ios/Kline/KlineUITests/KlineUITests.swift#L69-L76) 的 `test02_TabSwitching_ShowsEachPage` 首页判定由 `app.staticTexts["home.welcome"]` 改为 `app.staticTexts["home.page"]`（`home.page` 改挂在共享标题栏的软件名 `Text` 上，容器标识未必暴露成元素），保证默认档位为 B 时用例不误报
   - [x] SubTask 12.4: 四档互切自测（入口点击、搜索模式往返、公式管理 overlay 开关、切档后 Tab 选中态与滚动位置正常）
 
-- [ ] Task 13: 阶段三闭环
-  - [ ] SubTask 13.1: 编码自查（同上四项 + 卡片 / 宫格滚动性能）
-  - [ ] SubTask 13.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(home-layout): 首页 B/C/D 三套布局 + 入口跳转与标识"`
-  - [ ] SubTask 13.3: 交付说明，等待真机验收
+- [x] Task 13: 阶段三闭环
+  - [x] SubTask 13.1: 编码自查（同上四项 + 卡片 / 宫格滚动性能）
+  - [x] SubTask 13.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(home-layout): 首页 B/C/D 三套布局 + 入口跳转与标识"`（run=35551076040，退出码 0，已部署 Kline v1.0.2 (348)）
+  - [x] SubTask 13.3: 交付说明，等待真机验收
 
 ## 阶段四：验收
 
-- [ ] Task 14: 逐条核验 checklist（figma 画廊 / 仓库与个人中心 / 首页四档 / 跳转与标识 / 工程与交付），失败条目回填 tasks 修复后重验
-- [ ] Task 15: 最终交付说明（各阶段 build 号、4 档一览、真机验证路径与回归点、`git status` 无遗留改动）
+- [x] Task 14: 逐条核验 checklist（figma 画廊 / 仓库与个人中心 / 首页四档 / 跳转与标识 / 工程与交付），失败条目回填 tasks 修复后重验
+- [x] Task 15: 最终交付说明（各阶段 build 号、4 档一览、真机验证路径与回归点、`git status` 无遗留改动）
 
 # Task Dependencies
 
