@@ -38,8 +38,11 @@ struct PageLayoutDefinition: Decodable {
 
 // MARK: - 节点树
 
-/// 节点树的一个节点
-struct PageLayoutNode: Decodable {
+/// 节点树的一个节点。
+/// 用 `final class` 而非 `struct`：节点树是**递归**结构（`children` / `child` 又是节点），
+/// 值类型无法表达自递归（编译报 "has infinite size"），引用类型天然可递归。
+/// 解码后即只读，不做可变性暴露。
+final class PageLayoutNode: Decodable {
     let type: String
     let spacing: Double?
     let alignment: String?
