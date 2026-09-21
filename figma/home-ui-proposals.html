@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kline 首页布局重设计方案 · 4 档</title>
+<title>Kline 首页布局重设计方案 · 4 档（B/C/D 新形态）</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='4' y='10' width='3.4' height='10' fill='%23D92929'/%3E%3Crect x='10.3' y='5' width='3.4' height='15' fill='%23008C59'/%3E%3Crect x='16.6' y='8' width='3.4' height='12' fill='%23D92929'/%3E%3C/svg%3E">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -122,52 +122,97 @@ body.hide-ann .marker{display:none}
 .hm-big{font-size:28px;font-weight:700;line-height:1.3}
 .hm-subx{font-size:17px;color:var(--sub);line-height:1.3}
 
-.hm-search{height:36px;flex:none;margin:12px 16px 0;background:var(--gray5);border-radius:8px;
-  display:flex;align-items:center;gap:7px;padding:0 12px;color:var(--sub)}
-.hm-search svg{width:17px;height:17px;flex:none}
-.hm-search span{font-size:15px}
-
-.hm-grp{font-size:13px;color:var(--sub);line-height:18px;padding:14px 16px 8px}
-
 .icb{color:var(--blue)}
 .ico{color:var(--orange)}
 .icr{color:var(--red)}
 .icg{color:var(--green)}
 
-/* 首页 B：4 列宫格 */
-.hm-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 12px;padding:0 16px}
-.hm-cell{height:88px;background:var(--g6);border-radius:12px;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:7px}
-.hm-cell svg{width:28px;height:28px;flex:none}
-.hm-cell span{font-size:13px;color:var(--ink);line-height:1.2}
+/* ===== 首页 B/C/D 共用：一行横滑快捷入口（6 项，第 6 项半露） ===== */
+.qrail{flex:none;display:flex;gap:12px;padding:10px 16px 0;overflow:hidden}
+.qchip{flex:none;width:172px;height:68px;background:var(--g6);border-radius:12px;
+  display:flex;align-items:center;gap:9px;padding:0 12px;overflow:hidden}
+.qchip>svg{width:22px;height:22px;flex:none}
+.qchip .qx{min-width:0;display:flex;flex-direction:column;justify-content:center}
+.qchip .qt{font-size:13px;font-weight:600;line-height:16px;white-space:nowrap}
+.qchip .qs{font-size:11px;color:var(--sub);line-height:14px;margin-top:2px;white-space:nowrap}
 
-/* 首页 C：分区列表 */
-.hm-row{height:56px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line)}
-.hm-ibox{width:28px;height:28px;flex:none;border-radius:7px;background:var(--g6);
-  display:flex;align-items:center;justify-content:center}
-.hm-ibox svg{width:17px;height:17px}
-.hm-txt{min-width:0}
-.hm-tt{font-size:16px;line-height:1.25}
-.hm-st{font-size:12px;color:var(--sub);line-height:1.3}
-.hm-chev{margin-left:auto;flex:none;display:flex;color:var(--sub2)}
-.hm-chev svg{width:13px;height:13px}
+/* ===== 首页 B/C/D 共用：内容区四块骨架 ===== */
+.qz{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:10px 16px 12px}
+.qcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px;overflow:hidden}
+.qh{font-size:13px;font-weight:600;color:var(--sub);line-height:18px}
+.qh2{font-size:12px;color:var(--sub);line-height:16px;margin-top:6px}
 
-/* 首页 D：卡片工作台 */
-.hm-hero{margin:16px 16px 0;height:76px;flex:none;background:var(--g6);border-radius:12px;
-  display:flex;align-items:center;gap:12px;padding:0 18px}
-.hm-hero>svg{width:26px;height:26px;flex:none}
-.hm-hero .ht{font-size:16px;font-weight:600;line-height:1.3}
-.hm-hero .hd{margin-left:auto;font-size:12px;color:var(--sub);line-height:1.3}
-.hm-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:12px 16px 0}
-.hm-mcard{height:104px;background:var(--g6);border-radius:12px;padding:14px 18px;
-  display:flex;flex-direction:column;justify-content:center;gap:5px}
-.hm-mcard>svg{width:22px;height:22px;flex:none}
-.hm-mcard .mt{font-size:15px;font-weight:600;line-height:1.25}
-.hm-mcard .md{font-size:11.5px;color:var(--sub);line-height:1.3}
-.hm-smcard{margin:12px 16px 0;height:64px;flex:none;background:var(--g6);border-radius:12px;
-  display:flex;align-items:center;gap:12px;padding:0 18px}
-.hm-smcard>svg{width:22px;height:22px;flex:none}
-.hm-smcard .mt{font-size:15px;font-weight:600;line-height:1.25}
+/* 大盘概览：4 指数 + 涨跌家数 */
+.qidx{display:grid;grid-template-columns:repeat(4,1fr);gap:2px 10px;margin-top:3px}
+.qic{display:flex;flex-direction:column;gap:1px;min-width:0}
+.qin{font-size:12px;color:var(--sub);line-height:15px}
+.qiv{display:flex;align-items:baseline;gap:6px;line-height:19px}
+.qip{font-size:15px;font-weight:600}
+.qir{font-size:12px}
+.qbr{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);line-height:18px;margin-top:2px}
+.qbr b{font-weight:600}
+.qbr .dv{width:1px;height:11px;background:var(--line2);margin:0 2px}
+
+/* 标的行：名称 + 代码 / 现价 / 涨跌幅胶囊 */
+.qrow{height:34px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+.qrow:last-child{border-bottom:none}
+.qrow.lg{height:44px}
+.qrow.sm{height:32px}
+.qname{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+.qnt{font-size:13px;line-height:16px;white-space:nowrap}
+.qcd{font-size:11px;color:var(--sub);line-height:14px}
+.qpr{flex:none;width:80px;text-align:right;font-size:13px}
+.qpill{flex:none;width:80px;text-align:center;font-size:12px;font-weight:600;border-radius:6px;
+  padding:3px 0;line-height:1.1}
+.qpill.up{background:rgba(217,41,41,.10);color:var(--red)}
+.qpill.dn{background:rgba(0,140,89,.10);color:var(--green)}
+.qsp{flex:none;width:60px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+
+/* 模拟账户汇总 */
+.qm2{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;margin-top:2px}
+.qmc{display:flex;flex-direction:column;gap:1px;min-width:0}
+.qml{font-size:12px;color:var(--sub);line-height:15px}
+.qmv{font-size:15px;font-weight:600;line-height:19px}
+.qmbar{display:flex;align-items:center;gap:8px;margin-top:6px}
+.qmbar .qb{flex:1;height:5px;border-radius:3px;background:var(--g6);overflow:hidden}
+.qmbar .qb i{display:block;height:100%;width:62%;background:var(--blue);border-radius:3px}
+.qmore{height:26px;display:flex;align-items:center;justify-content:flex-end;gap:4px;font-size:12px;color:var(--blue)}
+.qmore svg{width:12px;height:12px}
+
+/* B 档：卡片网格 */
+.qb-ov{flex:none;height:96px}
+.qb-mid{flex:none;height:224px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.qb-rank{flex:1;min-height:0}
+
+/* C 档：分区列表（卡片内 13pt 灰标题 + 24pt 紧凑行，无走势） */
+.qcz{gap:8px}
+.qcz .qcard{padding:6px 12px}
+.qc-ov{flex:none;height:84px}
+.qc-c{flex:none;height:152px}
+.cridx{display:flex;align-items:center;gap:20px;height:28px}
+.cridx .ci{font-size:11px;color:var(--sub);white-space:nowrap}
+.cridx .ci b{font-size:14px;font-weight:600;color:var(--ink);margin-left:4px}
+.cridx .ci span{margin-left:5px}
+.clrow{height:24px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)}
+.clrow:last-child{border-bottom:none}
+.clrow .ln{font-size:13px;line-height:1;white-space:nowrap}
+.clrow .lc{font-size:11px;color:var(--sub);line-height:1}
+.clrow .lp{margin-left:auto;flex:none;width:76px;text-align:right;font-size:13px}
+.qpill.sm{width:66px;font-size:11px;padding:2px 0;border-radius:5px}
+
+/* D 档：工作台混排（大卡 + 2 列小卡 + 底部横滑 chips） */
+.qdz{gap:10px}
+.qd-ov{flex:none;height:104px}
+.qd-mid{flex:none;height:216px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.qd-rank{flex:none;display:flex;flex-direction:column;gap:4px}
+.drail{display:flex;gap:16px;overflow:hidden;margin:0 -16px;padding:0 16px}
+.dchip{flex:none;width:168px;height:72px;background:var(--g6);border-radius:12px;padding:0 12px;
+  display:flex;flex-direction:column;justify-content:center;gap:4px;overflow:hidden}
+.dchip .dcn{font-size:13px;font-weight:600;line-height:16px;white-space:nowrap}
+.dchip .dcl{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.dchip .dpl{font-size:15px;font-weight:600;line-height:19px}
+.dchip .qpill{width:64px;font-size:11px;padding:2px 0;border-radius:5px}
 
 /* ===== 个人中心 ===== */
 .hp-nav{height:56px;flex:none;display:flex;align-items:center;gap:18px;padding:0 16px}
@@ -204,16 +249,19 @@ body.shot .stage{display:block;margin:0}
 
   <div class="hero">
     <h1>Kline 首页布局重设计方案 · 4 档</h1>
-    <p>现状首页只有标题栏 + 一句「首页 / 欢迎来到首页」，1024×768 的横屏画布几乎完全空置，也不承担任何导航作用。
-      本次为首页出 4 档布局：<b style="color:#fff">A 档为现有实现的 1:1 复刻</b>（作为基线），
-      <b style="color:#fff">B / C / D 为重设计方案</b>，分别探索「宫格快捷入口」「分区列表入口」「卡片工作台」三条路线。
+    <p>首页现状（A 档）只有标题栏 + 一句欢迎语，1024×768 的横屏画布几乎完全空置。真机验收后确认：旧首页把自选 / 行情 / 模拟做成快捷入口，与底部 Tab 完全重复，而且铺满首屏。
+      本次改版把入口压成<b style="color:#fff">一行可左右拖动的快捷入口</b>（6 项，剔除与底部栏重复的三项），入口行下方留出四块内容区：
+      大盘概览条 / 我的自选 / 模拟账户汇总 / 涨幅榜。
+      <b style="color:#fff">A 档为现有实现的 1:1 复刻</b>（基线，保持不变），
+      <b style="color:#fff">B / C / D 为三种新形态</b>，分别用「卡片网格」「分区列表」「工作台混排」三种方式排布这四块内容。
       所有画面按真机形态绘制（iPad 横屏 1024×768、涨红跌绿、底部四项 Tab：首页 / 自选 / 行情 / 模拟），屏内按钮与切换器均可点。
-      四档布局在「个人中心 → 首页布局」里独立选择，见区块二。</p>
+      三档布局在「个人中心 → 首页布局」里独立选择，见区块二。</p>
     <div class="meta">
       <span class="chip">样机尺寸 <b>1024×768</b>（iPad mini 4 横屏）</span>
-      <span class="chip">A 档 = <b>现有实现复刻</b></span>
-      <span class="chip">B / C / D = <b>重设计</b></span>
-      <span class="chip">默认档 <b>B · 宫格快捷入口</b></span>
+      <span class="chip">A 档 = <b>现有实现复刻（不变）</b></span>
+      <span class="chip">B / C / D = <b>一行横滑入口 + 四块内容</b></span>
+      <span class="chip">默认档 <b>B · 卡片网格</b></span>
+      <span class="chip">入口不再与底部 Tab 重复</span>
       <span class="chip">示例数据，非真实行情</span>
       <button class="chip" id="annToggle" style="cursor:pointer">标注：开（点击切换）</button>
     </div>
@@ -228,6 +276,8 @@ body.shot .stage{display:block;margin:0}
     <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
     <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="11" rx="4"/><path d="M7 11.5v4M5 13.5h4M15.5 12.5h.01M18 15h.01"/></symbol>
     <symbol id="i-fx" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6.5 21c2.6 0 3.7-1.7 4.4-4.4L14 5.6C14.7 2.9 15.8 1.5 18 1.5"/><path d="M8.6 10.6h8"/></symbol>
+    <symbol id="i-funnel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.5h17l-6.6 7.8v6.1l-3.8 2.1v-8.2z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 1 1 12 0c0 3.9.9 5.3 1.6 6.1H4.4C5.1 15.3 6 13.9 6 10z"/><path d="M10 19.4a2.2 2.2 0 0 0 4 0"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M9 6v12M15 6v12"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
@@ -242,18 +292,21 @@ body.shot .stage{display:block;margin:0}
     <div class="sec-head">
       <span class="sec-no">区块一</span>
       <h2>首页 · 4 档布局</h2>
-      <div class="sub">现状（A 档）首页是「标题栏 + 一句欢迎语」，除登录外没有任何入口，用户进任何功能都要先走底部 Tab。
-        重设计三条路线：<b style="color:#fff">B</b> 用 4 列宫格把 6 个入口一屏铺满，点击 1 步到位；
-        <b style="color:#fff">C</b> 换成带副标题的分区列表，用一句说明解释每个入口；
-        <b style="color:#fff">D</b> 用大 / 中 / 小三种尺寸的卡片搭一个工作台，兼顾入口与说明。四档共用同一批入口，仅渲染层不同。</div>
+      <div class="sub">现状（A 档）首页把自选 / 行情 / 模拟交易做成快捷入口，这三项与底部 Tab 完全重复，且宫格铺满首屏、把行情内容全挤到下一屏。
+        改版后 B / C / D 三档共用同一套结构：<b style="color:#fff">标题栏</b> → <b style="color:#fff">一行横滑快捷入口</b>（搜索标的 / 技术指标 / 选股指标 / 交易策略 / 条件单 / 个人中心，第 6 项半露示意可滑）
+        → <b style="color:#fff">四块内容区</b>（大盘概览条 / 我的自选 / 模拟账户汇总 / 涨幅榜）→ 底部 Tab 栏。
+        三档只在这四块内容的排布方式上不同：
+        <b style="color:#fff">B</b> 卡片网格（通栏概览 + 2 列卡片 + 通栏涨幅榜）；
+        <b style="color:#fff">C</b> 分区列表（四块通栏卡、行高 24、信息密度最高）；
+        <b style="color:#fff">D</b> 工作台混排（大盘大卡 + 2 列小卡 + 底部横滑 chips）。四档共用同一批示例数据，仅渲染层不同。</div>
     </div>
 
     <div class="switcher">
       <span class="lab">方案</span>
       <button class="seg" data-home="homeA">A · 现有实现（保留）</button>
-      <button class="seg on" data-home="homeB">B · 宫格快捷入口<span class="tag">默认</span></button>
-      <button class="seg" data-home="homeC">C · 分区列表入口</button>
-      <button class="seg" data-home="homeD">D · 卡片工作台</button>
+      <button class="seg on" data-home="homeB">B · 卡片网格<span class="tag">默认</span></button>
+      <button class="seg" data-home="homeC">C · 分区列表</button>
+      <button class="seg" data-home="homeD">D · 工作台混排</button>
     </div>
 
     <div class="stage">
@@ -278,7 +331,7 @@ body.shot .stage{display:block;margin:0}
               <div class="tabbar" data-tab="0"></div>
             </div>
 
-            <!-- ===== 首页 B：宫格快捷入口 ===== -->
+            <!-- ===== 首页 B：卡片网格（默认档） ===== -->
             <div class="screen" id="scr-homeB">
               <div class="page">
                 <div class="hm-top">
@@ -288,15 +341,65 @@ body.shot .stage{display:block;margin:0}
                 </div>
                 <div class="hairline1"></div>
                 <div class="hm-body">
-                  <div class="hm-search"><svg><use href="#i-search"/></svg><span>搜索</span></div>
-                  <div class="hm-grp">快捷入口</div>
-                  <div class="hm-grid" id="hmQuick"></div>
+                  <!-- 一行横滑快捷入口：6 项合计 1092pt > 1024pt，第 6 项被裁掉一半 -->
+                  <div class="qrail"></div>
+                  <div class="qz">
+                    <!-- 内容块 1：大盘概览条（通栏卡，96） -->
+                    <div class="qcard qb-ov">
+                      <div class="qh">大盘概览</div>
+                      <div class="qidx">
+                        <div class="qic"><span class="qin">上证指数</span><span class="qiv"><b class="qip num">3218.45</b><span class="qir up num">+0.62%</span></span></div>
+                        <div class="qic"><span class="qin">深证成指</span><span class="qiv"><b class="qip num">10142.80</b><span class="qir up num">+0.38%</span></span></div>
+                        <div class="qic"><span class="qin">创业板指</span><span class="qiv"><b class="qip num">2024.63</b><span class="qir dn num">-0.21%</span></span></div>
+                        <div class="qic"><span class="qin">科创50</span><span class="qiv"><b class="qip num">986.32</b><span class="qir dn num">-0.41%</span></span></div>
+                      </div>
+                      <div class="qbr">涨 <b class="up num">1832</b> · 平 <b class="num">96</b> · 跌 <b class="dn num">741</b><span class="dv"></span>涨停 <b class="up num">23</b> · 跌停 <b class="dn num">4</b></div>
+                    </div>
+                    <!-- 内容块 2 / 3：我的自选 + 模拟账户汇总（2 列，各 224） -->
+                    <div class="qb-mid">
+                      <div class="qcard">
+                        <div class="qh">我的自选</div>
+                        <div>
+                          <div class="qrow"><span class="qname"><span class="qnt">贵州茅台</span><span class="qcd num">600519</span></span><svg class="qsp up" viewBox="0 0 60 24"><polyline points="2,18 9,15 16,17 23,11 30,13 37,8 44,10 51,5 58,3"/></svg><span class="qpr num">1628.50</span><span class="qpill up num">+1.24%</span></div>
+                          <div class="qrow"><span class="qname"><span class="qnt">宁德时代</span><span class="qcd num">300750</span></span><svg class="qsp dn" viewBox="0 0 60 24"><polyline points="2,5 9,8 16,6 23,12 30,10 37,15 44,13 51,18 58,21"/></svg><span class="qpr num">186.42</span><span class="qpill dn num">-0.86%</span></div>
+                          <div class="qrow"><span class="qname"><span class="qnt">中际旭创</span><span class="qcd num">300308</span></span><svg class="qsp up" viewBox="0 0 60 24"><polyline points="2,19 9,16 16,18 23,12 30,14 37,9 44,11 51,5 58,2"/></svg><span class="qpr num">168.20</span><span class="qpill up num">+10.02%</span></div>
+                          <div class="qrow"><span class="qname"><span class="qnt">立讯精密</span><span class="qcd num">002475</span></span><svg class="qsp up" viewBox="0 0 60 24"><polyline points="2,17 9,13 16,15 23,10 30,12 37,7 44,9 51,6 58,4"/></svg><span class="qpr num">42.16</span><span class="qpill up num">+2.31%</span></div>
+                          <div class="qrow"><span class="qname"><span class="qnt">招商银行</span><span class="qcd num">600036</span></span><svg class="qsp dn" viewBox="0 0 60 24"><polyline points="2,6 9,9 16,7 23,11 30,10 37,14 44,12 51,16 58,19"/></svg><span class="qpr num">38.94</span><span class="qpill dn num">-0.35%</span></div>
+                        </div>
+                      </div>
+                      <div class="qcard">
+                        <div class="qh">模拟账户汇总</div>
+                        <div class="qm2">
+                          <div class="qmc"><span class="qml">总资产</span><span class="qmv num">¥1,286,430</span></div>
+                          <div class="qmc"><span class="qml">当日盈亏</span><span class="qmv up num">+¥8,214（+0.64%）</span></div>
+                        </div>
+                        <div class="qmbar"><span class="qml">持仓占比 62%</span><span class="qb"><i style="width:62%"></i></span></div>
+                        <div class="qh2">持仓 Top 3</div>
+                        <div>
+                          <div class="qrow sm"><span class="qname"><span class="qnt">贵州茅台</span><span class="qcd num">600519</span></span><span class="qpr num">1628.50</span><span class="qpill up num">+¥12,480</span></div>
+                          <div class="qrow sm"><span class="qname"><span class="qnt">中际旭创</span><span class="qcd num">300308</span></span><span class="qpr num">168.20</span><span class="qpill up num">+¥9,120</span></div>
+                          <div class="qrow sm"><span class="qname"><span class="qnt">宁德时代</span><span class="qcd num">300750</span></span><span class="qpr num">186.42</span><span class="qpill dn num">-¥2,340</span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- 内容块 4：涨幅榜 Top 5（通栏卡，224） -->
+                    <div class="qcard qb-rank">
+                      <div class="qh">涨幅榜 Top 5</div>
+                      <div>
+                        <div class="qrow"><span class="qname"><span class="qnt">中际旭创</span><span class="qcd num">300308</span></span><span class="qpr num">168.20</span><span class="qpill up num">+10.02%</span></div>
+                        <div class="qrow"><span class="qname"><span class="qnt">天孚通信</span><span class="qcd num">300394</span></span><span class="qpr num">92.36</span><span class="qpill up num">+8.44%</span></div>
+                        <div class="qrow"><span class="qname"><span class="qnt">新易盛</span><span class="qcd num">300502</span></span><span class="qpr num">118.72</span><span class="qpill up num">+6.85%</span></div>
+                        <div class="qrow"><span class="qname"><span class="qnt">沪电股份</span><span class="qcd num">002463</span></span><span class="qpr num">43.28</span><span class="qpill up num">+5.12%</span></div>
+                        <div class="qrow"><span class="qname"><span class="qnt">立讯精密</span><span class="qcd num">002475</span></span><span class="qpr num">42.16</span><span class="qpill up num">+2.31%</span></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="tabbar" data-tab="0"></div>
             </div>
 
-            <!-- ===== 首页 C：分区列表入口 ===== -->
+            <!-- ===== 首页 C：分区列表（四块通栏卡，行高 24、无走势） ===== -->
             <div class="screen" id="scr-homeC">
               <div class="page">
                 <div class="hm-top">
@@ -305,12 +408,60 @@ body.shot .stage{display:block;margin:0}
                   <span class="login-pill"><svg><use href="#i-person"/></svg><span>登录</span></span>
                 </div>
                 <div class="hairline1"></div>
-                <div class="hm-body" id="hmSections"></div>
+                <div class="hm-body">
+                  <div class="qrail"></div>
+                  <div class="qz qcz">
+                    <!-- 内容块 1：大盘概览（通栏卡，84） -->
+                    <div class="qcard qc-ov">
+                      <div class="qh">大盘概览</div>
+                      <div class="cridx">
+                        <span class="ci">上证指数<b class="num">3218.45</b><span class="up num">+0.62%</span></span>
+                        <span class="ci">深证成指<b class="num">10142.80</b><span class="up num">+0.38%</span></span>
+                        <span class="ci">创业板指<b class="num">2024.63</b><span class="dn num">-0.21%</span></span>
+                        <span class="ci">科创50<b class="num">986.32</b><span class="dn num">-0.41%</span></span>
+                      </div>
+                      <div class="qbr">涨 <b class="up num">1832</b> · 平 <b class="num">96</b> · 跌 <b class="dn num">741</b><span class="dv"></span>涨停 <b class="up num">23</b> · 跌停 <b class="dn num">4</b></div>
+                    </div>
+                    <!-- 内容块 2：我的自选（通栏卡，152） -->
+                    <div class="qcard qc-c">
+                      <div class="qh">我的自选</div>
+                      <div>
+                        <div class="clrow"><span class="ln">贵州茅台</span><span class="lc num">600519</span><span class="lp num">1628.50</span><span class="qpill sm up num">+1.24%</span></div>
+                        <div class="clrow"><span class="ln">宁德时代</span><span class="lc num">300750</span><span class="lp num">186.42</span><span class="qpill sm dn num">-0.86%</span></div>
+                        <div class="clrow"><span class="ln">中际旭创</span><span class="lc num">300308</span><span class="lp num">168.20</span><span class="qpill sm up num">+10.02%</span></div>
+                        <div class="clrow"><span class="ln">立讯精密</span><span class="lc num">002475</span><span class="lp num">42.16</span><span class="qpill sm up num">+2.31%</span></div>
+                        <div class="clrow"><span class="ln">招商银行</span><span class="lc num">600036</span><span class="lp num">38.94</span><span class="qpill sm dn num">-0.35%</span></div>
+                      </div>
+                    </div>
+                    <!-- 内容块 3：模拟账户汇总（通栏卡，152：汇总 2 行 + 持仓 Top 3） -->
+                    <div class="qcard qc-c">
+                      <div class="qh">模拟账户汇总 · 持仓 Top 3</div>
+                      <div>
+                        <div class="clrow"><span class="ln">总资产</span><span class="lc">持仓占比 62%</span><span class="lp num">¥1,286,430</span></div>
+                        <div class="clrow"><span class="ln">当日盈亏</span><span class="lp up num">+¥8,214</span><span class="qpill sm up num">+0.64%</span></div>
+                        <div class="clrow"><span class="ln">贵州茅台</span><span class="lc num">600519</span><span class="lp num">1628.50</span><span class="qpill sm up num">+¥12,480</span></div>
+                        <div class="clrow"><span class="ln">中际旭创</span><span class="lc num">300308</span><span class="lp num">168.20</span><span class="qpill sm up num">+¥9,120</span></div>
+                        <div class="clrow"><span class="ln">宁德时代</span><span class="lc num">300750</span><span class="lp num">186.42</span><span class="qpill sm dn num">-¥2,340</span></div>
+                      </div>
+                    </div>
+                    <!-- 内容块 4：涨幅榜 Top 5（通栏卡，152） -->
+                    <div class="qcard qc-c">
+                      <div class="qh">涨幅榜 Top 5</div>
+                      <div>
+                        <div class="clrow"><span class="ln">中际旭创</span><span class="lc num">300308</span><span class="lp num">168.20</span><span class="qpill sm up num">+10.02%</span></div>
+                        <div class="clrow"><span class="ln">天孚通信</span><span class="lc num">300394</span><span class="lp num">92.36</span><span class="qpill sm up num">+8.44%</span></div>
+                        <div class="clrow"><span class="ln">新易盛</span><span class="lc num">300502</span><span class="lp num">118.72</span><span class="qpill sm up num">+6.85%</span></div>
+                        <div class="clrow"><span class="ln">沪电股份</span><span class="lc num">002463</span><span class="lp num">43.28</span><span class="qpill sm up num">+5.12%</span></div>
+                        <div class="clrow"><span class="ln">立讯精密</span><span class="lc num">002475</span><span class="lp num">42.16</span><span class="qpill sm up num">+2.31%</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div class="tabbar" data-tab="0"></div>
             </div>
 
-            <!-- ===== 首页 D：卡片工作台 ===== -->
+            <!-- ===== 首页 D：工作台混排（大卡 + 2 列小卡 + 底部横滑 chips） ===== -->
             <div class="screen" id="scr-homeD">
               <div class="page">
                 <div class="hm-top">
@@ -320,16 +471,57 @@ body.shot .stage{display:block;margin:0}
                 </div>
                 <div class="hairline1"></div>
                 <div class="hm-body">
-                  <div class="hm-hero">
-                    <svg class="icb"><use href="#i-search"/></svg>
-                    <span class="ht">搜索标的</span>
-                    <span class="hd">双击首页或点这里进入搜索</span>
-                  </div>
-                  <div class="hm-cards" id="hmCards"></div>
-                  <div class="hm-smcard">
-                    <svg class="icb"><use href="#i-person"/></svg>
-                    <span class="mt">个人中心</span>
-                    <span class="hm-chev"><svg><use href="#i-chev-r"/></svg></span>
+                  <div class="qrail"></div>
+                  <div class="qz qdz">
+                    <!-- 内容块 1：大盘概览大卡（通栏，104） -->
+                    <div class="qcard qd-ov">
+                      <div class="qh">大盘概览</div>
+                      <div class="qidx">
+                        <div class="qic"><span class="qin">上证指数</span><span class="qiv"><b class="qip num">3218.45</b><span class="qir up num">+0.62%</span></span></div>
+                        <div class="qic"><span class="qin">深证成指</span><span class="qiv"><b class="qip num">10142.80</b><span class="qir up num">+0.38%</span></span></div>
+                        <div class="qic"><span class="qin">创业板指</span><span class="qiv"><b class="qip num">2024.63</b><span class="qir dn num">-0.21%</span></span></div>
+                        <div class="qic"><span class="qin">科创50</span><span class="qiv"><b class="qip num">986.32</b><span class="qir dn num">-0.41%</span></span></div>
+                      </div>
+                      <div class="qbr">涨 <b class="up num">1832</b> · 平 <b class="num">96</b> · 跌 <b class="dn num">741</b><span class="dv"></span>涨停 <b class="up num">23</b> · 跌停 <b class="dn num">4</b></div>
+                    </div>
+                    <!-- 内容块 2 / 3：模拟账户汇总 + 我的自选 Top 3（2 列小卡，各 216，自选无走势） -->
+                    <div class="qd-mid">
+                      <div class="qcard">
+                        <div class="qh">模拟账户汇总</div>
+                        <div class="qm2">
+                          <div class="qmc"><span class="qml">总资产</span><span class="qmv num">¥1,286,430</span></div>
+                          <div class="qmc"><span class="qml">当日盈亏</span><span class="qmv up num">+¥8,214（+0.64%）</span></div>
+                        </div>
+                        <div class="qmbar"><span class="qml">持仓占比 62%</span><span class="qb"><i style="width:62%"></i></span></div>
+                        <div class="qh2">持仓 Top 3</div>
+                        <div>
+                          <div class="qrow sm"><span class="qname"><span class="qnt">贵州茅台</span><span class="qcd num">600519</span></span><span class="qpr num">1628.50</span><span class="qpill up num">+¥12,480</span></div>
+                          <div class="qrow sm"><span class="qname"><span class="qnt">中际旭创</span><span class="qcd num">300308</span></span><span class="qpr num">168.20</span><span class="qpill up num">+¥9,120</span></div>
+                          <div class="qrow sm"><span class="qname"><span class="qnt">宁德时代</span><span class="qcd num">300750</span></span><span class="qpr num">186.42</span><span class="qpill dn num">-¥2,340</span></div>
+                        </div>
+                      </div>
+                      <div class="qcard">
+                        <div class="qh">我的自选 · Top 3</div>
+                        <div>
+                          <div class="qrow lg"><span class="qname"><span class="qnt">贵州茅台</span><span class="qcd num">600519</span></span><span class="qpr num">1628.50</span><span class="qpill up num">+1.24%</span></div>
+                          <div class="qrow lg"><span class="qname"><span class="qnt">宁德时代</span><span class="qcd num">300750</span></span><span class="qpr num">186.42</span><span class="qpill dn num">-0.86%</span></div>
+                          <div class="qrow lg"><span class="qname"><span class="qnt">中际旭创</span><span class="qcd num">300308</span></span><span class="qpr num">168.20</span><span class="qpill up num">+10.02%</span></div>
+                        </div>
+                        <div class="qmore">查看全部 5 只<svg><use href="#i-chev-r"/></svg></div>
+                      </div>
+                    </div>
+                    <!-- 内容块 4：涨幅榜改为一行横滑 chips（第 6 个半露） -->
+                    <div class="qd-rank">
+                      <div class="qh">涨幅榜 Top 6（可左右滑动）</div>
+                      <div class="drail">
+                        <div class="dchip"><span class="dcn">中际旭创</span><span class="dcl"><span class="dpl num">168.20</span><span class="qpill up num">+10.02%</span></span></div>
+                        <div class="dchip"><span class="dcn">天孚通信</span><span class="dcl"><span class="dpl num">92.36</span><span class="qpill up num">+8.44%</span></span></div>
+                        <div class="dchip"><span class="dcn">新易盛</span><span class="dcl"><span class="dpl num">118.72</span><span class="qpill up num">+6.85%</span></span></div>
+                        <div class="dchip"><span class="dcn">沪电股份</span><span class="dcl"><span class="dpl num">43.28</span><span class="qpill up num">+5.12%</span></span></div>
+                        <div class="dchip"><span class="dcn">立讯精密</span><span class="dcl"><span class="dpl num">42.16</span><span class="qpill up num">+2.31%</span></span></div>
+                        <div class="dchip"><span class="dcn">剑桥科技</span><span class="dcl"><span class="dpl num">58.40</span><span class="qpill up num">+1.94%</span></span></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -388,17 +580,17 @@ body.shot .stage{display:block;margin:0}
     <div class="sec-head">
       <span class="sec-no">区块三</span>
       <h2>方案对比表 · 4 档 × 6 维度</h2>
-      <div class="sub">A 档为现有实现的复刻，作为基线；B / C / D 为三条重设计路线。绿色为该项表现最好的一档。</div>
+      <div class="sub">A 档为现有实现的复刻，作为基线；B / C / D 为三种新形态（一行横滑入口 + 四块内容区），差别只在这四块的排布方式。绿色为该项表现最好的一档。</div>
     </div>
     <div class="cmp">
       <div class="cmp-wrap">
         <table>
           <colgroup><col style="width:19%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:12%"><col style="width:13%"><col style="width:14%"></colgroup>
           <tr><th>方案</th><th>信息密度</th><th>横屏利用</th><th>首屏信息量</th><th>操作步数</th><th>实现复杂度</th><th>适配场景</th></tr>
-          <tr><td>homeA · 现有实现（保留）</td><td>极低：整屏只有 2 行字</td><td>浪费：内容居中、两侧与下方全空</td><td>0 个入口 + 1 句欢迎语</td><td>进任一功能 1 步（走底部 Tab）</td><td class="pick">低：现有实现，零改动</td><td>基线对照 / 保留老用户习惯</td></tr>
-          <tr><td>homeB · 宫格快捷入口（B）</td><td>中：6 格 × 1 图标 1 名称</td><td class="pick">充分：4 列宫格铺满 1024 宽</td><td>6 个入口 + 搜索条</td><td class="pick">1 步（宫格直达）</td><td>中：宫格 + 图标语义映射</td><td>新用户、高频跨页跳转</td></tr>
-          <tr><td>homeC · 分区列表入口</td><td>中高：6 行 × 标题 + 副标题</td><td>好：单列长行，右侧留白</td><td>6 个入口 + 每组分类说明</td><td class="pick">1 步（列表直达）</td><td class="pick">低：复用个人中心设置行组件</td><td>需要解释文案 / 功能还在增加的版本</td></tr>
-          <tr><td>homeD · 卡片工作台</td><td class="pick">高：1 大卡 + 4 中卡 + 1 小卡</td><td class="pick">极充分：三段式，卡片均分横屏</td><td class="pick">6 个入口 + 每张卡一句说明</td><td class="pick">1 步（卡片直达）</td><td>中高：三种卡片尺寸 + 说明文案</td><td>平板为主、要一眼看懂每个功能</td></tr>
+          <tr><td>homeA · 现有实现（保留）</td><td>极低：整屏只有 2 行字</td><td>浪费：内容居中、两侧与下方全空</td><td>0 块内容 + 1 句欢迎语</td><td>进任一功能 1 步（走底部 Tab）</td><td class="pick">低：现有实现，零改动</td><td>基线对照 / 保留老用户习惯</td></tr>
+          <tr><td>homeB · 卡片网格（默认档）</td><td>高：1 行入口 + 4 块卡片，约 30 个数据元素</td><td>好：入口行与通栏卡铺满 1024，第 6 张 chip 溢出表示可滑</td><td>4 指数 + 家数 / 自选 5 行（带走势）/ 账户 4 项 / 涨幅榜 5 行</td><td>1 步（横滑行直达；第 6 项需先横拖一次）</td><td>中：横滑入口 + 3 种卡片高度 + 迷你走势</td><td>默认档：既要入口，也要一眼看到行情</td></tr>
+          <tr><td>homeC · 分区列表</td><td class="pick">最高：4 张通栏卡、19 行紧凑数据，行高仅 24</td><td class="pick">最好：无 2 列分割，992pt 宽度全给数据列</td><td class="pick">最多：19 行数据 + 4 指数 + 涨跌家数</td><td>1 步（横滑行直达）</td><td class="pick">低：4 张卡同一结构，行组件可复用</td><td>信息优先：盯盘为主的老用户</td></tr>
+          <tr><td>homeD · 工作台混排</td><td>中：3 段卡片 + 6 个 chip，下方留白约 130pt</td><td class="pick">充分：大卡横排 + 底部 chips 向右溢出贴屏边</td><td>较少：4 指数 + 家数 / 账户 4 项 / 自选 3 行 / 涨幅榜 6 chip</td><td>1 步（横滑行直达；涨幅榜需横拖一次）</td><td>中高：两条横滑行 + 三种卡片尺寸</td><td>工作台：一眼看懂 + 预留后续模块位</td></tr>
         </table>
       </div>
     </div>
@@ -421,31 +613,14 @@ function fillTabbar(){
   });
 }
 
-/* =============== 数据：入口 =============== */
-const QUICK=[
-  {n:'搜索标的',ic:'i-search',c:'icb'},
-  {n:'自选',ic:'i-star-f',c:'ico'},
-  {n:'行情',ic:'i-chart',c:'icb'},
-  {n:'模拟交易',ic:'i-game',c:'icb'},
-  {n:'公式管理',ic:'i-fx',c:'icb'},
-  {n:'个人中心',ic:'i-person',c:'icb'}
-];
-const SECTIONS=[
-  {t:'行情',items:[
-    {n:'行情',s:'沪深主板 / ETF 指数行情表',ic:'i-chart'},
-    {n:'自选',s:'分组自选与公式选股结果',ic:'i-folder-f'}]},
-  {t:'研究',items:[
-    {n:'搜索标的',s:'按名称 / 代码检索标的',ic:'i-search'},
-    {n:'公式管理',s:'技术指标 / 选股指标 / 交易策略',ic:'i-fx'}]},
-  {t:'账户',items:[
-    {n:'模拟交易',s:'账户、持仓、委托与条件单',ic:'i-game'},
-    {n:'个人中心',s:'主题、页面布局与本地更新',ic:'i-person'}]}
-];
-const DCARDS=[
-  {n:'自选',d:'我的分组与持仓',ic:'i-star-f',c:'ico'},
-  {n:'行情',d:'沪深主板 + ETF 指数',ic:'i-chart',c:'icb'},
-  {n:'模拟交易',d:'账户资产与持仓盈亏',ic:'i-game',c:'icb'},
-  {n:'公式管理',d:'指标 / 选股 / 策略',ic:'i-fx',c:'icb'}
+/* =============== 数据：一行横滑快捷入口（6 项，已剔除与底部 Tab 重复的自选 / 行情 / 模拟） =============== */
+const RAIL=[
+  {n:'搜索标的',s:'按名称 / 代码',ic:'i-search',c:'icb'},
+  {n:'技术指标',s:'主图叠加 / 副图',ic:'i-fx',c:'icb'},
+  {n:'选股指标',s:'全市场跑选股',ic:'i-funnel',c:'icb'},
+  {n:'交易策略',s:'策略与回测',ic:'i-uptrend',c:'icb'},
+  {n:'条件单',s:'监控 / 触发',ic:'i-bell',c:'ico'},
+  {n:'个人中心',s:'主题与布局',ic:'i-person',c:'icb'}
 ];
 const SETROWS=[
   {n:'Kline 显示主题',v:'跟随系统'},
@@ -459,21 +634,12 @@ const SETROWS=[
 /* =============== 渲染屏内内容 =============== */
 fillTabbar();
 
-$('#hmQuick').innerHTML=QUICK.map(q=>
-  `<div class="hm-cell"><svg class="${q.c}"><use href="#${q.ic}"/></svg><span>${q.n}</span></div>`).join('');
-
-$('#hmSections').innerHTML=SECTIONS.map(s=>
-  `<div class="hm-grp">${s.t}</div>`+s.items.map(it=>
-    `<div class="hm-row">`
-    +`<span class="hm-ibox icb"><svg><use href="#${it.ic}"/></svg></span>`
-    +`<span class="hm-txt"><span class="hm-tt">${it.n}</span><br><span class="hm-st">${it.s}</span></span>`
-    +`<span class="hm-chev"><svg><use href="#i-chev-r"/></svg></span>`
-    +`</div>`).join('')
-).join('');
-
-$('#hmCards').innerHTML=DCARDS.map(c=>
-  `<div class="hm-mcard"><svg class="${c.c}"><use href="#${c.ic}"/></svg>`
-  +`<span class="mt">${c.n}</span><span class="md">${c.d}</span></div>`).join('');
+/* 6 项 × 172 + 5 × 12 = 1092 > 1024，第 6 项被屏右边裁掉一半 → 表达可左右拖动 */
+$$('.qrail').forEach(r=>{
+  r.innerHTML=RAIL.map(q=>
+    `<div class="qchip"><svg class="${q.c}"><use href="#${q.ic}"/></svg>`
+    +`<span class="qx"><span class="qt">${q.n}</span><span class="qs">${q.s}</span></span></div>`).join('');
+});
 
 $('#hpRows').innerHTML=SETROWS.map(r=>
   `<div class="hp-row${r.open?' open':''}"><span class="rl">${r.n}</span>`
@@ -492,38 +658,59 @@ const SCREENS={
   pro:['改动量为零，完全保留老用户的进入习惯','作为 B / C / D 三档的对照基线'],
   con:['整屏没有任何入口，进任何功能都要先走底部 Tab','1024×768 的横屏横向空间完全闲置','首屏只有两行文字，信息量几乎为零']},
  'homeB':{kind:'首页方案 B',badge:'重设计',
-  cap:'<b>方案 B</b> · 宫格快捷入口（默认档）：6 个入口一屏全见',
-  desc:'在标题栏下加一条搜索条，再接一行分组标题与 4 列宫格：搜索标的 / 自选 / 行情 / 模拟交易 / 公式管理 / 个人中心。每格约 242×88 的浅灰卡片，内含 28pt 图标与 13pt 名称。',
-  ann:[[1,'顶部标题栏与 A 档完全一致（Kline 图标 + 登录胶囊 + 分隔线）'],
-       [2,'搜索条：高 36、左右外边距 16、灰底 #E5E5EA 圆角 8，点击进入搜索'],
-       [3,'分组标题「快捷入口」：13pt 灰字、左对齐 16'],
-       [4,'宫格第 1 格「搜索标的」：28pt 蓝色搜索图标 + 13pt 名称，卡片 242×88'],
-       [5,'宫格第 4 格「模拟交易」：与其它格等宽等高，4 列铺满 1024 宽'],
-       [6,'第 2 行第 2 格「公式管理」：图标语义为 ƒx，与行情 / 自选等入口同构']],
-  pro:['6 个入口一屏全见，任一入口点击 1 步到位','4 列宫格把 1024 宽的横屏铺满，横向利用率最高','图标色做语义区分（自选橙色、其余蓝色），扫视定位快'],
-  con:['入口无说明文案，新用户需先熟悉每个图标含义','6 格只占上半屏，下半屏仍有约 386pt 留白','入口增到 8 个以上时需要滚动，或改成 5 列缩小格子']},
+  cap:'<b>方案 B</b> · 卡片网格（默认档）：一行横滑入口 + 通栏概览 / 2 列卡片 / 通栏涨幅榜',
+  desc:'标题栏与 A 档完全一致，其下是一行可左右拖动的快捷入口（6 张 172×68 chip，第 6 张被屏右边裁掉一半），再往下依次是：大盘概览条通栏卡（96）→ 我的自选 / 模拟账户汇总 2 列卡片（各 224，自选卡内 5 行带 60×24 迷你走势）→ 涨幅榜 Top 5 通栏卡（224）。入口不再与底部 Tab 的自选 / 行情 / 模拟重复，横向 1024pt 全部用于行情数据。',
+  ann:[[1,'顶部标题栏：与 A 档完全一致的 Kline 图标 + 名称 + 右侧「登录」胶囊 + 1pt 分隔线'],
+       [2,'一行横滑快捷入口：6 张 chip 172×68、浅灰底 #F2F2F7 圆角 12，图标 22pt + 标题 13pt semibold + 副标题 11pt 灰字；已剔除与底部 Tab 重复的自选 / 行情 / 模拟'],
+       [3,'第 6 项「个人中心」右侧半露：6 项合计 6×172＋5×12＝1092pt > 1024pt，直观表达这一行可左右拖动，行内不加滚动条'],
+       [4,'大盘概览条（通栏卡，高 96）：上证指数 3218.45 +0.62%、深证成指 10142.80 +0.38%、创业板指 2024.63 -0.21%、科创50 986.32 -0.41%，名称 12pt / 现价 15pt semibold / 涨跌幅 12pt 红涨绿跌'],
+       [5,'我的自选卡（2 列左，高 224）：5 行标的（贵州茅台 600519 到招商银行 600036），名称 13pt + 代码 11pt、现价 13pt、涨跌幅胶囊，每行带 60×24 迷你走势折线'],
+       [6,'模拟账户汇总卡（2 列右，高 224）：总资产 ¥1,286,430、当日盈亏 +¥8,214（+0.64%）、持仓占比 62% 进度条，下方持仓 Top 3 名称 + 现价 + 盈亏'],
+       [7,'涨幅榜 Top 5（通栏卡，高 224）+ 涨跌家数：涨 1832 / 平 96 / 跌 741、涨停 23 / 跌停 4；涨幅榜按降序，中际旭创 +10.02% 居首']],
+  pro:['入口只保留搜索标的 / 技术指标 / 选股指标 / 交易策略 / 条件单 / 个人中心，与底部 Tab 的自选 / 行情 / 模拟不再重复',
+       '入口从铺满首屏压成一行 68pt 高（连边距 78pt），省出约 480pt 高度给行情内容',
+       '一行横滑 + 第 6 项半露，入口继续增加时只延长这一行，不动下方布局',
+       '四块内容首屏全见：4 个指数 + 5 行自选 + 账户 4 项 + 涨幅榜 5 行，约 30 个数据元素'],
+  con:['横滑行必须左右拖动才能看全 6 项，第 6 项默认只露约一半（88 / 172pt），可发现性下降',
+       '内容区四块都依赖行情数据就绪，冷启动首屏会有短暂加载态',
+       '自选卡与涨幅榜是两张不同的表，同一屏出现两组「涨跌幅」列，需要靠卡片标题区分',
+       '首屏元素从 A 档的 3 个增到约 30 个，视觉密度大幅上升']},
  'homeC':{kind:'首页方案 C',badge:'重设计',
-  cap:'<b>方案 C</b> · 分区列表入口：三组六行，每行带一句说明',
-  desc:'把入口按「行情 / 研究 / 账户」分成三组，每行 56pt：左侧 28pt 图标方块、中间标题 16pt + 副标题 12pt、右侧 chevron.right，行与行之间 1pt 分隔线。',
-  ann:[[1,'顶部标题栏与 A 档完全一致'],
-       [2,'分组标题：行情 / 研究 / 账户，13pt 灰字、左对齐 16'],
-       [3,'入口行：28pt 图标方块（浅灰底 #F2F2F7 圆角 7）+ 标题 16pt + 副标题 12pt 灰字'],
-       [4,'行右侧 chevron.right 13pt 灰，行与行之间 1pt 分隔线'],
-       [5,'账户组：模拟交易（账户 / 持仓 / 委托 / 条件单）、个人中心（主题 / 布局 / 本地更新）'],
-       [6,'底部 Tab 栏，「首页」蓝色高亮']],
-  pro:['每行带一句说明，新用户不看图标也能懂','分区把 6 个入口归类，层级比宫格更清晰','行组件与个人中心设置页同构，实现成本低'],
-  con:['列表只占上半屏，下半屏约 208pt 留白','一屏只放 6 行，入口继续增加就要滚动','横向空间利用一般，右侧 chevron 之外没有内容']},
+  cap:'<b>方案 C</b> · 分区列表：四块通栏卡片 + 24pt 紧凑行，信息密度最高',
+  desc:'标题栏与横滑快捷入口与 B 档一致，内容区改为四张通栏卡片自上而下：大盘概览（84）→ 我的自选（152）→ 模拟账户汇总 · 持仓 Top 3（152）→ 涨幅榜 Top 5（152）。每张卡内先是 13pt 灰色小标题，再是行高 24pt 的紧凑行、行间 1pt 分隔线、不带迷你走势；模拟账户块用「汇总 2 行 + 持仓 Top 3」的写法，整屏 19 行数据。',
+  ann:[[1,'顶部标题栏：与 A 档完全一致（Kline 图标 + 登录胶囊 + 1pt 分隔线）'],
+       [2,'一行横滑快捷入口：6 张 chip 172×68，共 1092pt 宽，只占 78pt 高，不再与底部 Tab 重复'],
+       [3,'第 6 项「个人中心」半露：由屏右边裁掉约一半，配合无滚动条的设计就是「可以左右拖」的全部提示'],
+       [4,'大盘概览通栏卡（高 84）：13pt 灰标题 + 4 指数单行紧凑排布（名称 11pt / 现价 14pt semibold / 涨跌幅 11pt）+ 涨 1832 / 平 96 / 跌 741、涨停 23 / 跌停 4'],
+       [5,'我的自选通栏卡（高 152）：5 行紧凑行，行高 24pt、行间 1pt 分隔线、无迷你走势；名称 13pt 与代码 11pt 同行存放，是三档里信息密度最高的一档'],
+       [6,'模拟账户汇总 · 持仓 Top 3 通栏卡（高 152）：汇总 2 行（总资产 ¥1,286,430 + 持仓占比 62% / 当日盈亏 +¥8,214 +0.64%）+ 持仓 Top 3，共 5 行'],
+       [7,'涨幅榜 Top 5 通栏卡（高 152）：5 行按涨跌幅降序，中际旭创 +10.02% 居首；底部 Tab 栏「首页」蓝色高亮']],
+  pro:['入口行只有 78pt 高、且不与底部 Tab 重复，首屏空间基本让给内容',
+       '四块内容各一张通栏卡 + 24pt 行高，一屏放下 19 行数据，信息密度三档最高',
+       '行与行靠 1pt 分隔线切分，992pt 的横向宽度全部分给数据列，没有 2 列分割的浪费',
+       '无迷你走势等装饰元素，渲染节点最少，滚动与刷新成本最低'],
+  con:['行高压到 24pt，13pt 名称与胶囊挤在同一行，长时间盯盘比 B 档更累眼',
+       '横滑入口仍需左右拖动才能看全 6 项；内容区四块同样依赖行情数据，首屏有加载态',
+       '四块通栏卡自上而下等权排列，没有主次，模拟账户的当日盈亏不够突出',
+       '首屏信息量最大（19 行），新手容易不知从哪看起']},
  'homeD':{kind:'首页方案 D',badge:'重设计',
-  cap:'<b>方案 D</b> · 卡片工作台：大卡 + 2×2 中卡 + 小卡',
-  desc:'顶部一张 992×76 的大卡作为搜索标的入口，中间 2×2 中卡网格给出自选 / 行情 / 模拟交易 / 公式管理，底部一张 992×64 小卡放个人中心；三种卡片尺寸形成主次。',
-  ann:[[1,'顶部标题栏与 A 档完全一致'],
-       [2,'顶部大卡：magnifyingglass + 「搜索标的」16pt semibold，右侧一行 12pt 灰字说明'],
-       [3,'2×2 中卡：每张 490×104，图标 22pt + 标题 15pt semibold + 11.5pt 灰字说明'],
-       [4,'中卡「行情」：说明文案「沪深主板 + ETF 指数」，与其它卡等宽等高'],
-       [5,'中卡「公式管理」：说明文案「指标 / 选股 / 策略」'],
-       [6,'底部小卡：个人中心，图标 22pt + 标题 + chevron，高度 64']],
-  pro:['大 / 中 / 小三种卡片形成主次，搜索标的被突出为第一入口','每张卡都带一句说明，理解成本最低','卡片尺寸有节奏，横屏三段式利用极充分'],
-  con:['三种卡片尺寸 × 横竖屏，实现与适配成本最高','同为一屏 6 个入口，卡片占高更多、下方仍留约 264pt','阴影 / 圆角 / 说明文案都要逐卡维护，视觉元素最多']},
+  cap:'<b>方案 D</b> · 工作台混排：大盘大卡 + 2 列小卡 + 底部横滑 chips',
+  desc:'标题栏与横滑快捷入口与 B 档一致，内容区用三种尺寸做节奏：大盘概览大卡（通栏 104，指数横排在上、涨跌家数在下方）→ 模拟账户汇总 / 我的自选 Top 3 两张 2 列小卡（各 216，自选只列 3 行、无走势）→ 底部涨幅榜改为一行横滑 chips（168×72，名称 + 现价 + 涨跌幅，第 6 张半露）。卡片区下方留白约 130pt，留给后续模块。',
+  ann:[[1,'顶部标题栏：与 A 档完全一致（Kline 图标 + 登录胶囊 + 1pt 分隔线）'],
+       [2,'一行横滑快捷入口：6 张 chip 172×68、共 1092pt，只占 78pt 高；自选 / 行情 / 模拟已从入口里剔除，交给底部 Tab'],
+       [3,'第 6 项「个人中心」半露：露出约 88pt（一半），是这一行可左右拖动的唯一视觉提示，行内不加滚动条'],
+       [4,'大盘概览大卡（通栏，高 104）：4 指数横排在上（上证指数 3218.45 +0.62% 到 科创50 986.32 -0.41%），涨 1832 / 平 96 / 跌 741、涨停 23 / 跌停 4 在下方'],
+       [5,'模拟账户汇总小卡（2 列左，高 216）：总资产 ¥1,286,430、当日盈亏 +¥8,214（+0.64%）、持仓占比 62%，加持仓 Top 3'],
+       [6,'我的自选 Top 3 小卡（2 列右，高 216）：只列 3 行、行高 44pt、无迷你走势，底部「查看全部 5 只」'],
+       [7,'涨幅榜改一行横滑 chips（168×72：名称 + 现价 + 涨跌幅），第 6 张 chip 半露表达可横滑；卡片区下方留白约 130pt']],
+  pro:['入口行 78pt 高且不再与底部 Tab 重复，首屏腾出的空间用来放大盘与账户两块最常看的数据',
+       '大盘大卡 / 2 列小卡 / 底部 chips 三种尺寸形成主次，横屏三段式利用充分',
+       '涨幅榜改成横滑 chips，一卡一标的、不占纵向高度，扫视效率比列表高',
+       '卡片区下方留白约 130pt，后续加「资讯 / 复盘 / 龙虎榜」不用重排'],
+  con:['涨幅榜只有 5 个 chip 完全可见（第 6 个半露 88pt），看全要横拖一次',
+       '内容区依赖行情数据就绪，冷启动首屏有加载态',
+       '同一屏出现两条横滑行（顶部入口 + 底部 chips），滑动方向一致但语义不同，需要区分',
+       '信息量三档最少，大盘大卡与 2 列小卡之后仍空约 130pt']},
  'profileHomeLayout':{kind:'个人中心 · 首页布局',badge:'入口',
   cap:'<b>个人中心</b> · 首页布局：六行设置 + 居中四选项面板',
   desc:'个人中心六行设置（Kline 显示主题、快捷面板布局、模拟页布局、自选页布局、行情页布局、首页布局）共用同一个 210pt 宽的选择面板。点「首页布局」右侧下拉按钮，面板在屏幕中央弹出，当前档 B 右侧显示蓝色对勾，底部蓝色「完成」关闭。',
@@ -540,9 +727,9 @@ const SCREENS={
 /* 屏内编号标注坐标（1024×768 坐标系） */
 const MARKS={
  'homeA':[[1,110,28],[2,858,28],[3,640,374],[4,640,424],[5,128,744]],
- 'homeB':[[1,110,28],[2,520,87],[3,70,128],[4,38,159],[5,800,159],[6,292,261]],
- 'homeC':[[1,110,28],[2,70,80],[3,330,125],[4,988,125],[5,330,429],[6,128,744]],
- 'homeD':[[1,110,28],[2,200,111],[3,260,213],[4,750,213],[5,750,329],[6,600,425]],
+ 'homeB':[[1,620,28],[2,10,101],[3,1014,140],[4,10,193],[5,10,363],[6,1014,363],[7,10,597]],
+ 'homeC':[[1,620,28],[2,10,101],[3,1014,140],[4,10,187],[5,10,313],[6,1014,473],[7,10,633]],
+ 'homeD':[[1,620,28],[2,10,101],[3,1014,140],[4,10,197],[5,10,367],[6,1014,367],[7,10,543]],
  'profileHomeLayout':[[1,200,28],[2,500,87],[3,900,87],[4,760,317],[5,392,505],[6,512,463]]
 };
 
@@ -609,7 +796,7 @@ window.addEventListener('hashchange',()=>{ if(!applyShot()) initNormal(); });
 
 /* =============== 初始化 =============== */
 function initNormal(){
-  document.title='Kline 首页布局重设计方案 · 4 档';
+  document.title='Kline 首页布局重设计方案 · 4 档（B/C/D 新形态）';
   showHome('homeB');
   $('#pfCap').innerHTML=SCREENS['profileHomeLayout'].cap;
   renderNotes('pfNotes','profileHomeLayout');

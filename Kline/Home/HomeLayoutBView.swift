@@ -2,90 +2,85 @@
 //  HomeLayoutBView.swift
 //  Kline
 //
-//  首页 B 档布局（宫格快捷入口，默认档）：
-//  标题栏 + 只读搜索条 + 「快捷入口」分组标题 + 自适应列数的入口宫格。
-//  入口文案 / 图标 / 语义色全部来自共享骨架 HomePageKit（HomeEntryKind + HomeEntryTile），
-//  本档只做组合、列数自适应与入口动作映射，不复制任何入口实现。
+//  首页 B 档布局（默认档，卡片网格）：横滑快捷入口行 + 内容区卡片网格。
+//  - 大盘概览卡（非紧凑）
+//  - 我的自选 + 模拟账户：各占一半宽、顶部对齐（带迷你走势）
+//  - 涨幅榜通栏卡（列表行）
+//  共享骨架：标题栏 HomeHeaderBar + 横滑入口行 HomeQuickEntryRow + 内容块 HomeContentBlocks；
+//  数据由 HomePageModel 提供，入口动作由容器注入的闭包承担（本档不持状态、不发命令）。
 //
 
 import SwiftUI
 
 struct HomeLayoutBView: View {
+    @ObservedObject var model: HomePageModel
     let onSelectTab: (Int) -> Void
     let onSearch: () -> Void
+    let onOpenFormula: (FormulaKind) -> Void
+    let onOpenCondOrder: () -> Void
     let onProfile: () -> Void
-    let onFormula: () -> Void
-
-    init(onSelectTab: @escaping (Int) -> Void,
-         onSearch: @escaping () -> Void,
-         onProfile: @escaping () -> Void,
-         onFormula: @escaping () -> Void) {
-        self.onSelectTab = onSelectTab
-        self.onSearch = onSearch
-        self.onProfile = onProfile
-        self.onFormula = onFormula
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             HomeHeaderBar(onProfile: onProfile)
             Divider()
 
-            // 只读搜索条：点击进入搜索模式（与搜索态的搜索框同款外观）
-            HomeSearchBar(onTap: onSearch)
+            // 横滑快捷入口行（6 项 chip 合计约 1100pt，横屏下需左右拖动）
+            HomeQuickEntryRow(onTap: perform)
 
-            // 「快捷入口」分组标题
-            HStack {
-                Text("快捷入口")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
-
-            // 宫格：列数按可用宽度自适应（≥960 四列 / ≥640 三列 / 否则两列）
-            GeometryReader { geo in
-                ScrollView {
-                    LazyVGrid(columns: Self.gridColumns(for: geo.size.width), spacing: 12) {
-                        ForEach(HomeEntryKind.allCases) { kind in
-                            HomeEntryTile(kind: kind, action: { perform(kind) })
-                        }
+            ScrollView {
+                VStack(spacing: 12) {
+                    HomeSectionCard(title: "大盘概览") {
+                        HomeMarketOverviewStrip(rows: model.indexQuotes, breadth: model.breadth,
+                                                compact: false)
                     }
-                    .padding(16)
+
+                    // 我的自选 + 模拟账户：各占一半宽、顶部对齐（内容行数不同不强行等高）
+                    HStack(alignment: .top, spacing: 12) {
+                        HomeSectionCard(title: "我的自选") {
+                            HomeFavoritesBlock(rows: model.favoriteRows, compact: false,
+                                               showsSparkline: true,
+                                               onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                        }
+                        .frame(maxWidth: .infinity, alignment: .top)
+
+                        HomeSectionCard(title: "模拟账户") {
+                            HomeSimSummaryBlock(model: model, compact: false,
+                                                onTap: { onSelectTab(3) })
+                        }
+                        .frame(maxWidth: .infinity, alignment: .top)
+                    }
+
+                    HomeSectionCard(title: "涨幅榜") {
+                        HomeTopGainersBlock(rows: model.topGainers, style: .list, compact: false,
+                                            isReady: model.isMarketReady, onOpen: openDetail)
+                    }
                 }
+                .padding(16)
             }
         }
     }
 
-    // MARK: - 入口动作映射（三档一致：搜索进搜索模式；自选 / 行情 / 模拟切底部 Tab；公式 / 个人中心各自入口）
+    // MARK: - 入口动作映射（三档一致）
 
+    /// 搜索进搜索模式；三个公式入口按分段打开公式管理中心；条件单 / 个人中心各自入口
     private func perform(_ kind: HomeEntryKind) {
         switch kind {
         case .search: onSearch()
-        case .favorites: onSelectTab(1)
-        case .market: onSelectTab(2)
-        case .simulation: onSelectTab(3)
-        case .formula: onFormula()
+        case .tech, .picker, .strategy:
+            if let fk = kind.formulaKind { onOpenFormula(fk) }
+        case .condOrder: onOpenCondOrder()
         case .profile: onProfile()
         }
     }
 
-    /// 列数按可用宽度自适应（口径与行情页 C 档一致）
-    private static func gridColumns(for width: CGFloat) -> [GridItem] {
-        let count: Int
-        if width >= 960 {
-            count = 4
-        } else if width >= 640 {
-            count = 3
-        } else {
-            count = 2
-        }
-        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+    /// 打开 K 线详情（与行情 / 自选页同机制，带上当前列表作为副图切换上下文）
+    private func openDetail(_ meta: MetaItem, in context: [MetaItem]) {
+        DetailRouter.shared.open(meta, in: context)
     }
 }
 
 #Preview {
-    HomeLayoutBView(onSelectTab: { _ in }, onSearch: {}, onProfile: {}, onFormula: {})
+    HomeLayoutBView(model: HomePageModel(), onSelectTab: { _ in }, onSearch: {},
+                    onOpenFormula: { _ in }, onOpenCondOrder: {}, onProfile: {})
 }

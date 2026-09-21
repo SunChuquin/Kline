@@ -2,30 +2,29 @@
 //  HomePageKit.swift
 //  Kline
 //
-//  首页共享骨架：入口清单模型 HomeEntryKind 与跨布局共享的子视图
-//  （标题栏 HomeHeaderBar / 搜索条 HomeSearchBar / 宫格磁贴 HomeEntryTile /
-//   列表行 HomeEntryRow / 卡片 HomeEntryCard / 搜索模式视图 HomeSearchModeView），
-//  以及公式管理全屏浮层 homeOverlays(...)。
+//  首页共享骨架：入口清单 HomeEntryKind、横滑快捷入口行（HomeQuickEntryRow + HomeQuickEntryChip）、
+//  标题栏 HomeHeaderBar、搜索模式视图 HomeSearchModeView，以及单一目标浮层 homeOverlays(...)。
 //  设计要点：
-//  - 入口文案 / 图标 / 语义色统一由 HomeEntryKind 提供，四档共用同一份清单，各档只做组合；
-//  - 入口控件只接收闭包（action / onTap / onProfile），不持任何状态、不发命令，
-//    状态与跳转统一由容器 HomeView 注入（写法与 FavoritesPageKit / MarketPageKit 同惯例）；
-//  - 颜色全部走语义色（Color(.systemBackground) / Color(.systemGray5) / .primary / .secondary），
+//  - 入口文案 / 图标 / 语义色统一由 HomeEntryKind 提供，三档共用同一份清单，各档只做组合；
+//  - 入口与底部导航栏重复的三项（自选 / 行情 / 模拟）已按用户反馈剔除，只留首页独有的入口；
+//  - 入口控件只接收闭包（onTap / onProfile），不持任何状态、不发命令，
+//    状态与跳转（搜索 / 公式分段 / 条件单 / 个人中心）统一由容器 HomeView 注入；
+//  - 颜色全部走语义色（Color(.systemBackground) / Color(.secondarySystemBackground) / .primary / .secondary），
 //    深色模式自动适配；可点击元素命中区均 ≥ 44pt，且高度固定（点击与切档不抖动）。
 //
 
 import SwiftUI
 
-// MARK: - 入口清单（四档共用同一份数据）
+// MARK: - 入口清单（三档共用同一份数据）
 
-/// 首页入口类型：名称 / 说明 / 图标 / 语义色。
-/// B 档取 title + icon；C 档取 title + subtitle + icon；D 档取 title + subtitle + icon。
+/// 首页入口类型：名称 / 说明 / 图标 / 语义色 / 公式分段。
+/// 只收首页独有入口（自选 / 行情 / 模拟与底部导航栏重复，已剔除）。
 enum HomeEntryKind: String, CaseIterable, Identifiable {
     case search
-    case favorites
-    case market
-    case simulation
-    case formula
+    case tech
+    case picker
+    case strategy
+    case condOrder
     case profile
 
     var id: String { rawValue }
@@ -34,23 +33,23 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .search: return "搜索标的"
-        case .favorites: return "自选"
-        case .market: return "行情"
-        case .simulation: return "模拟交易"
-        case .formula: return "公式管理"
+        case .tech: return "技术指标"
+        case .picker: return "选股指标"
+        case .strategy: return "交易策略"
+        case .condOrder: return "条件单"
         case .profile: return "个人中心"
         }
     }
 
-    /// 入口说明（C 档列表行副标题 / D 档卡片说明）
+    /// 入口说明（横滑 chip 的副标题）
     var subtitle: String {
         switch self {
-        case .search: return "按名称 / 代码检索标的"
-        case .favorites: return "分组自选与公式选股结果"
-        case .market: return "沪深主板 / ETF 指数行情表"
-        case .simulation: return "账户、持仓、委托与条件单"
-        case .formula: return "技术指标 / 选股指标 / 交易策略"
-        case .profile: return "主题、页面布局与本地更新"
+        case .search: return "按名称 / 代码检索"
+        case .tech: return "主图叠加与副图指标"
+        case .picker: return "全市场跑选股"
+        case .strategy: return "策略与历史回测"
+        case .condOrder: return "监控与触发下单"
+        case .profile: return "主题与页面布局"
         }
     }
 
@@ -58,10 +57,10 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .search: return "magnifyingglass"
-        case .favorites: return "folder"
-        case .market: return "chart.bar"
-        case .simulation: return "gamecontroller"
-        case .formula: return "function"
+        case .tech: return "function"
+        case .picker: return "line.3.horizontal.decrease.circle"
+        case .strategy: return "chart.xyaxis.line"
+        case .condOrder: return "bell.badge"
         case .profile: return "person.circle"
         }
     }
@@ -70,20 +69,82 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .search: return .blue
-        case .favorites: return .orange
-        case .market: return .red
-        case .simulation: return .green
-        case .formula: return .purple
+        case .tech: return .purple
+        case .picker: return .orange
+        case .strategy: return .teal
+        case .condOrder: return .red
         case .profile: return .blue
         }
+    }
+
+    /// 公式类入口对应的公式管理中心分段（非公式入口为 nil）
+    var formulaKind: FormulaKind? {
+        switch self {
+        case .tech: return .tech
+        case .picker: return .picker
+        case .strategy: return .strategy
+        case .search, .condOrder, .profile: return nil
+        }
+    }
+}
+
+// MARK: - 横滑快捷入口行（三档共用）
+
+/// 首页横滑快捷入口行：一行可左右拖动的入口卡片。
+/// 6 项 chip 合计约 1100pt > 1024pt（iPad mini 4 横屏），横屏下天然需要左右拖动 ——
+/// 这是本次变更的核心诉求（首屏不再被宫格/列表占满），chip 的 minWidth 不要调小到能一屏放下。
+struct HomeQuickEntryRow: View {
+    let onTap: (HomeEntryKind) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(HomeEntryKind.allCases) { kind in
+                    HomeQuickEntryChip(kind: kind, action: { onTap(kind) })
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
+}
+
+/// 快捷入口卡片：图标 22pt + 标题 13pt + 一行说明 11pt。
+/// 固定最小宽 168 / 最小高 68（命中区 ≥ 44pt）；点击整卡生效。
+struct HomeQuickEntryChip: View {
+    let kind: HomeEntryKind
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Image(systemName: kind.icon)
+                    .font(.system(size: 22))
+                    .foregroundColor(kind.tint)
+                Text(kind.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.primary)
+                Text(kind.subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(minWidth: 168, minHeight: 68, alignment: .leading)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home.entry.\(kind.rawValue)")
     }
 }
 
 // MARK: - 顶部标题栏（等价搬入改造前 HomeView 非搜索态的标题栏）
 
-/// 首页标题栏：左侧软件图标 + 名称，右侧「登录」用户入口胶囊。四档共用。
+/// 首页标题栏：左侧软件图标 + 名称，右侧「登录」用户入口胶囊。三档共用。
 /// 外观、间距、配色与改造前逐项一致；用户入口点击由容器注入的 `onProfile` 承担。
-/// 无障碍标识 `home.page` 挂在软件名 Text 上：四档都渲染本标题栏，
+/// 无障碍标识 `home.page` 挂在软件名 Text 上：三档都渲染本标题栏，
 /// Text 在无障碍树里是 staticText，`app.staticTexts["home.page"]` 稳定命中
 /// （挂在各档内容根容器上的标识在 SwiftUI 里未必暴露成元素）。
 struct HomeHeaderBar: View {
@@ -125,161 +186,7 @@ struct HomeHeaderBar: View {
     }
 }
 
-// MARK: - 只读搜索条（B 档顶部，点击进入搜索模式）
-
-/// 只读样式的搜索条：外观同搜索模式的搜索框（灰色放大镜 + 「搜索」灰字 + 灰底圆角条），
-/// 本身不接受输入，整条可点（命中区高 44pt）→ 由容器把 `isSearching` 置真进入搜索模式。
-struct HomeSearchBar: View {
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.gray)
-                Text("搜索")
-                    .foregroundColor(.gray)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity)
-            .frame(height: 36)
-            .background(Color(.systemGray5))
-            .cornerRadius(8)
-            // 外观 36pt 高，命中区补到 44pt（补的空间在上下，视觉不变）
-            .frame(height: 44)
-            .contentShape(Rectangle())
-            .padding(.horizontal, 16)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - 宫格磁贴（B 档）
-
-/// 宫格入口磁贴：图标 28 + 名称 13，格高固定 88pt（≥ 44pt 命中区），整格可点。
-struct HomeEntryTile: View {
-    let kind: HomeEntryKind
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: kind.icon)
-                    .font(.system(size: 28))
-                    .foregroundColor(kind.tint)
-                Text(kind.title)
-                    .font(.system(size: 13))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 88)
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("home.entry.\(kind.rawValue)")
-    }
-}
-
-// MARK: - 列表入口行（C 档）
-
-/// 分区列表入口行：左侧 28pt 图标方块 + 标题 16 + 说明 12 + 右侧 chevron，行高固定 56pt，整行可点。
-struct HomeEntryRow: View {
-    let kind: HomeEntryKind
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: kind.icon)
-                    .font(.system(size: 15))
-                    .foregroundColor(kind.tint)
-                    .frame(width: 28, height: 28)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(7)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(kind.title)
-                        .font(.system(size: 16))
-                        .foregroundColor(.primary)
-                    Text(kind.subtitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 56)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("home.entry.\(kind.rawValue)")
-    }
-}
-
-// MARK: - 入口卡片（D 档）
-
-/// 卡片入口：大卡 / 中卡 / 小卡共用一份实现，只参数化高度与排版（不做三份重复实现）。
-/// - Parameters:
-///   - height: 卡片高度（D 档：大卡 / 中卡 104、小卡 64 等，由布局视图传入）
-///   - big: true → 标题 16 semibold + 说明 12（大卡）；false → 标题 15 semibold + 说明 11.5（中卡）
-///   - showsChevron: 小卡右侧显示 chevron（无说明行的横向卡）
-struct HomeEntryCard: View {
-    let kind: HomeEntryKind
-    let height: CGFloat
-    var big: Bool = false
-    var showsChevron: Bool = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: big ? 8 : 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: kind.icon)
-                        .font(.system(size: 22))
-                        .foregroundColor(kind.tint)
-                    Text(kind.title)
-                        .font(.system(size: big ? 16 : 15, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    if showsChevron {
-                        Spacer(minLength: 4)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                Text(kind.subtitle)
-                    .font(.system(size: big ? 12 : 11.5))
-                    .foregroundColor(.secondary)
-                    .lineLimit(big ? 2 : 1)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !showsChevron {
-                    Spacer(minLength: 0)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: height)
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("home.entry.\(kind.rawValue)")
-    }
-}
-
-// MARK: - 搜索模式（四档共用，等价搬入改造前 HomeView 的搜索态）
+// MARK: - 搜索模式（三档共用，等价搬入改造前 HomeView 的搜索态）
 
 /// 首页搜索模式：返回按钮 + 搜索框（自动聚焦）+ 搜索结果页。
 /// 与改造前逐项一致：`.focused` 延时 0.05s 自动聚焦；点返回清空 `searchText` 并置 `isSearching = false`。
@@ -338,19 +245,40 @@ struct HomeSearchModeView: View {
     }
 }
 
-// MARK: - 浮层（公式管理中心，四档共用）
+// MARK: - 浮层（单一呈现目标，三档共用）
 
-/// 首页浮层：公式管理中心全屏页面（铺满，无遮罩），关闭走页内「返回」。
+/// 首页浮层的单一呈现目标：公式管理中心（按分段）/ 条件单管理页。
+/// 用单一 target 枚举而非多个 Bool：类型上保证同时只呈现一个，切换时自然替换。
+enum HomeOverlayTarget: Identifiable, Equatable {
+    case formula(FormulaKind)
+    case condOrder
+
+    var id: String {
+        switch self {
+        case .formula(let kind): return "formula.\(kind.rawValue)"
+        case .condOrder: return "condOrder"
+        }
+    }
+}
+
+/// 首页浮层容器：公式管理中心 / 条件单管理页都是全屏页面（铺满，无遮罩），关闭走页内「返回」。
 /// 与个人中心同做法：挂在页面根视图上，避免被列表 ScrollView 裁剪。
 struct HomeOverlays: ViewModifier {
-    @Binding var showFormulaCenter: Bool
+    @Binding var target: HomeOverlayTarget?
 
     func body(content: Content) -> some View {
         content
             .overlay {
-                if showFormulaCenter {
+                if let t = target {
                     ZStack {
-                        FormulaCenterView(initialKind: .tech, onClose: { showFormulaCenter = false })
+                        switch t {
+                        case .formula(let kind):
+                            // `.id`：切分段（技术 / 选股 / 策略）时重建页面，让初始分段真正生效
+                            FormulaCenterView(initialKind: kind, onClose: { target = nil })
+                                .id(t.id)
+                        case .condOrder:
+                            SimCondListView(accountID: nil, onClose: { target = nil })
+                        }
                     }
                     .transition(.opacity)
                     .zIndex(1000)
@@ -360,9 +288,9 @@ struct HomeOverlays: ViewModifier {
 }
 
 extension View {
-    /// 挂载首页浮层（公式管理中心；四档共用）
-    func homeOverlays(showFormulaCenter: Binding<Bool>) -> some View {
-        modifier(HomeOverlays(showFormulaCenter: showFormulaCenter))
+    /// 挂载首页浮层（公式管理中心 / 条件单管理页；三档共用）
+    func homeOverlays(target: Binding<HomeOverlayTarget?>) -> some View {
+        modifier(HomeOverlays(target: target))
     }
 }
 
@@ -370,18 +298,7 @@ extension View {
     VStack(spacing: 0) {
         HomeHeaderBar(onProfile: {})
         Divider()
-        HomeSearchBar(onTap: {})
-        ScrollView {
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    HomeEntryTile(kind: .search, action: {})
-                    HomeEntryTile(kind: .favorites, action: {})
-                }
-                HomeEntryRow(kind: .market, action: {})
-                HomeEntryCard(kind: .simulation, height: 104, big: true, action: {})
-                HomeEntryCard(kind: .profile, height: 64, showsChevron: true, action: {})
-            }
-            .padding()
-        }
+        HomeQuickEntryRow(onTap: { _ in })
+        Spacer()
     }
 }

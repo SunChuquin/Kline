@@ -2,104 +2,77 @@
 //  HomeLayoutCView.swift
 //  Kline
 //
-//  首页 C 档布局（分区列表入口）：
-//  标题栏 + 三组分区卡片（行情 / 研究 / 账户），组内是共享的入口行 HomeEntryRow。
-//  入口文案 / 图标 / 语义色全部来自共享骨架 HomePageKit（HomeEntryKind + HomeEntryRow），
-//  本档只做分组定义与入口动作映射，不复制任何入口实现。
+//  首页 C 档布局（分区列表 / 紧凑通栏）：横滑快捷入口行 + 四块通栏内容卡。
+//  顺序：大盘概览 → 我的自选 → 模拟账户 → 涨幅榜（列表行）；全部紧凑（行高 40、无走势图）。
+//  共享骨架：标题栏 HomeHeaderBar + 横滑入口行 HomeQuickEntryRow + 内容块 HomeContentBlocks；
+//  数据由 HomePageModel 提供，入口动作由容器注入的闭包承担（本档不持状态、不发命令）。
 //
 
 import SwiftUI
 
-// MARK: - 分组定义（固定顺序：行情 / 研究 / 账户）
-
-/// 首页入口分组：组名 + 组内入口（顺序即渲染顺序）
-private struct HomeEntryGroup: Identifiable {
-    let title: String
-    let kinds: [HomeEntryKind]
-
-    var id: String { title }
-}
-
 struct HomeLayoutCView: View {
+    @ObservedObject var model: HomePageModel
     let onSelectTab: (Int) -> Void
     let onSearch: () -> Void
+    let onOpenFormula: (FormulaKind) -> Void
+    let onOpenCondOrder: () -> Void
     let onProfile: () -> Void
-    let onFormula: () -> Void
-
-    init(onSelectTab: @escaping (Int) -> Void,
-         onSearch: @escaping () -> Void,
-         onProfile: @escaping () -> Void,
-         onFormula: @escaping () -> Void) {
-        self.onSelectTab = onSelectTab
-        self.onSearch = onSearch
-        self.onProfile = onProfile
-        self.onFormula = onFormula
-    }
-
-    /// 三组固定顺序（与 Figma 原型一致）
-    private static let groups: [HomeEntryGroup] = [
-        HomeEntryGroup(title: "行情", kinds: [.market, .favorites]),
-        HomeEntryGroup(title: "研究", kinds: [.search, .formula]),
-        HomeEntryGroup(title: "账户", kinds: [.simulation, .profile])
-    ]
 
     var body: some View {
         VStack(spacing: 0) {
             HomeHeaderBar(onProfile: onProfile)
             Divider()
 
+            // 横滑快捷入口行（6 项 chip 合计约 1100pt，横屏下需左右拖动）
+            HomeQuickEntryRow(onTap: perform)
+
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Self.groups) { group in
-                        groupCard(group)
+                VStack(spacing: 12) {
+                    HomeSectionCard(title: "大盘概览", compact: true) {
+                        HomeMarketOverviewStrip(rows: model.indexQuotes, breadth: model.breadth,
+                                                compact: true)
+                    }
+
+                    HomeSectionCard(title: "我的自选", compact: true) {
+                        HomeFavoritesBlock(rows: model.favoriteRows, compact: true,
+                                           showsSparkline: false,
+                                           onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                    }
+
+                    HomeSectionCard(title: "模拟账户", compact: true) {
+                        HomeSimSummaryBlock(model: model, compact: true, onTap: { onSelectTab(3) })
+                    }
+
+                    HomeSectionCard(title: "涨幅榜", compact: true) {
+                        HomeTopGainersBlock(rows: model.topGainers, style: .list, compact: true,
+                                            isReady: model.isMarketReady, onOpen: openDetail)
                     }
                 }
-                // 末组下方留白（首组上方与组间 14 由每组自身的 .padding(.top, 14) 提供）
-                .padding(.bottom, 14)
+                .padding(16)
             }
         }
     }
 
-    /// 单个分区卡片：组标题 + 组内入口行（行间细分隔线，缩进 56 避开图标方块）
-    private func groupCard(_ group: HomeEntryGroup) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(group.title)
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
+    // MARK: - 入口动作映射（三档一致）
 
-            ForEach(Array(group.kinds.enumerated()), id: \.offset) { index, kind in
-                if index > 0 {
-                    Divider().padding(.leading, 56)
-                }
-                HomeEntryRow(kind: kind, action: { perform(kind) })
-            }
-        }
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-    }
-
-    // MARK: - 入口动作映射（三档一致：搜索进搜索模式；自选 / 行情 / 模拟切底部 Tab；公式 / 个人中心各自入口）
-
+    /// 搜索进搜索模式；三个公式入口按分段打开公式管理中心；条件单 / 个人中心各自入口
     private func perform(_ kind: HomeEntryKind) {
         switch kind {
         case .search: onSearch()
-        case .favorites: onSelectTab(1)
-        case .market: onSelectTab(2)
-        case .simulation: onSelectTab(3)
-        case .formula: onFormula()
+        case .tech, .picker, .strategy:
+            if let fk = kind.formulaKind { onOpenFormula(fk) }
+        case .condOrder: onOpenCondOrder()
         case .profile: onProfile()
         }
+    }
+
+    /// 打开 K 线详情（与行情 / 自选页同机制，带上当前列表作为副图切换上下文）
+    private func openDetail(_ meta: MetaItem, in context: [MetaItem]) {
+        DetailRouter.shared.open(meta, in: context)
     }
 }
 
 #Preview {
-    HomeLayoutCView(onSelectTab: { _ in }, onSearch: {}, onProfile: {}, onFormula: {})
+    HomeLayoutCView(model: HomePageModel(), onSelectTab: { _ in }, onSearch: {},
+                    onOpenFormula: { _ in }, onOpenCondOrder: {}, onProfile: {})
 }

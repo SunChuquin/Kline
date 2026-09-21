@@ -79,6 +79,62 @@
 - [x] Task 14: 逐条核验 checklist（figma 画廊 / 仓库与个人中心 / 首页四档 / 跳转与标识 / 工程与交付），失败条目回填 tasks 修复后重验
 - [x] Task 15: 最终交付说明（各阶段 build 号、4 档一览、真机验证路径与回归点、`git status` 无遗留改动）
 
+## 阶段五（变更二）：figma 画廊同步更新（设计稿先行）
+
+- [x] Task 16: 更新 `figma/home-ui-proposals.html` 的 B / C / D 三屏
+  - [x] SubTask 16.1: B 屏改为「一行横滑入口行（6 项 chips）+ 内容区卡片网格（大盘概览条通栏 / 自选 + 模拟汇总 2 列 / 涨幅榜通栏）」
+  - [x] SubTask 16.2: C 屏改为「同一行横滑入口行 + 四块通栏卡片的紧凑分区列表」
+  - [x] SubTask 16.3: D 屏改为「同一行横滑入口行 + 工作台混排（概览条大卡 / 2 列小卡 / 涨幅榜横滑 chips）」
+  - [x] SubTask 16.4: A 屏与个人中心屏**保持不变**；重写 B/C/D 三屏的 `cap`/`desc`/`ann`/`pro`/`con`（要点：不再与底部栏重复、入口可横滑、内容区信息量），更新对比表六维度取值
+  - [x] SubTask 16.5: 重截 `figma/_shots/home_B.png` / `home_C.png` / `home_D.png`（沿用 `#shot=` 与 700×560 窗口，A 屏与个人中心屏截图不动），逐屏自检无溢出 / 截断 / 重叠
+
+## 阶段六（变更二）：首页数据层 + 共享横滑入口行
+
+- [x] Task 17: 新增首页数据层 `Kline/Home/HomePageModel.swift`
+  - [x] SubTask 17.1: `@MainActor final class HomePageModel: ObservableObject`，快照字段 `indexQuotes: [MarketRow]` / `breadth: HomeBreadth?`（`up`/`down`/`flat`/`limitUp`/`limitDown`/`validCount`）/ `favoriteRows: [MarketRow]` / `topGainers: [MarketRow]`
+  - [x] SubTask 17.2: 指数快照：`DatabaseManager.metaList` 中 `type == "沪深京指数"` 取前 4 只，经 `MarketRowCache.row(for:prefetch:false)` 注册后按就绪状态输出
+  - [x] SubTask 17.3: 涨跌家数与涨幅榜：只遍历 `MarketRowCache.rows` 中 `meta.type == "沪深主板"` 且 `hasBars` 的行，一次性聚合（涨/跌/平 + 涨停 `pct >= 9.8` / 跌停 `pct <= -9.8`）与排序（`changePct` 降序取前 5，过滤 nil）
+  - [x] SubTask 17.4: 自选快照：`FavoritesStore.allGroup` 的标的取前 5，经 `MarketRowCache.rows(for:prefetch:)` 触发行预取（自选恒为高优先级）
+  - [x] SubTask 17.5: 刷新时机：订阅 `MarketRowCache.$rows` 变化 → **防抖 250ms** 合并重算（写法对齐 `MarketPageModel.scheduleOverviewRefresh`）；订阅 `FavoritesStore` / `SimStore` 变化 → 立即重算对应块；同值不赋值（`@Published` 守卫）
+  - [x] SubTask 17.6: 新增只读派生 `simSummary`（读 `SimStore.shared.summary(accountID: nil)`）与 `simPositions`（`positions` + `snapshot(for:)` 取前 5），捕获 `SimQuoteCenter` 取不到的标的时退回成本价，不显示错值
+  - [x] SubTask 17.7: 编码自查：`body` 内禁止全表遍历 / O(n) 聚合；`Color.opacity` 入参 Double；异步回写统一切 `MainActor`
+
+- [x] Task 18: 共享骨架改造 `Kline/Home/HomePageKit.swift`
+  - [x] SubTask 18.1: `HomeEntryKind` 重构为 6 项：`search` / `tech` / `picker` / `strategy` / `condOrder` / `profile`；更新 `title`（搜索标的 / 技术指标 / 选股指标 / 交易策略 / 条件单 / 个人中心）、`subtitle`、`icon`（`magnifyingglass` / `function` / `line.3.horizontal.decrease.circle` / `chart.xyaxis.line` / `bell.badge` / `person.circle`）、`tint`
+  - [x] SubTask 18.2: 新增 `HomeQuickEntryRow`（`ScrollView(.horizontal, showsIndicators: false)` + `HStack(spacing: 12)`，左右内边距 16、高 76）+ `HomeQuickEntryChip`（图标 22 + 名称 13、`Color(.secondarySystemBackground)` + `cornerRadius(12)`、`contentShape(Rectangle())`、命中区 ≥44×44、标识 `home.entry.<kind>`）
+  - [x] SubTask 18.3: **删除**不再被使用的 `HomeEntryTile` / `HomeEntryRow` / `HomeEntryCard` / `HomeSearchBar`（不留死代码）；`HomeHeaderBar` 与 `HomeSearchModeView` 保持不变
+  - [x] SubTask 18.4: `HomeOverlays` 由多个 Bool 改为单一目标枚举：`enum HomeOverlayTarget: Identifiable { case formula(FormulaKind); case condOrder }`，`func homeOverlays(target: Binding<HomeOverlayTarget?>)`；`formula` 呈现 `FormulaCenterView(initialKind:onClose:)`、`condOrder` 呈现 `SimCondListView(accountID: nil, onClose:)`，均 `.transition(.opacity)` + `zIndex(1000)`
+
+- [x] Task 19: 首页容器接线 `Kline/Home/HomeView.swift`
+  - [x] SubTask 19.1: 加 `@StateObject private var model = HomePageModel()`、`@State private var overlayTarget: HomeOverlayTarget?`；入口动作映射改为：`onSearch` / `onOpenFormula(FormulaKind)` / `onOpenCondOrder` / `onProfile` / `onSelectTab(Int)`（空态「去自选页」与模拟卡跳转仍用 `onSelectTab`）
+  - [x] SubTask 19.2: 三档视图签名统一为 `init(model: HomePageModel, onSelectTab:onSearch:onOpenFormula:onOpenCondOrder:onProfile:)`，A 档签名保持不变
+  - [x] SubTask 19.3: 编码自查 + 编译自查（`HomeView` 的 `#Preview` 补 `HomePageModel`；确认无遗留旧控件引用）
+
+## 阶段七（变更二）：三档内容区改造 + 闭环
+
+- [x] Task 20: 新增内容块视图 `Kline/Home/HomeContentBlocks.swift`
+  - [x] SubTask 20.1: `HomeMarketOverviewStrip`（指数 chips：名称 + 现价 + 涨跌幅；涨跌家数行：涨 / 跌 / 平 + 涨停 / 跌停；点了指数进详情）
+  - [x] SubTask 20.2: `HomeFavoritesBlock`（`compact: Bool` + `limit: Int` 参数化：行式 / 卡片式两种排版均由同一实现承载，含迷你走势开关；空态「暂无自选，去自选页添加」可点）
+  - [x] SubTask 20.3: `HomeSimSummaryBlock`（总资产 / 当日盈亏 + 百分比 / 持仓占比 + 持仓 Top N；点击切模拟页）
+  - [x] SubTask 20.4: `HomeTopGainersBlock`（`style: .list / .chips` 参数化：列表式与一行横滑 chips 式；未就绪占位「加载中」）
+  - [x] SubTask 20.5: 全部使用语义化颜色与固定高度；行 / 卡可点区域 `contentShape(Rectangle())`；空态与加载态不引起布局抖动
+
+- [x] Task 21: 三档布局改造（入口行统一 + 内容区各异）
+  - [x] SubTask 21.1: `HomeLayoutBView`：`HomeHeaderBar` + `HomeQuickEntryRow` + 内容区**卡片网格**（概览条通栏 → 自选卡 / 模拟汇总卡 2 列 → 涨幅榜通栏卡，带迷你走势）
+  - [x] SubTask 21.2: `HomeLayoutCView`：同一入口行 + 内容区**分区列表**（四块通栏卡片，内部紧凑行、无迷你走势；组标题 13pt `.secondary`）
+  - [x] SubTask 21.3: `HomeLayoutDView`：同一入口行 + 内容区**工作台混排**（概览条大卡 → 2 列小卡：模拟汇总 + 自选 Top 3 紧凑 → 涨幅榜横滑 chips），删除旧的大卡 / 2×2 / 小卡入口实现
+  - [x] SubTask 21.4: 三档互切自测：入口行内容一致、公式三域与条件单浮层互斥、自选空态与涨幅榜加载态、切档后滚动位置与 Tab 选中态正常
+
+- [ ] Task 22: 阶段七闭环
+  - [ ] SubTask 22.1: 编码自查（死代码清理确认、`body` 内无全表遍历、防抖生效、44pt 命中区）
+  - [ ] SubTask 22.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(home-layout): 首页快捷入口改横滑行（剔除与底部栏重复项）+ 新增四块内容区"`
+  - [ ] SubTask 22.3: 交付说明，等待真机验收
+
+## 阶段八（变更二）：验收
+
+- [ ] Task 23: 逐条核验 checklist 的「变更二」章节（入口行 / 内容区 / 数据口径 / 浮层 / figma 同步 / 工程），失败条目回填 tasks 修复后重验
+- [ ] Task 24: 最终交付说明（build 号、入口与内容区一览、真机验证路径与回归点、`git status` 无遗留改动）
+
 # Task Dependencies
 
 - Task 2 依赖 Task 1（同一 HTML 文件、共用画廊骨架与 `SCREENS` 表）
@@ -91,3 +147,14 @@
 - Task 13 依赖 Task 12
 - Task 14 / 15 依赖 Task 13
 - 阶段一与阶段二可并行（figma 原型不改 Swift 代码）
+
+## 变更二
+
+- Task 16（figma 更新）与 Task 17 / 18 可并行（前者只改 `figma/`，不碰 Swift）
+- Task 17（数据层）与 Task 18（共享骨架）可并行（不同文件）
+- Task 19 依赖 Task 17、Task 18（容器要同时接线模型与浮层枚举）
+- Task 20 依赖 Task 17（内容块消费模型快照）
+- Task 21 依赖 Task 18、Task 19、Task 20（三档要同时用到入口行、模型与内容块）
+- Task 22 依赖 Task 21
+- Task 23 依赖 Task 16、Task 22；Task 24 依赖 Task 23
+- 变更二不改动 A 档、`PageLayoutStore`、个人中心、`ContentView`、`MarketPageKit`、`KlineUITests`（回归面为零）

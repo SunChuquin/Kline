@@ -200,3 +200,193 @@
 ## REMOVED Requirements
 
 无。
+
+***
+***
+
+# 变更二：快捷入口行化 + 首页内容区（用户追加需求）
+
+> 第一轮（A/B/C/D 四档 + 个人中心入口）已交付并真机验收（run=35551076040 / v1.0.2 (348)）。
+> 本节为同一功能的第二轮修订，沿用同一 change-id，追加需求与任务。
+
+## Why（变更二）
+
+真机验收后用户反馈两点：① 首页快捷入口与**底部导航栏功能重叠**（自选 / 行情 / 模拟三项与底部 Tab 完全重复），且宫格式/列表式入口占满首屏、信息量与底部栏重复；② 入口之外首页没有别的内容。
+
+用户要求：**同时保留底部栏与快捷入口**的前提下，把快捷入口改成**一行可左右拖动**的布局、从中**剔除与底部栏重复的入口**，并在这一行下方补上**其他内容控件**（内容项由用户确认，见下）。
+
+## What Changes（变更二）
+
+- 快捷入口重构为**一行横向可拖动**（`ScrollView(.horizontal)` + 单行 chips），三档新布局（B/C/D）**共用同一行入口**；A 档（现有实现）保持不动。
+- **剔除与底部栏重复的三项**（自选 / 行情 / 模拟 —— 底部 Tab 已有），入口清单由 6 项改为新的 6 项（见下表）；`HomeEntryKind` 随之重构。
+- 入口行下方新增**四个内容块**（用户已确认全选）：大盘概览条 / 我的自选 / 模拟账户汇总 / 涨幅榜 Top N；三档的差异从「入口排布」转移到「内容区呈现方式」。
+- 新增首页数据层 `HomePageModel`（`ObservableObject`）：把指数、涨跌家数、自选、涨幅榜在**快照阶段一次性算好**，行数据陆续到位时防抖合并重算（口径与 `MarketPageModel.scheduleOverviewRefresh` 一致），**禁止在 `body` 内遍历全表**。
+- 入口行的横滑、内容块的布局与点击、空态/加载态全部走共享骨架；三档布局视图只做组合。
+- 首页容器层浮层由「多个 Bool」改为**单一目标枚举**（公式管理三域 / 条件单），避免互斥链膨胀。
+- 清理第一轮中**不再被使用**的入口控件（`HomeEntryTile` / `HomeEntryRow` / `HomeEntryCard` / `HomeSearchBar`）——不留死代码。
+- `figma/home-ui-proposals.html` 同步更新：B/C/D 三屏改为「横滑入口行 + 内容区」，重写布局标注 / 优劣势 / 对比表，并重截 `figma/_shots/home_B.png` / `home_C.png` / `home_D.png`。
+- **BREAKING**：无。A 档与个人中心、仓库、底部栏、其他页面均不改动。
+
+## Impact（变更二）
+
+- Affected specs: 本 spec 第一轮的「首页四档布局」（被本轮的「入口行统一、内容区各异」修订）
+- Affected code:
+  - 修改 [HomePageKit.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomePageKit.swift)（`HomeEntryKind` 重构、新增 `HomeQuickEntryRow` / `HomeQuickEntryChip`、删除不再使用的入口控件与搜索条、`HomeOverlays` 改单一目标枚举）
+  - 修改 [HomeView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeView.swift)（`@StateObject HomePageModel`、浮层目标枚举、入口动作映射）
+  - 修改 [HomeLayoutBView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutBView.swift) / [HomeLayoutCView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutCView.swift) / [HomeLayoutDView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutDView.swift)（入口行统一 + 内容区各异）
+  - 新增 `Kline/Home/HomePageModel.swift`（首页数据快照与聚合刷新）、`Kline/Home/HomeContentBlocks.swift`（四个内容块视图）
+  - 修改 `figma/home-ui-proposals.html` + 重截 3 张截图
+  - **不改**：[HomeLayoutAView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeLayoutAView.swift)（A 档零变化）、`PageLayoutStore.swift`、`ProfileDetailView.swift`、`TradingLayoutSettings.swift`、`ContentView.swift`、`MarketPageKit.swift`、`KlineUITests.swift`
+
+***
+
+## 入口清单（变更二：剔除与底部栏重复项后的 6 项）
+
+| 入口 | 图标（SF Symbol） | 行为（全部复用既有实现） | 是否与底部栏重复 |
+|---|---|---|---|
+| 搜索标的 | `magnifyingglass` | 进入现有搜索模式（返回 + 搜索框 + `SearchPageView`） | 否 |
+| 技术指标 | `function` | 首页容器层全屏 `FormulaCenterView(initialKind: .tech)` | 否 |
+| 选股指标 | `line.3.horizontal.decrease.circle` | 同上，`initialKind: .picker` | 否 |
+| 交易策略 | `chart.xyaxis.line` | 同上，`initialKind: .strategy` | 否 |
+| 条件单 | `bell.badge` | 首页容器层全屏 `SimCondListView(accountID: nil, onClose:)`（全部账户汇总） | 否（底部栏只有「模拟」Tab，条件单是模拟域内的独立页面） |
+| 个人中心 | `person.circle` | `isProfilePresented = true` | 否 |
+
+**剔除**：自选 / 行情 / 模拟交易（与底部 Tab 完全重复，用户明确要求剔除）。
+
+## 内容块清单（变更二：用户确认四块全选）
+
+| 内容块 | 数据来源（既有，不新增） | 展示口径 | 点击行为 |
+|---|---|---|---|
+| 大盘概览条 | `DatabaseManager.metaList`（`type == "沪深京指数"`，取前 4）+ `MarketRowCache` 行数据 | 每只指数：名称 + 现价 + 涨跌幅（红涨绿跌）；右侧/下方一行涨跌家数：涨 / 跌 / 平 + 涨停 / 跌停（对沪深主板快照聚合） | 点指数项 → `DetailRouter.open(meta, in: 指数上下文)` |
+| 我的自选 | `FavoritesStore.allGroup`（已合并各分组的全部自选）+ `MarketRowCache` | Top N（默认 5）：名称 / 代码 + 现价 + 涨跌幅胶囊 + 近 20 日迷你走势（复用既有 `MarketSparkline`）；空态：无自选时显示「暂无自选，去自选页添加」 | 点行 → 打开 K 线详情；空态点击 → 切自选页（`selectedTab = 1`） |
+| 模拟账户汇总 | `SimStore.summary(accountID: nil)` + `SimStore.positions` / `snapshot(for:)` | 总资产 / 当日盈亏（含百分比）/ 持仓占比 + 持仓 Top N（名称 / 代码 / 现价 / 盈亏） | 点击 → 切模拟页（`selectedTab = 3`） |
+| 涨幅榜 Top N | `MarketRowCache.rows` 中 `meta.type == "沪深主板"` 且 `hasBars` 的行，按 `number(.changePct)` 降序 | Top N（默认 5）：名称 / 代码 + 现价 + 涨跌幅；数据未就绪时显示占位「加载中」 | 点行 → 打开 K 线详情 |
+
+## 三档呈现差异（变更二：入口行统一，内容区各异）
+
+| 档 | 入口区 | 内容区呈现 |
+|---|---|---|
+| A | 不动（现有实现，无入口行、无内容区） | 不动 |
+| B（默认） | 共用横滑入口行 | **卡片网格**：大盘概览条通栏 → 自选卡（左）/ 模拟汇总卡（右）2 列 → 涨幅榜通栏卡片；自选与涨幅榜带迷你走势/较高行高，卡高固定 |
+| C | 共用横滑入口行 | **分区列表**：四块各一张通栏卡片，内部为紧凑行（自选 / 涨幅榜按行展示、不显示迷你走势），信息密度最高、可读性最好 |
+| D | 共用横滑入口行 | **工作台混排**：概览条大卡 → 2 列小卡（模拟汇总 + 自选 Top 3 紧凑无走势）→ 底部涨幅榜改为**一行横滑 chips**（与入口行同款形态但内容为行情） |
+
+## 数据与性能口径（变更二）
+
+- 新增 `HomePageModel: ObservableObject`，由 `HomeView` 以 `@StateObject` 持有（写法对齐 `MarketPageModel` / `FavoritesPageModel`），向三档布局以 `@ObservedObject` 消费。
+- 快照字段：`indexQuotes: [MarketRow]`（指数）、`breadth: HomeBreadth?`（涨 / 跌 / 平 / 涨停 / 跌停）、`favoriteRows: [MarketRow]`、`topGainers: [MarketRow]`。
+- 刷新时机：`MarketRowCache.$rows` 变化 → **防抖 250ms** 合并重算（禁止逐行到达就全表重算）；`FavoritesStore` / `SimStore` 变化 → 立即重算对应块。
+- **禁止在 `body` 内遍历全表或做 O(n) 聚合**：所有聚合在 `HomePageModel` 内完成（与第一轮行情页 D 档概览同一口径）。
+- 主板行规模约 1000+，只在**已就绪行**（`hasBars`）上聚合；未就绪时不显示该项而非显示错值。
+- 迷你走势复用既有 `MarketSparkline`（现定义在 `MarketLayoutCView.swift`，internal 可直接使用）。
+
+***
+
+## ADDED Requirements（变更二）
+
+### Requirement: 首页快捷入口横滑行
+
+系统 SHALL 把三档新布局（B/C/D）的快捷入口改为**同一行横向可拖动**的布局（`ScrollView(.horizontal)` + 单行 chips，每项 ≥44×44pt 命中区），SHALL 剔除与底部导航栏重复的入口（自选 / 行情 / 模拟），入口清单固定为 6 项（搜索标的 / 技术指标 / 选股指标 / 交易策略 / 条件单 / 个人中心）。
+
+#### Scenario: 入口行可左右拖动且底部栏保留
+
+- **WHEN** 在 B / C / D 任一档，入口行内容宽超过可视宽
+- **THEN** 该行可左右拖动查看全部 6 个入口，且底部导航栏四项 Tab 照常显示与可点
+
+#### Scenario: 不重复跳转底部栏
+
+- **WHEN** 查看入口行
+- **THEN** 行内不再出现「自选 / 行情 / 模拟交易」三项（它们只能通过底部栏进入）
+
+#### Scenario: 公式三域直达
+
+- **WHEN** 点入口行的「技术指标」/「选股指标」/「交易策略」
+- **THEN** 分别全屏呈现 `FormulaCenterView` 并落在对应分段（tech / picker / strategy），页内「返回」回到首页原档位
+
+#### Scenario: 条件单入口
+
+- **WHEN** 点入口行的「条件单」
+- **THEN** 全屏呈现 `SimCondListView`（全部账户汇总口径），页内关闭回到首页原档位
+
+### Requirement: 首页内容区（四块）
+
+系统 SHALL 在快捷入口行下方呈现四个内容块：大盘概览条、我的自选、模拟账户汇总、涨幅榜 Top N；每块的数据口径与点击行为 SHALL 与下方「内容块清单」一致，且全部复用既有数据源（`DatabaseManager.metaList` / `MarketRowCache` / `FavoritesStore` / `SimStore` / `DetailRouter`），不新增数据源、不改持久化结构。
+
+#### Scenario: 大盘概览条数值正确
+
+- **WHEN** 指数与主板行数据就绪
+- **THEN** 概览条显示的指数现价 / 涨跌幅与前 4 只「沪深京指数」的实际行数据一致；涨 / 跌 / 平与涨停 / 跌停家数与沪深主板快照的聚合结果一致
+
+#### Scenario: 我的自选与空态
+
+- **WHEN** 自选为空 / 自选有标的
+- **THEN** 空态显示「暂无自选，去自选页添加」且点击切到自选页；有标的时显示 Top 5（现价 + 涨跌幅 + 迷你走势），点行打开 K 线详情
+
+#### Scenario: 模拟账户汇总
+
+- **WHEN** 存在模拟账户与持仓
+- **THEN** 显示总资产 / 当日盈亏（含百分比）/ 持仓占比 + 持仓 Top N 的现价与盈亏，点击切到模拟页
+
+#### Scenario: 涨幅榜 Top N
+
+- **WHEN** 主板行数据部分或全部就绪
+- **THEN** 已就绪部分按涨跌幅降序显示 Top N（默认 5，过滤无涨跌幅的行），点行打开 K 线详情；完全未就绪时显示占位「加载中」而非错值
+
+#### Scenario: 加载顺序不引起重算风暴
+
+- **WHEN** 启动后主板与指数行陆续到位（约 1000+ 行分批回写）
+- **THEN** 首页内容块按 250ms 防抖合并刷新，不在每行到达时做全表聚合，且 `body` 内无全表遍历
+
+### Requirement: 首页容器层浮层单一目标
+
+系统 SHALL 把首页容器层浮层由多个布尔量改为单一目标枚举（`HomeOverlayTarget?`：公式管理三域 / 条件单），保证同时只呈现一个全屏浮层。
+
+#### Scenario: 浮层互斥
+
+- **WHEN** 先打开「技术指标」再在首页点「条件单」
+- **THEN** 同时只呈现一个浮层（先关后开或直接切换），关闭后回到首页原档位
+
+### Requirement: figma 画廊同步更新
+
+系统交付 SHALL 把 `figma/home-ui-proposals.html` 的 B / C / D 三屏更新为「横滑入口行 + 内容区」形态（A 屏与个人中心屏保持不变），同步重写这三屏的布局标注与优劣势、更新对比表，并重截 `figma/_shots/home_B.png` / `home_C.png` / `home_D.png`。
+
+#### Scenario: 单屏定位仍可截图
+
+- **WHEN** 用无头浏览器打开 `figma/home-ui-proposals.html#shot=homeC`
+- **THEN** 直接呈现更新后的 C 档屏（横滑入口行 + 分区列表式内容区），无多余区块干扰
+
+#### Scenario: 画廊仍是自包含单文件
+
+- **WHEN** 检查文件
+- **THEN** 无任何外链依赖（无 CDN / 远程字体 / 远程图片），设备框尺寸与其他画廊一致（1024×768 → 573×430）
+
+## MODIFIED Requirements（变更二）
+
+### Requirement: 首页四档布局
+
+系统 SHALL 让首页按 `PageLayoutStore.homeLayout` 呈现 A / B / C / D 四档之一。A 档 SHALL 与改造前完全一致（无入口行、无内容区）；B / C / D 三档 SHALL **共用同一行横滑快捷入口**（6 项，剔除与底部栏重复项）并在其下方呈现同样的四个内容块，三档的差异只体现在**内容区的呈现方式**（B 卡片网格 / C 分区列表 / D 工作台混排）。四档共用同一个标题栏与同一套搜索模式。
+
+（第一轮的旧要求「B 为宫格、C 为分组入口行、D 为大卡 + 2×2 中卡」随本轮修订废止；宫格 / 列表行 / 入口卡片三套旧入口控件随之删除。）
+
+#### Scenario: A 档行为零变化
+
+- **WHEN** 布局为 A
+- **THEN** 首页与改造前（第一轮验收版本）的呈现、交互、`home.welcome` 标识完全一致
+
+#### Scenario: 三档入口行一致
+
+- **WHEN** 在 B / C / D 之间切换
+- **THEN** 顶部入口行始终是同一行横滑 6 项入口，只有下方内容区的呈现方式变化
+
+#### Scenario: 搜索模式四档一致
+
+- **WHEN** 任一档进入搜索模式（点入口行首项「搜索标的」）
+- **THEN** 呈现与现状逐项一致的搜索界面（返回按钮 + 搜索框自动聚焦 + `SearchPageView`）；点返回回到该档首页内容
+
+## REMOVED Requirements（变更二）
+
+### Requirement: B 档宫格 / C 档分组入口行 / D 档大卡入口
+
+**Reason**：入口与底部导航栏重复、且占满首屏挤掉了内容；用户明确要求改为一行横滑 + 剔除重复项。
+
+**Migration**：`HomeEntryKind` 重构为 6 项新清单；`HomeEntryTile`（宫格）、`HomeEntryRow`（列表行）、`HomeEntryCard`（卡片）、`HomeSearchBar`（顶部只读搜索条，搜索改由入口行首项承担）四个控件删除；三档布局改用共享的 `HomeQuickEntryRow`。

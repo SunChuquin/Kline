@@ -55,3 +55,53 @@
 - [x] 未新增数据源、未改任何持久化文件结构（`favorites.json` / `market_columns.json` / `sim.json` 不变）—— 两次提交清单中 `Kline/Data/`、`FavoritesStore.swift`、`MarketConfigStore.swift`、`SimStore.swift` 均无改动；改动仅限布局仓库、个人中心、`Kline/Home/` 与调用方
 - [x] 阶段二 / 三闭环命令均返回 0 / 6 / 7，构建通过 —— 阶段二 run=35550562651（退出码 6：云端构建成功、设备锁屏未下发）；阶段三 run=35551076040（退出码 0：已部署 Kline v1.0.2 (348)）
 - [x] A 档下首页行为与改造前一致（回归点）；`git status` 无遗留未提交改动，spec 三件套随闭环命令一并提交 —— `HomeLayoutAView` 与改造前 body 逐项等价（标题栏 / 分隔线 / 占位 / `home.welcome` / 搜索模式）；`git status --porcelain` 输出为空；spec 三件套在 7812ce8 提交、核验结果回填在 7498dce 之后单独提交
+
+***
+
+# 变更二核验：快捷入口横滑行 + 首页内容区
+
+> 核验方式同前：静态核验（文件 + 行号）+ 首批 ⏳ 项需真机确认。本变更**不改动** A 档 / 个人中心 / 仓库 / 底部栏 / 其他页面，回归面为零。
+
+## 快捷入口横滑行
+
+- [ ] 三档（B/C/D）共用同一行横滑入口 —— 三档均渲染 `HomeQuickEntryRow`，行实现只在 `HomePageKit.swift` 一处
+- [ ] 入口行为 `ScrollView(.horizontal, showsIndicators: false)` 单行 chips，内容超宽时可左右拖动；底部导航栏四项 Tab 不受影响（未改 `ContentView`）
+- [ ] 入口清单恰好 6 项且为：搜索标的 / 技术指标 / 选股指标 / 交易策略 / 条件单 / 个人中心 —— `HomeEntryKind` 的 `allCases` 与之一致
+- [ ] **已剔除**与底部栏重复的自选 / 行情 / 模拟交易 —— 全项目 Grep 入口清单中不再含这三项（`HomeEntryKind` 无对应 case，页面无相关磁贴/行/卡）
+- [ ] 每个 chip 命中区 ≥ 44×44pt、高度固定 76pt，点击与切档不抖动；图标 22 / 名称 13、语义色
+- [ ] 点「技术指标」/「选股指标」/「交易策略」分别全屏呈现 `FormulaCenterView` 并落在 tech / picker / strategy 段
+- [ ] 点「条件单」全屏呈现 `SimCondListView(accountID: nil)`（全部账户汇总），关闭后回到原档位
+- [ ] 点「个人中心」经 `isProfilePresented` 打开；点「搜索标的」进入现有搜索模式
+- [ ] 第一轮遗留的 `HomeEntryTile` / `HomeEntryRow` / `HomeEntryCard` / `HomeSearchBar` 已删除，全项目无引用残留（不留死代码）
+
+## 首页内容区（四块）
+
+- [ ] 入口行下方呈现四块：大盘概览条 / 我的自选 / 模拟账户汇总 / 涨幅榜 Top N，三档口径一致
+- [ ] 大盘概览条：前 4 只「沪深京指数」的名称 / 现价 / 涨跌幅（红涨绿跌）+ 沪深主板涨 / 跌 / 平与涨停（`pct >= 9.8`）/ 跌停（`pct <= -9.8`）家数；点指数项进 K 线详情
+- [ ] 我的自选：取 `FavoritesStore.allGroup` 前 5，含名称 / 代码、现价、涨跌幅胶囊与近 20 日迷你走势（复用 `MarketSparkline`）；点行进详情
+- [ ] 我的自选空态：显示「暂无自选，去自选页添加」，点击切自选页（`selectedTab = 1`）
+- [ ] 模拟账户汇总：`SimStore.summary(accountID: nil)` 的总资产 / 当日盈亏（含百分比）/ 持仓占比 + 持仓 Top N（现价 / 盈亏）；点击切模拟页（`selectedTab = 3`）
+- [ ] 涨幅榜 Top N：仅取已就绪的沪深主板行，按 `changePct` 降序前 5、过滤 nil；未就绪显示「加载中」占位而非错值；点行进详情
+- [ ] 四块均使用语义化颜色、固定高度；空态 / 加载态切换不引起布局抖动
+
+## 数据口径与性能
+
+- [ ] 新增 `HomePageModel`（`@StateObject` 由 `HomeView` 持有，向三档 `@ObservedObject` 消费），快照字段齐备（指数 / 涨跌家数 / 自选 / 涨幅榜）
+- [ ] `Kline/Home/` 内 `body` 中无全表遍历或 O(n) 聚合 —— 聚合与排序全部在 `HomePageModel` 内完成（Grep 三档布局视图与内容块视图，无 `for` / `.filter` / `.sorted` 于全量行集合上）
+- [ ] 行数据陆续到位时按 **250ms 防抖**合并重算（对齐 `MarketPageModel.scheduleOverviewRefresh` 写法），不在每行到达时重算
+- [ ] 未就绪行不参与聚合、不显示错值；`@Published` 赋值带同值守卫
+- [ ] 未新增数据源、未改持久化结构（`favorites.json` / `market_columns.json` / `sim.json` 不变）
+
+## 浮层与标识
+
+- [ ] 首页容器层浮层为单一目标枚举（公式三域 / 条件单），同时只呈现一个；关闭后回到首页原档位
+- [ ] `home.page` 仍挂在共享标题栏的软件名 `Text` 上（四档可用），`home.welcome` 在 A 档保留
+- [ ] 未改动 `KlineUITests`，冒烟用例（首页判定 `home.page`）仍成立
+
+## figma 同步与工程
+
+- [ ] `figma/home-ui-proposals.html` 的 B / C / D 三屏已更新为「横滑入口行 + 内容区」，A 屏与个人中心屏未变
+- [ ] 三屏的布局标注 / 优劣势已重写（体现「不再与底部栏重复、入口可横滑、内容区信息量」），对比表六维度已更新
+- [ ] 重截 `home_B.png` / `home_C.png` / `home_D.png`（700×560，与既有截图同尺寸），逐屏无溢出 / 截断 / 重叠；画廊仍为自包含单文件、支持 `#shot=`
+- [ ] A 档零变化（`HomeLayoutAView` 未改）；`PageLayoutStore` / `ProfileDetailView` / `TradingLayoutSettings` / `ContentView` / `MarketPageKit` / `KlineUITests` 无改动
+- [ ] 闭环命令返回 0 / 6 / 7；`git status` 无遗留未提交改动
