@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import Combine
 
 struct MarketLayoutDView: View {
     @ObservedObject var model: MarketPageModel

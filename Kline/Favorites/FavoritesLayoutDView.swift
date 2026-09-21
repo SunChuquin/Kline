@@ -14,6 +14,7 @@
 //
 
 import SwiftUI
+import Combine
 
 // MARK: - 一组分组的统计快照（数据快照阶段算好，body 内只读）
 
