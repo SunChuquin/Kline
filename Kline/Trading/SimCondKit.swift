@@ -2,7 +2,7 @@
 //  SimCondKit.swift
 //  Kline
 //
-//  条件单纯展示原子件：类型 chip / 状态标签 / 多触发进度条 / 概览三段计数条。
+//  条件单纯展示原子件：类型 chip / 「仅提醒」标记 / 状态标签 / 多触发进度条 / 概览三段计数条。
 //  约定：不持有业务状态，供管理页 SimCondListView 与编辑器 SimCondEditorView 复用；
 //  iOS 15 兼容（不用 Table / Chart / NavigationStack / @Observable），
 //  配色一律语义色（支持深色模式），买入红 / 卖出绿沿用 SimSharedViews 的惯例。
@@ -23,6 +23,21 @@ struct SimCondKindChip: View {
             .padding(.horizontal, 6)
             .frame(height: 17)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.12)))
+    }
+}
+
+// MARK: - 「仅提醒」标记
+
+/// 「仅提醒」标记：告知这条条件单触发时**不下单**（只写预警记录）。
+/// 与状态标签同风格（高 17 / 圆角 4 / 10.5 bold），底色用 `systemGray5` + 蓝色字，
+/// 与状态标签（橙/红/绿/灰，按状态着色）在语义上区分开。
+struct SimCondAlertBadge: View {
+    var body: some View {
+        Text("提醒")
+            .font(.system(size: 10.5, weight: .bold))
+            .foregroundColor(.blue)
+            .frame(width: 34, height: 17)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5)))
     }
 }
 

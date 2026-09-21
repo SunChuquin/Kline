@@ -4,7 +4,10 @@
 //
 //  条件单编辑器：新建 / 编辑 8 种条件单（独立全屏）。
 //  结构（严格对齐 spec.md 线框）：导航栏 → 标的头卡 → 方向大分段 → 类型 chips →
-//  类型参数卡 → 触发后委托指令卡 → 有效期卡 → 预览摘要 → 提交。
+//  类型参数卡 → 「仅提醒（不下单）」开关卡 → 触发后委托指令卡 → 有效期卡 → 预览摘要 → 提交。
+//  「仅提醒」：开关写入 `SimCondDirective.alertOnly`，开启时只记录预警不下单；
+//  与下单耦合的字段（方向 / 触发后报价 / 价格偏移 / 数量 / 仓位快捷 / 网格每格数量与倍数 / 分批总数量）
+//  置灰但**保留**（不隐藏 → 布局不跳动），判定参数一律保持可用。
 //  约定：复用 TradeTicketKit 的原子件（不重写）；校验失败就地红字、不弹 alert；
 //  切换类型只重置类型参数，方向 / 委托指令 / 有效期保持不变；
 //  iOS 15 兼容（不用 NavigationStack / Table / Chart / @Observable，onChange 为单参数闭包）；
@@ -57,6 +60,8 @@ struct SimCondEditorView: View {
     @State private var fireDate: Date = Date().addingTimeInterval(3600)
     @State private var takeProfitOn: Bool = true
     @State private var stopLossOn: Bool = true
+    /// 「仅提醒（不下单）」：true 时触发只写预警记录，不生成委托 / 成交（数量与持仓校验跳过）
+    @State private var alertOnly: Bool = false
     /// 文本型数字的展示值（区分「程序化回填」与「用户编辑」由清洗后回写完成）
     @State private var numText: [CondNumKey: String] = [:]
     @State private var errorText: String?
@@ -97,6 +102,8 @@ struct SimCondEditorView: View {
         _fireDate = State(initialValue: editing?.params.fireDate ?? Date().addingTimeInterval(3600))
         _takeProfitOn = State(initialValue: editing.map { $0.params.takeProfitPrice != nil } ?? true)
         _stopLossOn = State(initialValue: editing.map { $0.params.stopLossPrice != nil } ?? true)
+        // 编辑既有条件单：按原单的 isAlertOnly 预填（保证提醒型单据保存后仍为提醒，不被默认 false 覆盖）
+        _alertOnly = State(initialValue: editing?.directive.isAlertOnly ?? false)
     }
 
     // MARK: - Body
@@ -110,6 +117,8 @@ struct SimCondEditorView: View {
                     directionSection
                     kindChips
                     paramCard
+                    // 「仅提醒」开关：放在下单相关字段之前，一眼看到这条单是否下单
+                    alertOnlyCard
                     directiveCard
                     validityCard
                     previewCard
@@ -209,6 +218,10 @@ struct SimCondEditorView: View {
             }
         }
         .padding(.horizontal, 16)
+        // 仅提醒时方向只影响"下单方向"（不下单 → 无意义）→ 置灰；
+        // 例外：分批卖出的方向决定触发价路径（越跌越买 / 越涨越卖），必须保留可改
+        .disabled(alertOnly && kind != .batch)
+        .opacity((alertOnly && kind != .batch) ? 0.4 : 1)
     }
 
     // MARK: 类型 chips（横向可滑）
@@ -365,7 +378,8 @@ struct SimCondEditorView: View {
             }
         }
         numRow("网格间距", key: .gridStepPct, unitText: "%", showsDivider: true)
-        numRow("每格数量", key: .gridQtyPerLevel, unitText: "股",
+        // 每格数量只用于下单（仅提醒不下单）→ 置灰但保留字段位置
+        numRow("每格数量", key: .gridQtyPerLevel, unitText: "股", enabled: !alertOnly,
                stepDelta: Double(rules.lotSize), showsDivider: true)
         segmentedRow("倍数委托", options: [
             TradeSegOption(id: "1", title: "1×", selected: gridMultiplier == 1),
@@ -375,12 +389,16 @@ struct SimCondEditorView: View {
         ], showsDivider: true) { id in
             params.gridMultiplier = Double(id)
         }
+        // 倍数只放大下单数量，不影响档位判定 → 仅提醒时置灰
+        .disabled(alertOnly)
+        .opacity(alertOnly ? 0.4 : 1)
         hintRow("区间内约 \(SimCondRule.gridLevelCount(order: draftOrder())) 档")
     }
 
     @ViewBuilder
     private var batchRows: some View {
-        numRow("总数量", key: .batchTotalQty, unitText: "股",
+        // 总数量只用于下单（仅提醒不下单；且 evaluate 对 alertOnly 已允许总量缺省）→ 置灰但保留
+        numRow("总数量", key: .batchTotalQty, unitText: "股", enabled: !alertOnly,
                stepDelta: Double(rules.lotSize), showsDivider: true)
         segmentedRow("分批笔数", options: [
             TradeSegOption(id: "2", title: "2 笔", selected: params.batchCount == 2),
@@ -394,6 +412,32 @@ struct SimCondEditorView: View {
                stepDelta: rules.priceTick, showsDivider: true)
         numRow("每批价差", key: .batchStepPct, unitText: "%", showsDivider: true)
         hintRow(batchPreviewText)
+    }
+
+    // MARK: 仅提醒开关卡（不下单）
+
+    /// 「仅提醒（不下单）」开关：开启后触发只记录（触发时间 / 触发价 / 文案）并追加一条预警记录，
+    /// 不生成委托与成交；`SimCondRule.validateCreate` 对 alertOnly 已跳过数量与可卖持仓校验。
+    /// 位置放在「触发后委托指令」卡之前：先决定"是否下单"，再（置灰地）看下单参数。字段一律保留不隐藏 → 不跳动。
+    private var alertOnlyCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle(isOn: $alertOnly) {
+                    Text("仅提醒（不下单）")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color.primary)
+                }
+                .tint(.blue)
+                .frame(minHeight: 46)
+                // 切换后清掉可能残留的下单校验错误（如"数量需为 100 股的整数倍"）
+                .onChange(of: alertOnly) { _ in errorText = nil }
+
+                hintRow(alertOnly
+                        ? "开启后触发只记录时间 / 触发价 / 文案，不生成委托与成交；数量与持仓校验会跳过"
+                        : "关闭时触发后按下方委托指令下单（数量与可卖持仓会被校验）")
+            }
+            .padding(.vertical, 6)
+        }
     }
 
     // MARK: 触发后委托指令卡
@@ -420,7 +464,7 @@ struct SimCondEditorView: View {
             }
 
             if kind == .grid {
-                hintRow("网格按「每格数量」下单")
+                hintRow(alertOnly ? "网格按「每格数量」下单；仅提醒不会下单" : "网格按「每格数量」下单")
             } else {
                 numRow("数量", key: .qty, unitText: "股",
                        stepDelta: Double(rules.lotSize), showsDivider: true)
@@ -432,6 +476,9 @@ struct SimCondEditorView: View {
                 }
             }
         }
+        // 仅提醒不下单：整张「触发后委托指令」卡置灰但**保留**（不隐藏，避免布局跳动）
+        .disabled(alertOnly)
+        .opacity(alertOnly ? 0.4 : 1)
     }
 
     // MARK: 有效期卡
@@ -465,7 +512,7 @@ struct SimCondEditorView: View {
             Text("预览")
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
-            Text(SimCondRule.previewSentence(draftOrder()))
+            Text(alertOnly ? alertPreviewSentence : SimCondRule.previewSentence(draftOrder()))
                 .font(.system(size: 12))
                 .foregroundColor(Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -474,6 +521,14 @@ struct SimCondEditorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
         .padding(.horizontal, 16)
+    }
+
+    /// 仅提醒预览句：不下单，故不展示委托指令句
+    /// （`SimCondRule.previewSentence` 固定含「以…下单」，本轮不改该文件）
+    private var alertPreviewSentence: String {
+        let order = draftOrder()
+        return "当 \(order.name) \(SimCondRule.conditionSummary(order)) 时，只记录预警（不下单），"
+            + SimCondRule.validitySummary(order)
     }
 
     // MARK: 提交
@@ -486,7 +541,8 @@ struct SimCondEditorView: View {
                     .foregroundColor(Color.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(dirColor))
+                    // 仅提醒不下单 → 用中性蓝，避免用"买入红 / 卖出绿"误导为会下单
+                    .background(RoundedRectangle(cornerRadius: 10).fill(alertOnly ? Color.blue : dirColor))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -839,7 +895,9 @@ struct SimCondEditorView: View {
         let directive = SimCondDirective(direction: direction,
                                          priceType: priceType,
                                          offsetTicks: priceType == .limit ? offsetTicks : 0,
-                                         qty: directiveQty)
+                                         qty: directiveQty,
+                                         // 仅提醒才写 true；普通单写 nil → 与改造前的 JSON 逐字一致
+                                         alertOnly: alertOnly ? true : nil)
         return SimCondOrder(id: editing?.id ?? UUID(),
                             accountID: accountID,
                             metaID: metaID,
@@ -891,6 +949,8 @@ struct SimCondEditorView: View {
             fireDate = existing.params.fireDate ?? Date().addingTimeInterval(3600)
             takeProfitOn = existing.params.takeProfitPrice != nil
             stopLossOn = existing.params.stopLossPrice != nil
+            // 提醒型单据：开关必须显示为开（保存后仍为提醒）
+            alertOnly = existing.directive.isAlertOnly
         } else {
             kind = initialKind
             direction = initialDirection
@@ -899,6 +959,7 @@ struct SimCondEditorView: View {
             applyKindDefaults()
             takeProfitOn = true
             stopLossOn = true
+            alertOnly = false
             fireDate = Date().addingTimeInterval(3600)
         }
         syncAllTexts()

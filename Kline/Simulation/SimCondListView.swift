@@ -2,8 +2,9 @@
 //  SimCondListView.swift
 //  Kline
 //
-//  条件单管理页（独立全屏二级页）：44pt 导航栏（关闭 / 条件单 / ＋新建）+ 三段概览条
-//  + 三段分段筛选 + 条件单卡片列表（条件摘要 / 指令与有效期 / 多触发进度 / 原因）
+//  条件单管理页（独立全屏二级页）：44pt 导航栏（关闭 / 条件单 / 预警记录 / ＋新建）+ 三段概览条
+//  + 三段分段筛选 + 条件单卡片列表（条件摘要 / 指令与有效期 / 多触发进度 / 原因；
+//  「仅提醒」单据额外带「提醒」标记与提醒说明，不展示委托指令句）
 //  + 52pt 底部常驻条（评估口径提示 + 立即检查）。
 //  新建 / 编辑 / 详情由页内唯一的 .fullScreenCover 分发呈现，选择标的走内层底部条的
 //  confirmationDialog（同一视图不叠多个 presentation modifier）；「立即检查」结果用页内轻量 toast 就地提示。
@@ -69,12 +70,14 @@ enum SimCondPresentation: Identifiable {
     case listPicker                     // 选择标的（由内层底部条的 confirmationDialog 呈现）
     case editor(SimCondEditorRequest)
     case detail(SimCondOrder)
+    case alerts                         // 预警记录页（「仅提醒」触发后写入的记录）
 
     var id: String {
         switch self {
         case .listPicker:        return "picker"
         case .editor(let req):   return "editor-\(req.id.uuidString)"
         case .detail(let order): return "detail-\(order.id.uuidString)"
+        case .alerts:            return "alerts"
         }
     }
 }
@@ -130,6 +133,9 @@ struct SimCondListView: View {
                                   editing: req.editing) { presentation = nil }
             case .detail(let order):
                 SimCondDetailView(order: order) { presentation = nil }
+            case .alerts:
+                // 预警记录页：与其它二级页一样挂在本页唯一的 fullScreenCover 上
+                AlertRecordView { presentation = nil }
             }
         }
     }
@@ -163,6 +169,17 @@ struct SimCondListView: View {
             .buttonStyle(.plain)
 
             Spacer(minLength: 8)
+
+            // 预警记录入口（「仅提醒」条件单触发后写入的记录页）
+            Button(action: { presentation = .alerts }) {
+                Image(systemName: "bell.badge")
+                    .font(.system(size: 15))
+                    .foregroundColor(Color.blue)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("condList.alerts")
 
             Button(action: startCreate) {
                 Text("＋ 新建")
@@ -264,6 +281,10 @@ struct SimCondListView: View {
                     .foregroundColor(Color(.secondaryLabel))
                     .lineLimit(1)
                 Spacer(minLength: 6)
+                // 「仅提醒」标记：触发不下单，便于与普通条件单区分（与状态标签同风格）
+                if order.directive.isAlertOnly {
+                    SimCondAlertBadge()
+                }
                 SimCondStatusTag(status: order.status)
                 inlineButton("编辑", tint: .blue) { openEditor(order) }
                 if order.status == .monitoring {
@@ -281,7 +302,7 @@ struct SimCondListView: View {
                 Spacer(minLength: 0)
             }
 
-            Text("\(SimCondRule.directiveSummary(order)) · \(SimCondRule.validitySummary(order))")
+            Text(directiveLine(order))
                 .font(.system(size: 12))
                 .foregroundColor(Color(.secondaryLabel))
                 .lineLimit(2)
@@ -315,6 +336,16 @@ struct SimCondListView: View {
         SimInlineButton(title: title, tint: tint, action: action)
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
+    }
+
+    /// 指令行：普通单据 = 委托摘要；「仅提醒」= 提醒说明
+    /// （不下单，故不展示「触发后 市价卖出 xx 股」；本轮不改 SimCondRule 的文案层）
+    private func directiveLine(_ order: SimCondOrder) -> String {
+        let validity = SimCondRule.validitySummary(order)
+        if order.directive.isAlertOnly {
+            return "触发后只记录预警（不下单） · \(validity)"
+        }
+        return "\(SimCondRule.directiveSummary(order)) · \(validity)"
     }
 
     private func progressDone(_ order: SimCondOrder) -> Int {

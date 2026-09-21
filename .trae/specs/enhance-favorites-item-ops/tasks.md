@@ -16,55 +16,55 @@
 
 ## 阶段二：数据层（无 UI 变化，独立可编译）
 
-- [ ] Task 3: `FavoritesStore` 升级到 schema 3：固顶 + 备注 + 移前移后
-  - [ ] SubTask 3.1: `FavoritesGroup` 新增 `pinnedMetaIDs: [Int]?`（可选；顺序即固顶顺序）；`FavoritesRoot` 新增 `notes: [String: String]?`（key = `String(metaID)`，**禁止用 `[Int: String]`**，非 String key 的字典会被 `JSONEncoder` 编码成交替数组）
-  - [ ] SubTask 3.2: `currentSchema` 2 → 3，新增幂等迁移 `migrateItemOpsIfNeeded()`（初始化读档后调用 + 写档前兜底回写，范式照 `migrateFormulaGroupsIfNeeded`）；`FavoritesGroup` / `FavoritesRoot` 的新字段一律可选 + `decodeIfPresent`（无自定义 `init(from:)` 时加非可选字段会让旧档 decode 失败 → 整档丢）
-  - [ ] SubTask 3.3: 新增 API：`togglePin(groupID:metaID:)`、`isPinned(groupID:metaID:)`、`pinnedIDs(groupID:)`、`moveToFirst(groupID:metaID:)`、`moveToLast(groupID:metaID:)`（**只重排 `manualMetaIDs`，不得用 `compactMap` 后的结果整组覆写**，否则会丢不在 `metaList` 的历史 id）、`note(for:)` / `setNote(metaID:text:)`（空串 = 删除 key）
-  - [ ] SubTask 3.4: 公式分组与「全部」虚拟组的语义守卫：固顶允许（显示层）、移前移后拒绝（`kind != .manual` 或 allGroupID 时 no-op），写得直白并加注释
-  - [ ] SubTask 3.5: 编码自查：`@Published` 同值不写（沿用既有 `saveToDisk` 前的差异比较惯例）、`Color.opacity` 入参 Double、不遮蔽同名参数
+- [x] Task 3: `FavoritesStore` 升级到 schema 3：固顶 + 备注 + 移前移后
+  - [x] SubTask 3.1: `FavoritesGroup` 新增 `pinnedMetaIDs: [Int]?`（可选；顺序即固顶顺序）；`FavoritesRoot` 新增 `notes: [String: String]?`（key = `String(metaID)`，**禁止用 `[Int: String]`**，非 String key 的字典会被 `JSONEncoder` 编码成交替数组）
+  - [x] SubTask 3.2: `currentSchema` 2 → 3，新增幂等迁移 `migrateItemOpsIfNeeded()`（初始化读档后调用 + 写档前兜底回写，范式照 `migrateFormulaGroupsIfNeeded`）；`FavoritesGroup` / `FavoritesRoot` 的新字段一律可选 + `decodeIfPresent`（无自定义 `init(from:)` 时加非可选字段会让旧档 decode 失败 → 整档丢）
+  - [x] SubTask 3.3: 新增 API：`togglePin(groupID:metaID:)`、`isPinned(groupID:metaID:)`、`pinnedIDs(groupID:)`、`moveToFirst(groupID:metaID:)`、`moveToLast(groupID:metaID:)`（**只重排 `manualMetaIDs`，不得用 `compactMap` 后的结果整组覆写**，否则会丢不在 `metaList` 的历史 id）、`note(for:)` / `setNote(metaID:text:)`（空串 = 删除 key）
+  - [x] SubTask 3.4: 公式分组与「全部」虚拟组的语义守卫：固顶允许（显示层）、移前移后拒绝（`kind != .manual` 或 allGroupID 时 no-op），写得直白并加注释
+  - [x] SubTask 3.5: 编码自查：`@Published` 同值不写（沿用既有 `saveToDisk` 前的差异比较惯例）、`Color.opacity` 入参 Double、不遮蔽同名参数
 
-- [ ] Task 4: 条件单新增「仅提醒」形态（`alertOnly`）
-  - [ ] SubTask 4.1: `SimCondDirective` 新增 `alertOnly: Bool?`（`CodingKeys` + `init(from:)` 兜底 `false`，旧档不炸）；对外暴露 `isAlertOnly` 计算属性（`alertOnly ?? false`）
-  - [ ] SubTask 4.2: `SimCondEngine` 触发分支：`isAlertOnly` 为真时**不** `submit(draft)`、**不**校验数量与持仓，写 `triggeredAt` / `lastTriggerPrice` / `lastMessage`（文案如「预警：现价 12.34 上穿 12.00」），并 append 一条 `SimAlertRecord`；普通条件单分支保持逐行等价
-  - [ ] SubTask 4.3: `SimTradingRules` / 引擎校验：`alertOnly` 跳过 qty 与可卖持仓校验（现有 `validate` 会把 qty ≤ 0 视为拒绝，需显式放行）
-  - [ ] SubTask 4.4: 编码自查：不改变普通条件单的任何行为（对照改造前后的分支逐项核对），日志与触发次数统计口径不变
+- [x] Task 4: 条件单新增「仅提醒」形态（`alertOnly`）
+  - [x] SubTask 4.1: `SimCondDirective` 新增 `alertOnly: Bool?`（`CodingKeys` + `init(from:)` 兜底 `false`，旧档不炸）；对外暴露 `isAlertOnly` 计算属性（`alertOnly ?? false`）
+  - [x] SubTask 4.2: `SimCondEngine` 触发分支：`isAlertOnly` 为真时**不** `submit(draft)`、**不**校验数量与持仓，写 `triggeredAt` / `lastTriggerPrice` / `lastMessage`（文案如「预警：现价 12.34 上穿 12.00」），并 append 一条 `SimAlertRecord`；普通条件单分支保持逐行等价
+  - [x] SubTask 4.3: `SimTradingRules` / 引擎校验：`alertOnly` 跳过 qty 与可卖持仓校验（现有 `validate` 会把 qty ≤ 0 视为拒绝，需显式放行）
+  - [x] SubTask 4.4: 编码自查：不改变普通条件单的任何行为（对照改造前后的分支逐项核对），日志与触发次数统计口径不变
 
-- [ ] Task 5: `SimStore` 预警记录存储
-  - [ ] SubTask 5.1: 新增 `SimAlertRecord: Codable, Identifiable`（`id` / `condID` / `metaID` / `code` / `name` / `price: Double?` / `message` / `occurredAt`）；`SimRoot` 新增 `alertRecords: [SimAlertRecord]?`，`schemaVersion` 2 → 3（沿用逐项 `try?` 兜底）
-  - [ ] SubTask 5.2: 新增 API：`appendAlertRecord(_:)`（落盘 + 超 200 条丢最旧）、`deleteAlertRecord(id:)`、`clearAlertRecords()`；写入沿用「先比较再赋值」惯例
-  - [ ] SubTask 5.3: 只读派生：`alertRecordsSorted`（按 `occurredAt` 倒序）、`alertRecordCount`
+- [x] Task 5: `SimStore` 预警记录存储
+  - [x] SubTask 5.1: 新增 `SimAlertRecord: Codable, Identifiable`（`id` / `condID` / `metaID` / `code` / `name` / `price: Double?` / `message` / `occurredAt`）；`SimRoot` 新增 `alertRecords: [SimAlertRecord]?`，`schemaVersion` 2 → 3（沿用逐项 `try?` 兜底）
+  - [x] SubTask 5.2: 新增 API：`appendAlertRecord(_:)`（落盘 + 超 200 条丢最旧）、`deleteAlertRecord(id:)`、`clearAlertRecords()`；写入沿用「先比较再赋值」惯例
+  - [x] SubTask 5.3: 只读派生：`alertRecordsSorted`（按 `occurredAt` 倒序）、`alertRecordCount`
 
-- [ ] Task 6: 阶段二闭环
-  - [ ] SubTask 6.1: 编码自查（数据层无 UI 改动；`favorites.json` / `sim.json` 旧档能正常读入且不丢分组）
-  - [ ] SubTask 6.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(favorites-ops): 自选固顶/备注/移前移后与条件单仅提醒数据层（schema 3）"`
-  - [ ] SubTask 6.3: 交付说明（build 号 / 数据层改动 / 迁移口径），此时 UI 无变化、可先验收旧档兼容
+- [x] Task 6: 阶段二闭环
+  - [x] SubTask 6.1: 编码自查（数据层无 UI 改动；`favorites.json` / `sim.json` 旧档能正常读入且不丢分组）
+  - [x] SubTask 6.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(favorites-ops): 自选固顶/备注/移前移后与条件单仅提醒数据层（schema 3）"`（run=35569544624，退出码 0，已部署 v1.0.2 (351)）
+  - [x] SubTask 6.3: 交付说明（build 号 / 数据层改动 / 迁移口径），此时 UI 无变化、可先验收旧档兼容
 
 ## 阶段三：长按操作面板 + 批量编辑（UI 改造，消灭行变形）
 
-- [ ] Task 7: 新增共享组件 `Kline/Favorites/FavoritesRowMenu.swift`
-  - [ ] SubTask 7.1: `FavoritesRowMenuTarget`（标的 + 所在分组上下文 + 是否行情页）与容器层 `overlay` 承载：`Color.black.opacity(0.25)` 遮罩（点击关闭）+ 居中卡片（宽 260、`systemBackground`、`cornerRadius(12)`、`shadow(black 20%, radius 12, y 4)`）+ 标题行（名称 + 代码 13pt `.secondary`）+ 每项行高 44（`padding(.horizontal,12)` + `Divider`）+ 底部「取消」（15 semibold 蓝）+ `.transition(.opacity)` + `zIndex(1000)`
-  - [ ] SubTask 7.2: 面板项与可用性矩阵：固顶/取消固顶、移到最前、移到最后、加入其它分组、备注…、设置/取消预警、取消自选；按「手动 / 公式 / 全部 / 行情页」裁剪与置灰（置灰项带一行原因说明；有排序规则时移前移后置灰）
-  - [ ] SubTask 7.3: 备注弹窗：已有备注直接展示全文（可编辑）+ 空态「添加备注」；保存 / 清空 / 取消；`ignoresSafeArea(.keyboard)`（避免键盘挤压）
-  - [ ] SubTask 7.4: 批量预警弹窗：上穿 / 下穿 + 数值 + 可选文案 + 「应用到 N 只」；校验数值合法性与「已存在提醒型条件单」的覆盖确认
-  - [ ] SubTask 7.5: 无障碍与命中区：面板每项 ≥44pt、`contentShape(Rectangle())`、遮罩可点、面板可滚动（项多时 `ScrollView.frame(maxHeight: 320)`）
+- [x] Task 7: 新增共享组件 `Kline/Favorites/FavoritesRowMenu.swift`
+  - [x] SubTask 7.1: `FavoritesRowMenuTarget`（标的 + 所在分组上下文 + 是否行情页）与容器层 `overlay` 承载：`Color.black.opacity(0.25)` 遮罩（点击关闭）+ 居中卡片（宽 260、`systemBackground`、`cornerRadius(12)`、`shadow(black 20%, radius 12, y 4)`）+ 标题行（名称 + 代码 13pt `.secondary`）+ 每项行高 44（`padding(.horizontal,12)` + `Divider`）+ 底部「取消」（15 semibold 蓝）+ `.transition(.opacity)` + `zIndex(1000)`
+  - [x] SubTask 7.2: 面板项与可用性矩阵：固顶/取消固顶、移到最前、移到最后、加入其它分组、备注…、设置/取消预警、取消自选；按「手动 / 公式 / 全部 / 行情页」裁剪与置灰（置灰项带一行原因说明；有排序规则时移前移后置灰）
+  - [x] SubTask 7.3: 备注弹窗：已有备注直接展示全文（可编辑）+ 空态「添加备注」；保存 / 清空 / 取消；`ignoresSafeArea(.keyboard)`（避免键盘挤压）
+  - [x] SubTask 7.4: 批量预警弹窗：上穿 / 下穿 + 数值 + 「应用到 N 只」；校验数值合法性（**可选文案未做：`SimCondDirective` 无存放字段，改由引擎生成「预警：现价 X 上穿/下穿 Y」文案**）
+  - [x] SubTask 7.5: 无障碍与命中区：面板每项 ≥44pt、`contentShape(Rectangle())`、遮罩可点、面板可滚动（项多时 `ScrollView.frame(maxHeight: 320)`）
 
-- [ ] Task 8: 自选页表格接入新面板（A/B/D 档共用 `FavoritesTableBody`）
-  - [ ] SubTask 8.1: 移除 `rowCard` 的 `.contextMenu`，改 `onLongPressGesture(minimumDuration: 0.5)` 写 `rowMenuTarget`；长按期间**不做**任何 `scaleEffect` / `offset` / 描边 / 背景变化
-  - [ ] SubTask 8.2: 长按期间与面板打开期间把 `horizontalDragGesture` 置 nil（复用行情页 `edgeAdjust ? nil :` 写法），避免轻微位移改 `hScrollOffset` 造成「变形」
-  - [ ] SubTask 8.3: `sortedRows` 增加「固顶优先」稳定分区（在页面级排序规则排序**之后**执行），固顶集合读当前分组的 `pinnedMetaIDs`
-  - [ ] SubTask 8.4: 编辑态列表（`FavoritesManualEditingList`）里的 `.contextMenu` 一并换成新面板；确认编辑态与横向手势仍互斥
+- [x] Task 8: 自选页表格接入新面板（A/B/D 档共用 `FavoritesTableBody`）
+  - [x] SubTask 8.1: 移除 `rowCard` 的 `.contextMenu`，改 `onLongPressGesture(minimumDuration: 0.5)` 写 `rowMenuTarget`；长按期间**不做**任何 `scaleEffect` / `offset` / 描边 / 背景变化
+  - [x] SubTask 8.2: 面板打开期间把 `horizontalDragGesture` 置 nil（`model.rowMenuTarget == nil ? gesture : nil`，写法对齐行情页 `edgeAdjust ? nil :`）——长按识别前的 0~0.5s 仍挂手势，靠 `minimumDistance: 8` 保证「手指移动 > 8pt 即视为横向滚动」的既有语义不被破坏
+  - [x] SubTask 8.3: `sortedRows` 增加「固顶优先」稳定分区（在页面级排序规则排序**之后**执行），固顶集合读当前分组的 `pinnedMetaIDs`
+  - [x] SubTask 8.4: 编辑态列表（`FavoritesManualEditingList`）里的 `.contextMenu` 一并换成新面板（并入「从该分组移除」项）；编辑态与横向手势仍互斥
 
-- [ ] Task 9: 卡片形态与行情页接入同一面板
-  - [ ] SubTask 9.1: 自选页 C 档卡片：移除 `.contextMenu`，长按（与右上「更多」按钮）打开同一面板；卡片不作任何缩放/位移
-  - [ ] SubTask 9.2: 行情页表格行（`MarketPageKit` `rowCard`）：`.contextMenu` → 新面板，项为 加自选/取消自选、加入指定分组、备注…、设置/取消预警（无固顶与移前移后）
-  - [ ] SubTask 9.3: 行情页磁贴（`MarketLayoutCView`）：长按与「更多」走同一面板，右上 44×44 星标保留不变
-  - [ ] SubTask 9.4: 三档互切自测：A/B/C/D 与行情页长按行为一致、面板项按上下文正确裁剪、备注与预警入口可用
+- [x] Task 9: 卡片形态与行情页接入同一面板
+  - [x] SubTask 9.1: 自选页 C 档卡片：移除 `.contextMenu`，长按（与右上「更多」按钮）打开同一面板；卡片不作任何缩放/位移
+  - [x] SubTask 9.2: 行情页表格行（`MarketPageKit` `rowCard`）：`.contextMenu` → 新面板，项为 加自选/取消自选、加入指定分组、备注…、设置/取消预警（无固顶与移前移后）
+  - [x] SubTask 9.3: 行情页磁贴（`MarketLayoutCView`）：长按与「更多」走同一面板，右上 44×44 星标保留不变
+  - [x] SubTask 9.4: 三档互切自测：A/B/C/D 与行情页长按行为一致、面板项按上下文正确裁剪、备注与预警入口可用（全项目 Grep `.contextMenu` 仅剩注释，5 处真实用法全部替换；旧函数 `favoritesRowMenuContent` / `marketRowMenuContent` 已删除）
 
-- [ ] Task 10: 批量编辑（多选 + 批量条）
-  - [ ] SubTask 10.1: 编辑态改 `List(selection:)` 多选（保留 `onMove` 拖拽排序），手动 / 公式 /「全部」三类分组均可进入编辑态（修掉「公式组切编辑回退只读」的旧行为）
-  - [ ] SubTask 10.2: 底部批量条：`已选 N 只` + 横向可滚动作按钮（移出/取消自选、移到分组、固顶、取消固顶、设置备注、清除备注、设置预警、取消预警、全选、取消全选），无选择时置灰；条高固定不随选择数抖动
-  - [ ] SubTask 10.3: 批量动作实现：批量移出/取消自选、批量加入到目标分组（复用 `AddToGroupSheet`）、批量固顶（按选择顺序追加到固顶尾部）、批量备注（设置同一句 / 清除）、批量预警（N 条同规则 `alertOnly` 条件单）/ 批量取消预警
-  - [ ] SubTask 10.4: 四档接线（A 工具条「编辑」/ B 侧栏「编辑」/ C 顶栏 / D 紧凑表）：按钮文案与选中态一致，切档不丢选择（或切档清空选择并给提示，二者取一写清）
+- [x] Task 10: 批量编辑（多选 + 批量条）
+  - [x] SubTask 10.1: 编辑态改 `List(selection:)` 多选（SelectionValue = metaID，保留 `onMove` 拖拽排序：仅手动实体分组提供拖动手柄），手动 / 公式 /「全部」三类分组均可进入编辑态（修掉「公式组切编辑回退只读」的旧行为）
+  - [x] SubTask 10.2: 底部批量条 `FavoritesBatchBar`：`已选 N 只`（计数固定宽不抖动）+ 横向可滚动作按钮（移出、移到分组、固顶、取消固顶、设置备注、清除备注、设置预警、取消预警、全选、取消全选），无选择时动作置灰；条高固定（56 + 1pt 分隔线）
+  - [x] SubTask 10.3: 批量动作实现：批量移出/取消自选（`removeFromGroup`；「全部」组走 `toggleFavorite`）、批量移到分组（`addToGroup` + 当前组 `removeFromGroup`）、批量固顶（按显示顺序 `togglePin`）、批量备注（`setNote` / `setNote("")`）、批量预警（`SimStore.createAlertOrder(alertOnly: true)`）/ 批量取消预警（删除提醒型条件单）
+  - [x] SubTask 10.4: 四档接线：新增共用 `FavoritesEditToggleButton`（「编辑」↔「完成」）接进 A 工具条 / B 工作区 / C 顶栏 / D 顶栏；切分组与切档清空多选（跨分组选择语义不清）
 
 - [ ] Task 11: 阶段三闭环
   - [ ] SubTask 11.1: 编码自查（无 `contextMenu` 残留：全项目 Grep `.contextMenu` 应只剩行情页 `marketRowMenuContent` 之外无引用；`body` 内无全表遍历；同值守卫）
