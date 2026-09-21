@@ -62,15 +62,19 @@
 
 ## 阶段三：等价性验收
 
-- [ ] Task 9: 逐档对照与配置生效验证
-  - [ ] SubTask 9.1: 个人中心逐档切 A/B/C/D，与阶段一交付的呈现逐项对照（字号 / 间距 / 分栏 / 颜色 / 滚动行为）
+> 本轮已完成**静态等价核验**（独立只读核验代理，10 项全通过）：JSON 四档与 `HomeLayout{A,B,C,D}View` 的区块顺序 / 卡片文案 / `compact` / `showsSparkline` / 涨幅榜 `style` / D 档 `limit: 3` / 半宽 `frame` / `HStack` 对齐与间距 / `padding 16` + `VStack(spacing: 12)` 逐项一致；`card` 节点渲染与 `HomeSectionCard` 逐字符一致；引擎 4 文件零 `Home*` 引用；锚点 `home.page` / `home.welcome` / `home.entry.` 唯一且未回归；`PageLayoutStore` / `TradingLayoutSettings` / `ProfileDetailView` 未被改动。核验中发现的**唯一实质差异**（内容区 `ScrollView` 滚动指示器：硬编码默认显示、配置默认隐藏）已修复并复跑构建 run=35615307932。另用脚本校验了内置默认 JSON 的语法、`schemaVersion`/`page`/`default`、四档齐全、全部节点 `type` 在渲染器白名单内、全部 `widget.name` 在注册表内。
+>
+> 以下 Task 9 的真机动作需设备解锁 + Kline 在前台（本轮三次交付均因「设备无人值守」停在云端构建成功），**待用户真机验收**。
+
+- [ ] Task 9: 逐档对照与配置生效验证（**待真机验收**）
+  - [ ] SubTask 9.1: 个人中心逐档切 A/B/C/D，与阶段一交付的呈现逐项对照（字号 / 间距 / 分栏 / 颜色 / 滚动行为）——静态等价已核验通过，待真机目视确认
   - [ ] SubTask 9.2: 验证沙盒覆盖：通过沙盒直连（`KlineHTTPServer` 以 Documents 为根）或文件工具改 `Documents/Layouts/home.json` 中 `spacing` 12→24，重进首页确认生效
   - [ ] SubTask 9.3: 验证回退：把沙盒 JSON 改成非法内容（如删掉一个逗号），确认自动回退内置默认且不崩溃、可用；删除沙盒文件确认重新种回默认
   - [ ] SubTask 9.4: 验证未注册控件名占位（临时改一个 `name` 为不存在的值，确认显示可诊断占位后改回）
 
 - [ ] Task 10: 收尾
-  - [ ] SubTask 10.1: 无障碍锚点回归：`home.page`（四档）、`home.welcome`（A 档）、`home.entry.<rawValue>`（快捷入口）
-  - [ ] SubTask 10.2: 清理临时状态（沙盒 JSON 恢复为默认 `spacing: 12`、控件名恢复），确认工作区无未提交改动
+  - [x] SubTask 10.1: 无障碍锚点回归（**静态核验通过**）：`home.page` 唯一于 `Widgets/HomeHeaderBar.swift:30`（四档共用标题栏）、`home.welcome` 唯一于 `Widgets/HomePlaceholderBlock.swift:16`（A 档）、`home.entry.<rawValue>` 唯一于 `Widgets/HomeQuickEntryChip.swift:37`；`KlineUITests.swift:76` 对 `staticTexts["home.page"]` 的期望未被破坏
+  - [x] SubTask 10.2: 清理临时状态：内置默认已恢复为等价形态（`spacing: 12`、7 个控件名全部有注册），`git status` 干净、无未提交代码改动、无临时脚本残留
 
 # Task Dependencies
 
