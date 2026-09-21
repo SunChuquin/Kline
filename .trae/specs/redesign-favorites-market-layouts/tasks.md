@@ -67,7 +67,7 @@
 
 - [x] Task 12: 阶段三闭环
   - [x] SubTask 12.1: B/C/D 三档互切自测（分组联动、卡片↔表格切换、看板统计与表格一致、空态与加载态）
-  - [x] SubTask 12.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(page-layout): 自选页 B/C/D 三套布局"`
+  - [x] SubTask 12.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(page-layout): 自选页 B/C/D 三套布局"`（与阶段四合并为一次构建：首次 run=35547737370 因 D 档缺 `import Combine` 失败，补导入后 run=35547825436 退出码 6 构建成功）
   - [x] SubTask 12.3: 交付说明，等待真机验收
 
 ## 阶段四：行情页 B / C / D
@@ -87,7 +87,7 @@
 
 - [x] Task 16: 阶段四闭环
   - [x] SubTask 16.1: B/C/D 三档互切自测（分类联动、磁贴↔表格切换、概览统计与表格一致、空态与加载态）
-  - [x] SubTask 16.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(page-layout): 行情页 B/C/D 三套布局"`
+  - [x] SubTask 16.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(page-layout): 行情页 B/C/D 三套布局"`（与阶段三合并为一次构建，run=35547825436 退出码 6）
   - [x] SubTask 16.3: 交付说明，等待真机验收
 
 ## 阶段五：验收
