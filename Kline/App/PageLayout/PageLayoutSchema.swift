@@ -473,6 +473,11 @@ struct WidgetParams: Codable, Equatable {
     }
 }
 
+/// 控件参数值（四型标量）。
+/// 解码顺序固定为 **Int → Double → Bool → String**：Darwin 的 `JSONDecoder` 以 `NSNumber` 兜底，
+/// 若先试 `Bool` 会把数字 `0/1` 读成布尔（`"limit": 1` 就取不到值），故数字优先。
+/// `Int` 对 `2.5` 会抛「does not fit in Int」而落到 `Double`，对 `true/false` 会抛而落到 `Bool`；
+/// 布尔值经 `WidgetParams.bool(_:default:)` 亦可从 `.int(0/1)` 读回，语义不丢。
 enum WidgetParamValue: Codable, Equatable {
     case bool(Bool)
     case int(Int)
@@ -481,9 +486,9 @@ enum WidgetParamValue: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let b = try? container.decode(Bool.self) { self = .bool(b); return }
         if let i = try? container.decode(Int.self) { self = .int(i); return }
         if let d = try? container.decode(Double.self) { self = .double(d); return }
+        if let b = try? container.decode(Bool.self) { self = .bool(b); return }
         if let s = try? container.decode(String.self) { self = .string(s); return }
         throw DecodingError.dataCorruptedError(
             in: container,

@@ -53,18 +53,22 @@ struct HomeLayoutPreviewPane: View {
 
             Spacer(minLength: 12)
 
-            HStack(spacing: 3) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 12))
-                Text("全屏")
-                    .font(.system(size: 12))
+            Button(action: onExpand) {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 12))
+                    Text("全屏")
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(.blue)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.blue)
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layoutEditor.preview.expand")
         }
         .padding(.horizontal, 16)
-        .frame(height: 36)
-        .contentShape(Rectangle())
-        .onTapGesture { onExpand() }
+        .frame(height: 44)
     }
 
     private var emptyState: some View {

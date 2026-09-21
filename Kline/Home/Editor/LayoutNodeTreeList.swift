@@ -8,7 +8,7 @@
 //  底部工具条提供「排序 / 完成」开关（iOS 15 下 `.onMove` 仅在编辑态可拖）、
 //  「上移 / 下移」精确重排、「添加节点」/「添加控件」两个 Menu。
 //
-//  行身份用节点 uuid（编辑期身份）；行高固定 40 + 上下各 2 padding = 44 命中区。
+//  行身份用节点 uuid（编辑期身份）；行高固定 44（命中区 ≥ 44pt）。
 //
 
 import SwiftUI
@@ -85,8 +85,7 @@ struct LayoutNodeTreeList: View {
 
             Spacer(minLength: 0)
         }
-        .frame(height: 40)
-        .padding(.vertical, 2)
+        .frame(height: 44)
         .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { editor.select(node) }

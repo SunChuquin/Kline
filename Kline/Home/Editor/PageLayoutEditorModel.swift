@@ -338,8 +338,10 @@ final class PageLayoutEditorModel: ObservableObject {
         touchDraft()
     }
 
-    /// 换控件名并清空旧 params（避免残留无关键）
+    /// 换控件名并清空旧 params（避免残留无关键）；
+    /// 同名重复选择直接返回，避免误清用户已调好的参数
     func setWidgetName(_ name: String, on node: PageLayoutNode) {
+        guard node.name != name else { return }
         node.name = name
         node.params = WidgetParams()
         touchDraft()

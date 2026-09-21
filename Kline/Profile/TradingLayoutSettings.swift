@@ -196,7 +196,7 @@ struct LayoutEditorSettingRow: View {
             }
             .foregroundColor(.blue)
         }
-        .frame(minHeight: 36)
+        .frame(minHeight: 44)
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
     }
