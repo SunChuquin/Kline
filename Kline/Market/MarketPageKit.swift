@@ -98,6 +98,12 @@ final class MarketPageModel: ObservableObject {
     // MARK: 浮层
     @Published var showColumnPanel = false
     @Published var addGroupTarget: MetaItem? = nil
+    /// 长按操作面板目标（nil = 未打开；面板挂在容器层 overlay，行 / 磁贴不挂任何 menu）
+    @Published var rowMenuTarget: FavoritesRowMenuTarget? = nil
+    /// 备注弹窗目标（全局备注，与自选页共享同一条）
+    @Published var noteEditorTarget: FavoritesRowMenuTarget? = nil
+    /// 预警弹窗目标（本轮单只预警 = 1 只；批量预警下一轮复用同一弹窗与创建路径）
+    @Published var alertSheetTargets: [MetaItem] = []
     /// 点击顶部搜索图标后弹出搜索页（复用 HomeView 搜索模式，等同双击首页的效果）
     @Published var homeSearchActive = false
     /// 公式管理中心页（全屏 overlay）开合：仅「选股」Tab 工具区入口触发
@@ -382,6 +388,65 @@ final class MarketPageModel: ObservableObject {
         // 收窄可能导致滚动偏移越界：夹回有效范围
         if hScrollOffset < -maxHOffset { hScrollOffset = -maxHOffset }
     }
+
+    // MARK: - 长按操作面板（自绘，替代系统 .contextMenu；面板挂在容器层 overlay）
+
+    /// 行情页上下文：无分组 + 行情页标记（面板不给固顶 / 移前移后）
+    func menuTarget(for meta: MetaItem) -> FavoritesRowMenuTarget {
+        FavoritesRowMenuTarget(meta: meta, groupID: nil, isMarketPage: true)
+    }
+
+    /// 打开长按面板（同值不写，避免 @Published 发布风暴）
+    func openRowMenu(_ target: FavoritesRowMenuTarget) {
+        if rowMenuTarget != target { rowMenuTarget = target }
+    }
+
+    /// 面板项：加自选 / 取消自选、加入指定分组、备注…、设置 / 取消预警
+    /// （行情页无分组概念，故不出现固顶与移前移后；「加入指定分组」复用既有 AddToGroupSheet）
+    func rowMenuItems(for target: FavoritesRowMenuTarget) -> [FavoritesRowMenuItem] {
+        let meta = target.meta
+        let faved = fav.isFavorited(meta.id)
+        var items: [FavoritesRowMenuItem] = [
+            FavoritesRowMenuItem(action: .toggleFavorite,
+                                 title: faved ? "取消自选" : "加自选",
+                                 icon: faved ? "star.slash" : "star"),
+            FavoritesRowMenuItem(action: .addToGroup, title: "加入指定分组",
+                                 icon: "folder.badge.plus")
+        ]
+        let note = fav.note(for: meta.id)
+        items.append(FavoritesRowMenuItem(action: .note, title: "备注…", icon: "note.text",
+                                          trailing: note.map { FavoritesRowMenuItem.noteSummary($0) }))
+        let hasAlert = FavoritesAlertKit.hasAlert(metaID: meta.id)
+        let canAlert = hasAlert || FavoritesAlertKit.accountID != nil
+        items.append(FavoritesRowMenuItem(action: .toggleAlert,
+                                          title: hasAlert ? "取消预警" : "设置预警",
+                                          icon: hasAlert ? "bell.slash" : "bell",
+                                          enabled: canAlert,
+                                          reason: canAlert ? nil : "请先在模拟页创建账户"))
+        return items
+    }
+
+    /// 执行面板动作（面板已在调用处关闭）
+    func performRowMenu(_ action: FavoritesRowMenuAction, for target: FavoritesRowMenuTarget) {
+        let meta = target.meta
+        switch action {
+        case .toggleFavorite:
+            fav.toggleFavorite(meta.id)
+        case .addToGroup:
+            addGroupTarget = meta
+        case .note:
+            noteEditorTarget = target
+        case .toggleAlert:
+            if FavoritesAlertKit.hasAlert(metaID: meta.id) {
+                FavoritesAlertKit.cancelAlerts(metaID: meta.id)
+            } else {
+                alertSheetTargets = [meta]
+            }
+        case .togglePin, .moveToFirst, .moveToLast, .removeFromGroup:
+            // 行情页无分组上下文：这几项不会出现在面板里，防御性忽略
+            break
+        }
+    }
 }
 
 // MARK: - 顶部一级菜单栏（含二级胶囊栏）
@@ -623,7 +688,9 @@ struct MarketTableBody: View {
                         }
                     }
                 }
-                .simultaneousGesture(model.edgeAdjust ? nil : model.horizontalDragGesture)
+                // 面板打开期间也禁用横向拖动：避免长按 / 面板弹出时整表位移
+                .simultaneousGesture((model.edgeAdjust || model.rowMenuTarget != nil)
+                                     ? nil : model.horizontalDragGesture)
                 .refreshable {
                     // 重新拉 meta + 刷新 rows（触发重新计算字段值）
                     model.rowCache.refresh(metas: model.tabItems)
@@ -665,32 +732,21 @@ struct MarketTableBody: View {
         }
         .padding(.trailing, 8)
         .accessibilityIdentifier("market.rowCard")
-        // 长按弹菜单：加自选 / 取消自选 / 加入指定分组
-        .contextMenu {
-            marketRowMenuContent(model: model, meta: meta, isFaved: isFaved)
+        // 长按出操作面板：面板挂在容器层 overlay，**行自身无任何样式改动** ——
+        // 不用 .contextMenu（它走 UIContextMenuInteraction 抬升快照管线，会把行换宿主重排，
+        // 行内 GeometryReader 实测宽 + 常量列宽 + offset + clipped 会因此列错位 / 被裁）
+        .onLongPressGesture(minimumDuration: 0.5) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                model.openRowMenu(model.menuTarget(for: meta))
+            }
         }
-    }
-}
-
-// MARK: - 数据行长按菜单（A / C 档复用）
-
-/// 数据行长按菜单内容（A / C 档复用）：加自选 / 取消自选 / 加入指定分组。
-///
-/// 以 `@ViewBuilder` 函数形式提供，调用处直接内联在 `.contextMenu { }` 里 ——
-/// 与改造前的内联写法在 SwiftUI 菜单构建上完全等价（不引入自定义 View 包裹菜单项的歧义）。
-@ViewBuilder
-func marketRowMenuContent(model: MarketPageModel, meta: MetaItem, isFaved: Bool) -> some View {
-    Button(action: { model.fav.toggleFavorite(meta.id) }) {
-        Label(isFaved ? "取消自选" : "加自选", systemImage: isFaved ? "star.slash" : "star")
-    }
-    Button(action: { model.addGroupTarget = meta }) {
-        Label("加入指定分组", systemImage: "folder.badge.plus")
     }
 }
 
 // MARK: - 浮层（设置面板 / 加分组 / 搜索页 / 公式中心）
 
-/// 行情页四个浮层：挂在容器层，四档布局共用。
+/// 行情页呈现层：挂在容器层，四档布局共用。
+/// - 长按操作面板 / 备注弹窗 / 预警弹窗（容器层 overlay，与自选页共用 FavoritesRowMenu.swift）
 /// - 行情表设置面板 sheet（回调进入列宽调整模式）
 /// - 加入分组 sheet
 /// - 搜索页 overlay（复用 HomeView 搜索模式）
@@ -720,6 +776,7 @@ struct MarketSheets: ViewModifier {
                     .transition(.opacity)
                     .zIndex(1000)
                 }
+                rowMenuLayers
             }
             .sheet(isPresented: $model.showColumnPanel) {
                 MarketColumnConfigPanel(page: .marketBoard, configStore: model.colCfg) {
@@ -734,10 +791,70 @@ struct MarketSheets: ViewModifier {
                 AddToGroupSheet(meta: wrap.meta, fav: model.fav)
             }
     }
+
+    /// 长按面板 / 备注 / 预警：与自选页同一套组件，仅面板项按行情页上下文裁剪
+    @ViewBuilder
+    private var rowMenuLayers: some View {
+        if let target = model.rowMenuTarget {
+            FavoritesOverlayCard(onDismiss: { closeRowMenu() }) {
+                FavoritesRowMenuPanel(title: target.meta.name,
+                                      subtitle: target.meta.displayCode,
+                                      items: model.rowMenuItems(for: target),
+                                      onSelect: { action in
+                                          closeRowMenu()
+                                          model.performRowMenu(action, for: target)
+                                      },
+                                      onCancel: { closeRowMenu() })
+            }
+        }
+        if let target = model.noteEditorTarget {
+            FavoritesOverlayCard(onDismiss: { closeNoteEditor() }) {
+                FavoritesNoteSheet(meta: target.meta,
+                                   initialText: model.fav.note(for: target.meta.id) ?? "",
+                                   onSave: { text in
+                                       model.fav.setNote(metaID: target.meta.id, text: text)
+                                       closeNoteEditor()
+                                   },
+                                   onClear: {
+                                       model.fav.setNote(metaID: target.meta.id, text: "")
+                                       closeNoteEditor()
+                                   },
+                                   onCancel: { closeNoteEditor() })
+            }
+        }
+        if !model.alertSheetTargets.isEmpty {
+            FavoritesOverlayCard(onDismiss: { closeAlertSheet() }) {
+                FavoritesBatchAlertSheet(metas: model.alertSheetTargets,
+                                         onApply: { compareUp, price in
+                                             let targets = model.alertSheetTargets
+                                             closeAlertSheet()
+                                             FavoritesAlertKit.setAlerts(metas: targets,
+                                                                         compareUp: compareUp,
+                                                                         triggerPrice: price)
+                                         },
+                                         onCancel: { closeAlertSheet() })
+            }
+        }
+    }
+
+    private func closeRowMenu() {
+        guard model.rowMenuTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.rowMenuTarget = nil }
+    }
+
+    private func closeNoteEditor() {
+        guard model.noteEditorTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.noteEditorTarget = nil }
+    }
+
+    private func closeAlertSheet() {
+        guard !model.alertSheetTargets.isEmpty else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.alertSheetTargets = [] }
+    }
 }
 
 extension View {
-    /// 挂载行情页四个浮层（四档布局共用）
+    /// 挂载行情页全部呈现层（四档布局共用）
     func marketSheets(model: MarketPageModel) -> some View {
         modifier(MarketSheets(model: model))
     }

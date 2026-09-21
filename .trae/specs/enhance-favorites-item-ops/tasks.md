@@ -2,17 +2,17 @@
 
 ## 阶段一：figma 原型（设计稿先行，用户看稿定面板形态）
 
-- [ ] Task 1: 新建 `figma/favorites-ops-proposals.html`（3 屏）
-  - [ ] SubTask 1.1: 复用 `figma/favorites-market-ui-proposals.html` 的画廊骨架（`:root` 变量、`.bezel` + `.screen-wrap` 573×430 + `.screen` 1024×768 `scale(.55957)`、`.switcher`/`.seg`、`.marker`、`.ncard` 标注栏、`#shot=` 单屏定位），无外链依赖
-  - [ ] SubTask 1.2: 屏 `opsRowMenu`（长按操作面板）：左「长按前的表格行」、右「长按后的同一行 + 居中操作面板」，用编号标注明确标出「行高 / 列宽 / 横向偏移三者逐值不变」，并给一条「旧实现：系统菜单抬升预览 → 列错位」的对照小图
-  - [ ] SubTask 1.3: 屏 `opsBatch`（批量编辑）：编辑态多选（勾选圈 + 已选高亮）+ 底部批量条（已选 N 只 + 10 个 44pt 动作按钮），并标注「公式分组 / 全部组下的按钮置灰与原因文案」
-  - [ ] SubTask 1.4: 屏 `opsAlert`（预警记录页 + 备注弹窗）：预警记录列表（时间 / 名称代码 / 触发价 / 文案 + 单条删除 + 顶部「清空全部」）+ 叠一张备注编辑弹窗（含「已有备注」与「空备注」两态）
-  - [ ] SubTask 1.5: 每屏配编号标注 + 标注栏（描述 / 布局标注 / 优势 / 代价）与 `SCREENS`/`MARKS` 登记；页头写清「本次要解决的 6 件事（变形修复 / 固顶 / 移前移后 / 批量 / 备注 / 预警）」
+- [x] Task 1: 新建 `figma/favorites-ops-proposals.html`（3 屏）
+  - [x] SubTask 1.1: 复用 `figma/favorites-market-ui-proposals.html` 的画廊骨架（`:root` 变量、`.bezel` + `.screen-wrap` 573×430 + `.screen` 1024×768 `scale(.55957)`、`.switcher`/`.seg`、`.marker`、`.ncard` 标注栏、`#shot=` 单屏定位），无外链依赖
+  - [x] SubTask 1.2: 屏 `opsRowMenu`（长按操作面板）：左「长按前的表格行」、右「长按后的同一行 + 居中操作面板」，用编号标注明确标出「行高 / 列宽 / 横向偏移三者逐值不变」，并给一条「旧实现：系统菜单抬升预览 → 列错位」的对照小图
+  - [x] SubTask 1.3: 屏 `opsBatch`（批量编辑）：编辑态多选（勾选圈 + 已选高亮）+ 底部批量条（已选 N 只 + 10 个 44pt 动作按钮），并标注「公式分组 / 全部组下的按钮置灰与原因文案」
+  - [x] SubTask 1.4: 屏 `opsAlert`（预警记录页 + 备注弹窗）：预警记录列表（时间 / 名称代码 / 触发价 / 文案 + 单条删除 + 顶部「清空全部」）+ 叠一张备注编辑弹窗（含「已有备注」与「空备注」两态）
+  - [x] SubTask 1.5: 每屏配编号标注 + 标注栏（描述 / 布局标注 / 优势 / 代价）与 `SCREENS`/`MARKS` 登记；页头写清「本次要解决的 6 件事（变形修复 / 固顶 / 移前移后 / 批量 / 备注 / 预警）」
 
-- [ ] Task 2: 逐屏截图与交付说明
-  - [ ] SubTask 2.1: 按 `#shot=<屏 id>` 逐屏截图到 `figma/_shots/`（`ops_rowmenu.png` / `ops_batch.png` / `ops_alert.png`，窗口与既有截图一致 700×560）
-  - [ ] SubTask 2.2: 自检：无溢出 / 截断 / 重叠、编号与标注一一对应、设备框尺寸与既有画廊一致
-  - [ ] SubTask 2.3: 交付说明（画廊路径 + 3 张截图 + 面板项与批量项一览），等用户定稿
+- [x] Task 2: 逐屏截图与交付说明
+  - [x] SubTask 2.1: 按 `#shot=<屏 id>` 逐屏截图到 `figma/_shots/`（`ops_rowmenu.png` / `ops_batch.png` / `ops_alert.png`，窗口与既有截图一致 700×560）
+  - [x] SubTask 2.2: 自检：无溢出 / 截断 / 重叠、编号与标注一一对应、设备框尺寸与既有画廊一致（屏 1 左/右两块表格由同一串 HTML 渲染，行高列宽逐值一致）
+  - [x] SubTask 2.3: 交付说明（画廊路径 + 3 张截图 + 面板项与批量项一览），等用户定稿
 
 ## 阶段二：数据层（无 UI 变化，独立可编译）
 

@@ -89,7 +89,7 @@ struct MarketLayoutCView: View {
 // MARK: - 磁贴卡
 
 /// 磁贴卡（高 108pt）：名称 + 代码 / 大字现价 / 涨跌幅胶囊 + 涨跌额 / 迷你走势 / 右上角自选星标。
-/// 点击打开 K 线详情（按当前分类列表上下文），长按菜单与 A 档一致。
+/// 点击打开 K 线详情（按当前分类列表上下文），长按打开与表格同一套操作面板（容器层 overlay）。
 struct MarketTileCard: View {
     @ObservedObject var model: MarketPageModel
     let row: MarketRow
@@ -176,8 +176,12 @@ struct MarketTileCard: View {
         .onTapGesture {
             DetailRouter.shared.open(meta, in: model.displayRows.map { $0.meta })
         }
-        .contextMenu {
-            marketRowMenuContent(model: model, meta: meta, isFaved: isFaved)
+        // 长按出与表格同一套操作面板（挂在容器层 overlay，磁贴自身零样式改动）；
+        // 不用 .contextMenu：它会把磁贴抬升快照 / 换宿主，卡片高与内部布局会被重排
+        .onLongPressGesture(minimumDuration: 0.5) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                model.openRowMenu(model.menuTarget(for: meta))
+            }
         }
     }
 }

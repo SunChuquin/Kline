@@ -1078,6 +1078,40 @@ final class SimStore: ObservableObject {
         saveToDisk()
     }
 
+    /// 创建一条「仅提醒」预警条件单（薄封装，供自选 / 行情页的长按面板与批量预警复用）：
+    /// 装配 `alertOnly = true` 的价格条件单 → 走既有 `SimCondRule.validateCreate` 校验
+    /// （alertOnly 自动放行数量与可卖持仓）→ `upsertCondOrder` 落盘。
+    /// 不复制编辑器表单逻辑；表单仍归 SimCondEditorView 所有。
+    @discardableResult
+    func createAlertOrder(accountID: UUID, metaID: Int, code: String, name: String,
+                          compareUp: Bool, triggerPrice: Double) -> Result<SimCondOrder, SimCondRejection> {
+        guard triggerPrice > 0 else { return .failure(.missingParam("触发价")) }
+        guard let account = account(id: accountID) else { return .failure(.accountUnavailable) }
+
+        let now = Date()
+        var params = SimCondParams()
+        params.compareUp = compareUp
+        params.triggerPrice = triggerPrice
+        let directive = SimCondDirective(direction: .sell, priceType: .market,
+                                         offsetTicks: 0, qty: 0, alertOnly: true)
+        let order = SimCondOrder(id: UUID(), accountID: accountID, metaID: metaID,
+                                 code: code, name: name, kind: .price, params: params,
+                                 directive: directive, validity: .longTerm, expiresAt: nil,
+                                 createdAt: now, updatedAt: now, status: .monitoring,
+                                 runtime: SimCondRuntime(), triggeredCount: 0,
+                                 triggeredAt: nil, originOrderID: nil)
+
+        let snapshot = SimCondSnapshotCenter.snapshot(for: order)
+        if let rejection = SimCondRule.validateCreate(order: order, account: account,
+                                                      position: position(accountID: accountID,
+                                                                         metaID: metaID),
+                                                      snapshot: snapshot) {
+            return .failure(rejection)
+        }
+        upsertCondOrder(order)
+        return .success(order)
+    }
+
     // MARK: - 预警记录（条件单「仅提醒」触发写入；落盘在方法内部完成，与条件单写入口风格一致）
 
     /// 追加一条预警记录：写到尾部 + 落盘；超过 `alertRecordLimit` 丢最旧（保序裁剪）

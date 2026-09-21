@@ -99,10 +99,8 @@ struct FavoritesLayoutDView: View {
                 .accessibilityIdentifier("favorites.title")
                 .padding(.leading, 16)
             Spacer(minLength: 8)
-            iconButton(model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal",
-                       color: model.showEditingMode ? .blue : .secondary) {
-                model.showEditingMode.toggle()
-            }
+            // 编辑态开关：与 A/B/C 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
+            FavoritesEditToggleButton(model: model)
             iconButton("slider.horizontal.3") { model.showColumnPanel = true }
             iconButton("folder") { model.showManageSheet = true }
             iconButton("plus", color: .blue) { model.showAddSheet = true }

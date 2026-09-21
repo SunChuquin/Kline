@@ -54,10 +54,8 @@ struct FavoritesLayoutBView: View {
             toolButton("表头设置", icon: "slider.horizontal.3") {
                 model.showColumnPanel = true
             }
-            toolButton("编辑", icon: model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal",
-                       active: model.showEditingMode) {
-                model.showEditingMode.toggle()
-            }
+            // 编辑态开关：与 A/C/D 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
+            FavoritesEditToggleButton(model: model)
         }
         .padding(.horizontal, 16)
         .frame(height: 46)

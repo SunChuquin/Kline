@@ -5,7 +5,8 @@
 //  自选页 C 档布局：自选卡片流（卡片 / 表格双形态）。
 //  顶部 = 页标题 + 「卡片 / 表格」分段切换 + 图标按钮组；其下为共享分组 Tab 条。
 //  卡片形态：每卡一只（名称/代码 + 近 20 日迷你走势 + 今开/最高/最低/成交额 + 现价/涨跌幅胶囊 + 更多菜单），
-//  整卡点击进详情、长按出与 A 档同一套行菜单；表格形态直接复用 FavoritesTableBody（能力与 A 档一致）。
+//  整卡点击进详情、长按（或点右上「更多」）打开与 A 档同一套操作面板（FavoritesRowMenu.swift）；
+//  表格形态直接复用 FavoritesTableBody（能力与 A 档一致）。
 //
 
 import SwiftUI
@@ -32,10 +33,8 @@ struct FavoritesLayoutCView: View {
                 .padding(.leading, 16)
             Spacer(minLength: 8)
             modeSwitch
-            iconButton(model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal",
-                       color: model.showEditingMode ? .blue : .secondary) {
-                model.showEditingMode.toggle()
-            }
+            // 编辑态开关：与 A/B/D 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
+            FavoritesEditToggleButton(model: model)
             iconButton("slider.horizontal.3") { model.showColumnPanel = true }
             iconButton("plus", color: .blue) { model.showAddSheet = true }
                 .padding(.trailing, 4)
@@ -102,8 +101,8 @@ struct FavoritesLayoutCView: View {
                                         ? "还没有自选股" : "此分组暂无股票",
                                  subtitle: "在行情页面长按股票行即可加自选，或点击右上角 + 新建分组")
         } else if model.showsCardMode {
-            if model.showEditingMode, model.currentGroup.kind == .manual {
-                // 编辑态：与 A 档同一套拖动排序列表
+            if model.showEditingMode {
+                // 编辑态：三类分组都进同一套多选列表（其下方自带批量条；不提供拖拽排序则仅手动组有手柄）
                 FavoritesManualEditingList(model: model)
             } else {
                 cardList
@@ -156,9 +155,12 @@ struct FavoritesLayoutCView: View {
         .onTapGesture {
             model.detailRouter.open(meta, in: items)
         }
-        // 长按出与 A 档同一套行菜单（取消自选 / 加入其它分组 / 移动到分组）
-        .contextMenu {
-            favoritesRowMenuContent(model: model, meta: meta)
+        // 长按出与 A 档同一套操作面板（挂在容器层 overlay，卡片自身零样式改动）；
+        // 不用 .contextMenu：它会抬升快照 / 换宿主，卡片高与内部布局会被重排
+        .onLongPressGesture(minimumDuration: 0.5) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                model.openRowMenu(model.menuTarget(for: meta))
+            }
         }
     }
 
@@ -239,10 +241,12 @@ struct FavoritesLayoutCView: View {
         return Color(.systemGray)
     }
 
-    /// 最右：44x44「更多」按钮，点了弹出与长按相同的三项菜单
+    /// 最右：44x44「更多」按钮，点击打开与长按**同一**面板（同一份 items / 同一套动作）
     private func moreButton(_ meta: MetaItem) -> some View {
-        Menu {
-            favoritesRowMenuContent(model: model, meta: meta)
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                model.openRowMenu(model.menuTarget(for: meta))
+            }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .semibold))
@@ -250,6 +254,7 @@ struct FavoritesLayoutCView: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 }
 

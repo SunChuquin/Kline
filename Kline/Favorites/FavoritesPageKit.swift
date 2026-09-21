@@ -3,7 +3,11 @@
 //  Kline
 //
 //  自选页共享骨架：跨布局共享的页面状态模型 FavoritesPageModel 与子视图
-//  （工具条 / 分组 Tab 条 / 表格主体 / 行长按菜单 / 手动组编辑列表 / 浮层）。
+//  （工具条 / 编辑态开关 / 分组 Tab 条 / 表格主体 / 编辑态多选列表 / 长按面板与弹窗浮层）。
+//  编辑态：手动 / 公式 /「全部」三类分组都可进（`List(selection:)` 多选 + 手动组保留拖拽排序），
+//  底部批量条见 FavoritesRowMenu.swift（FavoritesBatchBar：按分组类型裁剪可用项）。
+//  长按面板与备注 / 预警弹窗见 FavoritesRowMenu.swift：全部挂在容器层 overlay，
+//  行与卡片自身不挂 menu（系统 .contextMenu 会把行换宿主重排 → 列错位 / 被裁）。
 //  A 档（FavoritesLayoutAView）由它们组合而成；后续 B/C/D 三档复用同一套骨架。
 //  写法与行情页 MarketPageKit.swift 同惯例：模型由容器 @StateObject 持有，
 //  各布局视图与子视图以 @ObservedObject 消费。
@@ -39,6 +43,18 @@ final class FavoritesPageModel: ObservableObject {
     @Published var showAddSheet: Bool = false
     @Published var formulaEditorTarget: FavoritesGroup? = nil
     @Published var addGroupTarget: MetaItem? = nil
+    /// 长按操作面板目标（nil = 未打开；挂在容器层 overlay，行内不挂任何 menu）
+    @Published var rowMenuTarget: FavoritesRowMenuTarget? = nil
+    /// 备注弹窗目标（全局备注，所有分组 / 行情页共享同一条）
+    @Published var noteEditorTarget: FavoritesRowMenuTarget? = nil
+    /// 预警弹窗载体（面板单只「设置预警」= 1 只；批量预警 = N 只，同一弹窗与创建路径）
+    @Published var batchAlertTarget: BatchAlertTarget? = nil
+    /// 批量编辑：多选集合（`List(selection:)` 的 SelectionValue = metaID）
+    @Published var batchSelection: Set<Int> = []
+    /// 批量备注弹窗载体（打开瞬间快照选中标的）
+    @Published var batchNoteTarget: BatchNoteTarget? = nil
+    /// 批量「移到分组」选择器开关（confirmationDialog 承载，沿用项目既有选择器规范）
+    @Published var batchGroupPickerActive: Bool = false
     /// C 档列表形态：true = 卡片流（默认），false = 表格
     @Published var showsCardMode: Bool = true
     /// 布局自身常驻占据的横向宽度（B 档左侧分组侧栏 216pt；其余档 0），
@@ -48,6 +64,21 @@ final class FavoritesPageModel: ObservableObject {
     // MARK: 内部（横向拖拽，不参与渲染，无需 Published）
     var hDragStart: CGFloat = 0
     var panAxisIsH: Bool? = nil
+    /// 订阅令牌（切分组 / 切布局时清空多选）
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        // 跨分组 / 跨档位的多选语义不清（"看不见的行"不应被批量动作命中）→ 一旦切换就清空。
+        // 放在模型里订阅，避免在 GroupTabs / B 侧栏 / D 看板 / 容器等每个写入点各加一段守卫。
+        fav.$selectedGroupID
+            .dropFirst()
+            .sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+        PageLayoutStore.shared.$favoritesLayout
+            .dropFirst()
+            .sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+    }
 
     // MARK: - 派生数据（与改造前 FavoritesView 的计算属性等价）
 
@@ -95,15 +126,28 @@ final class FavoritesPageModel: ObservableObject {
         fav.resolveMetaItems(groupID: groupID, allMeta: dbm.metaList)
     }
 
-    /// 指定分组内的行（已按列配置排序规则排序）
+    /// 指定分组内的行（已按列配置排序规则排序，并做「固顶优先」稳定分区）
     /// - Parameter prefetch: true → 未就绪的行触发后台预取（列表渲染用）；
     ///   false → 只读缓存快照（D 档统计快照用：避免统计重算 → 预取 → objectWillChange → 再重算的回环）
     func sortedRows(groupID: UUID, prefetch: Bool = true) -> [MarketRow] {
         let all = rowCache.rows(for: items(groupID: groupID), prefetch: prefetch)
-        if let rule = colCfg.sortRule(for: .favorites) {
-            return all.sorted(by: rule)
+        let base = colCfg.sortRule(for: .favorites).map { all.sorted(by: $0) } ?? all
+        // 固顶优先：在页面级排序规则**之后**做稳定分区 —— 固顶项按固顶顺序恒排最前，
+        // 其余保持排序后的原顺序（不用 sorted，避免不稳定排序打乱其余行）
+        let pinned = fav.pinnedIDs(groupID: groupID)
+        guard !pinned.isEmpty else { return base }
+
+        var byID: [Int: MarketRow] = [:]
+        for row in base { byID[row.metaID] = row }
+        var head: [MarketRow] = []
+        var taken: Set<Int> = []
+        for id in pinned {
+            guard let row = byID[id], taken.insert(id).inserted else { continue }
+            head.append(row)
         }
-        return all
+        guard !head.isEmpty else { return base }
+        let rest = base.filter { !taken.contains($0.metaID) }
+        return head + rest
     }
 
     func countOfGroup(_ g: FavoritesGroup) -> Int {
@@ -183,6 +227,301 @@ final class FavoritesPageModel: ObservableObject {
             }
     }
 
+    // MARK: - 长按操作面板（自绘，替代系统 .contextMenu；面板挂在容器层 overlay）
+
+    /// 当前是否处于「手动分组编辑态列表」语境（该语境的面板额外给「从该分组移除」）
+    var isManualEditingList: Bool {
+        showEditingMode && currentGroup.kind == .manual && currentGroup.id != fav.allGroup.id
+    }
+
+    /// 自选页上下文：当前分组 + 非行情页
+    func menuTarget(for meta: MetaItem) -> FavoritesRowMenuTarget {
+        FavoritesRowMenuTarget(meta: meta, groupID: currentGroup.id, isMarketPage: false)
+    }
+
+    /// 打开长按面板（同值不写，避免 @Published 发布风暴）
+    func openRowMenu(_ target: FavoritesRowMenuTarget) {
+        if rowMenuTarget != target { rowMenuTarget = target }
+    }
+
+    /// 面板项（按「可用性矩阵」算好后交给面板；不可用的项给 reason 供面板在其下方说明）
+    ///
+    /// - 手动分组：固顶 / 移前移后 / 加入其它分组 / 备注 / 设置·取消预警 / 取消自选
+    /// - 公式分组：固顶 / 加入其它分组 / 备注 / 设置·取消预警（移前移后置灰给原因；取消自选不出现）
+    /// - 「全部」虚拟组：加入其它分组 / 备注 / 设置·取消预警 / 取消自选（无固顶与移前移后）
+    func rowMenuItems(for target: FavoritesRowMenuTarget,
+                      includeRemoveFromGroup: Bool = false) -> [FavoritesRowMenuItem] {
+        let meta = target.meta
+        guard let gid = target.groupID else { return [] }
+        let group = fav.groups.first(where: { $0.id == gid })
+        let isAllGroup = gid == fav.allGroup.id
+        var items: [FavoritesRowMenuItem] = []
+
+        // 固顶：手动分组与公式分组都可固顶（纯显示层，与公式刷新结果无关）；「全部」虚拟组无实体 → 不出现
+        if !isAllGroup, group != nil {
+            let pinned = fav.isPinned(groupID: gid, metaID: meta.id)
+            items.append(FavoritesRowMenuItem(action: .togglePin,
+                                              title: pinned ? "取消固顶" : "固顶",
+                                              icon: pinned ? "pin.slash" : "pin"))
+        }
+
+        // 移到最前 / 最后：仅手动实体分组且当前无页面级排序规则才可用
+        if !isAllGroup, let group = group {
+            let sortRule = colCfg.sortRule(for: .favorites)
+            var blockReason: String?
+            if group.kind == .formula {
+                blockReason = "顺序由公式计算得到"
+            } else if let rule = sortRule {
+                let orderText = rule.order == .descending ? "降序" : "升序"
+                blockReason = "当前按 \(rule.field.title)\(orderText) 排序，暂不可手动定位"
+            }
+            let index = group.manualMetaIDs.firstIndex(of: meta.id)
+            let notInGroup = "不在该分组内"
+
+            let firstEnabled = blockReason == nil && index != nil && index != 0
+            var firstReason = blockReason
+            if firstReason == nil, firstEnabled == false {
+                firstReason = index == nil ? notInGroup : "已在最前"
+            }
+            items.append(FavoritesRowMenuItem(action: .moveToFirst, title: "移到最前",
+                                              icon: "arrow.up.to.line",
+                                              enabled: firstEnabled, reason: firstReason))
+
+            let lastEnabled = blockReason == nil && index != nil && index != group.manualMetaIDs.count - 1
+            var lastReason = blockReason
+            if lastReason == nil, lastEnabled == false {
+                lastReason = index == nil ? notInGroup : "已在最后"
+            }
+            items.append(FavoritesRowMenuItem(action: .moveToLast, title: "移到最后",
+                                              icon: "arrow.down.to.line",
+                                              enabled: lastEnabled, reason: lastReason))
+        }
+
+        // 加入其它分组（复用既有 AddToGroupSheet）
+        items.append(FavoritesRowMenuItem(action: .addToGroup, title: "加入其它分组",
+                                          icon: "folder.badge.plus"))
+
+        // 备注…（有备注时右侧给首行摘要）
+        let note = fav.note(for: meta.id)
+        items.append(FavoritesRowMenuItem(action: .note, title: "备注…", icon: "note.text",
+                                          trailing: note.map { FavoritesRowMenuItem.noteSummary($0) }))
+
+        // 设置 / 取消预警（无可用模拟账户且尚未设置预警时置灰并说明）
+        let hasAlert = FavoritesAlertKit.hasAlert(metaID: meta.id)
+        let canAlert = hasAlert || FavoritesAlertKit.accountID != nil
+        items.append(FavoritesRowMenuItem(action: .toggleAlert,
+                                          title: hasAlert ? "取消预警" : "设置预警",
+                                          icon: hasAlert ? "bell.slash" : "bell",
+                                          enabled: canAlert,
+                                          reason: canAlert ? nil : "请先在模拟页创建账户"))
+
+        // 编辑态：仅从该分组移除（保留其它分组里的自选）
+        if includeRemoveFromGroup, !isAllGroup, group?.kind == .manual {
+            items.append(FavoritesRowMenuItem(action: .removeFromGroup, title: "从该分组移除",
+                                              icon: "trash", destructive: true))
+        }
+
+        // 取消自选：公式分组成员由公式决定，故不出现；手动分组与「全部」组都有
+        if isAllGroup || group?.kind == .manual {
+            items.append(FavoritesRowMenuItem(action: .toggleFavorite, title: "取消自选",
+                                              icon: "star.slash", destructive: true))
+        }
+        return items
+    }
+
+    /// 执行面板动作（面板已在调用处关闭）
+    func performRowMenu(_ action: FavoritesRowMenuAction, for target: FavoritesRowMenuTarget) {
+        let meta = target.meta
+        switch action {
+        case .togglePin:
+            if let gid = target.groupID { fav.togglePin(groupID: gid, metaID: meta.id) }
+        case .moveToFirst:
+            if let gid = target.groupID { fav.moveToFirst(groupID: gid, metaID: meta.id) }
+        case .moveToLast:
+            if let gid = target.groupID { fav.moveToLast(groupID: gid, metaID: meta.id) }
+        case .addToGroup:
+            addGroupTarget = meta
+        case .note:
+            noteEditorTarget = target
+        case .toggleAlert:
+            if FavoritesAlertKit.hasAlert(metaID: meta.id) {
+                FavoritesAlertKit.cancelAlerts(metaID: meta.id)
+            } else {
+                // 单只预警也走批量预警弹窗（count = 1），同一套创建路径
+                batchAlertTarget = BatchAlertTarget(metas: [meta])
+            }
+        case .toggleFavorite:
+            fav.toggleFavorite(meta.id)
+        case .removeFromGroup:
+            if let gid = target.groupID { fav.removeFromGroup(id: gid, metaID: meta.id) }
+        }
+    }
+
+    // MARK: - 批量编辑（多选 + 底部批量条）
+
+    /// 当前分组是否「全部」虚拟组（无实体：固顶 / 移到分组不适用，移出即「取消自选」）
+    private var isAllGroupSelected: Bool { currentGroup.id == fav.allGroup.id }
+
+    /// 进入 / 退出编辑态：退出时清空多选（避免残留选择在下次进入时命中"看不见的行"）
+    func toggleEditingMode() {
+        if showEditingMode {
+            setBatchSelection([])
+            showEditingMode = false
+        } else {
+            showEditingMode = true
+        }
+    }
+
+    /// 写多选（同值不写，避免 @Published 发布风暴）
+    func setBatchSelection(_ new: Set<Int>) {
+        if batchSelection != new { batchSelection = new }
+    }
+
+    /// 选中标的快照：按当前分组原始顺序（Set 无序，动作一律按显示顺序执行）
+    func batchSelectedMetas() -> [MetaItem] {
+        guard !batchSelection.isEmpty else { return [] }
+        let selected = batchSelection
+        return currentItems.filter { selected.contains($0.id) }
+    }
+
+    /// 批量条项目（按当前分组类型的可用性矩阵裁剪 / 置灰；不可用项给原因供批量条显示一行说明）
+    ///
+    /// - 手动分组：10 项全可用
+    /// - 公式分组：移出 / 移到分组 置灰（原因「顺序由公式计算得到」，拖拽排序同样不提供）
+    /// - 「全部」虚拟组：只保留 取消自选 / 备注 / 预警 / 全选 / 取消全选（固顶与移到分组不出现）
+    func batchBarItems() -> [FavoritesBatchItem] {
+        let isAll = isAllGroupSelected
+        let isFormula = currentGroup.kind == .formula
+        let hasSelection = !batchSelection.isEmpty
+        let formulaReason = isFormula ? "顺序由公式计算得到" : nil
+        let hasAccount = FavoritesAlertKit.accountID != nil
+        var items: [FavoritesBatchItem] = []
+
+        items.append(FavoritesBatchItem(action: .removeFromGroup,
+                                        title: isAll ? "取消自选" : "移出",
+                                        icon: "folder.badge.minus",
+                                        enabled: hasSelection && !isFormula,
+                                        reason: formulaReason))
+        if !isAll {
+            items.append(FavoritesBatchItem(action: .moveToGroup, title: "移到分组",
+                                            icon: "folder.badge.plus",
+                                            enabled: hasSelection && !isFormula,
+                                            reason: formulaReason))
+            items.append(FavoritesBatchItem(action: .pin, title: "固顶",
+                                            icon: "pin", enabled: hasSelection))
+            items.append(FavoritesBatchItem(action: .unpin, title: "取消固顶",
+                                            icon: "pin.slash", enabled: hasSelection))
+        }
+        items.append(FavoritesBatchItem(action: .setNote, title: "设置备注",
+                                        icon: "note.text", enabled: hasSelection))
+        items.append(FavoritesBatchItem(action: .clearNote, title: "清除备注",
+                                        icon: "trash", enabled: hasSelection))
+        items.append(FavoritesBatchItem(action: .setAlert, title: "设置预警",
+                                        icon: "bell", enabled: hasSelection && hasAccount,
+                                        reason: hasAccount ? nil : "请先在模拟页创建账户"))
+        items.append(FavoritesBatchItem(action: .cancelAlert, title: "取消预警",
+                                        icon: "bell.slash", enabled: hasSelection))
+        // 全选是「从无到有」的入口：批量条只在当前分组有行时才渲染（空态走列表空态），故恒可用；
+        // 已全选时再点为幂等 no-op；取消全选要有选择才有意义。
+        // 注意：本方法在批量条 body 内调用，故只用 O(1) 状态（不在此处遍历分组标的 / 行缓存）
+        items.append(FavoritesBatchItem(action: .selectAll, title: "全选",
+                                        icon: "checkmark.circle", enabled: true))
+        items.append(FavoritesBatchItem(action: .deselectAll, title: "取消全选",
+                                        icon: "circle", enabled: hasSelection))
+        return items
+    }
+
+    /// 执行批量动作（动作完成后清空选择并保持编辑态；单个标的失败只记日志、继续处理其余标的）
+    func performBatch(_ action: FavoritesBatchAction) {
+        switch action {
+        case .selectAll:
+            // 全选 = 当前列表已显示的行（sortedRows 的 metaID 集合）
+            setBatchSelection(Set(sortedRows.map(\.metaID)))
+        case .deselectAll:
+            setBatchSelection([])
+
+        case .removeFromGroup:
+            let gid = currentGroup.id
+            for meta in batchSelectedMetas() {
+                if gid == fav.allGroup.id {
+                    // 「全部」虚拟组：取消自选 = 从所有手动分组移除
+                    fav.toggleFavorite(meta.id)
+                } else {
+                    fav.removeFromGroup(id: gid, metaID: meta.id)
+                }
+            }
+            finishBatch()
+
+        case .moveToGroup:
+            // 目标分组由 confirmationDialog 选择，选完调 performBatchMoveToGroup(_:)
+            batchGroupPickerActive = true
+
+        case .pin:
+            setBatchPinned(true)
+        case .unpin:
+            setBatchPinned(false)
+
+        case .setNote:
+            batchNoteTarget = BatchNoteTarget(metas: batchSelectedMetas())
+
+        case .clearNote:
+            for meta in batchSelectedMetas() { fav.setNote(metaID: meta.id, text: "") }
+            finishBatch()
+
+        case .setAlert:
+            batchAlertTarget = BatchAlertTarget(metas: batchSelectedMetas())
+
+        case .cancelAlert:
+            for meta in batchSelectedMetas() { FavoritesAlertKit.cancelAlerts(metaID: meta.id) }
+            finishBatch()
+        }
+    }
+
+    /// 批量移到分组（用户在选择器里点了目标分组）：加入目标分组 + 从当前分组移除
+    func performBatchMoveToGroup(_ target: FavoritesGroup) {
+        let gid = currentGroup.id
+        for meta in batchSelectedMetas() {
+            fav.addToGroup(id: target.id, metaID: meta.id)
+            // 当前组为「全部」虚拟组时没有实体可移除，只做加入
+            if gid != fav.allGroup.id { fav.removeFromGroup(id: gid, metaID: meta.id) }
+        }
+        finishBatch()
+    }
+
+    /// 批量备注落库（弹窗「保存」传文本；「清空」传空串 = 删除 key）
+    func applyBatchNote(_ text: String) {
+        let metas = batchNoteTarget?.metas ?? []
+        for meta in metas { fav.setNote(metaID: meta.id, text: text) }
+        finishBatch()
+    }
+
+    /// 批量预警创建（弹窗「应用到 N 只」）：对快照标的各建一条同规则 alertOnly 条件单；
+    /// 失败原因由 FavoritesAlertKit 记 DebugLogger，不中断其余标的
+    func applyBatchAlert(compareUp: Bool, triggerPrice: Double) {
+        let metas = batchAlertTarget?.metas ?? []
+        FavoritesAlertKit.setAlerts(metas: metas, compareUp: compareUp, triggerPrice: triggerPrice)
+        finishBatch()
+    }
+
+    /// 批量固顶 / 取消固顶：按列表当前显示顺序逐个执行（Set 无序，不能按点击顺序）；
+    /// 用 `isPinned` 先判方向，保证「固顶」不会把已固顶项反向取消（反之亦然）
+    private func setBatchPinned(_ pinned: Bool) {
+        let gid = currentGroup.id
+        guard gid != fav.allGroup.id else { return }
+        let selected = batchSelection
+        for row in sortedRows where selected.contains(row.metaID) {
+            if fav.isPinned(groupID: gid, metaID: row.metaID) != pinned {
+                fav.togglePin(groupID: gid, metaID: row.metaID)
+            }
+        }
+        finishBatch()
+    }
+
+    /// 批量动作收尾：只清空选择、保持编辑态（用户常连续做多组批量动作）
+    private func finishBatch() {
+        setBatchSelection([])
+    }
+
     // MARK: - 刷新进度回写（同值不写）
 
     func setRefreshProgress(_ groupID: UUID, done: Int, total: Int) {
@@ -193,6 +532,39 @@ final class FavoritesPageModel: ObservableObject {
     func clearRefreshProgress(groupID: UUID) {
         guard let p = refreshProgress, p.groupID == groupID else { return }
         refreshProgress = nil
+    }
+}
+
+// MARK: - 编辑态开关按钮（四档共用：文案「编辑」→「完成」）
+
+/// 编辑态开关：灰底胶囊蓝字「编辑」→ 编辑态蓝底白字「完成」，命中区 44pt。
+/// A 工具条 / B 工作区标题 / C 顶栏 / D 顶栏共用同一个按钮，保证四档文案与选中态一致；
+/// 退出编辑态时由 `FavoritesPageModel.toggleEditingMode()` 一并清空多选。
+struct FavoritesEditToggleButton: View {
+    @ObservedObject var model: FavoritesPageModel
+
+    var body: some View {
+        Button {
+            model.toggleEditingMode()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal")
+                    .font(.system(size: 12, weight: .medium))
+                Text(model.showEditingMode ? "完成" : "编辑")
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    // 固定最小宽：文案切换时按钮宽度不跳动
+                    .frame(minWidth: 24)
+            }
+            .foregroundColor(model.showEditingMode ? .white : .blue)
+            .padding(.horizontal, 11)
+            .frame(height: 28)
+            .background(model.showEditingMode ? Color.blue : Color(.systemGray6))
+            .cornerRadius(7)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -253,10 +625,8 @@ struct FavoritesToolbar: View {
                 .padding(.horizontal, 6)
                 .contentShape(Rectangle())
             }
-            topIconButton(model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal",
-                          color: model.showEditingMode ? .blue : .secondary) {
-                model.showEditingMode.toggle()
-            }
+            // 编辑态开关（A/B/C/D 四档同一按钮：文案「编辑」→「完成」）
+            FavoritesEditToggleButton(model: model)
             topIconButton("slider.horizontal.3") {
                 model.showColumnPanel = true
             }
@@ -391,7 +761,9 @@ struct FavoritesTableBody: View {
 
     @ViewBuilder
     private var listBody: some View {
-        if model.showEditingMode, model.currentGroup.kind == .manual {
+        // 三类分组（手动 / 公式 /「全部」虚拟组）都可进入编辑态：批量动作按分组类型裁剪可用项
+        // （旧行为「公式组切编辑回退只读列表」已修掉）
+        if model.showEditingMode {
             FavoritesManualEditingList(model: model,
                                        heightOverride: rowHeightOverride,
                                        fontSizeOverride: fontSizeOverride)
@@ -410,7 +782,7 @@ struct FavoritesTableBody: View {
                 }
             }
         }
-        .simultaneousGesture(model.horizontalDragGesture)
+        .simultaneousGesture(model.rowMenuTarget == nil ? model.horizontalDragGesture : nil)
         .refreshable {
             model.refreshCurrentGroup()
         }
@@ -431,9 +803,13 @@ struct FavoritesTableBody: View {
         }
         .padding(.trailing, 8)
         .frame(height: rowHeight)
-        // 长按弹菜单：取消自选 / 加入其它分组 / 移动分组
-        .contextMenu {
-            favoritesRowMenuContent(model: model, meta: meta)
+        // 长按出操作面板：面板挂在容器层 overlay，**行自身无任何样式改动** ——
+        // 不用 .contextMenu（它走 UIContextMenuInteraction 抬升快照管线，会把行换宿主重排，
+        // 行内 GeometryReader 实测宽 + 常量列宽 + offset + clipped 会因此列错位 / 被裁）
+        .onLongPressGesture(minimumDuration: 0.5) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                model.openRowMenu(model.menuTarget(for: meta))
+            }
         }
     }
 
@@ -472,40 +848,16 @@ struct FavoritesTableBody: View {
     }
 }
 
-// MARK: - 数据行长按菜单（A 档与后续 C 档复用）
+// MARK: - 编辑态列表（多选 + 拖拽排序 + 底部批量条）
 
-/// 数据行长按菜单内容（A 档与后续 C 档复用）：取消自选 / 加入其它分组 / 移动到分组。
-///
-/// 以 `@ViewBuilder` 函数形式提供，调用处直接内联在 `.contextMenu { }` 里 ——
-/// 与改造前的内联写法在 SwiftUI 菜单构建上完全等价（不引入自定义 View 包裹菜单项的歧义）。
-@ViewBuilder
-func favoritesRowMenuContent(model: FavoritesPageModel, meta: MetaItem) -> some View {
-    Button(role: .destructive, action: { model.fav.toggleFavorite(meta.id) }) {
-        Label("取消自选", systemImage: "star.slash")
-    }
-    Button(action: { model.addGroupTarget = meta }) {
-        Label("加入其它分组", systemImage: "folder.badge.plus")
-    }
-    Menu(content: {
-        let manualGroups = model.fav.groups.filter { $0.kind == .manual }
-        ForEach(manualGroups) { g in
-            Button(action: {
-                if g.manualMetaIDs.contains(meta.id) {
-                    model.fav.removeFromGroup(id: g.id, metaID: meta.id)
-                } else {
-                    model.fav.addToGroup(id: g.id, metaID: meta.id)
-                }
-            }) {
-                let inIt = g.manualMetaIDs.contains(meta.id)
-                Label(g.name, systemImage: inIt ? "checkmark" : "")
-            }
-        }
-    }) { Label("移动到分组", systemImage: "arrow.up.arrow.down.circle") }
-}
-
-// MARK: - 手动分组编辑模式列表（List + onMove + editMode，后续 C 档复用）
-
-/// 手动分组在编辑模式下的可拖动排序列表：拖动后顺序立即落盘。
+/// 编辑态列表：手动 / 公式 /「全部」三类分组都可进入。
+/// - 多选：`List(selection:)`，SelectionValue = `metaID`（Int），行用 `.tag(metaID)`；
+///   写入统一走 `model.setBatchSelection`（同值不写）
+/// - 拖拽排序：仅手动实体分组提供 `.onMove`（公式组顺序由公式算、「全部」组是虚拟并集）——
+///   不提供拖拽手柄，而不是"提供但 no-op"，避免出现拖了没反应的手柄
+/// - 行数据取分组**原始顺序**（手动组 = manualMetaIDs 顺序；不走 sortedRows，避免固顶分区 /
+///   排序规则打乱拖动语义）
+/// - 底部常驻批量条（A/B/C/D 与 C 档卡片形态共用这一处）；编辑态不挂横向手势（本就与横滑互斥）
 struct FavoritesManualEditingList: View {
     @ObservedObject var model: FavoritesPageModel
     /// 行高覆盖（nil = 既有 45）；D 档紧凑表传 34，编辑态与只读态行高一致
@@ -513,48 +865,72 @@ struct FavoritesManualEditingList: View {
     /// 主字号覆盖（nil = 既有 18）；D 档紧凑表传 15
     var fontSizeOverride: CGFloat? = nil
 
+    private var gid: UUID { model.currentGroup.id }
+
+    /// 拖拽排序可用性：仅手动实体分组
+    private var canReorder: Bool {
+        model.currentGroup.kind == .manual && gid != model.fav.allGroup.id
+    }
+
+    /// 编辑态行数据：分组原始顺序
+    private var editingItems: [MetaItem] { model.items(groupID: gid) }
+
+    /// 多选绑定：统一经 `setBatchSelection` 写入（同值不写）
+    private var selection: Binding<Set<Int>> {
+        Binding(get: { model.batchSelection },
+                set: { model.setBatchSelection($0) })
+    }
+
     var body: some View {
-        let gid = model.currentGroup.id
-        let currentBinding = Binding<[MetaItem]>(
-            get: { model.items(groupID: gid) },
-            set: { newMetas in
-                // 将手动组的 manualMetaIDs 替换为新的顺序并落盘
-                model.saveManualOrder(groupID: gid, orderedMetaIDs: newMetas.map { $0.id })
-            }
-        )
-        return List {
-            ForEach(currentBinding) { $m in
-                HStack(spacing: 0) {
-                    let mm = $m.wrappedValue
-                    // 自选页内容本身即自选结果，无需再用灰底/红字标记，样式与行情页非自选行一致
-                    MarketTableRow(page: .favorites, mode: .data(meta: mm), config: model.colCfg, rowCache: model.rowCache,
-                                   onOpen: { m in
-                        model.detailRouter.open(m, in: model.items(groupID: gid))
-                    }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false,
-                                   heightOverride: heightOverride, fontSizeOverride: fontSizeOverride)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            model.fav.removeFromGroup(id: gid, metaID: mm.id)
-                        } label: {
-                            Label("从该分组移除", systemImage: "trash")
-                        }
+        VStack(spacing: 0) {
+            List(selection: selection) {
+                if canReorder {
+                    ForEach(editingItems) { meta in
+                        editingRow(meta).tag(meta.id)
+                    }
+                    .onMove { from, to in
+                        var items = editingItems
+                        items.move(fromOffsets: from, toOffset: to)
+                        model.saveManualOrder(groupID: gid, orderedMetaIDs: items.map { $0.id })
+                    }
+                } else {
+                    ForEach(editingItems) { meta in
+                        editingRow(meta).tag(meta.id)
                     }
                 }
             }
-            .onMove { from, to in
-                var items = model.items(groupID: gid)
-                items.move(fromOffsets: from, toOffset: to)
-                model.saveManualOrder(groupID: gid, orderedMetaIDs: items.map { $0.id })
+            .listStyle(.plain)
+            .environment(\.editMode, .constant(.active))
+
+            // 底部批量条（高度固定；无选择时动作置灰）
+            FavoritesBatchBar(model: model)
+        }
+    }
+
+    /// 编辑态行：与只读态同一套 MarketTableRow（行高 / 字号沿用覆盖值）+ 长按操作面板
+    private func editingRow(_ meta: MetaItem) -> some View {
+        HStack(spacing: 0) {
+            // 自选页内容本身即自选结果，无需再用灰底/红字标记，样式与行情页非自选行一致
+            MarketTableRow(page: .favorites, mode: .data(meta: meta), config: model.colCfg, rowCache: model.rowCache,
+                           onOpen: { m in
+                model.detailRouter.open(m, in: model.items(groupID: gid))
+            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false,
+                           heightOverride: heightOverride, fontSizeOverride: fontSizeOverride)
+            // 长按出同一套操作面板（该列表的「从该分组移除」并入面板项）
+            .onLongPressGesture(minimumDuration: 0.5) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    model.openRowMenu(model.menuTarget(for: meta))
+                }
             }
         }
-        .listStyle(.plain)
-        .environment(\.editMode, .constant(.active))
     }
 }
 
-// MARK: - 浮层（列配置 / 管理分组 / 新建分组 / 公式编辑 / 加入分组）
+// MARK: - 浮层（列配置 / 管理分组 / 新建分组 / 公式编辑 / 加入分组 / 长按面板 / 备注 / 预警）
 
-/// 自选页 5 个呈现层：挂在容器层，四档布局共用。
+/// 自选页呈现层：挂在容器层，四档布局共用。
+/// - 长按操作面板 / 备注弹窗 / 预警弹窗 / 批量备注弹窗（容器层 overlay，四档共用同一套）
+/// - 批量「移到分组」选择器（confirmationDialog，沿用项目既有选择器规范）
 /// - 行情表设置面板 sheet
 /// - 管理分组 sheet
 /// - 新建分组 sheet
@@ -565,6 +941,16 @@ struct FavoritesSheets: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // 长按面板 / 备注 / 预警：容器层 overlay（行内零改动，长按前后行几何逐值不变）
+            .overlay { rowMenuLayers }
+            // 批量「移到分组」：目标分组用 confirmationDialog 选（选择器统一规范，不用 Menu）
+            .confirmationDialog("移到分组", isPresented: $model.batchGroupPickerActive,
+                                titleVisibility: .visible) {
+                ForEach(model.fav.groups.filter { $0.kind == .manual }) { g in
+                    Button(g.name) { model.performBatchMoveToGroup(g) }
+                }
+                Button("取消", role: .cancel) { }
+            }
             .sheet(isPresented: $model.showColumnPanel) {
                 MarketColumnConfigPanel(page: .favorites, configStore: model.colCfg)
             }
@@ -587,10 +973,90 @@ struct FavoritesSheets: ViewModifier {
                 AddToGroupSheet(meta: wrap.meta, fav: model.fav)
             }
     }
+
+    @ViewBuilder
+    private var rowMenuLayers: some View {
+        if let target = model.rowMenuTarget {
+            FavoritesOverlayCard(onDismiss: { closeRowMenu() }) {
+                FavoritesRowMenuPanel(title: target.meta.name,
+                                      subtitle: target.meta.displayCode,
+                                      items: model.rowMenuItems(for: target,
+                                                                includeRemoveFromGroup: model.isManualEditingList),
+                                      onSelect: { action in
+                                          closeRowMenu()
+                                          model.performRowMenu(action, for: target)
+                                      },
+                                      onCancel: { closeRowMenu() })
+            }
+        }
+        if let target = model.noteEditorTarget {
+            FavoritesOverlayCard(onDismiss: { closeNoteEditor() }) {
+                FavoritesNoteSheet(meta: target.meta,
+                                   initialText: model.fav.note(for: target.meta.id) ?? "",
+                                   onSave: { text in
+                                       model.fav.setNote(metaID: target.meta.id, text: text)
+                                       closeNoteEditor()
+                                   },
+                                   onClear: {
+                                       model.fav.setNote(metaID: target.meta.id, text: "")
+                                       closeNoteEditor()
+                                   },
+                                   onCancel: { closeNoteEditor() })
+            }
+        }
+        if let target = model.batchNoteTarget, let first = target.metas.first {
+            FavoritesOverlayCard(onDismiss: { closeBatchNote() }) {
+                FavoritesNoteSheet(meta: first,
+                                   initialText: "",
+                                   titleOverride: "批量备注 · \(target.count) 只",
+                                   onSave: { text in
+                                       model.applyBatchNote(text)
+                                       closeBatchNote()
+                                   },
+                                   onClear: {
+                                       // 批量「清空」= 删除这批标的的备注 key
+                                       model.applyBatchNote("")
+                                       closeBatchNote()
+                                   },
+                                   onCancel: { closeBatchNote() })
+            }
+        }
+        if let target = model.batchAlertTarget {
+            FavoritesOverlayCard(onDismiss: { closeBatchAlert() }) {
+                FavoritesBatchAlertSheet(metas: target.metas,
+                                         onApply: { compareUp, price in
+                                             closeBatchAlert()
+                                             model.applyBatchAlert(compareUp: compareUp,
+                                                                   triggerPrice: price)
+                                         },
+                                         onCancel: { closeBatchAlert() })
+            }
+        }
+    }
+
+    private func closeRowMenu() {
+        guard model.rowMenuTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.rowMenuTarget = nil }
+    }
+
+    private func closeNoteEditor() {
+        guard model.noteEditorTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.noteEditorTarget = nil }
+    }
+
+    private func closeBatchNote() {
+        guard model.batchNoteTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.batchNoteTarget = nil }
+    }
+
+    private func closeBatchAlert() {
+        guard model.batchAlertTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.batchAlertTarget = nil }
+    }
 }
 
 extension View {
-    /// 挂载自选页 5 个浮层（四档布局共用）
+    /// 挂载自选页全部呈现层（四档布局共用）
     func favoritesSheets(model: FavoritesPageModel) -> some View {
         modifier(FavoritesSheets(model: model))
     }
