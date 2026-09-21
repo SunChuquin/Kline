@@ -66,32 +66,32 @@
   - [x] SubTask 10.3: 批量动作实现：批量移出/取消自选（`removeFromGroup`；「全部」组走 `toggleFavorite`）、批量移到分组（`addToGroup` + 当前组 `removeFromGroup`）、批量固顶（按显示顺序 `togglePin`）、批量备注（`setNote` / `setNote("")`）、批量预警（`SimStore.createAlertOrder(alertOnly: true)`）/ 批量取消预警（删除提醒型条件单）
   - [x] SubTask 10.4: 四档接线：新增共用 `FavoritesEditToggleButton`（「编辑」↔「完成」）接进 A 工具条 / B 工作区 / C 顶栏 / D 顶栏；切分组与切档清空多选（跨分组选择语义不清）
 
-- [ ] Task 11: 阶段三闭环
-  - [ ] SubTask 11.1: 编码自查（无 `contextMenu` 残留：全项目 Grep `.contextMenu` 应只剩行情页 `marketRowMenuContent` 之外无引用；`body` 内无全表遍历；同值守卫）
-  - [ ] SubTask 11.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(favorites-ops): 长按操作面板（消灭行变形）+ 固顶/移动/备注/批量编辑"`
-  - [ ] SubTask 11.3: 交付说明（重点请用户验收：长按不再变形、固顶优先于排序规则、批量动作正确），等待真机验收
+- [x] Task 11: 阶段三闭环
+  - [x] SubTask 11.1: 编码自查（无 `contextMenu` 残留：全项目 Grep `.contextMenu` 只剩注释，5 处真实用法全部替换、旧函数 `favoritesRowMenuContent` / `marketRowMenuContent` 已删除；`body` 内无全表遍历；同值守卫）
+  - [x] SubTask 11.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(favorites-ops): 长按操作面板（消灭行变形）+ 固顶/移动/备注 + 批量编辑"` → 首次 run=35572722753 **编译失败**（`FavoritesRowMenu.swift:421` 的 `dialogButton` 缺 `bold` 默认值）→ 修复后 run=35572879428 退出码 0，已部署 v1.0.2 (353)
+  - [x] SubTask 11.3: 交付说明（重点请用户验收：长按不再变形、固顶优先于排序规则、批量动作正确），等待真机验收
 
 ## 阶段四：预警闭环（编辑器开关 + 预警记录页）
 
-- [ ] Task 12: 条件单编辑器与入口
-  - [ ] SubTask 12.1: `SimCondEditorView` 新增「仅提醒（不下单）」开关（默认关），保存时写入 `alertOnly`；开关开启时隐藏/置灰与下单相关的字段（方向、数量、价格类型）
-  - [ ] SubTask 12.2: 自选页长按面板「设置预警」→ 复用条件单编辑器并预置「仅提醒」开启 + 带入标的（不复制表单）
-  - [ ] SubTask 12.3: `SimCondListView` 导航栏新增「预警记录」入口（跳全屏 `AlertRecordView`）；条件单卡片上对 `isAlertOnly` 显示「提醒」标记，便于区分
+- [x] Task 12: 条件单编辑器与入口
+  - [x] SubTask 12.1: `SimCondEditorView` 新增「仅提醒（不下单）」开关（默认关，编辑既有提醒单时预填为开）；开启时**置灰但保留**下单相关字段（触发后委托指令卡整张、网格每格数量与倍数、分批总数量；分批方向保留，因其参与触发价判定）——不隐藏以免布局跳动；提交按钮提醒态改中性蓝
+  - [x] SubTask 12.2: 面板「设置预警」**改用轻量预警弹窗**（而非打开编辑器）：阶段三实现时 `SimCondEditorView` 尚无 `alertOnly` 参数，直接打开编辑器会创建**真正下单**的普通条件单（语义相反），故先走轻量弹窗 + `SimStore.createAlertOrder(alertOnly: true)`；本轮编辑器开关补上后该路径仍然保留（更快的建档方式），属**有意偏差**
+  - [x] SubTask 12.3: `SimCondListView` 导航栏新增「预警记录」入口（`bell.badge`，44×44，走本页 `fullScreenCover` 的新 `case .alerts`）；条件单卡片对 `isAlertOnly` 显示「提醒」标记（`SimCondAlertBadge`），指令行改为「触发后只记录预警（不下单）· 有效期」
 
-- [ ] Task 13: 新增 `Kline/Simulation/AlertRecordView.swift`（预警记录页）
-  - [ ] SubTask 13.1: 列表按 `occurredAt` 倒序：时间（含日期与时分）/ 标的名称与代码 / 触发价 / 文案；空态「暂无预警记录」
-  - [ ] SubTask 13.2: 单条左滑或行内按钮删除（先做行内删除按钮，命中区 ≥44pt）、顶部「清空全部」（二次确认）；点记录打开该标的 K 线详情（`DetailRouter.open`）
-  - [ ] SubTask 13.3: 使用语义化颜色、固定行高；不改 App 内任何弹窗/横幅提示（预警不弹窗是本次明确口径）
+- [x] Task 13: 新增 `Kline/Simulation/AlertRecordView.swift`（预警记录页）
+  - [x] SubTask 13.1: 列表**直接读** `SimStore.shared.alertRecordsSorted`（已按 `occurredAt` 倒序，页面不二次排序）：时间（`MM-dd HH:mm`，等宽 76）+ 「名称 代码」+ 触发价（按来源条件单方向着色，取不到用主色不臆造）+ 一行文案；空态 `bell.slash` + 两行说明
+  - [x] SubTask 13.2: 行内删除按钮（`trash`，44×44）→ `deleteAlertRecord(id:)`；顶部「清空全部」（无记录时置灰）走 `confirmationDialog` 二次确认（destructive）→ `clearAlertRecords()`；点整行 → `DetailRouter.open(meta, in: [meta])`（`metaList` 反查不到则不响应）
+  - [x] SubTask 13.3: 使用语义化颜色、行高固定 56；**页内无任何自动弹窗/横幅**（预警不在 App 内提示是本次口径）
 
-- [ ] Task 14: 阶段四闭环
-  - [ ] SubTask 14.1: 编码自查（普通条件单行为零变化、预警触发不下单、记录落盘与上限生效）
-  - [ ] SubTask 14.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(favorites-ops): 条件单仅提醒模式与预警记录页"`
-  - [ ] SubTask 14.3: 交付说明，等待真机验收
+- [x] Task 14: 阶段四闭环
+  - [x] SubTask 14.1: 编码自查（普通条件单的创建/编辑/保存/触发路径零变化：`alertOnly` 仅在提醒态写 `true`、普通单写 `nil` → JSON 与改造前逐字一致；预警触发不下单；记录落盘与 200 条上限生效）
+  - [x] SubTask 14.2: 执行 `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "feat(favorites-ops): 条件单仅提醒模式与预警记录页"`（run=35574303002，退出码 0，已部署 v1.0.2 (354)）
+  - [x] SubTask 14.3: 交付说明，等待真机验收
 
 ## 阶段五：验收
 
-- [ ] Task 15: 逐条核验 checklist（含真机手工验收清单），失败条目回填 tasks 修复后重验
-- [ ] Task 16: 最终交付说明（各阶段 build 号、操作矩阵一览、真机验证路径与回归点、`git status` 无遗留改动）
+- [x] Task 15: 逐条核验 checklist（含真机手工验收清单），失败条目回填 tasks 修复后重验（其间修复 1 处编译错误 → Task 11.2）
+- [x] Task 16: 最终交付说明（各阶段 build 号、操作矩阵一览、真机验证路径与回归点、`git status` 无遗留改动）
 
 # Task Dependencies
 
