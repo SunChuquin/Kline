@@ -42,7 +42,7 @@
 - [x] Task 7: 首页分发容器 + A 档等价搬运
   - [x] SubTask 7.1: 新增 `HomeLayoutAView`：把现有 `HomeView` 的 body 等价搬入（标题栏 / 分隔线 / 居中占位；`home.welcome` 标识保留在「欢迎来到首页」上）
   - [x] SubTask 7.2: [HomeView](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeView.swift#L25-L48) 改为分发容器：`@ObservedObject layoutStore`，`isSearching` 为真时统一走 `HomeSearchModeView`，否则按 `layoutStore.homeLayout` 分发四档；B/C/D **先临时回落到 A 档视图**（代码注释标明下一阶段替换）
-  - [x] SubTask 7.3: 四档内容根统一挂 `accessibilityIdentifier("home.page")`；公式管理 overlay 经 `homeOverlays(...)` 挂容器层
+  - [x] SubTask 7.3: 四档内容根统一挂 `accessibilityIdentifier("home.page")`（阶段三改为挂在四档共用标题栏的软件名 `Text` 上——容器上的标识在 SwiftUI 里未必暴露成无障碍元素，详见 Task 12.3）；公式管理 overlay 经 `homeOverlays(...)` 挂容器层
 
 - [x] Task 8: 阶段二闭环
   - [x] SubTask 8.1: 编码自查（`Color.opacity` 入参 Double、勿遮蔽同名参数、`@Published` 同值赋值加守卫、不在 `body` 内做重计算、只改本阶段相关文件）
@@ -51,23 +51,23 @@
 
 ## 阶段三：B / C / D 三档 + 跳转打通
 
-- [ ] Task 9: 首页 B（宫格快捷入口，默认档）
-  - [ ] SubTask 9.1: 新增 `HomeLayoutBView`：标题栏 + `HomeSearchBar` + 「快捷入口」分组标题 + `LazyVGrid` 宫格（格高 88、间距 12、水平内边距 16）
-  - [ ] SubTask 9.2: 列数按可用宽度自适应（复用 [MarketLayoutCView.gridColumns](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Market/MarketLayoutCView.swift#L76-L86) 的口径：≥960 四列 / ≥640 三列 / 否则两列），入口 `onSelectTab` / `onSearch` / `onProfile` 由容器闭包驱动
+- [x] Task 9: 首页 B（宫格快捷入口，默认档）
+  - [x] SubTask 9.1: 新增 `HomeLayoutBView`：标题栏 + `HomeSearchBar` + 「快捷入口」分组标题 + `LazyVGrid` 宫格（格高 88、间距 12、水平内边距 16）
+  - [x] SubTask 9.2: 列数按可用宽度自适应（复用 [MarketLayoutCView.gridColumns](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Market/MarketLayoutCView.swift#L76-L86) 的口径：≥960 四列 / ≥640 三列 / 否则两列），入口 `onSelectTab` / `onSearch` / `onProfile` 由容器闭包驱动
 
-- [ ] Task 10: 首页 C（分区列表入口）
-  - [ ] SubTask 10.1: 新增 `HomeLayoutCView`：标题栏 + 三组入口行（「行情」= 行情 / 自选；「研究」= 搜索标的 / 公式管理；「账户」= 模拟交易 / 个人中心），组标题 13pt `.secondary`、行高固定 56pt、行间 `Divider`
-  - [ ] SubTask 10.2: 行点击走同一套容器闭包；行内不使用 `List`（避免默认样式与整页滚动耦合），用 `ScrollView` + `LazyVStack`
+- [x] Task 10: 首页 C（分区列表入口）
+  - [x] SubTask 10.1: 新增 `HomeLayoutCView`：标题栏 + 三组入口行（「行情」= 行情 / 自选；「研究」= 搜索标的 / 公式管理；「账户」= 模拟交易 / 个人中心），组标题 13pt `.secondary`、行高固定 56pt、行间 `Divider`
+  - [x] SubTask 10.2: 行点击走同一套容器闭包；行内不使用 `List`（避免默认样式与整页滚动耦合），用 `ScrollView` + `LazyVStack`
 
-- [ ] Task 11: 首页 D（卡片工作台）
-  - [ ] SubTask 11.1: 新增 `HomeLayoutDView`：标题栏 + 顶部大卡（搜索标的，含一行说明）+ 2×2 中卡（自选 / 行情 / 模拟交易 / 公式管理，高 104）+ 底部小卡（个人中心，高 64）
-  - [ ] SubTask 11.2: 卡片背景 `Color(.secondarySystemBackground)` + `cornerRadius(12)`，图标着色用 `tint`；点击命中区覆盖整卡（`contentShape(Rectangle())`）
+- [x] Task 11: 首页 D（卡片工作台）
+  - [x] SubTask 11.1: 新增 `HomeLayoutDView`：标题栏 + 顶部大卡（搜索标的，含一行说明）+ 2×2 中卡（自选 / 行情 / 模拟交易 / 公式管理，高 104）+ 底部小卡（个人中心，高 64）
+  - [x] SubTask 11.2: 卡片背景 `Color(.secondarySystemBackground)` + `cornerRadius(12)`，图标着色用 `tint`；点击命中区覆盖整卡（`contentShape(Rectangle())`）
 
-- [ ] Task 12: 入口跳转与标识打通
-  - [ ] SubTask 12.1: `HomeView` 增加 `@Binding var selectedTab: Int` 并透传给四档；`onSelectTab` 实现 `selectedTab = index`（索引与 `ContentView.menuItems` 一致：自选 1 / 行情 2 / 模拟 3）
-  - [ ] SubTask 12.2: 更新 3 处 `HomeView(...)` 调用方：ContentView 两个 case 传 `$selectedTab`，MarketPageKit 搜索 overlay 传 `.constant(2)`，`#Preview` 传 `.constant(0)`
-  - [ ] SubTask 12.3: [KlineUITests](file:///c:/Users/sunck/home/projects/ios/Kline/KlineUITests/KlineUITests.swift#L69-L76) 的 `test02_TabSwitching_ShowsEachPage` 首页判定由 `app.staticTexts["home.welcome"]` 改为按 `home.page` 判定（`app.descendants(matching: .any)["home.page"]`），保证默认档位为 B 时用例不误报
-  - [ ] SubTask 12.4: 四档互切自测（入口点击、搜索模式往返、公式管理 overlay 开关、切档后 Tab 选中态与滚动位置正常）
+- [x] Task 12: 入口跳转与标识打通
+  - [x] SubTask 12.1: `HomeView` 增加 `@Binding var selectedTab: Int` 并透传给四档；`onSelectTab` 实现 `selectedTab = index`（索引与 `ContentView.menuItems` 一致：自选 1 / 行情 2 / 模拟 3）
+  - [x] SubTask 12.2: 更新 3 处 `HomeView(...)` 调用方：ContentView 两个 case 传 `$selectedTab`，MarketPageKit 搜索 overlay 传 `.constant(2)`，`#Preview` 传 `.constant(0)`
+  - [x] SubTask 12.3: [KlineUITests](file:///c:/Users/sunck/home/projects/ios/Kline/KlineUITests/KlineUITests.swift#L69-L76) 的 `test02_TabSwitching_ShowsEachPage` 首页判定由 `app.staticTexts["home.welcome"]` 改为 `app.staticTexts["home.page"]`（`home.page` 改挂在共享标题栏的软件名 `Text` 上，容器标识未必暴露成元素），保证默认档位为 B 时用例不误报
+  - [x] SubTask 12.4: 四档互切自测（入口点击、搜索模式往返、公式管理 overlay 开关、切档后 Tab 选中态与滚动位置正常）
 
 - [ ] Task 13: 阶段三闭环
   - [ ] SubTask 13.1: 编码自查（同上四项 + 卡片 / 宫格滚动性能）

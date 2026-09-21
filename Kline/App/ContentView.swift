@@ -227,7 +227,7 @@ struct ContentView: View {
     private var mainContentView: some View {
         switch selectedTab {
         case 0:
-            HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
+            HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
         case 1:
             FavoritesView()
         case 2:
@@ -235,7 +235,7 @@ struct ContentView: View {
         case 3:
             SimulationView()
         default:
-            HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented)
+            HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
         }
     }
 }

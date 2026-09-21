@@ -706,7 +706,9 @@ struct MarketSheets: ViewModifier {
             // 点返回按钮写回 false → 覆盖层关闭、回到行情页
             .overlay {
                 if model.homeSearchActive {
-                    HomeView(isSearching: $model.homeSearchActive, isProfilePresented: .constant(false))
+                    // selectedTab 传入常量 2（行情页）：本覆盖层只是搜索界面，不改底部 Tab 选中态
+                    HomeView(isSearching: $model.homeSearchActive, isProfilePresented: .constant(false),
+                             selectedTab: .constant(2))
                         .transition(.opacity)
                 }
                 // 公式管理中心：全屏页面（铺满，无遮罩），关闭走页内「返回」；

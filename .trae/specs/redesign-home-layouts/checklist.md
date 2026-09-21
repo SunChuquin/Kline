@@ -46,7 +46,7 @@
 - [ ] 首页「自选 / 行情 / 模拟」入口切底部 Tab，索引与 `ContentView.menuItems` 一致（1 / 2 / 3）—— `HomeView` 的 `@Binding selectedTab` 写回
 - [ ] 三处 `HomeView(...)` 调用方均已更新：ContentView 两处传 `$selectedTab`、MarketPageKit 搜索 overlay 传 `.constant(2)`、`#Preview` 传 `.constant(0)`
 - [ ] 行情页搜索图标（`MarketPageKit` overlay）行为与改造前一致，不会改动底部 Tab 选中态
-- [ ] 四档内容根统一挂 `home.page` 标识；`KlineUITests.test02` 改用 `home.page` 判定首页已显示
+- [ ] `home.page` 挂在四档共用的标题栏 `Text("Kline")` 上（不挂内容根容器：SwiftUI 容器标识未必暴露成元素）；`KlineUITests.test02` 改用 `app.staticTexts["home.page"]` 判定首页已显示
 - [ ] 默认档位为 B 时既有冒烟用例不误报（首页判定不再依赖 A 档专有文案）
 
 ## 工程与交付

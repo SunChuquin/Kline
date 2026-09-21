@@ -18,7 +18,7 @@
 - 首页改造为**按布局分发的容器**（对齐 [FavoritesView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Favorites/FavoritesView.swift#L28-L40) / [MarketView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Market/MarketView.swift) 惯例），现有实现等价搬进 A 档视图（A 档呈现与交互零变化）；B/C/D 为新增视图。
 - 新增共享骨架 `Kline/Home/HomePageKit.swift`：入口数据模型 `HomeEntryKind` + 三档共用的入口控件（宫格磁贴 / 列表行 / 卡片）+ 顶部标题栏 + 搜索模式视图 + 公式管理全屏 overlay，各档只做组合，不复制逻辑。
 - [HomeView.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Home/HomeView.swift) 新增 `@Binding var selectedTab`，让首页入口能跳自选 / 行情 / 模拟（更新 3 处调用方：ContentView 两处 + MarketPageKit 搜索 overlay 传 `.constant`）。
-- 无障碍标识：四档内容根统一挂 `home.page`；`home.welcome` 在 A 档保留；`KlineUITests` 的「首页已显示」判定改为 `home.page`（布局无关，默认档位变化不会误报）。
+- 无障碍标识：`home.page` 挂在四档共用的标题栏软件名 `Text("Kline")` 上（SwiftUI 容器上的标识未必暴露成无障碍元素，挂在 `Text` 上才能被 `app.staticTexts[...]` 稳定命中）；`home.welcome` 在 A 档保留；`KlineUITests` 的「首页已显示」判定改为 `home.page`（布局无关，默认档位变化不会误报）。
 - **BREAKING**：无。仅新增文件、新增枚举与仓库字段、把首页既有 body 等价搬进 A 档视图、给 `HomeView` 增一个带默认回退的绑定。
 
 ## Impact
@@ -159,7 +159,7 @@
 
 ### Requirement: 首页无障碍标识
 
-系统 SHALL 在四档首页内容根挂无障碍标识 `home.page`，并保留 A 档的 `home.welcome`；`KlineUITests` 的首页判定 SHALL 改用布局无关的 `home.page`。
+系统 SHALL 在四档共用的标题栏软件名 `Text` 上挂无障碍标识 `home.page`（四档都渲染该标题栏，标识即布局无关），并保留 A 档的 `home.welcome`；`KlineUITests` 的首页判定 SHALL 改用 `home.page`。
 
 #### Scenario: 默认档位变化不影响冒烟用例
 

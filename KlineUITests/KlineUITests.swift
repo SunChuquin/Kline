@@ -70,9 +70,10 @@ final class KlineUITests: XCTestCase {
         XCTAssertTrue(homeTab.waitForExistence(timeout: 15), "底部菜单未出现")
 
         // 页面切换断言给 10s：模拟器冷启动首次运行时初始化慢，5s 偶发超时误报
-        // 首页
+        // 首页：判定改用布局无关的 home.page（挂在共享标题栏的软件名 Text 上）——
+        // 首页默认档位为 B（宫格），不再有 A 档专有的「欢迎来到首页」文案
         homeTab.tap()
-        XCTAssertTrue(app.staticTexts["home.welcome"].waitForExistence(timeout: 10), "首页未显示")
+        XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10), "首页未显示")
 
         // 自选
         app.buttons["tab.favorites"].tap()

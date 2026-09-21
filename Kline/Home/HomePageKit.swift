@@ -83,6 +83,9 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
 
 /// 首页标题栏：左侧软件图标 + 名称，右侧「登录」用户入口胶囊。四档共用。
 /// 外观、间距、配色与改造前逐项一致；用户入口点击由容器注入的 `onProfile` 承担。
+/// 无障碍标识 `home.page` 挂在软件名 Text 上：四档都渲染本标题栏，
+/// Text 在无障碍树里是 staticText，`app.staticTexts["home.page"]` 稳定命中
+/// （挂在各档内容根容器上的标识在 SwiftUI 里未必暴露成元素）。
 struct HomeHeaderBar: View {
     let onProfile: () -> Void
 
@@ -96,6 +99,7 @@ struct HomeHeaderBar: View {
                 Text("Kline")
                     .font(.system(size: 18))
                     .fontWeight(.bold)
+                    .accessibilityIdentifier("home.page")
             }
             .padding(.leading, 16)
 
