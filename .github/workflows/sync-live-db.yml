@@ -23,6 +23,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'src/data/universe.txt'
       - 'src/data/symbols.txt'
       - 'src/live_db_builder.py'
       - '.github/workflows/sync-live-db.yml'
