@@ -6,6 +6,11 @@
 	<key>UIFileSharingEnabled</key>
 	<true/>
 
+	<!-- 局域网直连通道：电脑端部署助手经同一 Wi-Fi 向本机推送增量行情库（tdx_live.db）。
+	     云端拉取源（raw.githubusercontent / jsDelivr）均为 https，按 ATS 无需任何例外 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于与电脑在同一局域网内直连推送行情数据</string>
+
 	<!-- ================= 状态栏 / 全屏（全局唯一配置点） =================
 	     本 App 为全屏图表型应用，要求：隐藏系统状态栏 + 不参与 iPad 分屏多任务。
 	     两项需求都只在 Info.plist 里配置，不做任何 ViewController / SwiftUI 层级适配，

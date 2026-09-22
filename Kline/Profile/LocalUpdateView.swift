@@ -20,6 +20,10 @@ import UIKit
 ///
 /// 下载新版前会把沙盒内现有的 Kline.ipa 归档为 Kline_<当前构建号>.ipa（可回退手动安装），
 /// 归档只保留版本号最大的 10 个，避免磁盘被历史 IPA 占满。
+///
+/// 另附「数据同步」卡片组：增量行情库（Documents/tdx_live.db）自动拉取开关 / 数据源 /
+/// 更新时刻 / 同步状态 / 上次同步与版本 / 覆盖标的 / 立即更新。规格与「本地更新」完全一致
+/// （13 semibold 灰标题、48pt 行高、16pt 左右 padding、secondarySystemBackground + 12 圆角）。
 struct LocalUpdateView: View {
 
     @Environment(\.scenePhase) private var scenePhase
@@ -45,7 +49,43 @@ struct LocalUpdateView: View {
     /// 下载进度 0~100（下载中显示在圆圈里）
     @State private var downloadPercent = 0
 
+    // MARK: - 数据同步（增量行情库自动拉取）
+
+    @ObservedObject private var syncConfig = TdxSyncConfig.shared
+    @ObservedObject private var syncManager = TdxSyncManager.shared
+    /// 增量库只读状态（覆盖标的数 / 最新交易日）
+    @ObservedObject private var liveStore = LiveDataStore.shared
+
+    /// 数据源地址编辑框内容（", " 分隔多个源）
+    @State private var syncSourceText = ""
+    /// 更新时刻编辑框内容（", " 分隔多个时刻）
+    @State private var syncScheduleText = ""
+    /// 输入防抖：停止输入 1s 后才写入配置
+    @State private var syncCommitWork: DispatchWorkItem?
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            localUpdateSection
+            syncSection
+        }
+        .onAppear {
+            refreshServerStatus()
+            // 页面打开即自动检查一次 Git 最新版本；已在检查/下载中则不打断
+            if !remoteBusy { checkGitHubUpdate() }
+            // 编辑框回填当前配置（文本可能被规范化，如 "9:5" → "09:05"）
+            syncSourceText = TdxSyncConfig.sourceText(syncConfig.sourceURLs)
+            syncScheduleText = TdxSyncConfig.scheduleText(syncConfig.scheduleTimes)
+        }
+        // 回前台重新探测：服务器此时会自检并可能重建监听，界面要跟着显示真实结果
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { refreshServerStatus() }
+        }
+        .onChange(of: syncSourceText) { _ in scheduleSyncConfigCommit() }
+        .onChange(of: syncScheduleText) { _ in scheduleSyncConfigCommit() }
+    }
+
+    /// 「本地更新」卡片组（原有两条状态行，规格不变）
+    private var localUpdateSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             // 卡片组标题：与行情表设置的分组标题同规格（13 semibold 灰、左对齐卡片边缘）
             Text("本地更新")
@@ -71,15 +111,6 @@ struct LocalUpdateView: View {
             }
             .background(Color(.secondarySystemBackground))
             .cornerRadius(12)
-        }
-        .onAppear {
-            refreshServerStatus()
-            // 页面打开即自动检查一次 Git 最新版本；已在检查/下载中则不打断
-            if !remoteBusy { checkGitHubUpdate() }
-        }
-        // 回前台重新探测：服务器此时会自检并可能重建监听，界面要跟着显示真实结果
-        .onChange(of: scenePhase) { phase in
-            if phase == .active { refreshServerStatus() }
         }
     }
 
@@ -320,5 +351,286 @@ struct LocalUpdateView: View {
             try? fm.removeItem(atPath: dir + "/" + item.name)
             DebugLogger.shared.log("清理旧归档 IPA：\(item.name)")
         }
+    }
+
+    // MARK: - 数据同步（增量行情库自动拉取）
+
+    /// 「数据同步」卡片组：开关 / 数据源 / 更新时刻 / 状态 / 上次同步 / 版本 / 覆盖标的 / 立即更新。
+    /// 行高统一 48、左右 padding 16，与「本地更新」卡片组完全同规格。
+    private var syncSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("数据同步")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.85))
+
+            // 三段均为 spacing 0 的 VStack，视觉上等价于一张连续卡片（分段只为控制 ViewBuilder 子视图数量）
+            VStack(spacing: 0) {
+                syncConfigRows
+                syncStatusRows
+                syncActionRows
+            }
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+    }
+
+    /// ① 开关 / ② 数据源地址 / ③ 更新时刻
+    private var syncConfigRows: some View {
+        VStack(spacing: 0) {
+            // ① 启用开关：整行可点（命中区 48pt ≥ 44pt），Toggle 本身不拦截点击
+            Button(action: { syncConfig.enabled.toggle() }) {
+                HStack(spacing: 10) {
+                    Text("启用自动更新")
+                        .font(.system(size: 16))
+                    Spacer(minLength: 12)
+                    Toggle("", isOn: $syncConfig.enabled)
+                        .labelsHidden()
+                        .allowsHitTesting(false)
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+
+            // ② 数据源地址（可编辑：多个源用逗号分隔，按顺序回退）
+            editRow(title: "数据源地址") {
+                TextField("https://raw.githubusercontent.com/SunChuquin/Kline/data",
+                          text: $syncSourceText)
+                    .font(.system(size: 13))
+                    .multilineTextAlignment(.trailing)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
+            }
+
+            Divider()
+
+            // ③ 更新时刻（可编辑："HH:mm"，逗号分隔）
+            editRow(title: "更新时刻") {
+                TextField("11:00, 14:30, 15:05", text: $syncScheduleText)
+                    .font(.system(size: 13))
+                    .multilineTextAlignment(.trailing)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .frame(height: 44)
+                    .contentShape(Rectangle())
+            }
+        }
+    }
+
+    /// ④ 同步状态 / ⑤ 上次同步 / ⑥ 数据版本 / ⑦ 覆盖标的
+    private var syncStatusRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            // ④ 同步状态（未启用 / 等待首次同步 / 同步中 / 已同步 / 失败）
+            infoRow(title: "同步状态", value: syncStateText, valueColor: syncStateColor)
+
+            Divider()
+
+            // ⑤ 上次同步时间
+            infoRow(title: "上次同步", value: syncLastTimeText)
+
+            Divider()
+
+            // ⑥ manifest 版本 + 行情交易日
+            infoRow(title: "数据版本", value: syncVersionText)
+
+            Divider()
+
+            // ⑦ 增量库覆盖标的数与最新交易日（取 LiveDataStore 状态）
+            infoRow(title: "覆盖标的", value: liveStore.status.isAvailable
+                    ? "\(liveStore.status.metaCount) 只 · 最新 \(dateText(liveStore.status.latestDate))"
+                    : "无增量库")
+        }
+    }
+
+    /// ⑧ 本次所用源 / ⑨ 失败原因 / ⑩ 立即更新 / ⑪ 语义说明
+    private var syncActionRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            // ⑧ 本次同步实际使用的源
+            infoRow(title: "本次所用源", value: syncUsedSourceText)
+
+            // ⑨ 失败原因（仅失败时出现；多行不裁切，故用 minHeight）
+            if let error = syncManager.lastError {
+                Divider()
+                HStack(spacing: 10) {
+                    Text("失败原因")
+                        .font(.system(size: 16))
+                    Spacer(minLength: 12)
+                    Text(error)
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.trailing)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(minHeight: 48)
+            }
+
+            Divider()
+
+            // ⑩ 立即更新：整行可点（命中区 48pt ≥ 44pt），同步中显示进度圈
+            Button(action: { syncManager.manualSync() }) {
+                HStack(spacing: 10) {
+                    Text("立即更新")
+                        .font(.system(size: 16))
+                        .foregroundColor(syncTappable ? Color.primary : Color.gray)
+                    Spacer(minLength: 12)
+                    if syncManager.isSyncing {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 18))
+                            .foregroundColor(syncTappable ? Color.blue : Color.gray)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!syncTappable)
+
+            Divider()
+
+            // ⑪ 语义说明：区分盘中快照与当日完整K线，避免误判
+            Text("11:00 / 14:30 为盘中快照，15:05 为当日完整K线")
+                .font(.system(size: 12))
+                .foregroundColor(Color.gray.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 同步状态（四态 + 已启用但尚未同步过）
+    private enum SyncState { case disabled, idle, syncing, synced, failed }
+
+    private var syncState: SyncState {
+        if !syncConfig.enabled { return .disabled }
+        if syncManager.isSyncing { return .syncing }
+        if syncManager.lastError != nil { return .failed }
+        return syncManager.lastSyncAt == nil ? .idle : .synced
+    }
+
+    private var syncStateText: String {
+        switch syncState {
+        case .disabled: return "未启用"
+        case .idle:     return "等待首次同步" + syncNextSuffix
+        case .syncing:  return "同步中…"
+        case .synced:   return "已同步" + syncNextSuffix
+        case .failed:   return "失败"
+        }
+    }
+
+    /// 追加"下次计划时刻"（形如"（下次 今日 14:30）"）
+    private var syncNextSuffix: String {
+        syncManager.nextScheduledText.map { "（下次 \($0)）" } ?? ""
+    }
+
+    private var syncStateColor: Color {
+        switch syncState {
+        case .disabled, .idle: return .gray
+        case .syncing:         return .yellow
+        case .synced:          return .green
+        case .failed:          return .red
+        }
+    }
+
+    private var syncLastTimeText: String {
+        guard let date = syncManager.lastSyncAt else { return "—" }
+        return Self.syncTimeFormatter.string(from: date)
+    }
+
+    /// 形如 "v12（20260922）"；交易日缺失时只显示版本号
+    private var syncVersionText: String {
+        guard let version = syncManager.lastVersion else { return "—" }
+        let trade = syncManager.lastTradeDate.map { "（\($0)）" } ?? ""
+        return "v\(version)\(trade)"
+    }
+
+    private var syncUsedSourceText: String {
+        guard let source = syncManager.lastSource else { return "—" }
+        return URL(string: source)?.host ?? source
+    }
+
+    /// 仅"已启用且当前不在同步中"可点（未启用时不允许拉取）
+    private var syncTappable: Bool { syncConfig.enabled && !syncManager.isSyncing }
+
+    /// YYYYMMDD 原样展示（0 = 无数据）
+    private func dateText(_ value: Int) -> String {
+        value == 0 ? "—" : String(value)
+    }
+
+    private static let syncTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    /// 可编辑行（左标题 + 右侧编辑控件），行高 48，与只读信息行同规格
+    private func editRow<Field: View>(title: String, @ViewBuilder field: () -> Field) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 16))
+                .fixedSize()
+            Spacer(minLength: 12)
+            field()
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+    }
+
+    /// 只读信息行（左标题 + 右值），行高固定 48
+    private func infoRow(title: String, value: String,
+                         valueColor: Color = Color(.secondaryLabel)) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 16))
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.system(size: 15))
+                .foregroundColor(valueColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+    }
+
+    // MARK: - 编辑框 → 配置（1s 防抖，避免每敲一个字符就持久化）
+
+    private func scheduleSyncConfigCommit() {
+        syncCommitWork?.cancel()
+        let item = DispatchWorkItem { commitSyncTexts() }
+        syncCommitWork = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: item)
+    }
+
+    private func commitSyncTexts() {
+        let urls = TdxSyncConfig.parseSourceText(syncSourceText)
+        if !urls.isEmpty, urls != syncConfig.sourceURLs {
+            syncConfig.sourceURLs = urls
+            DebugLogger.shared.log("[TdxSync] 数据源已更新为 \(urls.count) 条")
+        }
+        let times = TdxSyncConfig.parseScheduleText(syncScheduleText)
+        guard !times.isEmpty else { return }
+        if times != syncConfig.scheduleTimes {
+            syncConfig.scheduleTimes = times
+            DebugLogger.shared.log("[TdxSync] 更新时刻已更新为 \(times.joined(separator: ","))")
+        }
+        let normalized = TdxSyncConfig.scheduleText(times)
+        if normalized != syncScheduleText { syncScheduleText = normalized }
     }
 }

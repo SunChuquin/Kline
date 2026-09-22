@@ -36,6 +36,10 @@ struct KlineApp: App {
         // 启动增量库（Documents/tdx_live.db）指纹监视：前台每 5 分钟检查一次，
         // 回前台立即检查；指纹未变什么都不做，变化则热重载并广播数据版本
         LiveDataStore.shared.startWatching(interval: 300)
+
+        // 启动增量行情库自动拉取调度（默认关闭，需在「个人中心 → 本地更新 → 数据同步」显式开启）：
+        // 前台按 11:00 / 14:30 / 15:05 时刻表检查，到点即从 data 分支拉取并热刷新
+        TdxSyncManager.shared.start()
     }
 
     var body: some Scene {
