@@ -469,6 +469,21 @@ final class LiveDataStore: ObservableObject {
             return s
         }
 
+        // 4b) 旧版结构（v2 及更早：`live_meta` 以 `code` 为键、无 `file` 列）→ 视为不可用。
+        // 读路径若不放行这一步，查询会按 `WHERE file = ?` prepare 失败并静默返回空切片，
+        // 结果就是"看起来加载成功（覆盖/行数都有），实际一条都没合并"——必须显式拦下。
+        // 真正的重建交给写入路径 `_ensureWritableSchemaLocked`（下一次分片合并时 DROP 重建，无数据损失）。
+        if _hasLegacySchemaLocked(handle!) {
+            sqlite3_close(handle)
+            s.isAvailable = false
+            s.fingerprintAfter = newFP.display
+            s.contentChanged = previousKnown && (s.wasAvailable || oldHash != newFP.sha256)
+            appliedHash = nil
+            s.elapsed = Date().timeIntervalSince(t0)
+            DebugLogger.shared.log("[Live] 增量库为旧版（code 键）结构 → 视为不可用，待下次分片合并时重建为 file 键 path=\(path)")
+            return s
+        }
+
         db = handle
         available = true
         _loadLiveTableNamesLocked(handle!)
