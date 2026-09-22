@@ -225,7 +225,7 @@ class DatabaseManager: ObservableObject {
     /// 增量库不可用 / 未覆盖该 code / 该表无增量行 → 走纯主库路径，结果与改动前完全一致。
     private func fetchPeriodTable(metaId: Int, table: String) -> [KlineItem] {
         if let live = liveSlice(metaId: metaId, table: table) {
-            let main = dbQueue.sync {
+            let main: [KlineItem] = dbQueue.sync {
                 guard let db = db else { return [] }
                 return runBarsQuery(db: db, table: table, metaId: metaId,
                                     maxDateExclusive: live.minDate, limit: nil)
@@ -305,7 +305,7 @@ class DatabaseManager: ObservableObject {
         if let live = liveSlice(metaId: metaId, table: table) {
             if live.items.count >= wanted { return Array(live.items.prefix(wanted)) }
             let remain = wanted - live.items.count
-            let main = dbQueue.sync {
+            let main: [KlineItem] = dbQueue.sync {
                 guard let db = db else { return [] }
                 return runBarsQuery(db: db, table: table, metaId: metaId,
                                     maxDateExclusive: live.minDate, limit: remain)
