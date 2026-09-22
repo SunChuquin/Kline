@@ -52,7 +52,8 @@ jobs:
           # data 分支是孤儿提交、每次覆盖，无历史包袱；取不到（首次发布）就按首次走
           if git fetch origin data 2>/dev/null; then
             git archive --format=tar FETCH_HEAD | tar -x -C prev
-            echo "已取到上一版产物:"; ls -l prev/live
+            # 只做展示：旧布局（v1 单文件放在根目录）没有 prev/live，不能让这行把 job 干掉
+            echo "已取到上一版产物:"; find prev -maxdepth 2 -type f | head -20 || true
           else
             echo "::warning::data 分支不存在或取不到，本次按首次发布处理"
           fi

@@ -679,8 +679,8 @@ final class LiveDataStore: ObservableObject {
         defer { sqlite3_exec(handle, "DETACH DATABASE bkt;", nil, nil, nil) }
 
         // 分片契约：至少要有 bkt_meta / bkt_daily
-        let hasMeta = _existsLocked(handle, "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='bkt_meta' LIMIT 1;")
-        let hasDaily = _existsLocked(handle, "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='bkt_daily' LIMIT 1;")
+        let hasMeta = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='bkt_meta' LIMIT 1;")
+        let hasDaily = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='bkt_daily' LIMIT 1;")
         guard hasMeta, hasDaily else {
             r.message = "分片缺少 bkt_meta/bkt_daily 表"
             return r
@@ -704,7 +704,7 @@ final class LiveDataStore: ObservableObject {
         // ② 三张周期表（分片表名 bkt_* → 本地 live_*，字段顺序 file,date,open,high,low,close,vol,amo）
         if failed == nil {
             for m in Self.bucketTableMap {
-                let exists = _existsLocked(handle, "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='\(m.bucket)' LIMIT 1;")
+                let exists = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='\(m.bucket)' LIMIT 1;")
                 guard exists else { continue }
                 let sql = "INSERT OR REPLACE INTO \(m.local)(file,date,open,high,low,close,vol,amo) "
                         + "SELECT file,date,open,high,low,close,vol,amo FROM bkt.\(m.bucket);"

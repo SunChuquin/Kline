@@ -80,6 +80,7 @@ App 侧不自动改动。它目前停在 2026-08-28，导致打开任何一只�
 """
 
 import argparse
+import concurrent.futures
 import datetime
 import glob
 import hashlib
@@ -88,6 +89,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -118,10 +120,22 @@ UNIVERSE_PATH = os.path.join("src", "data", "universe.txt")
 MIN_COVERAGE = 0.85             # 全市场模式最低覆盖率，低于则判失败、保留上一版
 ULIST_BATCH = 100               # 批量快照每批 secid 数（3312 只 → 约 34 次请求）
 
-MIN_REQUEST_INTERVAL = 0.25     # 限速：任两次请求最小间隔(秒)
-REQUEST_RETRIES = 4             # 含首次共 4 次尝试
+MIN_REQUEST_INTERVAL = 0.25     # 限速：任两次请求最小间隔(秒) -> 全局约 4 请求/秒
+REQUEST_RETRIES = 4             # 含首次共 4 次尝试（≥3 次重试）
 REQUEST_TIMEOUT = 20
 _last_request_ts = 0.0
+_rate_lock = threading.Lock()   # 回补走并发，限速必须线程安全
+
+# 一次性回补（--backfill-days）的默认参数
+BACKFILL_WORKERS_DEFAULT = 4
+BACKFILL_WORKERS_MAX = 8        # 上限：再高也快不了（总速率被 MIN_REQUEST_INTERVAL 压住）
+BACKFILL_PROGRESS_EVERY = 300   # 每完成多少只打印一次进度
+
+# 日线接口（一次性回补用）。fqt=1 前复权，与主库（通达信前复权）口径一致。
+# 字段顺序见 _parse_kline_line()：**开,收,高,低**，不是 OHLC。
+KLINE_URL = ("https://push2his.eastmoney.com/api/qt/stock/kline/get"
+             "?secid={secid}&klt=101&fqt=1&lmt={lmt}&end=20500101"
+             "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57")
 
 # f124 = 东财行情时间戳（秒级 epoch）：判断"真实交易日"的唯一权威来源，绝不用本机日期。
 SNAPSHOT_ULIST_URL = ("https://push2.eastmoney.com/api/qt/ulist.np/get"
@@ -381,11 +395,19 @@ def parse_symbols(path):
 # ---------------------------------------------------------------------------
 
 def _throttle():
+    """全局限速（**线程安全**）：任意两次请求之间至少间隔 MIN_REQUEST_INTERVAL。
+
+    0.25s 间隔 ≈ 4 请求/秒。实现用"预约时间槽"：在锁里把 `_last_request_ts` 往后推一个间隔、
+    拿到属于自己的出发时刻，**真正的 sleep 放在锁外** —— 这样并发 worker 不会互相堵在锁里
+    （不会退化成串行），但总速率仍被全局压住，属礼貌爬取。
+    """
     global _last_request_ts
-    delta = time.monotonic() - _last_request_ts
-    if delta < MIN_REQUEST_INTERVAL:
-        time.sleep(MIN_REQUEST_INTERVAL - delta)
-    _last_request_ts = time.monotonic()
+    with _rate_lock:
+        due = max(time.monotonic(), _last_request_ts + MIN_REQUEST_INTERVAL)
+        _last_request_ts = due
+    delay = due - time.monotonic()
+    if delay > 0:
+        time.sleep(delay)
 
 
 def http_get_json(url):
@@ -488,6 +510,93 @@ def fetch_snapshot(secids, progress_every=10):
             print("  [快照] %d/%d 批  已命中 %d/%d 只  用时 %.1fs"
                   % (idx, total, len(result), len(uniq), time.time() - t0))
     return result
+
+
+# ---------------------------------------------------------------------------
+# 一次性缺口回补（--backfill-days）：逐标的拉最近 N 根日线
+# ---------------------------------------------------------------------------
+
+def _parse_kline_line(line):
+    """解析 '2026-09-22,开,收,高,低,量,额' -> dict。
+
+    ⚠ 东财 kline 接口 fields2=f51..f57 的顺序是 **日期,开,收,高,低,量,额**
+      （即 开/收/高/低，**不是** OHLC）；批量快照 ulist 的 f17/f15/f16/f2 才是
+      开/高/低/收。两处顺序不同，别抄混。
+    """
+    p = line.split(",")
+    if len(p) < 7:
+        return None
+    try:
+        date = int(p[0].replace("-", ""))
+    except ValueError:
+        return None
+    bar = {
+        "date": date,
+        "open": _num(p[1]), "close": _num(p[2]),
+        "high": _num(p[3]), "low": _num(p[4]),
+        "vol": _num(p[5]), "amo": _num(p[6]),
+    }
+    # 前复权老数据可能出现负价/0 价，属无效数据，直接丢弃
+    if None in (bar["open"], bar["high"], bar["low"], bar["close"]) or bar["close"] <= 0:
+        return None
+    return bar
+
+
+def fetch_kline_recent(secid, limit):
+    """拉某标的最近 limit 根日线（一次性回补用）。返回升序 bar 列表。
+
+    停牌/退市标的接口不返回 klines -> 返回 []（由调用方计入失败，不抛异常）。
+    重试交给 http_get_json（4 次尝试 + 指数退避），且每次尝试都走全局限速。
+    """
+    data = http_get_json(KLINE_URL.format(secid=secid, lmt=limit))
+    bars = []
+    for line in (data.get("data") or {}).get("klines") or []:
+        bar = _parse_kline_line(line)
+        if bar:
+            bars.append(bar)
+    bars.sort(key=lambda b: b["date"])
+    return bars[-limit:]
+
+
+def backfill_mappable(entries, days, workers, limit_symbols=None):
+    """并发回补 `entries` 中**可映射**标的（SH#/SZ#/BJ#）的最近 days 根日线。
+
+    · 礼貌并发：ThreadPoolExecutor(workers)，但总速率由全局 `_throttle()` 压在 ~4 请求/秒，
+      所以 workers 再大也不会把请求速率抬上去（workers 只影响"等待时是否空转"）。
+    · 每只失败只记入 failed、不中断整体；每 BACKFILL_PROGRESS_EVERY 只打印一次进度。
+    · 返回 {"daily": {file: {date: bar}}, "ok": [...], "failed": [...], "elapsed": 秒}
+    """
+    targets = [e for e in entries if e["secid"]]
+    if limit_symbols:
+        targets = targets[:limit_symbols]
+    total = len(targets)
+    daily, ok, failed = {}, [], []
+    t0 = time.time()
+    print("回补: 目标 %d 只可映射标的 × 最近 %d 根日线，workers=%d，全局速率约 %.0f 请求/秒"
+          % (total, days, workers, 1.0 / MIN_REQUEST_INTERVAL))
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(fetch_kline_recent, e["secid"], days): e for e in targets}
+        for fut in concurrent.futures.as_completed(futs):
+            e = futs[fut]
+            done += 1
+            try:
+                bars = fut.result()
+            except Exception as exc:
+                bars = []
+                if len(failed) < 5:
+                    print("[warn] 回补 %s(%s) 失败: %s" % (e["file"], e["secid"], exc),
+                          file=sys.stderr)
+            if bars:
+                daily[e["file"]] = {b["date"]: b for b in bars}
+                ok.append(e["file"])
+            else:
+                failed.append(e["file"])
+            if done % BACKFILL_PROGRESS_EVERY == 0 or done == total:
+                el = time.time() - t0
+                print("  [回补] %d/%d · 成功 %d / 失败 %d · 已耗时 %.1fs · 预计剩余 %.1fs"
+                      % (done, total, len(ok), len(failed), el, el / done * (total - done)))
+    return {"daily": daily, "ok": ok, "failed": failed, "elapsed": time.time() - t0}
 
 
 # ---------------------------------------------------------------------------
@@ -892,7 +1001,9 @@ def run_check(out_dir):
             print("trade_date: %s 落在最新分片 bucket_%d ✓" % (trade_date, latest_id))
     if seen_dates:
         ds = sorted(seen_dates)
-        print("窗口     : %s ~ %s（%d 片 = %d 个交易日）" % (ds[0], ds[-1], len(ds), len(ds)))
+        # 一眼看出"覆盖到哪段"：MIN/MAX 分片日期 + 片数（是否连续见上方的 id/重叠检查）
+        print("分片日期: MIN=%s  MAX=%s  片数=%d（= %d 个交易日）"
+              % (ds[0], ds[-1], len(ds), len(ds)))
 
     stray = sorted({os.path.basename(p)
                     for p in glob.glob(os.path.join(out_dir, BUCKET_PREFIX + "*.db"))} - declared)
@@ -932,6 +1043,16 @@ def main(argv=None):
                         help="即使判定'无变化'也强制重写 manifest 与 .changed（本地调试用）")
     parser.add_argument("--offline", action="store_true",
                         help="不联网，用内置合成数据（manifest.source=offline）")
+    parser.add_argument("--backfill-days", dest="backfill_days", type=int, default=0, metavar="N",
+                        help="【一次性缺口回补】为可映射标的（SH#/SZ#/BJ#）逐只拉最近 N 根日线，"
+                             "补出这些天的日分片（与日常分片同构）；0=关闭（默认）。"
+                             "**这不是日常路径**：只用于补齐主库停更造成的历史缺口，手动跑一次即可。")
+    parser.add_argument("--workers", type=int, default=BACKFILL_WORKERS_DEFAULT,
+                        help="回补并发数（默认 %d，上限 %d）。总速率仍由全局限速压在约 %.0f 请求/秒，"
+                             "并发只影响等待时是否空转"
+                             % (BACKFILL_WORKERS_DEFAULT, BACKFILL_WORKERS_MAX, 1.0 / MIN_REQUEST_INTERVAL))
+    parser.add_argument("--limit-symbols", dest="limit_symbols", type=int, default=None, metavar="N",
+                        help="【仅调试用】回补时只处理前 N 只可映射标的，生产不要传")
     parser.add_argument("--check", action="store_true",
                         help="只读产物并打印校验报告，不重新生成")
     parser.add_argument("--now-date", dest="now_date", default=None, metavar="YYYYMMDD",
@@ -973,13 +1094,47 @@ def main(argv=None):
     prev = read_prev_buckets(args.prev)
     prev_max_date = max((d for bars in prev["daily"].values() for d in bars), default=None)
 
-    # ---- 取得"当天那根K线" ----
+    # ---- 取得日线（三条互斥路径：回补 / offline / 日常快照）----
+    workers = min(max(1, args.workers), BACKFILL_WORKERS_MAX)
     fetched_failed, applied, session_dates, today_bar = [], [], [], {}
-    if args.offline:
+    extra_ids = set()          # 本次运行"新产出"的日期分片（日常只有当天；回补/offline 多天）
+    if args.backfill_days > 0 and not args.offline:
+        # ---- 一次性缺口回补（**不是日常路径**，只在补历史缺口时手动跑一次）----
+        source = "eastmoney_backfill"
+        bf = backfill_mappable(entries, args.backfill_days, workers, args.limit_symbols)
+        # 与 --prev 的旧分片合并：同 file+date 以回补到的新数据为准
+        daily_by_file = {f: dict(bars) for f, bars in prev["daily"].items()}
+        added = updated = 0
+        for f, bars in bf["daily"].items():
+            tgt = daily_by_file.setdefault(f, {})
+            for d, bar in bars.items():
+                if d in tgt:
+                    updated += 1
+                else:
+                    added += 1
+                tgt[d] = bar
+        fetched_failed = bf["failed"]
+        all_dates = {d for bars in daily_by_file.values() for d in bars}
+        if not all_dates:
+            raise SystemExit("回补未取到任何日线，放弃生成（保留上一版产物）")
+        trade_date = max(all_dates)
+        covered_files = sorted(bf["daily"])
+        extra_ids = {bucket_id_for_date(d) for bars in bf["daily"].values() for d in bars}
+        print("缺口回补完成: 新增 %d 根K线 / 覆盖同 file+date %d 根，耗时 %.1fs（实际约 %.2f 请求/秒，"
+              "成功 %d / 失败 %d）；补出的交易日 %s ~ %s"
+              % (added, updated, bf["elapsed"],
+                 (len(bf["ok"]) + len(bf["failed"])) / max(0.001, bf["elapsed"]),
+                 len(bf["ok"]), len(bf["failed"]),
+                 min(d for bars in bf["daily"].values() for d in bars),
+                 max(d for bars in bf["daily"].values() for d in bars)))
+    elif args.offline:
         daily_by_file = _offline_daily(entries, now_date, KEEP_BUCKETS)
         trade_date = date_to_int(now_date)
         source = "offline"
         covered_files = sorted(daily_by_file)
+        # offline 额外把合成的每个交易日各自成片，模拟"已经按天积累了 N 片"，
+        # 便于在无网络时联调多分片结构 / 30 片保留 / 周期聚合。
+        extra_ids = {bucket_id_for_date(d) for bars in daily_by_file.values() for d in bars}
         print("[info] offline：合成 %d 个交易日的日线（每只 %d 根）" % (KEEP_BUCKETS, KEEP_BUCKETS))
     else:
         source = "eastmoney"
@@ -1023,6 +1178,7 @@ def main(argv=None):
             raise SystemExit("批量快照未取到任何可用K线，放弃生成（保留上一版产物）")
         trade_date = max(session_dates)
         covered_files = sorted(today_bar)
+        extra_ids = {bucket_id_for_date(trade_date)}       # 日常路径只产出"当天那一片"
         print("交易日(trade_date)=%s  取到当日K线的 file=%d" % (trade_date, len(applied)))
 
     # ---- 覆盖率：分母是 universe 全量（含云端结构上覆盖不到的扩展行情指数）----
@@ -1036,22 +1192,26 @@ def main(argv=None):
           % (len(covered_files), universe, coverage, len(fetched_failed), len(unmappable)))
     if unmappable or fetched_failed:
         print("  未覆盖样例: %s" % (", ".join(missing_sample[:12]) or "无"))
+    if unmappable:
+        # 这 299 只在公开行情接口里没有对应 secid，**云端任何模式都补不上**（含 --backfill-days）
+        print("  [说明] %d 只扩展行情指数（27#/62#/102# 前缀：恒生/行业/主题指数）云端无法覆盖，"
+              "需由电脑侧生产者 build_live_buckets_pc.py 覆盖" % len(unmappable))
     if args.symbols and uncovered:
         # 小清单模式（调试）保持严格：缺任一即失败
         raise SystemExit("小清单模式取数不完整，放弃生成（保留原有产物）。缺失: %s"
                          % ", ".join(e["file"] for e in uncovered))
-    if coverage < MIN_COVERAGE:
+    if args.limit_symbols:
+        # 调试开关：只处理了前 N 只，覆盖率必然很低，此时跳过门槛（生产不要传这个参数）
+        print("  [调试] 已用 --limit-symbols=%d 限制标的数，跳过覆盖率门槛（%.4f < %.2f）"
+              % (args.limit_symbols, coverage, MIN_COVERAGE))
+    elif coverage < MIN_COVERAGE:
         raise SystemExit("覆盖率 %.4f < %.2f，放弃生成（保留上一版分片）"
                          % (coverage, MIN_COVERAGE))
 
     # ---- 保留最近 30 片（按日期新→旧）----
-    ids = set(prev["ids"])
-    ids.add(bucket_id_for_date(trade_date))
-    if args.offline:
-        # offline 额外把合成的每个交易日各自成片，模拟"已经按天积累了 N 片"，
-        # 便于在无网络时联调多分片结构 / 30 片保留 / 周期聚合。
-        # （联网路径严格不回溯补齐，只产出当天那一片 + 从 --prev 继承的历史片）
-        ids |= {bucket_id_for_date(d) for bars in daily_by_file.values() for d in bars}
+    # extra_ids = 本次运行新产出的日期分片：日常路径只有"当天那一片"；
+    # --backfill-days / --offline 会一次产出多天（回补本来就是多天），仍按最新 30 片裁剪。
+    ids = set(prev["ids"]) | extra_ids
     kept = sorted(ids, reverse=True)[:KEEP_BUCKETS]
     window_start = date_for_bucket(min(kept))
     window_end = trade_date
