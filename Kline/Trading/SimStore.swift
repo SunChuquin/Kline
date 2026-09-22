@@ -105,6 +105,8 @@ final class SimStore: ObservableObject {
     private var needsSeed = false
     /// 数据库就绪信号订阅
     private var databaseLoadedCancellable: AnyCancellable?
+    /// 增量库数据版本信号订阅（热刷新）
+    private var dataVersionCancellable: AnyCancellable?
 
     /// 已排队的行情触发结算（合并窗口内只结算一次，避免 rows 高频回写引发结算风暴）
     private var condSweepScheduled = false
@@ -267,6 +269,15 @@ final class SimStore: ObservableObject {
                 }
                 // @Published 会把当前值回放给新订阅者：上面分支已结算过时不再重复结算
                 guard !didSweepForLoadedDatabase else { return }
+                _ = self.sweepConditions(trigger: .dataReload)
+            }
+
+        // 增量库内容变化（dataVersion 仅在内容确实变化时自增）→ 与「数据库首次就绪」同路径重扫条件单
+        dataVersionCancellable = DatabaseManager.shared.$dataVersion
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
                 _ = self.sweepConditions(trigger: .dataReload)
             }
     }

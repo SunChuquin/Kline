@@ -123,6 +123,20 @@ struct LinkedKlineTile: View {
             loadData(targetMetaID: newValue.metaID, targetPeriod: newValue.period,
                      initiator: "CONFIG_CHANGE")
         }
+        // 增量库热刷新（dataVersion 仅在内容确实变化时自增）：isLoaded 已为 true 时上面两条都不会触发，
+        // 故此处补一条。先作废本格共享槽（否则 loadData 的「槽位已持有 series → SKIP」守卫会拦住重查），
+        // 再用闭包参数触发的同一通道加载（绝不在闭包里读 self.view.*）。
+        .onChange(of: databaseManager.dataVersion) { _ in
+            guard databaseManager.isLoaded else { return }
+            let idx = view.index
+            let targetMetaID = view.metaID
+            let targetPeriod = view.period
+            DebugLogger.shared.log("[LinkedTile#\(idx)] DATA_VERSION 变化 → 作废槽位并重查 meta=\(targetMetaID) period=\(targetPeriod.rawValue)")
+            linkedStore.commitSlot(ownerMetaID: ownerMetaID, tileIndex: idx,
+                                   metaID: targetMetaID, period: targetPeriod,
+                                   series: nil, isLoading: false)
+            loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod, initiator: "DATA_VERSION")
+        }
     }
 
     /// onAppear 阶段的加载决策（共享槽 + 在途登记 → 绝大多数命中后根本不查 DB）

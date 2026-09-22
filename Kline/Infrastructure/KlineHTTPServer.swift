@@ -337,6 +337,21 @@ final class KlineHTTPServer {
             handleInstallLocal(body: body, connection: connection)
         case ("POST", "/spawnroot-test"):
             handleSpawnRootTest(connection: connection)
+        case ("POST", "/sync/reload"):
+            // 增量库外部写入完成（USB / 局域网推送后）→ 立即做一次指纹检查并按需热刷新，
+            // 免去等下一次前台定时检查（默认 5 分钟）
+            DispatchQueue.main.async {
+                LiveDataStore.shared.notifyExternalWrite()
+            }
+            respond(connection, status: 200, contentType: "application/json",
+                    body: "{\"ok\":true,\"action\":\"reload\"}")
+        case ("GET", "/sync/status"):
+            // 增量库当前状态（供推送脚本与排查使用）
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: LiveDataStore.shared.currentStatusJSON())
+            }
         case ("GET", "/opener-log"):
             handleOpenerLog(connection: connection)
         case ("GET", "/sandbox"), ("GET", "/sandbox/"):

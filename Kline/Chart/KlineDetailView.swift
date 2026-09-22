@@ -337,6 +337,16 @@ struct KlineDetailView: View {
                 }
             }
         }
+        // 增量库热刷新（dataVersion 仅在内容确实变化时自增）：
+        // isLoaded 保持 true 不会触发上面那条，故此处补一条重查；showLoading=false 静默换数据不闪屏。
+        .onChange(of: databaseManager.dataVersion) { _ in
+            guard databaseManager.isLoaded, !drillInLoading else { return }
+            loadData(showLoading: false)
+            // 钻取态：只重查钻取序列，不重跑 startDrillIn（避免重置 snapshot / 光标联动状态）
+            if let d = drillIn {
+                queryDrillInSeries(metaID: d.metaID, period: d.period)
+            }
+        }
         // 键盘避让已由 ContentView 根部全局禁用（覆盖单图搜索与双联动 tile 搜索）；
         // 公式编辑器走 fullScreenCover 独立图层，自管键盘行为，不受影响
         //
@@ -1203,15 +1213,18 @@ struct KlineDetailView: View {
         .background(Color(.systemBackground))
     }
 
-    private func loadData() {
+    private func loadData(showLoading: Bool = true) {
         // 数据库未就绪时先不查询，等待 isLoaded 触发
         guard databaseManager.isLoaded else {
             isLoading = true
             return
         }
-        isLoading = true
-        // 图表将重建，先清空信息栏按钮标题，避免短暂显示旧周期指标
-        mainLegendPortal.title = ""
+        // 热刷新（增量库内容变化）时 showLoading=false：不切转圈、不清图例标题，静默换数据
+        if showLoading {
+            isLoading = true
+            // 图表将重建，先清空信息栏按钮标题，避免短暂显示旧周期指标
+            mainLegendPortal.title = ""
+        }
 
         // 后台串行加载并预计算指标（全量历史），避免阻塞主线程。
         // 月/季/年线表可能不存在，不存在时对应查询返回空、series 为 nil，仅加载日/周线
@@ -1277,6 +1290,12 @@ struct KlineDetailView: View {
         cursorClearToken = UUID()
 
         guard databaseManager.isLoaded else { return }   // DB 就绪后 onChange 会重试
+        queryDrillInSeries(metaID: metaID, period: period)
+    }
+
+    /// 后台查询钻取目标 K 线并写回 series。
+    /// 只做「查 + 写」，不触碰钻取状态机（snapshot / 光标 / 联动），供热刷新复用。
+    private func queryDrillInSeries(metaID: Int, period: KlinePeriod) {
         DispatchQueue.global(qos: .userInitiated).async {
             let data: [KlineItem]
             switch period {

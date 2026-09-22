@@ -32,6 +32,10 @@ struct KlineApp: App {
 
         // 启动本地 HTTP 服务器（A2 本地更新安装 + 🥈 远程更新触发）
         KlineHTTPServer.shared.start()
+
+        // 启动增量库（Documents/tdx_live.db）指纹监视：前台每 5 分钟检查一次，
+        // 回前台立即检查；指纹未变什么都不做，变化则热重载并广播数据版本
+        LiveDataStore.shared.startWatching(interval: 300)
     }
 
     var body: some Scene {

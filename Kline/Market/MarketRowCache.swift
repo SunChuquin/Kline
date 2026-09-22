@@ -40,6 +40,8 @@ final class MarketRowCache: ObservableObject {
     private var didPrewarm = false
     /// 观察数据库就绪信号
     private var isLoadedCancellable: AnyCancellable?
+    /// 观察增量库数据版本信号（热刷新）
+    private var dataVersionCancellable: AnyCancellable?
 
     /// 行情页顶部三个分类对应的 meta.type 取值
     private static let marketTypes: Set<String> = ["沪深主板", "沪深京指数", "扩展行情指数"]
@@ -52,6 +54,11 @@ final class MarketRowCache: ObservableObject {
             .sink { [weak self] _ in self?.prewarmMarketData(isLoaded: true) }
         // 若先于本对象创建时数据库已就绪，立即补一次
         if db.isLoaded { prewarmMarketData(isLoaded: true) }
+        // 增量库内容变化（dataVersion 仅在内容确实变化时自增）→ 只重取受影响的行
+        dataVersionCancellable = db.$dataVersion
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.handleDataVersionChange() }
     }
 
     /// 对外入口：App 启动 / 数据库就绪时调用，幂等（只在首次真正预取）。
@@ -157,6 +164,20 @@ final class MarketRowCache: ObservableObject {
         guard !pending.isEmpty, force || !didEmergencyRetry else { return }
         didEmergencyRetry = true
         prefetch(metas: pending)
+    }
+
+    /// 增量库内容变化（`DatabaseManager.dataVersion` 自增）→ 只对**受影响的行**重新预取。
+    /// - 受影响 = 增量库覆盖的 code 对应的行（行缓存是 code 维度热刷新的最小集合）；
+    /// - 增量库不可用/覆盖为空（含「删除增量库」回退场景）→ 全部已建行都受影响；
+    /// - 不清空 bars 再重取，避免整屏闪白：后台取完直接 setBars 覆盖。
+    private func handleDataVersionChange() {
+        guard db.isLoaded else { return }
+        let covered = LiveDataStore.shared.coveredCodes()
+        let affected = rows.values.map { $0.meta }
+            .filter { covered.isEmpty || covered.contains($0.code) }
+        guard !affected.isEmpty else { return }
+        DebugLogger.shared.log("[Cache] dataVersion 变化 → 重取行 n=\(affected.count) coveredCode=\(covered.count)")
+        prefetch(metas: affected)
     }
 
     // MARK: - 预取实现（每只标的查最近 lookback 根 DESC，翻转为 ASC 存入行）

@@ -23,10 +23,47 @@ class DatabaseManager: ObservableObject {
     @Published var metaList: [MetaItem] = []
     @Published var errorMessage: String? = nil
 
+    /// 数据版本：仅当增量库（tdx_live.db）重载后**内容确实变化**时自增，
+    /// 供行情行缓存 / 条件单 / K 线图做热刷新（增量内容不变则不发信号）。
+    @Published private(set) var dataVersion = 0
+
+    /// metaID → code 映射（metaList 就绪时一次性建好），避免每次查询线性遍历上万条 metaList
+    private let codeMapLock = NSLock()
+    private var codeByMetaId: [Int: String] = [:]
+
+    /// 已应用到 dataVersion 的增量库指纹（同一指纹不重复自增，防止重复发布）
+    private var appliedLiveFingerprint: String? = nil
+    /// 增量库热重载信号订阅
+    private var liveReloadCancellable: AnyCancellable?
+
     private init() {
         dbQueue.async { [weak self] in
             self?.loadDatabase()
         }
+        // 增量库热重载（内容确实变化）→ 数据版本自增，各处据 dataVersion 重查
+        liveReloadCancellable = LiveDataStore.shared.reloadPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] summary in
+                guard let self = self, summary.contentChanged else { return }
+                self.bumpDataVersion(summary: summary)
+            }
+    }
+
+    /// 数据版本自增（主线程）：增量库内容变化后由 liveReloadCancellable 触发。
+    /// 同指纹不重复自增 → 不会重复发布（项目教训：@Published 同值赋值也会发布）。
+    private func bumpDataVersion(summary: LiveReloadSummary) {
+        let key = summary.fingerprintAfter
+        guard appliedLiveFingerprint != key else { return }
+        guard isLoaded else {
+            // 主库 metaList 尚未就绪：此时合并本就查不到 code，等 isLoaded 后的预热读取新数据即可
+            DebugLogger.shared.log("[DB] 增量库已变化但主库未就绪，跳过 dataVersion 自增 fp=\(key)")
+            return
+        }
+        appliedLiveFingerprint = key
+        dataVersion += 1
+        // 底层行情数据整体更新 → 丢弃图表指标曲线缓存（否则指标仍是旧数据算出来的）
+        ChartCacheStore.shared.clearAll()
+        DebugLogger.shared.log("[DB] dataVersion → \(dataVersion)（增量库内容变化 · \(summary.reason) · 覆盖=\(summary.metaCountAfter)只/日线\(summary.dailyCountAfter)行 · 最新=\(summary.latestDateAfter) · fp=\(key)）")
     }
 
     /// 沙盒内可写数据库文件名（放在 Documents，可通过 Finder / 文件 App 单独替换更新，无需重装 App）
@@ -128,6 +165,14 @@ class DatabaseManager: ObservableObject {
 
             sqlite3_finalize(statement)
 
+            // 一次性建好 metaID → code 映射（增量库以 code 为键；避免每次查询线性遍历 metaList）
+            var codeMap: [Int: String] = [:]
+            codeMap.reserveCapacity(results.count)
+            for item in results { codeMap[item.id] = item.code }
+            self.codeMapLock.lock()
+            self.codeByMetaId = codeMap
+            self.codeMapLock.unlock()
+
             DispatchQueue.main.async {
                 self.metaList = results
                 self.isLoaded = true
@@ -137,20 +182,12 @@ class DatabaseManager: ObservableObject {
 
     /// 读取指定标的全量日线数据
     func fetchDailyData(metaId: Int) -> [KlineItem] {
-        dbQueue.sync {
-            guard let db = db else { return [] }
-            let query = "SELECT date, open, high, low, close, vol, amo FROM daily WHERE meta_id = ? ORDER BY date DESC;"
-            return runBarsQuery(db: db, query: query, metaId: metaId)
-        }
+        fetchPeriodTable(metaId: metaId, table: "daily")
     }
 
     /// 读取指定标的全量周线数据
     func fetchWeeklyData(metaId: Int) -> [KlineItem] {
-        dbQueue.sync {
-            guard let db = db else { return [] }
-            let query = "SELECT date, open, high, low, close, vol, amo FROM weekly WHERE meta_id = ? ORDER BY date DESC;"
-            return runBarsQuery(db: db, query: query, metaId: metaId)
-        }
+        fetchPeriodTable(metaId: metaId, table: "weekly")
     }
 
     /// 读取指定标的全量月线数据（表不存在时返回空，忽略）
@@ -179,23 +216,67 @@ class DatabaseManager: ObservableObject {
         }
     }
 
-    /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空
+    /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空。
+    ///
+    /// **增量优先 + 主库补齐**（三处出口共用同一规则）：
+    /// 结果 = 增量库该 code 的全部行 ∪ 主库该 code 中 `date < 增量最小 date` 的行。
+    /// 主库侧查询带 `AND date < ?` 谓词 → 两侧 date 区间天然无交集，
+    /// 因此「增量 date DESC + 主库 date DESC」拼接即为全局 date DESC，同 date 必以增量库为准。
+    /// 增量库不可用 / 未覆盖该 code / 该表无增量行 → 走纯主库路径，结果与改动前完全一致。
     private func fetchPeriodTable(metaId: Int, table: String) -> [KlineItem] {
-        dbQueue.sync {
+        if let live = liveSlice(metaId: metaId, table: table) {
+            let main = dbQueue.sync {
+                guard let db = db else { return [] }
+                return runBarsQuery(db: db, table: table, metaId: metaId,
+                                    maxDateExclusive: live.minDate, limit: nil)
+            }
+            return live.items + main
+        }
+        return dbQueue.sync {
             guard let db = db else { return [] }
-            let query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? ORDER BY date DESC;"
-            return runBarsQuery(db: db, query: query, metaId: metaId)
+            return runBarsQuery(db: db, table: table, metaId: metaId, maxDateExclusive: nil, limit: nil)
         }
     }
 
+    /// 增量库该 metaId 对应 code 在某周期表的切片；不可用 / 无 code 映射 / 该表无增量行 → nil
+    private func liveSlice(metaId: Int, table: String) -> LiveSlice? {
+        guard let code = codeForMetaId(metaId) else { return nil }
+        guard let slice = LiveDataStore.shared.slice(code: code, table: table), !slice.isEmpty else { return nil }
+        return slice
+    }
+
+    /// metaID → code（O(1) 字典查找，映射随 metaList 就绪时一次性建好）
+    private func codeForMetaId(_ metaId: Int) -> String? {
+        codeMapLock.lock()
+        defer { codeMapLock.unlock() }
+        return codeByMetaId[metaId]
+    }
+
     /// 统一执行 K 线查询并组装结果（需已在 dbQueue 上）
-    private func runBarsQuery(db: OpaquePointer, query: String, metaId: Int) -> [KlineItem] {
+    /// - Parameters:
+    ///   - maxDateExclusive: 非 nil 时追加 `AND date < ?`（增量库覆盖起点，主库只补齐更早的部分）
+    ///   - limit: 非 nil 时追加 `LIMIT ?`
+    private func runBarsQuery(db: OpaquePointer, table: String,
+                              metaId: Int, maxDateExclusive: Int?, limit: Int?) -> [KlineItem] {
+        var query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ?"
+        if maxDateExclusive != nil { query += " AND date < ?" }
+        query += " ORDER BY date DESC"
+        if limit != nil { query += " LIMIT ?" }
+        query += ";"
+
         var statement: OpaquePointer?
         var results: [KlineItem] = []
         guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
             return results
         }
-        sqlite3_bind_int64(statement, 1, Int64(metaId))
+        var index: Int32 = 1
+        sqlite3_bind_int64(statement, index, Int64(metaId)); index += 1
+        if let maxDateExclusive = maxDateExclusive {
+            sqlite3_bind_int64(statement, index, Int64(maxDateExclusive)); index += 1
+        }
+        if let limit = limit {
+            sqlite3_bind_int64(statement, index, Int64(Swift.max(1, limit))); index += 1
+        }
         while sqlite3_step(statement) == SQLITE_ROW {
             let date = Int(sqlite3_column_int64(statement, 0))
             let open = sqlite3_column_double(statement, 1)
@@ -218,28 +299,23 @@ class DatabaseManager: ObservableObject {
 
     /// 取某标的某周期表最近 limit 根（ORDER BY date DESC → 结果从新→旧）。
     /// 用于行情/自选列表表单只需要最近 80 根，避免全量读（一次 1K+ 只的话全量读会卡死）。
+    /// **增量优先 + 主库补齐**后在合并结果上取前 limit 条（增量已够 limit 条时不再查主库）。
     func fetchPeriodLimited(metaId: Int, table: String, limit: Int) -> [KlineItem] {
-        dbQueue.sync {
-            guard let db = self.db else { return [] }
-            let query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? ORDER BY date DESC LIMIT ?;"
-            var statement: OpaquePointer?
-            var results: [KlineItem] = []
-            guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else { return results }
-            sqlite3_bind_int64(statement, 1, Int64(metaId))
-            sqlite3_bind_int64(statement, 2, Int64(Swift.max(1, limit)))
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let date = Int(sqlite3_column_int64(statement, 0))
-                let open = sqlite3_column_double(statement, 1)
-                let high = sqlite3_column_double(statement, 2)
-                let low = sqlite3_column_double(statement, 3)
-                let close = sqlite3_column_double(statement, 4)
-                let vol = sqlite3_column_type(statement, 5) == SQLITE_FLOAT ? sqlite3_column_double(statement, 5) : 0
-                let amo = sqlite3_column_type(statement, 6) == SQLITE_FLOAT ? sqlite3_column_double(statement, 6) : 0
-                results.append(KlineItem(date: date, open: open, high: high, low: low,
-                                         close: close, volume: vol, turnover: amo))
+        let wanted = Swift.max(1, limit)
+        if let live = liveSlice(metaId: metaId, table: table) {
+            if live.items.count >= wanted { return Array(live.items.prefix(wanted)) }
+            let remain = wanted - live.items.count
+            let main = dbQueue.sync {
+                guard let db = db else { return [] }
+                return runBarsQuery(db: db, table: table, metaId: metaId,
+                                    maxDateExclusive: live.minDate, limit: remain)
             }
-            sqlite3_finalize(statement)
-            return results
+            return live.items + main
+        }
+        return dbQueue.sync {
+            guard let db = db else { return [] }
+            return runBarsQuery(db: db, table: table, metaId: metaId,
+                                maxDateExclusive: nil, limit: wanted)
         }
     }
 
