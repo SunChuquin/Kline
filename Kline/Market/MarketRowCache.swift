@@ -167,16 +167,16 @@ final class MarketRowCache: ObservableObject {
     }
 
     /// 增量库内容变化（`DatabaseManager.dataVersion` 自增）→ 只对**受影响的行**重新预取。
-    /// - 受影响 = 增量库覆盖的 code 对应的行（行缓存是 code 维度热刷新的最小集合）；
+    /// - 受影响 = 增量库覆盖的 file 对应的行（行缓存是 file 维度热刷新的最小集合）；
     /// - 增量库不可用/覆盖为空（含「删除增量库」回退场景）→ 全部已建行都受影响；
     /// - 不清空 bars 再重取，避免整屏闪白：后台取完直接 setBars 覆盖。
     private func handleDataVersionChange() {
         guard db.isLoaded else { return }
-        let covered = LiveDataStore.shared.coveredCodes()
+        let covered = LiveDataStore.shared.coveredFiles()
         let affected = rows.values.map { $0.meta }
-            .filter { covered.isEmpty || covered.contains($0.code) }
+            .filter { covered.isEmpty || covered.contains($0.file) }
         guard !affected.isEmpty else { return }
-        DebugLogger.shared.log("[Cache] dataVersion 变化 → 重取行 n=\(affected.count) coveredCode=\(covered.count)")
+        DebugLogger.shared.log("[Cache] dataVersion 变化 → 重取行 n=\(affected.count) coveredFile=\(covered.count)")
         prefetch(metas: affected)
     }
 

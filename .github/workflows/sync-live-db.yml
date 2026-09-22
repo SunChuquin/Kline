@@ -1,8 +1,14 @@
-name: Sync Live Data (增量行情库)
+name: Sync Live Data (日分片增量库)
 
-# 交易日北京时间 11:00 / 14:30 / 15:05 自动产出"增量行情库"并发布到 data 分支，
-# 供 Kline App 前台定时拉取（spec: .trae/specs/add-live-data-auto-sync）。
-# - 只发增量库（并集清单标的的最近 N 根多周期K线，约百 KB），**不碰**用户设备上的 1GB+ 主库 tdx.db；
+# 交易日北京时间 11:00 / 14:30 / 15:05 自动产出**日分片增量库**并发布到 data 分支的
+# live/ 目录（manifest.json + bucket_<id>.db，一天一片，保留最近 30 片），
+# 供 Kline App 按自身缺口只取相交的那几片（典型 1 片 ≈0.6MB）。
+# - 本 workflow 是**云端兜底生产者**：读 src/data/universe.txt 里可映射的 3312 只 → 批量快照
+#   出"当天那一片"（约 34 次请求，秒级）。主库那 299 只扩展行情指数（27#/62#/102# 前缀）
+#   公开接口无对应，只能由电脑侧 TrollRestore/build_live_buckets_pc.py 生产；
+# - 只发增量分片，**不碰**用户设备上的 1.4GB 主库 tdx.db；「合并回主库」是 App 侧的用户动作；
+# - 滚动增量：先把 data 分支的上一版分片取到 prev/ 作为基线（--prev），据此保留最近 30 片；
+#   已存在且 sha256 相同的分片不重写，无变化时写 dist/.changed=0 并**跳过 push**；
 # - 生成/自检不通过 → 整个 job 失败，绝不覆盖 data 分支上的上一版；
 # - data 分支每次用「孤儿提交」覆盖式发布，避免二进制历史把仓库撑大。
 on:
@@ -11,9 +17,9 @@ on:
     - cron: '0 3 * * 1-5'
     - cron: '30 6 * * 1-5'
     - cron: '5 7 * * 1-5'
-  # 清单或生成端一改就立刻重新发布一次（改完关注标的无需等到下一个定时点）；
-  # workflow_dispatch 供 Actions 页面手动触发（注意：本机 gh 用的是 GitHub App 集成令牌，
-  # 无 actions:write 权限，命令行下 `gh workflow run` 会 403，需从网页触发或用 push 触发）
+  # 生成端/清单一改就立刻重新发布一次；workflow_dispatch 供 Actions 页面手动触发
+  # （注意：本机 gh 用的是 GitHub App 集成令牌，无 actions:write 权限，
+  #  命令行下 `gh workflow run` 会 403，需从网页触发或用 push 触发）
   push:
     branches: [main]
     paths:
@@ -39,34 +45,56 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 生成增量库（真实行情接口）
-        run: python3 src/live_db_builder.py --out dist --limit 30
-
-      - name: 自检（manifest 必须与库内容逐项一致）
-        run: python3 src/live_db_builder.py --check --out dist
-
-      - name: 发布到 data 分支
+      - name: 取上一版分片（data 分支 -> prev/，作为保留 30 片的基线）
         run: |
           set -euo pipefail
+          mkdir -p prev
+          # data 分支是孤儿提交、每次覆盖，无历史包袱；取不到（首次发布）就按首次走
+          if git fetch origin data 2>/dev/null; then
+            git archive --format=tar FETCH_HEAD | tar -x -C prev
+            echo "已取到上一版产物:"; ls -l prev/live
+          else
+            echo "::warning::data 分支不存在或取不到，本次按首次发布处理"
+          fi
+
+      - name: 生成当天分片（真实行情接口）
+        run: python3 src/live_db_builder.py --universe src/data/universe.txt --out dist --prev prev/live
+
+      - name: 自检（manifest 必须与所有分片逐项一致）
+        run: python3 src/live_db_builder.py --check --out dist
+
+      - name: 发布到 data 分支（仅在内容有变化时）
+        run: |
+          set -euo pipefail
+          if [ "$(cat dist/.changed 2>/dev/null || echo 0)" != "1" ]; then
+            echo "生成端判定无变化，跳过发布（data 分支保持上一版）"
+            exit 0
+          fi
+
+          # 产物先挪到工作区之外：下面要 checkout 孤儿提交，会覆盖工作区
+          rm -rf /tmp/live && mkdir -p /tmp/live
+          cp dist/manifest.json /tmp/live/
+          cp dist/bucket_*.db /tmp/live/
+
           git config user.name "kline-data-bot"
           git config user.email "kline-data-bot@users.noreply.github.com"
 
-          # 产物先挪到工作区之外，随后用孤儿提交只发布这两个文件
-          mkdir -p /tmp/live
-          cp dist/tdx_live.db dist/tdx_live.manifest.json /tmp/live/
-
           git checkout --orphan data-publish
           git rm -rf --cached . > /dev/null
-          cp /tmp/live/tdx_live.db /tmp/live/tdx_live.manifest.json .
-          git add tdx_live.db tdx_live.manifest.json
-          git commit -m "data: 增量行情库 $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # 只发布 live/ 下的 manifest + 分片；超出 30 片的旧片因不在 dist/ 里而自然消失
+          rm -rf live && mkdir -p live
+          cp /tmp/live/manifest.json /tmp/live/bucket_*.db live/
+          git add -f live
+          git commit -m "data: 日分片增量库 $(date -u '+%Y-%m-%d %H:%M UTC')"
           # 强制覆盖 data 分支（单提交、无历史），保持仓库体积恒定
           git push --force origin HEAD:data
 
       - name: 汇总（便于在 Actions 页面直接核对）
         run: |
+          echo "=== 变化标记 (.changed) ==="
+          cat dist/.changed || true
           echo "=== manifest ==="
-          cat dist/tdx_live.manifest.json
+          cat dist/manifest.json
           echo
-          echo "=== 产物大小 ==="
+          echo "=== 分片 ==="
           ls -l dist/

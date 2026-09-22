@@ -2,8 +2,11 @@
 //  TdxSyncManager.swift
 //  Kline
 //
-//  增量行情库（Documents/tdx_live.db）自动拉取：
-//    manifest 比对 → 多源回退下载 → sha256 + manifest 合法性校验 → 原子替换 → LiveDataStore 热刷新。
+//  增量行情库（Documents/tdx_live.db）自动拉取，两种 manifest 版本：
+//   - **schema >= 3（v3，主路径）**：manifest 的 `buckets[]` 是**日分片**（一片 = 一个交易日，≈0.5MB），
+//     按主库缺口（`metaList.lastDate` 最大值 → 今天）选出相交分片（**上限 30 片**）→
+//     逐片下载 → sha256 校验 → LiveDataStore 合并（键 `file`）→ 裁剪冗余 → 单次热刷新；
+//   - **schema 缺失 / 1（旧）**：整文件下载 → sha256 校验 → 原子替换 `tdx_live.db`（升级瞬间不失联）。
 //
 //  关键约束：
 //   - 任一环节失败都 **保留上一版文件**，临时文件必清理，绝不产生半成品；
@@ -19,22 +22,64 @@ import UIKit
 
 // MARK: - manifest 数据契约
 
-/// data 分支上的 `tdx_live.manifest.json`
+/// 云端分片（schema 3）：`bucket_<id>.db`，**一片 = 一个交易日**（`min_date == max_date`）
+struct TdxLiveBucket: Codable {
+    /// 分片文件名（例：`bucket_20718.db`），与 manifest 同目录
+    var file: String
+    /// 分片 id = (date - date(1970,1,1)).days，例 20260922 → 20718
+    var id: Int
+    /// 该分片覆盖的最小 / 最大 date（YYYYMMDD；日分片下两者相等）
+    var min_date: Int?
+    var max_date: Int?
+    /// 文件字节数
+    var bytes: Int64?
+    /// 分片文件 sha256（十六进制小写）
+    var sha256: String?
+    /// 各表行数：daily / weekly / monthly / meta
+    var rows: [String: Int]?
+}
+
+/// 云端 manifest（**向后兼容 schema 1/2**）：
+/// - schema 缺失 / 1（旧）：`version/symbols/min_date/max_date/rows/sha256` → 整文件替换 `tdx_live.db`；
+/// - schema 2/3（分片）：`buckets[]` → 按缺口取片、逐片合并（v3 为日分片 + 保留 30 片）。
 struct TdxLiveManifest: Codable {
-    /// 每次生成自增的版本号
-    var version: Int
+    /// >=3 = v3 日分片；缺失 / 1 = 旧单文件；2 = 14 日分片（同样按分片路径处理）
+    var schema: Int?
+    /// schema 1：每次生成自增的版本号
+    var version: Int?
     var generated_at: Int?
     /// 行情的真实交易日（YYYYMMDD）
     var trade_date: Int?
+    /// 生成端：`pc_tdx`（电脑侧，覆盖率可达 100%）/ `eastmoney`（云端兜底）
     var source: String?
-    /// 覆盖标的数
+    /// 覆盖标的数（schema 1）
     var symbols: Int?
+    /// schema 1：整库覆盖区间
     var min_date: Int?
     var max_date: Int?
-    /// 各表行数：daily / weekly / monthly / quarterly / yearly
+    /// schema 1：各表行数
     var rows: [String: Int]?
-    /// `tdx_live.db` 的 sha256（十六进制小写）
+    /// schema 1：`tdx_live.db` 的 sha256
     var sha256: String?
+    /// schema 2：一个分片覆盖的自然日数
+    var bucket_days: Int?
+    /// schema 3：清单总量（`universe.txt`，3611）
+    var universe: Int?
+    /// schema 3：本次实际覆盖数
+    var covered: Int?
+    /// schema 3：覆盖率 = covered / universe
+    var coverage: Double?
+    /// schema 3：未覆盖 file 的样例（如云端拿不到的扩展行情指数）
+    var missing_sample: [String]?
+    /// 最新分片 id
+    var latest_bucket: Int?
+    /// schema 3：保留分片上限（30）
+    var keep_buckets: Int?
+    /// 分片列表（按 id 从新到旧）
+    var buckets: [TdxLiveBucket]?
+
+    /// 是否走「分片 + 按缺口取片」路径（schema < 3 且无 buckets 的旧 manifest → false）
+    var isSharded: Bool { (schema ?? 1) >= 2 && !(buckets ?? []).isEmpty }
 }
 
 /// 单步网络请求结果（不用 `Result`：String 不满足 Error）
@@ -67,6 +112,20 @@ final class TdxSyncManager: ObservableObject {
     /// 下一个计划时刻文案，形如 "今日 14:30" / "明日 11:00"
     @Published private(set) var nextScheduledText: String?
 
+    /// 本次下载的分片数 / 总字节（分片模式；schema 1 整库替换时为 0 / 0）
+    @Published private(set) var lastBucketCount = 0
+    @Published private(set) var lastBucketBytes: Int64 = 0
+    /// 本次分片覆盖的日期区间（YYYYMMDD；0 表示无）
+    @Published private(set) var lastCoveredFrom = 0
+    @Published private(set) var lastCoveredTo = 0
+    /// manifest 声明：清单总量 / 实际覆盖数（v3；0 = 未提供）
+    @Published private(set) var lastUniverse = 0
+    @Published private(set) var lastCovered = 0
+    /// 补充说明（如「主库已是最新，无需下载分片」）
+    @Published private(set) var lastNote: String?
+    /// 主库 metaList 中 lastDate 的最大值（0 = 全部缺失）
+    @Published private(set) var mainLatestDate = 0
+
     /// 是否已启用（透传配置）
     var isEnabled: Bool { config.enabled }
 
@@ -85,6 +144,10 @@ final class TdxSyncManager: ObservableObject {
     /// 下载落地的临时文件（校验通过前绝不覆盖正式文件）
     static var tmpPath: String {
         documentsPath + "/tdx_live.db.tmp"
+    }
+    /// 分片下载落地的临时文件（合并后即删）
+    static func bucketTmpPath(_ file: String) -> String {
+        documentsPath + "/" + file + ".tmp"
     }
     /// 最近一次成功同步的 manifest（留档，便于展示 / 与远端比对）
     static var manifestPath: String {
@@ -117,6 +180,8 @@ final class TdxSyncManager: ObservableObject {
     /// 当天已执行过的时刻（键 = "yyyyMMdd 分钟数"），保证"到点触发且当天不重复"
     private var ranSlots: Set<String> = []
     private var ranSlotsDayKey = ""
+    /// 本轮分片同步开始时算得的主库最新交易日（0 = 无）→ 合并后据此裁剪增量（**只在主线程访问**）
+    private var pendingMainLatest = 0
 
     private init() {
         let d = UserDefaults.standard
@@ -232,7 +297,11 @@ final class TdxSyncManager: ObservableObject {
         }
         isSyncing = true
         setError(nil)
-        DebugLogger.shared.log("[TdxSync] 开始同步（\(reason)）源数=\(config.sourceURLs.count)")
+        if lastNote != nil { lastNote = nil }
+        pendingMainLatest = 0
+        let latest = Self.mainLatestTradeDate()
+        if mainLatestDate != latest { mainLatestDate = latest }
+        DebugLogger.shared.log("[TdxSync] 开始同步（\(reason)）源数=\(config.sourceURLs.count) 主库最新=\(latest)")
         trySource(index: 0, reason: reason, errors: [])
     }
 
@@ -249,30 +318,168 @@ final class TdxSyncManager: ObservableObject {
             trySource(index: index + 1, reason: reason, errors: errors + ["源\(index + 1) 地址非法：\(raw)"])
             return
         }
-        DebugLogger.shared.log("[TdxSync] 源\(index + 1) 取 manifest \(urls.manifest.absoluteString)")
+        // 候选① 分片布局 `<base>/live/manifest.json`（v3 首选）；候选② 旧布局 `<base>/tdx_live.manifest.json`（兜底）
+        let candidates = [urls.liveManifest, urls.manifest]
+        DebugLogger.shared.log("[TdxSync] 源\(index + 1) 取 manifest（\(candidates.count) 个候选）")
 
-        fetchManifest(url: urls.manifest) { [weak self] step in
+        fetchFirstManifest(candidates: candidates, index: index) { [weak self] step in
             guard let self = self else { return }
             switch step {
             case .failed(let err):
                 DebugLogger.shared.log("[TdxSync] 源\(index + 1) manifest 失败：\(err)")
                 self.trySource(index: index + 1, reason: reason, errors: errors + ["源\(index + 1) \(err)"])
-            case .ok(let manifest):
+            case .ok(let pair):
+                let (manifest, manifestURL) = pair
                 if let bad = Self.validate(manifest) {
                     DebugLogger.shared.log("[TdxSync] 源\(index + 1) manifest 非法：\(bad)")
                     self.trySource(index: index + 1, reason: reason, errors: errors + ["源\(index + 1) \(bad)"])
                     return
                 }
+                if manifest.isSharded {
+                    self.startShardedSync(urls: urls, manifestURL: manifestURL, manifest: manifest)
+                    return
+                }
+                // schema 1（向后兼容）：整文件下载 + 原子替换
+                DebugLogger.shared.log("[TdxSync] 源\(index + 1) 旧版 manifest（schema 1）→ 整文件替换")
                 // 内容相同 → 跳过下载（省流量）
-                if manifest.version == self.recordedVersion,
+                if let v = manifest.version, v == self.recordedVersion,
                    let sha = manifest.sha256, sha == self.recordedSha {
-                    DebugLogger.shared.log("[TdxSync] 源\(index + 1) 版本 v\(manifest.version) 与本地一致 → 跳过下载")
-                    self.finishSuccess(manifest: manifest, source: raw, installed: false)
+                    DebugLogger.shared.log("[TdxSync] 源\(index + 1) 版本 v\(v) 与本地一致 → 跳过下载")
+                    self.finishSuccess(manifest: manifest, source: raw, installed: false, note: "内容与本地一致，跳过下载",
+                                       bucketCount: 0, bytes: 0, coveredFrom: 0, coveredTo: 0)
                     return
                 }
                 self.downloadDB(urls: urls, manifest: manifest, index: index, reason: reason, errors: errors)
             }
         }
+    }
+
+    /// 依次尝试 manifest 候选地址，第一个能取到并解析成功的生效
+    private func fetchFirstManifest(candidates: [URL], index: Int,
+                                    completion: @escaping (NetStep<(TdxLiveManifest, URL)>) -> Void) {
+        guard let first = candidates.first else {
+            completion(.failed("manifest 候选地址为空"))
+            return
+        }
+        fetchManifest(url: first) { [weak self] step in
+            guard let self = self else { return }
+            switch step {
+            case .ok(let manifest):
+                completion(.ok((manifest, first)))
+            case .failed(let err):
+                if candidates.count > 1 {
+                    DebugLogger.shared.log("[TdxSync] 源\(index + 1) manifest \(first.lastPathComponent) 失败（\(err)）→ 试下一个候选")
+                    self.fetchFirstManifest(candidates: Array(candidates.dropFirst()), index: index, completion: completion)
+                } else {
+                    completion(.failed(err))
+                }
+            }
+        }
+    }
+
+    // MARK: - 分片模式（schema 2/3）：按缺口取片 → 逐片下载/校验/合并
+
+    /// 用主库 `metaList` 的 `lastDate` 最大值到今日算出缺口，选出所需分片后逐片串行下载合并。
+    /// v3：一片 = 一个交易日（≈0.5MB），典型只取 1 片；上限 30 片（保留窗口上限）。
+    private func startShardedSync(urls: TdxSyncURLs, manifestURL: URL, manifest: TdxLiveManifest) {
+        let needTo = Self.todayYMD()
+        let mainLatest = Self.mainLatestTradeDate()
+        pendingMainLatest = mainLatest
+        if mainLatestDate != mainLatest { mainLatestDate = mainLatest }
+
+        let buckets = manifest.buckets ?? []
+        let earliest = buckets.compactMap { $0.min_date }.min() ?? 0
+        // 主库无 lastDate → 退化为取最早分片的 min_date（即全部保留窗口都要）
+        let needFrom = mainLatest > 0 ? mainLatest : earliest
+        let selected = Self.selectBuckets(buckets, needFrom: needFrom, needTo: needTo,
+                                          limit: Self.maxBucketSelection)
+
+        let baseDir = manifestURL.deletingLastPathComponent()
+        DebugLogger.shared.log("[TdxSync] 分片模式 schema=\(manifest.schema ?? 2) 源=\(manifest.source ?? "-") 覆盖=\(manifest.covered.map(String.init) ?? "-")/\(manifest.universe.map(String.init) ?? "-") 主库最新=\(mainLatest) 缺口 \(needFrom)~\(needTo) 候选分片=\(buckets.count) 选中=\(selected.count) 目录=\(baseDir.absoluteString)")
+
+        guard !selected.isEmpty else {
+            DebugLogger.shared.log("[TdxSync] 主库已新于所有分片 → 跳过下载")
+            finishSuccess(manifest: manifest, source: urls.source, installed: false, note: "主库已是最新，无需下载分片",
+                          bucketCount: 0, bytes: 0, coveredFrom: 0, coveredTo: 0)
+            return
+        }
+        downloadBuckets(selected, at: baseDir, urls: urls, manifest: manifest)
+    }
+
+    /// 逐片串行：下载 → sha256 校验 → 合并进本地增量库；任一片失败即整体失败
+    private func downloadBuckets(_ remaining: [TdxLiveBucket], at baseDir: URL,
+                                 urls: TdxSyncURLs, manifest: TdxLiveManifest,
+                                 done: [(id: Int, bytes: Int64, minDate: Int, maxDate: Int, rows: Int)] = []) {
+        guard let bucket = remaining.first else {
+            // 全部成功：先裁剪冗余（主库已有的日期），再一次性热刷新
+            let bytes = done.reduce(Int64(0)) { $0 + $1.bytes }
+            let minDate = done.map { $0.minDate }.filter { $0 > 0 }.min() ?? 0
+            let maxDate = done.map { $0.maxDate }.max() ?? 0
+            let rows = done.reduce(0) { $0 + $1.rows }
+            DebugLogger.shared.log("[TdxSync] 分片全部合并完成 \(done.count) 片/\(bytes)字节/\(rows)行 区间 \(minDate)~\(maxDate)")
+            finishSuccess(manifest: manifest, source: urls.source, installed: true, note: nil,
+                          bucketCount: done.count, bytes: bytes, coveredFrom: minDate, coveredTo: maxDate)
+            applyTrimThenReload()
+            return
+        }
+        let file = bucket.file
+        let url = baseDir.appendingPathComponent(file)
+        let tmp = Self.bucketTmpPath(file)
+        DebugLogger.shared.log("[TdxSync] 下载分片 id=\(bucket.id) \(url.absoluteString)")
+
+        downloadFile(url: url, toPath: tmp) { [weak self] step in
+            guard let self = self else { return }
+            switch step {
+            case .failed(let err):
+                self.finishFailure("第 \(bucket.id) 片（\(file)）下载失败：\(err)")
+            case .ok(let size):
+                // 哈希校验放工作串行队列，校验通过后回主线程合并
+                self.workQueue.async { [weak self] in
+                    let outcome = TdxSyncManager.verifyBucket(tmpPath: tmp, bucket: bucket)
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        switch outcome {
+                        case .failed(let err):
+                            try? FileManager.default.removeItem(atPath: tmp)
+                            self.finishFailure("第 \(bucket.id) 片（\(file)）校验失败：\(err)")
+                        case .ok:
+                            LiveDataStore.shared.mergeBucket(atPath: tmp) { result in
+                                try? FileManager.default.removeItem(atPath: tmp)
+                                guard result.ok else {
+                                    self.finishFailure("第 \(bucket.id) 片（\(file)）合并失败：\(result.message)")
+                                    return
+                                }
+                                DebugLogger.shared.log("[TdxSync] 分片 id=\(bucket.id) 合并成功：\(result.message)")
+                                self.downloadBuckets(Array(remaining.dropFirst()), at: baseDir, urls: urls,
+                                                     manifest: manifest,
+                                                     done: done + [(id: bucket.id, bytes: size,
+                                                                    minDate: bucket.min_date ?? 0,
+                                                                    maxDate: bucket.max_date ?? 0,
+                                                                    rows: bucket.rows?["daily"] ?? 0)])
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 合并完成后：把「主库已有」的日期从本地增量里裁掉，再一次性 reloadAsync 热刷新
+    private func applyTrimThenReload() {
+        let trimBefore = pendingMainLatest > 0 ? pendingMainLatest : nil
+        guard let trimBefore = trimBefore else {
+            DebugLogger.shared.log("[TdxSync] 主库无 lastDate → 不裁剪增量")
+            LiveDataStore.shared.reloadAsync(completion: TdxSyncManager.logReload)
+            return
+        }
+        LiveDataStore.shared.trim(beforeDate: trimBefore) { result in
+            DebugLogger.shared.log("[TdxSync] 增量裁剪：\(result.message)")
+            LiveDataStore.shared.reloadAsync(completion: TdxSyncManager.logReload)
+        }
+    }
+
+    private static func logReload(_ summary: LiveReloadSummary) {
+        DebugLogger.shared.log("[TdxSync] 热刷新完成 可用=\(summary.isAvailable) 覆盖=\(summary.metaCountAfter)只 最新=\(summary.latestDateAfter) 内容变化=\(summary.contentChanged)")
     }
 
     /// 下载 db 到临时文件 → 后台校验 + 原子替换
@@ -294,7 +501,8 @@ final class TdxSyncManager: ObservableObject {
                     DispatchQueue.main.async {
                         switch outcome {
                         case .ok:
-                            self.finishSuccess(manifest: manifest, source: urls.source, installed: true)
+                            self.finishSuccess(manifest: manifest, source: urls.source, installed: true,
+                                               note: nil, bucketCount: 0, bytes: 0, coveredFrom: 0, coveredTo: 0)
                         case .failed(let err):
                             DebugLogger.shared.log("[TdxSync] 源\(index + 1) 校验/替换失败：\(err)")
                             self.trySource(index: index + 1, reason: reason, errors: errors + ["源\(index + 1) \(err)"])
@@ -305,30 +513,42 @@ final class TdxSyncManager: ObservableObject {
         }
     }
 
-    /// 成功收尾（主线程）：记录版本/哈希/时间/源，热刷新增量库
-    private func finishSuccess(manifest: TdxLiveManifest, source: String, installed: Bool) {
+    /// 成功收尾（主线程）：记录版本/哈希/时间/源与分片统计。
+    /// - schema 1：文件确实被替换后在此立即热刷新；
+    /// - schema 2：由调用方在「合并 + 裁剪」后统一 `reloadAsync`（避免逐片重复刷新）。
+    private func finishSuccess(manifest: TdxLiveManifest, source: String, installed: Bool,
+                               note: String?, bucketCount: Int, bytes: Int64,
+                               coveredFrom: Int, coveredTo: Int) {
         let now = Date()
         let d = UserDefaults.standard
-        d.set(manifest.version, forKey: Self.lastVersionKey)
+        if let v = manifest.version { d.set(v, forKey: Self.lastVersionKey) }
         if let sha = manifest.sha256 { d.set(sha, forKey: Self.lastShaKey) }
         if let td = manifest.trade_date, td > 0 { d.set(td, forKey: Self.lastTradeDateKey) }
         d.set(now.timeIntervalSince1970, forKey: Self.lastSyncAtKey)
         d.set(source, forKey: Self.lastSourceKey)
 
-        if lastVersion != manifest.version { lastVersion = manifest.version }
+        if let v = manifest.version, lastVersion != v { lastVersion = v }
         if let td = manifest.trade_date, lastTradeDate != td { lastTradeDate = td }
         if lastSyncAt != now { lastSyncAt = now }
         if lastSource != source { lastSource = source }
+        if lastBucketCount != bucketCount { lastBucketCount = bucketCount }
+        if lastBucketBytes != bytes { lastBucketBytes = bytes }
+        if lastCoveredFrom != coveredFrom { lastCoveredFrom = coveredFrom }
+        if lastCoveredTo != coveredTo { lastCoveredTo = coveredTo }
+        // v3：覆盖率取 manifest 声明的 covered / universe（电脑侧可达 100%，云端兜底约 91%）
+        let universe = manifest.universe ?? manifest.symbols ?? 0
+        let covered = manifest.covered ?? manifest.symbols ?? 0
+        if lastUniverse != universe { lastUniverse = universe }
+        if lastCovered != covered { lastCovered = covered }
+        if lastNote != note { lastNote = note }
         setError(nil)
         if isSyncing { isSyncing = false }
 
-        DebugLogger.shared.log("[TdxSync] 同步成功 v\(manifest.version) trade=\(manifest.trade_date.map(String.init) ?? "-") 覆盖=\(manifest.symbols.map(String.init) ?? "-")只 源=\(source) 实际写入=\(installed)")
+        DebugLogger.shared.log("[TdxSync] 同步成功 schema=\(manifest.schema ?? 1) v\(manifest.version.map(String.init) ?? "-") trade=\(manifest.trade_date.map(String.init) ?? "-") 覆盖=\(covered)/\(universe) 分片=\(bucketCount)片/\(bytes)字节 区间=\(coveredFrom)~\(coveredTo) 源=\(source) 实际写入=\(installed)\(note.map { " · \($0)" } ?? "")")
 
-        // 关键链路：文件确实被替换后立即热刷新（无需重启、无需等 5 分钟指纹检查）
-        guard installed else { return }
-        LiveDataStore.shared.reloadAsync(completion: { summary in
-            DebugLogger.shared.log("[TdxSync] 热刷新完成 可用=\(summary.isAvailable) 覆盖=\(summary.metaCountAfter)只 最新=\(summary.latestDateAfter) 内容变化=\(summary.contentChanged)")
-        })
+        // schema 1：文件被替换 → 立即热刷新（分片模式由 applyTrimThenReload 统一刷新一次）
+        guard installed, !manifest.isSharded else { return }
+        LiveDataStore.shared.reloadAsync(completion: Self.logReload)
     }
 
     /// 失败收尾（主线程）：保留上一版文件，记录原因
@@ -454,13 +674,73 @@ final class TdxSyncManager: ObservableObject {
 
     // MARK: - manifest 合法性 / 工具
 
-    /// manifest 基本合法性：rows.daily > 0、max_date 为 8 位合法日期、symbols > 0、sha256 为 64 位十六进制
+    /// manifest 基本合法性：
+    /// - schema 2：每个分片都要有 file / 合法 min_date、max_date / 64 位 sha256；
+    /// - schema 1：rows.daily > 0、max_date 合法、symbols > 0、sha256 为 64 位十六进制。
     private static func validate(_ m: TdxLiveManifest) -> String? {
+        if m.isSharded {
+            guard let buckets = m.buckets, !buckets.isEmpty else { return "schema2 manifest 无分片" }
+            for b in buckets {
+                if b.file.isEmpty { return "分片缺 file 字段" }
+                guard let minDate = b.min_date, isValidDate8(minDate) else { return "分片 \(b.id) min_date 非法" }
+                guard let maxDate = b.max_date, isValidDate8(maxDate) else { return "分片 \(b.id) max_date 非法" }
+                guard minDate <= maxDate else { return "分片 \(b.id) 日期区间倒置" }
+                guard let sha = b.sha256, sha.count == 64 else { return "分片 \(b.id) sha256 缺失或长度非法" }
+            }
+            return nil
+        }
         if (m.rows?["daily"] ?? 0) <= 0 { return "manifest 日线行数为 0" }
         guard let maxDate = m.max_date, isValidDate8(maxDate) else { return "manifest max_date 非法" }
         if (m.symbols ?? 0) <= 0 { return "manifest 标的数为 0" }
         guard let sha = m.sha256, sha.count == 64 else { return "manifest sha256 缺失或长度非法" }
         return nil
+    }
+
+    /// 分片临时文件校验：sha256 与 manifest 该片声明一致（不一致一律丢弃，绝不合并半成品）
+    private static func verifyBucket(tmpPath: String, bucket: TdxLiveBucket) -> NetStep<Void> {
+        guard let expected = bucket.sha256?.lowercased() else { return .failed("manifest 该片缺少 sha256") }
+        guard let actual = sha256Hex(ofFile: tmpPath) else { return .failed("分片文件读取失败") }
+        guard actual == expected else {
+            return .failed("哈希不符（期望 \(expected.prefix(8))… 实际 \(actual.prefix(8))…）")
+        }
+        return .ok(())
+    }
+
+    // MARK: - 按缺口取片
+
+    /// 主库 `metaList` 中 `lastDate` 的最大值（0 = 全部缺失）；**须在主线程调用**
+    static func mainLatestTradeDate() -> Int {
+        DatabaseManager.shared.metaList.compactMap { $0.lastDate }.max() ?? 0
+    }
+
+    /// 今天（设备本地日期，YYYYMMDD）
+    static func todayYMD() -> Int {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd"
+        return Int(f.string(from: Date())) ?? 0
+    }
+
+    /// 距今天然天数（date8 为 0 / 非法 → 0）
+    static func naturalDaysSince(_ date8: Int) -> Int {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd"
+        guard date8 > 0, let date = f.date(from: String(date8)) else { return 0 }
+        let cal = Calendar.current
+        return cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: Date())).day ?? 0
+    }
+
+    /// 单次同步最多下载的分片数 = 生成端保留窗口上限（30 片 ≈ 6 周）
+    static let maxBucketSelection = 30
+
+    /// 选出与 `[needFrom, needTo]` 相交的分片：按 id 从新到旧，上限 limit 片
+    static func selectBuckets(_ buckets: [TdxLiveBucket], needFrom: Int, needTo: Int, limit: Int) -> [TdxLiveBucket] {
+        guard needFrom > 0, needTo >= needFrom else { return [] }
+        return Array(buckets
+            .filter { ($0.min_date ?? 0) <= needTo && ($0.max_date ?? 0) >= needFrom }
+            .sorted { $0.id > $1.id }
+            .prefix(Swift.max(0, limit)))
     }
 
     /// YYYYMMDD 合法性（年份 1990~2100，且当月确实存在该日）

@@ -13,14 +13,16 @@ import Combine
 
 // MARK: - 数据源地址解析结果
 
-/// 一个数据源解析出的两个完整地址（同一目录下的 db 与 manifest）
+/// 一个数据源解析出的完整地址（同一目录下的 db / manifest，以及新版分片布局的 manifest）
 struct TdxSyncURLs {
     /// 用户填写的原始值（日志 / UI 展示用）
     var source: String
-    /// tdx_live.db 完整地址
+    /// tdx_live.db 完整地址（schema 1 整库替换用）
     var db: URL
-    /// tdx_live.manifest.json 完整地址
+    /// tdx_live.manifest.json 完整地址（schema 1 布局）
     var manifest: URL
+    /// `<base>/live/manifest.json`（schema 2 分片布局；分片文件 `bucket_<id>.db` 与其同目录）
+    var liveManifest: URL
 }
 
 // MARK: - 配置
@@ -105,6 +107,9 @@ final class TdxSyncConfig: ObservableObject {
     ///    - `…/data/tdx_live.db` → manifest `…/data/tdx_live.manifest.json`
     ///
     /// 末尾多余的 `/` 会被忽略；只接受 http / https，无法得到合法 URL 时返回 nil（该源跳过）。
+    ///
+    /// 另给出 **schema 2 分片布局** 的 manifest 地址 `<base>/live/manifest.json`（分片 `bucket_<id>.db` 与其同目录），
+    /// App 会先试旧地址、再试该地址（见 `TdxSyncManager.fetchFirstManifest`），升级瞬间不会失联。
     static func resolve(_ raw: String) -> TdxSyncURLs? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
@@ -127,7 +132,11 @@ final class TdxSyncConfig: ObservableObject {
               scheme == "http" || scheme == "https",
               manifestURL.scheme?.lowercased() == scheme else { return nil }
 
-        return TdxSyncURLs(source: raw, db: dbURL, manifest: manifestURL)
+        // schema 2 分片布局：manifest 在 `<base>/live/manifest.json`，分片同目录（`live/bucket_<id>.db`）
+        let liveManifestURL = URL(string: dirString + "/live/manifest.json") ?? manifestURL
+
+        return TdxSyncURLs(source: raw, db: dbURL,
+                           manifest: manifestURL, liveManifest: liveManifestURL)
     }
 
     /// 取字符串最后一个 "/" 之前的目录部分

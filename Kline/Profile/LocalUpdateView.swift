@@ -55,6 +55,17 @@ struct LocalUpdateView: View {
     @ObservedObject private var syncManager = TdxSyncManager.shared
     /// 增量库只读状态（覆盖标的数 / 最新交易日）
     @ObservedObject private var liveStore = LiveDataStore.shared
+    /// 主库 meta（覆盖率分母 / 主库最新交易日）
+    @ObservedObject private var dbManager = DatabaseManager.shared
+
+    // MARK: - 合并到 tdx.db（增量库 → 主库）
+
+    /// 合并流程状态
+    private enum MergeState: Equatable { case idle, merging, done, failed }
+    @State private var mergeState: MergeState = .idle
+    @State private var showMergeAlert = false
+    @State private var mergeAlertMessage = ""
+    @State private var mergeResultText: String?
 
     /// 数据源地址编辑框内容（", " 分隔多个源）
     @State private var syncSourceText = ""
@@ -82,6 +93,13 @@ struct LocalUpdateView: View {
         }
         .onChange(of: syncSourceText) { _ in scheduleSyncConfigCommit() }
         .onChange(of: syncScheduleText) { _ in scheduleSyncConfigCommit() }
+        // 二次确认（iOS 15：isPresented + actions/message）
+        .alert("合并到 tdx.db", isPresented: $showMergeAlert) {
+            Button("取消", role: .cancel) { }
+            Button("合并") { performMerge() }
+        } message: {
+            Text(mergeAlertMessage)
+        }
     }
 
     /// 「本地更新」卡片组（原有两条状态行，规格不变）
@@ -363,12 +381,14 @@ struct LocalUpdateView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color.gray.opacity(0.85))
 
-            // 四段均为 spacing 0 的 VStack，视觉上等价于一张连续卡片（分段只为控制 ViewBuilder 子视图数量）
+            // 各段均为 spacing 0 的 VStack，视觉上等价于一张连续卡片（分段只为控制 ViewBuilder 子视图数量）
             VStack(spacing: 0) {
                 syncConfigRows
                 syncStatusRows
+                syncCoverageRows
                 syncNetworkRows
                 syncActionRows
+                syncMergeRows
             }
             .background(Color(.secondarySystemBackground))
             .cornerRadius(12)
@@ -452,7 +472,32 @@ struct LocalUpdateView: View {
         }
     }
 
-    /// ⑧ 局域网地址：电脑侧局域网直推脚本要用的 `http://<设备IP>:5051`（只读信息，不可点）
+    /// ⑧ 覆盖率 / ⑨ 数据覆盖区间 / ⑩ 本次下载分片 / ⑪ 主库最新与缺口
+    private var syncCoverageRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            // ⑧ 增量覆盖标的数 / 主库标的数
+            infoRow(title: "覆盖率", value: coverageText)
+
+            Divider()
+
+            // ⑨ 增量库覆盖的日期区间（min ~ max）
+            infoRow(title: "数据覆盖", value: coverageRangeText)
+
+            Divider()
+
+            // ⑩ 本次下载的分片数与总字节（无分片时显示说明 / —）
+            infoRow(title: "本次下载", value: bucketDownloadText)
+
+            Divider()
+
+            // ⑪ 主库最新交易日 + 到今日的缺口天数
+            infoRow(title: "主库最新", value: mainLatestText)
+        }
+    }
+
+    /// ⑫ 局域网地址：电脑侧局域网直推脚本要用的 `http://<设备IP>:5051`（只读信息，不可点）
     private var syncNetworkRows: some View {
         VStack(spacing: 0) {
             Divider()
@@ -469,7 +514,7 @@ struct LocalUpdateView: View {
         }
     }
 
-    /// ⑨ 本次所用源 / ⑩ 失败原因 / ⑪ 立即更新 / ⑫ 语义说明
+    /// ⑬ 本次所用源 / ⑭ 失败原因 / ⑮ 立即更新 / ⑯ 语义说明
     private var syncActionRows: some View {
         VStack(spacing: 0) {
             Divider()
@@ -521,8 +566,66 @@ struct LocalUpdateView: View {
 
             Divider()
 
-            // ⑫ 语义说明：区分盘中快照与当日完整K线，避免误判
+            // ⑯ 语义说明：区分盘中快照与当日完整K线，避免误判
             Text("11:00 / 14:30 为盘中快照，15:05 为当日完整K线")
+                .font(.system(size: 12))
+                .foregroundColor(Color.gray.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// ⑰ 合并到 tdx.db（二次确认）/ ⑱ 合并结果 / ⑲ 说明
+    private var syncMergeRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            // ⑰ 合并到 tdx.db：整行可点（命中区 48pt ≥ 44pt）；同步中 / 无增量 / 无可合并行时禁用
+            Button(action: onMergeTap) {
+                HStack(spacing: 10) {
+                    Text("合并到 tdx.db")
+                        .font(.system(size: 16))
+                        .foregroundColor(mergeTappable ? Color.primary : Color.gray)
+                    Spacer(minLength: 12)
+                    if mergeState == .merging {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "square.and.arrow.down.on.square")
+                            .font(.system(size: 18))
+                            .foregroundColor(mergeTappable ? Color.blue : Color.gray)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!mergeTappable)
+
+            // ⑱ 合并结果（仅执行过合并后出现；多行不裁切，故用 minHeight）
+            if let text = mergeResultText {
+                Divider()
+                HStack(spacing: 10) {
+                    Text("合并结果")
+                        .font(.system(size: 16))
+                    Spacer(minLength: 12)
+                    Text(text)
+                        .font(.system(size: 13))
+                        .foregroundColor(mergeState == .failed ? .red : Color(.secondaryLabel))
+                        .multilineTextAlignment(.trailing)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(minHeight: 48)
+            }
+
+            Divider()
+
+            // ⑲ 语义说明：合并只按主键 UPSERT，不删除主库历史
+            Text("合并会把增量库的日/周/月线写回 tdx.db（按 标的+日期 主键覆盖，不删除历史行；失败自动回滚）")
                 .font(.system(size: 12))
                 .foregroundColor(Color.gray.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -592,6 +695,96 @@ struct LocalUpdateView: View {
 
     /// 仅"已启用且当前不在同步中"可点（未启用时不允许拉取）
     private var syncTappable: Bool { syncConfig.enabled && !syncManager.isSyncing }
+
+    // MARK: - 覆盖率 / 分片 / 主库缺口（取不到一律显示 —）
+
+    /// 覆盖率：优先取 manifest 声明的 `covered/universe`（v3；电脑侧 3611/3611，云端兜底约 3312/3611），
+    /// 未同步过时回落到「本地增量覆盖 file 数 / 主库 meta 总数」
+    private var coverageText: String {
+        let universe = syncManager.lastUniverse
+        let covered = syncManager.lastCovered
+        if universe > 0 {
+            return "覆盖 \(covered)/\(universe)（\(percentText(covered, universe))）"
+        }
+        let total = dbManager.metaList.count
+        let local = liveStore.status.metaCount
+        guard liveStore.status.isAvailable else { return "—" }
+        guard total > 0 else { return "覆盖 \(local) 只" }
+        return "覆盖 \(local)/\(total)（\(percentText(local, total))）"
+    }
+
+    /// 百分比文案（分母为 0 → "0%"）
+    private func percentText(_ part: Int, _ whole: Int) -> String {
+        guard whole > 0 else { return "0%" }
+        return "\(Int((Double(part) / Double(whole) * 100).rounded()))%"
+    }
+
+    /// 增量库覆盖的日期区间（最早 ~ 最新）
+    private var coverageRangeText: String {
+        let earliest = liveStore.status.earliestDate
+        let latest = liveStore.status.latestDate
+        guard liveStore.status.isAvailable, earliest > 0, latest > 0 else { return "—" }
+        return "\(earliest) ~ \(latest)"
+    }
+
+    /// 本次下载分片数与总字节；无分片时回落到说明文案
+    private var bucketDownloadText: String {
+        if syncManager.lastBucketCount > 0 {
+            let bytes = ByteCountFormatter.string(fromByteCount: syncManager.lastBucketBytes, countStyle: .file)
+            return "\(syncManager.lastBucketCount) 片 · \(bytes)"
+        }
+        return syncManager.lastNote ?? "—"
+    }
+
+    /// 主库最新交易日 + 到今日的缺口天数
+    private var mainLatestText: String {
+        let latest = dbManager.metaList.compactMap { $0.lastDate }.max() ?? 0
+        guard latest > 0 else { return "—" }
+        return "\(latest)（缺口 \(TdxSyncManager.naturalDaysSince(latest)) 天）"
+    }
+
+    // MARK: - 合并到 tdx.db
+
+    /// 合并可点条件：增量库可用且有日线行、当前不在同步、也不在合并中
+    private var mergeTappable: Bool {
+        guard liveStore.status.isAvailable, liveStore.status.dailyCount > 0 else { return false }
+        return !syncManager.isSyncing && mergeState != .merging
+    }
+
+    /// 点击「合并到 tdx.db」：先后台算出「写入 N 根 / 覆盖 M 只 / 最新交易日」，再弹二次确认
+    private func onMergeTap() {
+        guard mergeTappable else { return }
+        mergeState = .merging          // 预估期间同样显示进度并禁用按钮
+        mergeResultText = nil
+        MainDBMerger.shared.previewMerge { preview in
+            mergeState = .idle
+            if preview.isMergeable {
+                // M = 按 `file` 命中主库 meta 的标的数（`code` 有 55 处重复，不能作键）
+                mergeAlertMessage = "将写入 \(preview.totalRows) 根K线、覆盖 \(preview.hitSymbols) 只标的、"
+                    + "最新交易日 \(preview.latestDate)。\n\n"
+                    + "按「标的 + 日期」主键写回 tdx.db，不删除任何历史行；任一步失败会自动回滚。"
+            } else {
+                mergeAlertMessage = "增量库暂无可合并到主库的行（可能已合并过或已被裁剪）。"
+            }
+            showMergeAlert = true
+        }
+    }
+
+    /// 确认后执行合并（主库单事务 UPSERT → 裁剪增量 → 热刷新）
+    private func performMerge() {
+        mergeState = .merging
+        mergeResultText = nil
+        MainDBMerger.shared.mergeIncrementIntoMainDB { result in
+            DebugLogger.shared.log("[Merge] \(result.message)")
+            if result.ok {
+                mergeState = .done
+                mergeResultText = "已合并 \(result.totalRows) 根 / 覆盖 \(result.hitSymbols) 只 / 最新 \(result.latestDate)"
+            } else {
+                mergeState = .failed
+                mergeResultText = result.message
+            }
+        }
+    }
 
     /// YYYYMMDD 原样展示（0 = 无数据）
     private func dateText(_ value: Int) -> String {

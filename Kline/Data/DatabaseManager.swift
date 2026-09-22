@@ -27,9 +27,10 @@ class DatabaseManager: ObservableObject {
     /// 供行情行缓存 / 条件单 / K 线图做热刷新（增量内容不变则不发信号）。
     @Published private(set) var dataVersion = 0
 
-    /// metaID → code 映射（metaList 就绪时一次性建好），避免每次查询线性遍历上万条 metaList
-    private let codeMapLock = NSLock()
-    private var codeByMetaId: [Int: String] = [:]
+    /// metaID → file 映射（metaList 就绪时一次性建好），避免每次查询线性遍历上万条 metaList。
+    /// **键必须是 `file`**（如 `SH#600000`）：主库 `code` 有 55 处重复（指数与股票同码），`file` 3611/3611 唯一。
+    private let fileMapLock = NSLock()
+    private var fileByMetaId: [Int: String] = [:]
 
     /// 已应用到 dataVersion 的增量库指纹（同一指纹不重复自增，防止重复发布）
     private var appliedLiveFingerprint: String? = nil
@@ -64,6 +65,27 @@ class DatabaseManager: ObservableObject {
         // 底层行情数据整体更新 → 丢弃图表指标曲线缓存（否则指标仍是旧数据算出来的）
         ChartCacheStore.shared.clearAll()
         DebugLogger.shared.log("[DB] dataVersion → \(dataVersion)（增量库内容变化 · \(summary.reason) · 覆盖=\(summary.metaCountAfter)只/日线\(summary.dailyCountAfter)行 · 最新=\(summary.latestDateAfter) · fp=\(key)）")
+    }
+
+    // MARK: - 新增能力（供 MainDBMerger 合并写回主库；不改动既有查询语义）
+
+    /// 在 `dbQueue` 串行队列上执行 `work`（提供主库连接句柄），完成后把结果回主线程交给 `completion`。
+    /// 整个合并期间独占 dbQueue → 天然禁止并发查询；`work` 内不得做网络 / 长文件 IO。
+    func performOnDBQueue<T>(_ work: @escaping (OpaquePointer?) -> T,
+                             completion: @escaping (T) -> Void) {
+        dbQueue.async { [weak self] in
+            let value = work(self?.db)
+            DispatchQueue.main.async { completion(value) }
+        }
+    }
+
+    /// 主库内容被内部合并改写后调用（**在主线程**）：强制自增数据版本并清图表缓存，
+    /// 让行情行缓存 / 条件单 / K 线图重查。仅用于「增量库指纹未变化但主库已变」的场合（避免漏刷新）。
+    func notifyMainDBChanged() {
+        guard isLoaded else { return }
+        dataVersion += 1
+        ChartCacheStore.shared.clearAll()
+        DebugLogger.shared.log("[DB] dataVersion → \(dataVersion)（主库被内部合并改写）")
     }
 
     /// 沙盒内可写数据库文件名（放在 Documents，可通过 Finder / 文件 App 单独替换更新，无需重装 App）
@@ -165,13 +187,13 @@ class DatabaseManager: ObservableObject {
 
             sqlite3_finalize(statement)
 
-            // 一次性建好 metaID → code 映射（增量库以 code 为键；避免每次查询线性遍历 metaList）
-            var codeMap: [Int: String] = [:]
-            codeMap.reserveCapacity(results.count)
-            for item in results { codeMap[item.id] = item.code }
-            self.codeMapLock.lock()
-            self.codeByMetaId = codeMap
-            self.codeMapLock.unlock()
+            // 一次性建好 metaID → file 映射（增量库以 file 为键；避免每次查询线性遍历 metaList）
+            var fileMap: [Int: String] = [:]
+            fileMap.reserveCapacity(results.count)
+            for item in results { fileMap[item.id] = item.file }
+            self.fileMapLock.lock()
+            self.fileByMetaId = fileMap
+            self.fileMapLock.unlock()
 
             DispatchQueue.main.async {
                 self.metaList = results
@@ -247,18 +269,18 @@ class DatabaseManager: ObservableObject {
         return (live.items + rest).sorted { $0.date > $1.date }
     }
 
-    /// 增量库该 metaId 对应 code 在某周期表的切片；不可用 / 无 code 映射 / 该表无增量行 → nil
+    /// 增量库该 metaId 对应 file 在某周期表的切片；不可用 / 无 file 映射 / 该表无增量行 → nil
     private func liveSlice(metaId: Int, table: String) -> LiveSlice? {
-        guard let code = codeForMetaId(metaId) else { return nil }
-        guard let slice = LiveDataStore.shared.slice(code: code, table: table), !slice.isEmpty else { return nil }
+        guard let file = fileForMetaId(metaId) else { return nil }
+        guard let slice = LiveDataStore.shared.slice(file: file, table: table), !slice.isEmpty else { return nil }
         return slice
     }
 
-    /// metaID → code（O(1) 字典查找，映射随 metaList 就绪时一次性建好）
-    private func codeForMetaId(_ metaId: Int) -> String? {
-        codeMapLock.lock()
-        defer { codeMapLock.unlock() }
-        return codeByMetaId[metaId]
+    /// metaID → file（O(1) 字典查找，映射随 metaList 就绪时一次性建好）
+    private func fileForMetaId(_ metaId: Int) -> String? {
+        fileMapLock.lock()
+        defer { fileMapLock.unlock() }
+        return fileByMetaId[metaId]
     }
 
     /// 统一执行 K 线查询并组装结果（需已在 dbQueue 上）
