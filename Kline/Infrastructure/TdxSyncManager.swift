@@ -77,6 +77,9 @@ struct TdxLiveManifest: Codable {
     var keep_buckets: Int?
     /// 分片列表（按 id 从新到旧）
     var buckets: [TdxLiveBucket]?
+    /// schema 3：历史重灌包（差分包）列表，与 `buckets` 并列；元素字段复用分片结构。
+    /// **可为 nil（旧 manifest 无该字段）→ 向后兼容，按「无补丁」处理**。
+    var patches: [TdxLiveBucket]?
 
     /// 是否走「分片 + 按缺口取片」路径（schema < 3 且无 buckets 的旧 manifest → false）
     var isSharded: Bool { (schema ?? 1) >= 2 && !(buckets ?? []).isEmpty }
@@ -136,6 +139,8 @@ final class TdxSyncManager: ObservableObject {
     private static let lastTradeDateKey = "kline.tdxsync.lastTradeDate"
     private static let lastSyncAtKey = "kline.tdxsync.lastSyncAt"
     private static let lastSourceKey = "kline.tdxsync.lastSource"
+    /// 已合并补丁包的幂等记录（sha256 优先，缺省用文件名；截断到最近 `maxMergedPatchRecords` 条）
+    private static let mergedPatchesKey = "kline.tdxsync.mergedPatches"
 
     // MARK: - 本地文件路径
 
@@ -252,7 +257,7 @@ final class TdxSyncManager: ObservableObject {
             ranSlots.removeAll()
         }
         let nowMinutes = Self.minutesOfDay(now)
-        // 只取「已到点」中最晚的一个：避免冷启动时把 11:00 / 14:30 / 15:05 三个都跑一遍
+        // 只取「已到点」中最晚的一个：避免冷启动时把 11:00 / 14:30 / 15:05 / 17:30 四个都跑一遍
         let passed = config.scheduleTimes.compactMap { Self.minutes(of: $0) }.filter { $0 <= nowMinutes }
         guard let slot = passed.max() else { return }
         let slotKey = dayKey + " " + String(slot)
@@ -260,6 +265,8 @@ final class TdxSyncManager: ObservableObject {
         ranSlots.insert(slotKey)
         DebugLogger.shared.log("[TdxSync] \(trigger)：已到点 \(Self.slotText(slot))，触发同步")
         beginSync(reason: trigger)
+        // 同一时刻同时触发「清单标的当日K线」东财直连更新（独立通道：与云端 manifest 成败互不影响）
+        WatchlistSyncManager.shared.sync(reason: trigger, slot: Self.slotText(slot))
     }
 
     /// 刷新「下次计划时刻」文案（未启用时也展示，便于用户理解时刻表）
@@ -399,8 +406,10 @@ final class TdxSyncManager: ObservableObject {
 
         guard !selected.isEmpty else {
             DebugLogger.shared.log("[TdxSync] 主库已新于所有分片 → 跳过下载")
-            finishSuccess(manifest: manifest, source: urls.source, installed: false, note: "主库已是最新，无需下载分片",
-                          bucketCount: 0, bytes: 0, coveredFrom: 0, coveredTo: 0)
+            // 分片无需下载，但补丁包（历史重灌）与「缺口」无关，仍须应用
+            let ctx = PatchSyncContext(urls: urls, manifest: manifest, bucketCount: 0, bytes: 0,
+                                       coveredFrom: 0, coveredTo: 0, note: "主库已是最新，无需下载分片")
+            syncPatches(manifest.patches ?? [], at: baseDir, context: ctx, applied: 0)
             return
         }
         downloadBuckets(selected, at: baseDir, urls: urls, manifest: manifest)
@@ -417,9 +426,10 @@ final class TdxSyncManager: ObservableObject {
             let maxDate = done.map { $0.maxDate }.max() ?? 0
             let rows = done.reduce(0) { $0 + $1.rows }
             DebugLogger.shared.log("[TdxSync] 分片全部合并完成 \(done.count) 片/\(bytes)字节/\(rows)行 区间 \(minDate)~\(maxDate)")
-            finishSuccess(manifest: manifest, source: urls.source, installed: true, note: nil,
-                          bucketCount: done.count, bytes: bytes, coveredFrom: minDate, coveredTo: maxDate)
-            applyTrimThenReload()
+            // 分片之后处理历史重灌包（patches）；二者都处理完再统一收尾（裁剪 + 一次热刷新）
+            let ctx = PatchSyncContext(urls: urls, manifest: manifest, bucketCount: done.count,
+                                       bytes: bytes, coveredFrom: minDate, coveredTo: maxDate, note: nil)
+            syncPatches(manifest.patches ?? [], at: baseDir, context: ctx, applied: 0)
             return
         }
         let file = bucket.file
@@ -456,6 +466,93 @@ final class TdxSyncManager: ObservableObject {
                                                                     minDate: bucket.min_date ?? 0,
                                                                     maxDate: bucket.max_date ?? 0,
                                                                     rows: bucket.rows?["daily"] ?? 0)])
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 历史重灌包（patches，schema 3）：分片之后逐包下载 → 校验 → 合并
+
+    /// 补丁同步的固定上下文（分片阶段统计 + 收尾所需字段），逐包递归时透传，避免长参数列表
+    private struct PatchSyncContext {
+        let urls: TdxSyncURLs
+        let manifest: TdxLiveManifest
+        let bucketCount: Int
+        let bytes: Int64
+        let coveredFrom: Int
+        let coveredTo: Int
+        let note: String?
+    }
+
+    /// 逐个处理 manifest 的 `patches[]`：下载到临时文件 → sha256 校验 → 合并进本地增量库 → 删临时文件。
+    /// - **幂等**：按 `patchKey`（sha256 优先）跳过已合并过的补丁（记录持久化到 UserDefaults，上限 `maxMergedPatchRecords`）；
+    /// - **容错**：任一补丁下载 / 校验 / 合并失败**只记日志并跳过**，绝不影响分片同步的整体成功；
+    /// - **收尾**：全部处理完统一 `finishSuccess`；分片有写入或确有补丁写入时才裁剪 + 热刷新（与分片共用同一收尾路径）。
+    private func syncPatches(_ remaining: [TdxLiveBucket], at baseDir: URL,
+                             context ctx: PatchSyncContext, applied: Int) {
+        let rest = Array(remaining.dropFirst())
+        guard let patch = remaining.first else {
+            finishSuccess(manifest: ctx.manifest, source: ctx.urls.source, installed: true, note: ctx.note,
+                          bucketCount: ctx.bucketCount, bytes: ctx.bytes,
+                          coveredFrom: ctx.coveredFrom, coveredTo: ctx.coveredTo)
+            if ctx.bucketCount > 0 || applied > 0 {
+                applyTrimThenReload()
+            } else {
+                DebugLogger.shared.log("[TdxSync] 无分片亦无补丁写入 → 跳过裁剪热刷新")
+            }
+            return
+        }
+        let file = patch.file
+        guard !file.isEmpty else {
+            DebugLogger.shared.log("[TdxSync] 补丁缺 file 字段 → 跳过")
+            syncPatches(rest, at: baseDir, context: ctx, applied: applied)
+            return
+        }
+        let key = Self.patchKey(patch)
+        guard !mergedPatchRecords.contains(key) else {
+            DebugLogger.shared.log("[TdxSync] 补丁 \(file) 已合并过 → 跳过")
+            syncPatches(rest, at: baseDir, context: ctx, applied: applied)
+            return
+        }
+        let url = baseDir.appendingPathComponent(file)
+        let tmp = Self.bucketTmpPath(file)
+        DebugLogger.shared.log("[TdxSync] 下载补丁 \(file) \(url.absoluteString)")
+        downloadFile(url: url, toPath: tmp) { [weak self] step in
+            guard let self = self else { return }
+            switch step {
+            case .failed(let err):
+                DebugLogger.shared.log("[TdxSync] 补丁 \(file) 下载失败（跳过，不影响分片）：\(err)")
+                try? FileManager.default.removeItem(atPath: tmp)
+                self.syncPatches(rest, at: baseDir, context: ctx, applied: applied)
+            case .ok:
+                // 哈希校验放工作串行队列，通过后回主线程合并
+                self.workQueue.async { [weak self] in
+                    let outcome = TdxSyncManager.verifyPatch(tmpPath: tmp, patch: patch)
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        switch outcome {
+                        case .failed(let err):
+                            DebugLogger.shared.log("[TdxSync] 补丁 \(file) 校验失败（跳过，不影响分片）：\(err)")
+                            try? FileManager.default.removeItem(atPath: tmp)
+                            self.syncPatches(rest, at: baseDir, context: ctx, applied: applied)
+                        case .ok:
+                            LiveDataStore.shared.mergeBucket(atPath: tmp) { result in
+                                try? FileManager.default.removeItem(atPath: tmp)
+                                guard result.ok else {
+                                    DebugLogger.shared.log("[TdxSync] 补丁 \(file) 合并失败（跳过，不影响分片）：\(result.message)")
+                                    self.syncPatches(rest, at: baseDir, context: ctx, applied: applied)
+                                    return
+                                }
+                                DebugLogger.shared.log("[TdxSync] 补丁 \(file) 合并成功：\(result.message)")
+                                var records = self.mergedPatchRecords
+                                if !records.contains(key) {
+                                    records.append(key)
+                                    self.mergedPatchRecords = records
+                                }
+                                self.syncPatches(rest, at: baseDir, context: ctx, applied: applied + 1)
                             }
                         }
                     }
@@ -706,6 +803,18 @@ final class TdxSyncManager: ObservableObject {
         return .ok(())
     }
 
+    /// 补丁包临时文件校验：sha256 与 manifest 该补丁声明一致（不一致一律丢弃，绝不合并半成品）
+    private static func verifyPatch(tmpPath: String, patch: TdxLiveBucket) -> NetStep<Void> {
+        guard let expected = patch.sha256?.lowercased(), !expected.isEmpty else {
+            return .failed("manifest 该补丁缺少 sha256")
+        }
+        guard let actual = sha256Hex(ofFile: tmpPath) else { return .failed("补丁文件读取失败") }
+        guard actual == expected else {
+            return .failed("哈希不符（期望 \(expected.prefix(8))… 实际 \(actual.prefix(8))…）")
+        }
+        return .ok(())
+    }
+
     // MARK: - 按缺口取片
 
     /// 主库 `metaList` 中 `lastDate` 的最大值（0 = 全部缺失）；**须在主线程调用**
@@ -733,6 +842,11 @@ final class TdxSyncManager: ObservableObject {
 
     /// 单次同步最多下载的分片数 = 生成端保留窗口上限（30 片 ≈ 6 周）
     static let maxBucketSelection = 30
+
+    /// 补丁包（历史重灌包）的独立上限：仅用于限制设备侧「已合并记录」的条数，
+    /// 避免 UserDefaults 无限增长。**与分片 30 片滚动完全独立、互不影响**；
+    /// 补丁文件下载后合并即删（与分片同样），故无需按数量滚动保留文件。
+    static let maxMergedPatchRecords = 10
 
     /// 选出与 `[needFrom, needTo]` 相交的分片：按 id 从新到旧，上限 limit 片
     static func selectBuckets(_ buckets: [TdxLiveBucket], needFrom: Int, needTo: Int, limit: Int) -> [TdxLiveBucket] {
@@ -772,6 +886,20 @@ final class TdxSyncManager: ObservableObject {
 
     private var recordedSha: String? {
         UserDefaults.standard.string(forKey: Self.lastShaKey)
+    }
+
+    /// 已合并补丁包的幂等记录（UserDefaults 持久化）。
+    /// 写入时截断到最近 `maxMergedPatchRecords` 条——这是补丁包**独立**于分片 30 片滚动的清理策略。
+    private var mergedPatchRecords: [String] {
+        get { UserDefaults.standard.stringArray(forKey: Self.mergedPatchesKey) ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.suffix(Self.maxMergedPatchRecords)),
+                                       forKey: Self.mergedPatchesKey) }
+    }
+
+    /// 补丁包幂等键：sha256 优先（可识别「同文件名不同内容」），无 sha 时退化为文件名
+    private static func patchKey(_ patch: TdxLiveBucket) -> String {
+        if let sha = patch.sha256?.lowercased(), !sha.isEmpty { return sha }
+        return patch.file
     }
 
     // MARK: - 时刻 / 交易日工具

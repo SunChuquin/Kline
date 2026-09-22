@@ -23,6 +23,8 @@ artifacts/
 # 例外：增量行情库的清单必须入库（云端 Actions 与电脑侧脚本共用同一份）
 !src/data/symbols.txt
 !src/data/universe.txt
+!src/data/universe_secids.txt
+!Kline/Resources/universe_secids.txt
 
 # SQLite 运行期副产物（读取 WAL 模式库时自动生成，不入库）
 *.db-shm

@@ -38,7 +38,8 @@ struct KlineApp: App {
         LiveDataStore.shared.startWatching(interval: 300)
 
         // 启动增量行情库自动拉取调度（默认关闭，需在「个人中心 → 本地更新 → 数据同步」显式开启）：
-        // 前台按 11:00 / 14:30 / 15:05 时刻表检查，到点即从 data 分支拉取并热刷新
+        // 前台按 11:00 / 14:30 / 15:05 / 17:30 时刻表检查，到点即从 data 分支拉取并热刷新
+        // （同时触发「清单标的当日K线」东财直连更新，两者独立、成败互不影响）
         TdxSyncManager.shared.start()
     }
 

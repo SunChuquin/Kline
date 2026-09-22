@@ -41,8 +41,12 @@ final class TdxSyncConfig: ObservableObject {
         "https://cdn.jsdelivr.net/gh/SunChuquin/Kline@data",
     ]
 
-    /// 默认更新时刻（北京时间，交易日）：11:00 / 14:30 为盘中快照，15:05 为当日完整K线
-    static let defaultScheduleTimes: [String] = ["11:00", "14:30", "15:05"]
+    /// 默认更新时刻（北京时间，交易日）：11:00 / 14:30 为盘中快照，15:05 为收盘后完整K线，17:30 为当日兜底
+    static let defaultScheduleTimes: [String] = ["11:00", "14:30", "15:05", "17:30"]
+
+    /// 旧版默认时刻（三档）。仅用于**一次性迁移**：已装机用户读回的历史值与它恰好相等 → 升级为新默认值；
+    /// 用户自己改过的值不在此列，保持不变。
+    static let legacyDefaultScheduleTimes: [String] = ["11:00", "14:30", "15:05"]
 
     /// data 分支上的两个文件名
     static let dbFileName = "tdx_live.db"
@@ -89,7 +93,15 @@ final class TdxSyncConfig: ObservableObject {
         // enabled 默认 true（本功能目的就是自动更新）；用 object(forKey:) 区分"从未设置过"与"用户显式关掉"
         enabled = (d.object(forKey: Self.enabledKey) as? Bool) ?? true
         sourceURLs = Self.load([String].self, key: Self.sourceURLsKey) ?? Self.defaultSourceURLs
-        scheduleTimes = Self.load([String].self, key: Self.scheduleTimesKey) ?? Self.defaultScheduleTimes
+        // 时刻表：一次性迁移（老用户读回旧三档默认值 → 升级为四档并落盘；用户自改值不动）
+        let storedTimes = Self.load([String].self, key: Self.scheduleTimesKey)
+        if storedTimes == Self.legacyDefaultScheduleTimes {
+            scheduleTimes = Self.defaultScheduleTimes
+            Self.save(Self.defaultScheduleTimes, key: Self.scheduleTimesKey)
+            DebugLogger.shared.log("[TdxSync] 时刻表迁移：旧默认 \(Self.legacyDefaultScheduleTimes.joined(separator: ",")) → 新默认 \(Self.defaultScheduleTimes.joined(separator: ","))")
+        } else {
+            scheduleTimes = storedTimes ?? Self.defaultScheduleTimes
+        }
         tradingDaysOnly = (d.object(forKey: Self.tradingDaysOnlyKey) as? Bool) ?? true
         foregroundCheckInterval = (d.object(forKey: Self.checkIntervalKey) as? Double) ?? 60
     }

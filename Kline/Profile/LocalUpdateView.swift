@@ -57,6 +57,8 @@ struct LocalUpdateView: View {
     @ObservedObject private var liveStore = LiveDataStore.shared
     /// 主库 meta（覆盖率分母 / 主库最新交易日）
     @ObservedObject private var dbManager = DatabaseManager.shared
+    /// 清单标的自动更新状态（设备侧东财直连：并集数 / 各时刻结果 / 命中数）
+    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
 
     // MARK: - 合并到 tdx.db（增量库 → 主库）
 
@@ -78,6 +80,7 @@ struct LocalUpdateView: View {
         VStack(alignment: .leading, spacing: 24) {
             localUpdateSection
             syncSection
+            watchlistSyncSection
         }
         .onAppear {
             refreshServerStatus()
@@ -433,7 +436,7 @@ struct LocalUpdateView: View {
 
             // ③ 更新时刻（可编辑："HH:mm"，逗号分隔）
             editRow(title: "更新时刻") {
-                TextField("11:00, 14:30, 15:05", text: $syncScheduleText)
+                TextField(TdxSyncConfig.scheduleText(syncConfig.scheduleTimes), text: $syncScheduleText)
                     .font(.system(size: 13))
                     .multilineTextAlignment(.trailing)
                     .keyboardType(.numbersAndPunctuation)
@@ -566,8 +569,8 @@ struct LocalUpdateView: View {
 
             Divider()
 
-            // ⑯ 语义说明：区分盘中快照与当日完整K线，避免误判
-            Text("11:00 / 14:30 为盘中快照，15:05 为当日完整K线")
+            // ⑯ 语义说明：区分盘中快照与当日完整K线（时刻随配置动态生成），避免误判
+            Text(scheduleSemanticsText)
                 .font(.system(size: 12))
                 .foregroundColor(Color.gray.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -634,6 +637,226 @@ struct LocalUpdateView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    // MARK: - 清单标的自动更新（设备侧东财直连，与云端同步各自独立）
+
+    /// 「清单标的自动更新」子区：状态 / 最近结果 / 清单并集 / 本次请求命中 / 当日交易日 /
+    /// 四个时刻各自的最近结果 / 立即更新 / 语义说明。规格与「数据同步」卡片组完全一致
+    /// （13 semibold 灰标题、48pt 行高、16pt 左右 padding、secondarySystemBackground + 12 圆角）。
+    private var watchlistSyncSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("清单标的自动更新")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.85))
+
+            // 分段只为控制 ViewBuilder 子视图数量（同「数据同步」卡片）
+            VStack(spacing: 0) {
+                watchlistStatusRows
+                watchlistSlotRows
+            }
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+    }
+
+    /// 状态 / 最近结果 / 清单并集 / 本次请求 / 当日交易日
+    private var watchlistStatusRows: some View {
+        VStack(spacing: 0) {
+            // ① 状态（未启用 / 等待首次执行 / 同步中 / 已同步 / 失败）：图标位固定 24x24，切换不跳布局
+            HStack(spacing: 10) {
+                Text("状态")
+                    .font(.system(size: 16))
+                Spacer(minLength: 12)
+                Text(watchlistStateText)
+                    .font(.system(size: 15))
+                    .foregroundColor(watchlistStateColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                watchlistStateIcon
+                    .frame(width: 24, height: 24)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 48)
+
+            Divider()
+
+            // ② 最近一次结果（成功 / 跳过 / 失败 + 原因）
+            infoRow(title: "最近结果", value: watchlistSync.lastResultText ?? "—",
+                    valueColor: watchlistResultColor)
+
+            Divider()
+
+            // ③ 清单并集标的数（6 类清单去重后的 file 数）
+            infoRow(title: "清单并集", value: watchlistSync.unionCount > 0
+                    ? "\(watchlistSync.unionCount) 只" : "—")
+
+            Divider()
+
+            // ④ 本次请求的命中 / 跳过 / 批次失败
+            infoRow(title: "本次请求", value: watchlistRequestText)
+
+            Divider()
+
+            // ⑤ 当日最新交易日（取自东财 f124 的北京时间换算）
+            infoRow(title: "当日交易日", value: watchlistSync.lastTradeDate.map { String($0) } ?? "—")
+        }
+    }
+
+    /// 各时刻最近结果（时刻随配置动态展开）/ 立即更新 / 语义说明
+    private var watchlistSlotRows: some View {
+        VStack(spacing: 0) {
+            // ⑥ 四个时刻各自的最近执行结果（标题自带「盘中快照 / 收盘」语义标注）
+            ForEach(syncConfig.scheduleTimes, id: \.self) { time in
+                Divider()
+                infoRow(title: watchlistSlotTitle(time),
+                        value: watchlistSync.slotResults[time] ?? "尚未执行")
+            }
+
+            Divider()
+
+            // ⑦ 立即更新：整行可点（命中区 48pt ≥ 44pt），执行中禁用并显示进度圈
+            Button(action: { watchlistSync.sync(reason: "手动") }) {
+                HStack(spacing: 10) {
+                    Text("立即更新")
+                        .font(.system(size: 16))
+                        .foregroundColor(watchlistTappable ? Color.primary : Color.gray)
+                    Spacer(minLength: 12)
+                    if watchlistSync.isRunning {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 18))
+                            .foregroundColor(watchlistTappable ? Color.blue : Color.gray)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!watchlistTappable)
+
+            Divider()
+
+            // ⑧ 语义说明：11:00 / 14:30 写的是当日未完成K线（盘中快照），15:05 / 17:30 才是完整K线
+            Text("盘中快照写的是当日未完成K线，条件单/预警会按「当前快照价」触发，勿当收盘价；"
+                + scheduleSemanticsText)
+                .font(.system(size: 12))
+                .foregroundColor(Color.gray.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 清单自动更新状态（未启用 / 等待首次执行 / 同步中 / 已同步 / 失败）
+    private enum WatchlistState { case disabled, idle, syncing, synced, failed }
+
+    private var watchlistState: WatchlistState {
+        if !syncConfig.enabled { return .disabled }
+        if watchlistSync.isRunning { return .syncing }
+        guard let outcome = watchlistSync.lastOutcome else { return .idle }
+        switch outcome {
+        case .failed:  return .failed
+        case .success: return .synced
+        case .skipped: return .idle
+        }
+    }
+
+    /// 上次结果是「跳过」时的提示文案（清单为空等，非失败）
+    private var watchlistWasSkipped: Bool {
+        if case .skipped? = watchlistSync.lastOutcome { return true }
+        return false
+    }
+
+    private var watchlistStateText: String {
+        switch watchlistState {
+        case .disabled: return "未启用"
+        case .idle:     return watchlistWasSkipped ? "已跳过（见最近结果）" : "等待首次执行"
+        case .syncing:  return "同步中…"
+        case .synced:   return "已同步"
+        case .failed:   return "失败"
+        }
+    }
+
+    private var watchlistStateColor: Color {
+        switch watchlistState {
+        case .disabled, .idle: return .gray
+        case .syncing:         return .yellow
+        case .synced:          return .green
+        case .failed:          return .red
+        }
+    }
+
+    /// 状态图标：灰「=」未启用/待执行、黄「…」同步中、绿勾已同步、红叉失败（固定 24x24）
+    @ViewBuilder
+    private var watchlistStateIcon: some View {
+        switch watchlistState {
+        case .disabled, .idle:
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.gray)
+        case .syncing:
+            Image(systemName: "ellipsis.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.yellow)
+        case .synced:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.green)
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.red)
+        }
+    }
+
+    /// 「最近结果」配色（失败红 / 成功绿 / 其余次要色）
+    private var watchlistResultColor: Color {
+        guard let outcome = watchlistSync.lastOutcome else { return Color(.secondaryLabel) }
+        switch outcome {
+        case .failed:  return .red
+        case .success: return .green
+        case .skipped: return Color(.secondaryLabel)
+        }
+    }
+
+    /// 本次请求：命中 / 跳过 / 批次失败（尚未执行过 → —）
+    private var watchlistRequestText: String {
+        guard watchlistSync.lastOutcome != nil else { return "—" }
+        return "命中 \(watchlistSync.hitCount) · 跳过 \(watchlistSync.skippedCount)"
+            + " · 批次失败 \(watchlistSync.batchFailureCount)"
+    }
+
+    /// 时刻行标题：`11:00 · 盘中快照` / `15:05 · 收盘`（语义跟随时刻动态判定）
+    private func watchlistSlotTitle(_ time: String) -> String {
+        "\(time) · \(slotSemantics(time))"
+    }
+
+    /// 时刻语义：15:00 之前 = 盘中快照（当日未完成K线），15:00 及之后 = 收盘（完整K线）
+    private func slotSemantics(_ time: String) -> String {
+        guard let minutes = TdxSyncManager.minutes(of: time) else { return "—" }
+        return minutes < 15 * 60 ? "盘中快照" : "收盘"
+    }
+
+    /// 时刻表语义说明（跟随 `TdxSyncConfig.scheduleTimes` 动态生成，不再硬编码三档时刻）
+    private var scheduleSemanticsText: String {
+        let intraday = syncConfig.scheduleTimes.filter { slotSemantics($0) == "盘中快照" }
+        let close = syncConfig.scheduleTimes.filter { slotSemantics($0) == "收盘" }
+        var parts: [String] = []
+        if !intraday.isEmpty {
+            parts.append("\(intraday.joined(separator: " / ")) 为盘中快照（当日未完成K线）")
+        }
+        if !close.isEmpty {
+            parts.append("\(close.joined(separator: " / ")) 为当日完整K线")
+        }
+        return parts.isEmpty ? "未配置更新时刻" : parts.joined(separator: "；")
+    }
+
+    /// 可点条件：已启用且当前不在执行中
+    private var watchlistTappable: Bool { syncConfig.enabled && !watchlistSync.isRunning }
 
     /// 同步状态（四态 + 已启用但尚未同步过）
     private enum SyncState { case disabled, idle, syncing, synced, failed }

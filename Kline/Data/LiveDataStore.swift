@@ -154,6 +154,26 @@ struct LiveIncrementSnapshot {
     var isEmpty: Bool { daily.isEmpty && weekly.isEmpty && monthly.isEmpty }
 }
 
+/// 「直接写入当日K线」的 meta 行（东财取数结果 → `live_meta`；键 = file）
+struct LiveUpsertMeta {
+    let file: String
+    let code: String
+    let name: String
+    let type: String
+}
+
+/// 「直接写入当日K线」的一根日线（东财取数结果 → `live_daily`；键 = (file, date)）
+struct LiveUpsertBar {
+    let file: String
+    let date: Int
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
+    let vol: Double
+    let amo: Double
+}
+
 // MARK: - 增量库读取层
 
 final class LiveDataStore: ObservableObject {
@@ -295,6 +315,26 @@ final class LiveDataStore: ObservableObject {
             guard let self = self else { return }
             let result = self._mergeBucketLocked(atPath: path)
             if result.ok { self._refreshAfterInternalWriteLocked(reason: "内部写入合并") }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    /// 直接写入「当日K线」（内存里的东财取数结果，非 sqlite 分片文件）：
+    /// **先与库内逐字段比对，只写真正变化 / 新增的行**（浮点容差 1e-6），单事务内
+    /// `live_meta` 补缺失标的（`INSERT OR IGNORE`）+ `live_daily` 按 `(file, date)` UPSERT
+    /// （表名 / 字段顺序与 `_mergeBucketLocked` 一致）。本地增量库不存在时按既有 schema 新建。
+    /// 与库内完全一致时不写任何行、不开事务，也**不**走热刷新（库文件 sha256 不变 → 不自增 `dataVersion`）。
+    /// 确有变化时才刷新缓存与自身指纹（随后的 `reloadAsync` 才判定内容是否真变化）。
+    /// completion 在主线程回调。
+    func upsertDaily(metas: [LiveUpsertMeta], bars: [LiveUpsertBar], updatedAt: Int,
+                     completion: @escaping (LiveMergeResult) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let result = self._upsertDailyLocked(metas: metas, bars: bars, updatedAt: updatedAt)
+            // 无变化时 metaRows / dailyRows 均为 0：库文件未变，跳过刷新（否则会白走一次指纹比对链路）
+            if result.ok && (result.metaRows > 0 || result.dailyRows > 0) {
+                self._refreshAfterInternalWriteLocked(reason: "外部写入·清单东财")
+            }
             DispatchQueue.main.async { completion(result) }
         }
     }
@@ -750,6 +790,143 @@ final class LiveDataStore: ObservableObject {
         r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
         r.message = "合并完成 meta=\(r.metaRows) daily=\(r.dailyRows) weekly=\(r.weeklyRows) monthly=\(r.monthlyRows) 覆盖=\(r.coveredFiles)只"
         return r
+    }
+
+    /// 东财当日K线 → 本地增量库：**先比对后写入**（单事务），全程预处理语句 + 绑定（不拼字符串 SQL），
+    /// 任一步失败整体回滚。与库内完全一致（浮点容差 `upsertEpsilon`）时不写任何行、不开事务。
+    private func _upsertDailyLocked(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
+                                    updatedAt: Int) -> LiveMergeResult {
+        var r = LiveMergeResult()
+        guard !metas.isEmpty || !bars.isEmpty else {
+            r.message = "无数据可写入"
+            return r
+        }
+        guard _ensureWritableOpenLocked(), let handle = db else {
+            r.message = "本地增量库不可写（打开失败）"
+            return r
+        }
+
+        // ① 写前判定：只保留「库里没有该 (file,date)」或「任一字段不同」的日线，以及 live_meta 尚不存在的标的。
+        //    重复写入同一快照 → 两个数组均为空 → 直接返回（不写库、不刷新，库文件 sha256 不变）
+        let changedBars = bars.filter { !_dailyRowIdenticalLocked(handle, bar: $0) }
+        let newMetas = metas.filter { !_metaExistsLocked(handle, file: $0.file) }
+        guard !changedBars.isEmpty || !newMetas.isEmpty else {
+            r.ok = true
+            r.message = "无变化：日线 \(bars.count) 行 / meta \(metas.count) 条均与库内一致 → 跳过写入"
+            return r
+        }
+
+        guard sqlite3_exec(handle, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
+            return r
+        }
+        var failed: String?
+
+        // ② meta：补缺失标的（`INSERT OR IGNORE`：已存在的不改写，字段顺序 file,code,name,type,updated_at）
+        if !newMetas.isEmpty {
+            var statement: OpaquePointer?
+            let sql = "INSERT OR IGNORE INTO live_meta(file,code,name,type,updated_at) VALUES(?,?,?,?,?);"
+            if sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK {
+                for m in newMetas {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    sqlite3_bind_text(statement, 1, m.file, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(statement, 2, m.code, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(statement, 3, m.name, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_text(statement, 4, m.type, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_int64(statement, 5, Int64(updatedAt))
+                    guard sqlite3_step(statement) == SQLITE_DONE else {
+                        failed = "live_meta：\(String(cString: sqlite3_errmsg(handle)))"
+                        break
+                    }
+                    r.metaRows += Int(sqlite3_changes(handle))
+                }
+                sqlite3_finalize(statement)
+            } else {
+                failed = "live_meta 准备失败：\(String(cString: sqlite3_errmsg(handle)))"
+            }
+        }
+
+        // ③ 日线：按 (file,date) UPSERT（同 date 以本次为准；字段顺序与分片合并一致）
+        if failed == nil && !changedBars.isEmpty {
+            var statement: OpaquePointer?
+            let sql = "INSERT OR REPLACE INTO live_daily(file,date,open,high,low,close,vol,amo) "
+                    + "VALUES(?,?,?,?,?,?,?,?);"
+            if sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK {
+                for b in changedBars {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    sqlite3_bind_text(statement, 1, b.file, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_int64(statement, 2, Int64(b.date))
+                    sqlite3_bind_double(statement, 3, b.open)
+                    sqlite3_bind_double(statement, 4, b.high)
+                    sqlite3_bind_double(statement, 5, b.low)
+                    sqlite3_bind_double(statement, 6, b.close)
+                    sqlite3_bind_double(statement, 7, b.vol)
+                    sqlite3_bind_double(statement, 8, b.amo)
+                    guard sqlite3_step(statement) == SQLITE_DONE else {
+                        failed = "live_daily：\(String(cString: sqlite3_errmsg(handle)))"
+                        break
+                    }
+                    r.dailyRows += Int(sqlite3_changes(handle))
+                }
+                sqlite3_finalize(statement)
+            } else {
+                failed = "live_daily 准备失败：\(String(cString: sqlite3_errmsg(handle)))"
+            }
+        }
+
+        if let failed = failed {
+            sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
+            r.message = "写入失败（已回滚）\(failed)"
+            return r
+        }
+        guard sqlite3_exec(handle, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
+            r.message = "提交失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
+            return r
+        }
+        r.ok = true
+        r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
+        r.message = "写入完成 meta新增=\(r.metaRows) 条 / daily变化=\(r.dailyRows) 行"
+            + "（传入 meta \(metas.count) 条 / 日线 \(bars.count) 行，其余与库内一致已跳过）覆盖=\(r.coveredFiles)只"
+        return r
+    }
+
+    /// 浮点比对容差：仅用于「这次要不要写」，不影响写入值的精度
+    private static let upsertEpsilon: Double = 1e-6
+
+    /// live_daily 是否已有该 `(file,date)` 且 6 个数值字段与传入值一致（容差 `upsertEpsilon`）。
+    /// 无该行 / 值不同 / 查询失败 → false（视为需要写入）。
+    private func _dailyRowIdenticalLocked(_ handle: OpaquePointer, bar: LiveUpsertBar) -> Bool {
+        var statement: OpaquePointer?
+        let sql = "SELECT open,high,low,close,vol,amo FROM live_daily WHERE file = ? AND date = ?;"
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, bar.file, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(statement, 2, Int64(bar.date))
+        guard sqlite3_step(statement) == SQLITE_ROW else { return false }
+        return Self.nearlyEqual(sqlite3_column_double(statement, 0), bar.open)
+            && Self.nearlyEqual(sqlite3_column_double(statement, 1), bar.high)
+            && Self.nearlyEqual(sqlite3_column_double(statement, 2), bar.low)
+            && Self.nearlyEqual(sqlite3_column_double(statement, 3), bar.close)
+            && Self.nearlyEqual(sqlite3_column_double(statement, 4), bar.vol)
+            && Self.nearlyEqual(sqlite3_column_double(statement, 5), bar.amo)
+    }
+
+    /// live_meta 是否已有该 file（新增判断：已有 → 不再写，避免页面变更）
+    private func _metaExistsLocked(_ handle: OpaquePointer, file: String) -> Bool {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "SELECT 1 FROM live_meta WHERE file = ? LIMIT 1;", -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, file, -1, SQLITE_TRANSIENT)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    private static func nearlyEqual(_ a: Double, _ b: Double) -> Bool {
+        abs(a - b) < upsertEpsilon
     }
 
     /// 删除三表中 `date <= beforeDate` 的行（单事务；表不存在则跳过）

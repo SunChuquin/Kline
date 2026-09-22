@@ -342,14 +342,21 @@ def sort_like_windows(file_list):
 
 
 class TDXDataGenerator:
-    def __init__(self, is_del: bool = False, is_demo: bool = False):
+    def __init__(self, is_del: bool = False, is_demo: bool = False, rebuild: bool = False):
         self.db = '../../tdx.db' if platform.system() != 'Windows' else '../../../../tdx.db'
         self.base_path = '../../tdx_data/' if platform.system() != 'Windows' else '../../../../tdx_data/'
         self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}
         self.date_cache = {}
         self.is_demo = is_demo
+        # 全量重读模式：忽略 meta.last_size，从头读全量 txt 并覆盖写入（用于复权改写后重建历史前复权价）
+        self.rebuild = rebuild
+        self.rebuilt_files = []
+        self.rebuild_daily_rows = 0
 
-        print(f"{'全量更新' if is_del else '增量更新'}")
+        if self.rebuild:
+            print("全量重读模式（忽略 last_size，从头读取并覆盖写入；不删除整库）")
+        else:
+            print(f"{'全量更新' if is_del else '增量更新'}")
         if os.path.exists(self.db):
             if is_del:
                 os.remove(self.db)
@@ -550,13 +557,17 @@ class TDXDataGenerator:
             kline_fields = ['meta_id', 'date', 'open', 'high', 'low', 'close', 'vol', 'amo']
             period_fields = ['date', 'open', 'high', 'low', 'close', 'vol', 'amo']
 
-            last_size = exist_meta[file_name]['last_size'] if file_name in exist_meta else 0
-            if last_size > 0:
-                if os.path.getsize(os.path.join(self.base_path, file)) == last_size:
-                    result['skipped'] = True
-                    result['skip_reason'] = '无变更'
-                    return result
-                last_size -= 18
+            if self.rebuild:
+                # 全量重读：忽略 last_size 基线，从头读整个 txt 并覆盖写入
+                last_size = 0
+            else:
+                last_size = exist_meta[file_name]['last_size'] if file_name in exist_meta else 0
+                if last_size > 0:
+                    if os.path.getsize(os.path.join(self.base_path, file)) == last_size:
+                        result['skipped'] = True
+                        result['skip_reason'] = '无变更'
+                        return result
+                    last_size -= 18
 
             with open(os.path.join(self.base_path, file), 'r', encoding='gbk') as fp:
                 fp.seek(last_size)
@@ -586,13 +597,15 @@ class TDXDataGenerator:
                     first_date = exist_meta[file_name]['first_date']
                     last_date = content[-1][:8]
                     meta_value = [meta_id, file_name, code, name, file_type, first_date, last_date, fp.tell()]
-                    for p in exist_periods:
-                        emap = exist_periods[p]
-                        if meta_id in emap:
-                            last_date_int = emap[meta_id]['last_date']
-                            key = self.period_key(last_date_int, p)
-                            row = [meta_id] + [emap[meta_id][f] for f in period_fields]
-                            init_states[p] = (key, {key: row})
+                    # 重读模式下周期线由全量日线重新聚合，不用旧周期行做种子，避免重复累加
+                    if not self.rebuild:
+                        for p in exist_periods:
+                            emap = exist_periods[p]
+                            if meta_id in emap:
+                                last_date_int = emap[meta_id]['last_date']
+                                key = self.period_key(last_date_int, p)
+                                row = [meta_id] + [emap[meta_id][f] for f in period_fields]
+                                init_states[p] = (key, {key: row})
                 else:
                     file_type = '扩展行情指数'
                     if file_name.split('#')[0] in ['SH', 'SZ']:
@@ -651,6 +664,11 @@ class TDXDataGenerator:
                 exist_periods[period] = {item['meta_id']: item for item in exist_periods[period]}
             exist_file = exist_meta.keys()
 
+            before_daily = 0
+            if self.rebuild:
+                _cnt = db.query_one("SELECT COUNT(*) AS c FROM daily;")
+                before_daily = _cnt['c'] if _cnt else 0
+
             next_id = len(exist_meta) + 1
             file_id_map = {}
             for file in file_list:
@@ -700,6 +718,8 @@ class TDXDataGenerator:
                             self.skipped_files['编码错误'].append(result['skip_detail'])
                         elif result['skip_reason'] == '未知异常':
                             self.skipped_files['未知异常'].append(result['skip_detail'])
+                        if self.rebuild:
+                            print(f"  [重建] 跳过 {result['file']}（{result['skip_reason']}）")
                     else:
                         db.insert_tables({
                             'meta': [meta_fields, [result['meta_value']]],
@@ -709,6 +729,11 @@ class TDXDataGenerator:
                             'quarterly': [quarterly_fields, result['quarterly_rows']],
                             'yearly': [yearly_fields, result['yearly_rows']],
                         })
+                        if self.rebuild:
+                            rows = len(result['daily_rows'])
+                            self.rebuild_daily_rows += rows
+                            self.rebuilt_files.append(result['file'])
+                            print(f"  [重建] {result['file']} 覆盖写入 {rows} 行日线")
 
                 processed += len([r for r in results if r is not None])
                 progress = (processed / total_files) * 100 if total_files > 0 else 0
@@ -720,7 +745,19 @@ class TDXDataGenerator:
                     sys.stdout.write(f'\r  进度: [{bar}] {progress:.1f}% ({processed}/{total_files}) 当前文件: {current_file[:20]}')
                     sys.stdout.flush()
 
+            if self.rebuild:
+                _cnt = db.query_one("SELECT COUNT(*) AS c FROM daily;")
+                after_daily = _cnt['c'] if _cnt else 0
+
         print(f"✅ 数据导入完成！共处理 {total_files} 个文件")
+        if self.rebuild:
+            skipped_total = sum(len(v) for v in self.skipped_files.values())
+            print(
+                f"[重建] 重建 {len(self.rebuilt_files)} 个文件 / 跳过 {skipped_total} 个文件；"
+                f"本次读入日线 {self.rebuild_daily_rows} 行；"
+                f"daily 总行数 {before_daily} -> {after_daily}（变化 {after_daily - before_daily:+d}）；"
+                f"已更新 {len(self.rebuilt_files)} 个文件的 last_size 基线"
+            )
         if self.skipped_files:
             a = len(self.skipped_files['无变更'])
             b = len(self.skipped_files['条件过滤'])
@@ -739,12 +776,30 @@ class TDXDataGenerator:
 
 
 if __name__ == "__main__":
-    param = input('是否默认使用增量更新？如果是，请直接回车, 否则请输入任意字符再回车, 进行全量更新 > ')
-    param = False if param == '' else True
+    import argparse
+
+    parser = argparse.ArgumentParser(description='通达信 txt 行情数据导入（默认增量 / --rebuild 全量重读）')
+    parser.add_argument(
+        '--rebuild', action='store_true',
+        help='全量重读模式：忽略 meta.last_size，从头读整个 txt 并覆盖写入，'
+             '用于通达信复权因子变更后重建历史前复权价；跑完更新 last_size 基线'
+    )
+    args = parser.parse_args()
+
+    if args.rebuild:
+        # 显式开关：全量重读（不删除整库，仍为增量库覆盖写入）
+        is_del = False
+        rebuild = True
+        print("已启用全量重读模式（--rebuild）")
+    else:
+        # 无参数时保持原有交互式行为（直接回车=增量，输入任意字符=全量建库）
+        param = input('是否默认使用增量更新？如果是，请直接回车, 否则请输入任意字符再回车, 进行全量更新 > ')
+        is_del = False if param == '' else True
+        rebuild = False
 
     print(f"\n开始时间: {time.strftime('%Y.%m.%d   %H:%M:%S')}")
     time0 = time.time()
-    tdx = TDXDataGenerator(param)
+    tdx = TDXDataGenerator(is_del, rebuild=rebuild)
     #tdx = TDXDataGenerator(param, is_demo=True)
     time1 = time.time()
     print(f"结束时间: {time.strftime('%Y.%m.%d   %H:%M:%S')}")

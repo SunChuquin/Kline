@@ -346,18 +346,23 @@ final class KlineHTTPServer {
             respond(connection, status: 200, contentType: "application/json",
                     body: "{\"ok\":true,\"action\":\"reload\"}")
         case ("POST", let p) where p.hasPrefix("/sync/merge-bucket"):
-            // 电脑侧直推分片（绕过设备侧无外网/防火墙的场景）：
-            // 分片先经 PUT /sandbox/live/<file> 落在 Documents/live/，这里直接把它
+            // 电脑侧直推分片 / 历史重灌包（绕过设备侧无外网/防火墙的场景）：
+            // 文件先经 PUT /sandbox/live/<file> 落在 Documents/live/，这里直接把它
             // 合并进本地增量库（与云端"下载→校验→合并"共用同一 mergeBucket 通路）。
-            // 可选参数 sha256=<hex>：与沙盒分片内容比对，不符则拒绝合并。
+            // 放行 `bucket_`（日分片）与 `patch_`（差分包，表结构一致）两种前缀。
+            // 可选参数 sha256=<hex>：与沙盒文件内容比对，不符则拒绝合并。
             let name = (Self.queryParam(rawPath, "name") ?? "") as NSString
+            // ① lastPathComponent 先剥掉任何目录分量（如 `../../x` → `x`），只留纯文件名
             let safeName = name.lastPathComponent
-            guard !safeName.isEmpty, safeName.hasPrefix("bucket_"), safeName.hasSuffix(".db") else {
+            // ② 只放行 bucket_ / patch_ 两种前缀 + `.db` 后缀（白名单）
+            let hasAllowedPrefix = safeName.hasPrefix("bucket_") || safeName.hasPrefix("patch_")
+            guard !safeName.isEmpty, hasAllowedPrefix, safeName.hasSuffix(".db") else {
                 respond(connection, status: 400, body: "{\"error\":\"bad name\"}")
                 return
             }
-            let bucketPath = sandboxRoot + "/live/" + safeName
-            guard FileManager.default.fileExists(atPath: bucketPath) else {
+            // ③ 再经 resolveSandboxPath 做一次「解析后必须落在 Documents 内」的包含性校验（防穿越）
+            guard let bucketPath = Self.resolveSandboxPath("live/" + safeName, sandboxRoot: sandboxRoot),
+                  FileManager.default.fileExists(atPath: bucketPath) else {
                 respond(connection, status: 404, body: "{\"error\":\"bucket not found, PUT /sandbox/live/<file> first\"}")
                 return
             }
