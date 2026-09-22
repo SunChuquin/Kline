@@ -22,7 +22,7 @@ import UIKit
 /// 归档只保留版本号最大的 10 个，避免磁盘被历史 IPA 占满。
 ///
 /// 另附「数据同步」卡片组：增量行情库（Documents/tdx_live.db）自动拉取开关 / 数据源 /
-/// 更新时刻 / 同步状态 / 上次同步与版本 / 覆盖标的 / 立即更新。规格与「本地更新」完全一致
+/// 更新时刻 / 同步状态 / 上次同步与版本 / 覆盖标的 / 局域网地址 / 立即更新。规格与「本地更新」完全一致
 /// （13 semibold 灰标题、48pt 行高、16pt 左右 padding、secondarySystemBackground + 12 圆角）。
 struct LocalUpdateView: View {
 
@@ -355,18 +355,19 @@ struct LocalUpdateView: View {
 
     // MARK: - 数据同步（增量行情库自动拉取）
 
-    /// 「数据同步」卡片组：开关 / 数据源 / 更新时刻 / 状态 / 上次同步 / 版本 / 覆盖标的 / 立即更新。
-    /// 行高统一 48、左右 padding 16，与「本地更新」卡片组完全同规格。
+    /// 「数据同步」卡片组：开关 / 数据源 / 更新时刻 / 状态 / 上次同步 / 版本 / 覆盖标的 /
+    /// 局域网地址 / 立即更新。行高统一 48、左右 padding 16，与「本地更新」卡片组完全同规格。
     private var syncSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("数据同步")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color.gray.opacity(0.85))
 
-            // 三段均为 spacing 0 的 VStack，视觉上等价于一张连续卡片（分段只为控制 ViewBuilder 子视图数量）
+            // 四段均为 spacing 0 的 VStack，视觉上等价于一张连续卡片（分段只为控制 ViewBuilder 子视图数量）
             VStack(spacing: 0) {
                 syncConfigRows
                 syncStatusRows
+                syncNetworkRows
                 syncActionRows
             }
             .background(Color(.secondarySystemBackground))
@@ -451,15 +452,32 @@ struct LocalUpdateView: View {
         }
     }
 
-    /// ⑧ 本次所用源 / ⑨ 失败原因 / ⑩ 立即更新 / ⑪ 语义说明
+    /// ⑧ 局域网地址：电脑侧局域网直推脚本要用的 `http://<设备IP>:5051`（只读信息，不可点）
+    private var syncNetworkRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            infoRow(title: "局域网地址", value: syncLanURLText)
+
+            Text("电脑与设备同一 Wi-Fi 时，可用它做局域网直推（见项目文档 Kline-增量行情库自动同步）")
+                .font(.system(size: 12))
+                .foregroundColor(Color.gray.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// ⑨ 本次所用源 / ⑩ 失败原因 / ⑪ 立即更新 / ⑫ 语义说明
     private var syncActionRows: some View {
         VStack(spacing: 0) {
             Divider()
 
-            // ⑧ 本次同步实际使用的源
+            // ⑨ 本次同步实际使用的源
             infoRow(title: "本次所用源", value: syncUsedSourceText)
 
-            // ⑨ 失败原因（仅失败时出现；多行不裁切，故用 minHeight）
+            // ⑩ 失败原因（仅失败时出现；多行不裁切，故用 minHeight）
             if let error = syncManager.lastError {
                 Divider()
                 HStack(spacing: 10) {
@@ -478,7 +496,7 @@ struct LocalUpdateView: View {
 
             Divider()
 
-            // ⑩ 立即更新：整行可点（命中区 48pt ≥ 44pt），同步中显示进度圈
+            // ⑪ 立即更新：整行可点（命中区 48pt ≥ 44pt），同步中显示进度圈
             Button(action: { syncManager.manualSync() }) {
                 HStack(spacing: 10) {
                     Text("立即更新")
@@ -503,7 +521,7 @@ struct LocalUpdateView: View {
 
             Divider()
 
-            // ⑪ 语义说明：区分盘中快照与当日完整K线，避免误判
+            // ⑫ 语义说明：区分盘中快照与当日完整K线，避免误判
             Text("11:00 / 14:30 为盘中快照，15:05 为当日完整K线")
                 .font(.system(size: 12))
                 .foregroundColor(Color.gray.opacity(0.85))
@@ -563,6 +581,13 @@ struct LocalUpdateView: View {
     private var syncUsedSourceText: String {
         guard let source = syncManager.lastSource else { return "—" }
         return URL(string: source)?.host ?? source
+    }
+
+    /// 局域网直推地址：`http://<设备IP>:5051`（端口取自 KlineHTTPServer，避免硬编码两份）；
+    /// 每次渲染重算（LocalNetworkAddress 不缓存），取不到 IP 时提示未连接 Wi-Fi
+    private var syncLanURLText: String {
+        guard let ip = LocalNetworkAddress.currentIPv4() else { return "未连接 Wi-Fi" }
+        return "http://\(ip):\(KlineHTTPServer.shared.port)"
     }
 
     /// 仅"已启用且当前不在同步中"可点（未启用时不允许拉取）

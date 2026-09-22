@@ -137,7 +137,7 @@ final class TdxSyncManager: ObservableObject {
             self.installForegroundObserver()
             self.scheduleTimer()
             self.checkSchedule(trigger: "启动检查")
-            DebugLogger.shared.log("[TdxSync] 调度启动 enabled=\(self.config.enabled) 间隔=\(Int(self.config.foregroundCheckInterval))s 时刻=\(self.config.scheduleTimes.joined(separator: ",")) 交易日限制=\(self.config.tradingDaysOnly)")
+            DebugLogger.shared.log("[TdxSync] 调度启动 enabled=\(self.config.enabled) 间隔=\(Int(self.config.foregroundCheckInterval))s 时刻=\(self.config.scheduleTimes.joined(separator: ",")) 交易日限制=\(self.config.tradingDaysOnly) 局域网地址=\(LocalNetworkAddress.currentIPv4() ?? "未连接")")
         }
     }
 
