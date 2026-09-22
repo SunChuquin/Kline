@@ -35,6 +35,12 @@ Kline 主库 Documents/tdx.db 体积巨大（1GB+，全市场历史K线），App
    —— 需要注意：周期线只由"最近 N 根日线"聚合而来，是滚动窗口而非全历史。
 6. 原子写入：db 与 manifest 都先写临时文件，校验通过后再 os.replace，
    任一步失败都不会覆盖已有产物。主库只读打开（uri `mode=ro`），绝不写入。
+7. 交易日以行情源为准（防K线污染）："当日这根K线"的日期取 **session_date**，
+   即批量快照 f124 时间戳按北京时间(UTC+8)换算的日期；f124 缺失时退化为该标的
+   日线历史的最后一根日期。**绝不使用本机日期** —— 否则国庆等非交易日被 cron
+   触发时，会写入一根日期为本机日期、数值却等于上一交易日收盘的"假K线"。
+   session_date 与历史末日相同则覆盖（幂等），只有它严格更大（行情源确认新交易日）
+   才追加新行。`--now-date` 只覆盖"本机当天"的认知，无法伪造成交日。
 
 用法
 ----
@@ -42,6 +48,7 @@ Kline 主库 Documents/tdx.db 体积巨大（1GB+，全市场历史K线），App
     python src/live_db_builder.py --out <dir> --check
     python src/live_db_builder.py --out <dir> --offline          # 合成数据，无需联网
     python src/live_db_builder.py --out <dir> --from-master-db tdx.db
+    python src/live_db_builder.py --out <dir> --now-date 20261001  # 模拟假期那天跑批
 """
 
 import argparse
@@ -69,13 +76,16 @@ except Exception:
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
+# f124 = 东财行情时间戳（秒级 epoch）：这是"交易日"的唯一权威来源，
+# 用它而不是本机日期来决定"当日K线"的日期，可避免非交易日跑批凭空多出一根K线。
 SNAPSHOT_ULIST_URL = ("https://push2.eastmoney.com/api/qt/ulist.np/get"
-                      "?fltt=2&invt=2&np=1&fields=f12,f13,f14,f2,f5,f6,f15,f16,f17,f18"
+                      "?fltt=2&invt=2&np=1"
+                      "&fields=f12,f13,f14,f2,f5,f6,f15,f16,f17,f18,f124"
                       "&secids={secids}")
 # 兜底用：任务给定的全市场批量接口（实测每页约 100 行、需分页，故仅作兜底）
 SNAPSHOT_CLIST_URL = ("https://push2.eastmoney.com/api/qt/clist/get"
                       "?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12"
-                      "&fs={fs}&fields=f12,f13,f14,f2,f5,f6,f15,f16,f17,f18")
+                      "&fs={fs}&fields=f12,f13,f14,f2,f5,f6,f15,f16,f17,f18,f124")
 CLIST_FS_DEFAULT = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"   # 深A/创业板/沪A/科创板
 CLIST_FS_INDEX = "m:1+s:2,m:0+s:2"                       # 沪深指数
 
@@ -216,6 +226,25 @@ def _num(v):
         return None
 
 
+BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def beijing_date_from_ts(ts):
+    """把东财行情时间戳(f124，秒级 epoch)按**北京时间(UTC+8)**换算成 YYYYMMDD 整数。
+
+    显式指定 UTC+8，不依赖本机时区设置（跑批机器可能在任意时区/夏令时下）。
+    ts 缺失、为 '-' 或非正数时返回 None，由调用方决定兜底策略。
+    """
+    try:
+        ts = int(float(ts))
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    dt = datetime.datetime.fromtimestamp(ts, BEIJING_TZ)
+    return int(dt.strftime("%Y%m%d"))
+
+
 # ---------------------------------------------------------------------------
 # 取数：批量快照（当日这根K线）
 # ---------------------------------------------------------------------------
@@ -234,6 +263,8 @@ def _snapshot_from_diff(diff):
             "name": (it.get("f14") or "").strip(),
             "open": o, "high": h, "low": l, "close": c,
             "vol": _num(it.get("f5")), "amo": _num(it.get("f6")),
+            # 行情时间戳，用于判定真实交易日；非交易时段/停牌可能是 '-' -> None
+            "ts": _num(it.get("f124")),
         }
     return res
 
@@ -299,10 +330,12 @@ def _parse_kline_line(line):
     return bar
 
 
-def fetch_daily_history(secid, limit):
-    """拉取最近 limit 根日线。beg 取足够宽的日历窗口，再按需截断。"""
+def fetch_daily_history(secid, limit, now_date):
+    """拉取最近 limit 根日线。beg 取足够宽的日历窗口，再按需截断。
+    now_date 为"本机当天"的认知（可被 --now-date 覆盖），仅用于计算取数窗口，
+    与"当日K线"的日期无关（后者来自行情源 session_date）。"""
     days_back = max(120, limit * 3 + 60)
-    beg = (datetime.date.today() - datetime.timedelta(days=days_back)).strftime("%Y%m%d")
+    beg = (now_date - datetime.timedelta(days=days_back)).strftime("%Y%m%d")
     data = http_get_json(KLINE_URL.format(secid=secid, beg=beg, lmt=limit))
     payload = data.get("data") or {}
     bars = []
@@ -453,39 +486,65 @@ def load_from_master_db(master_path, symbols, limit, trade_date):
 # 组装记录
 # ---------------------------------------------------------------------------
 
-def collect_records(args, symbols, trade_date):
-    """返回 [{code,name,type,bars(daily,升序)}]，source 由 args 决定。"""
+def collect_records(args, symbols, now_date):
+    """返回 (records, source, trade_date)。
+
+    trade_date 语义（关键修复点）：
+      - 联网路径：**以行情源为准**，取快照 f124 时间戳按北京时间(UTC+8)换算出的
+        session_date；f124 全部缺失时退化为各标的日线历史最后一根日期的最大值。
+        绝不使用本机日期 —— 否则非交易日（如国庆 2026-10-01）跑一次就会凭空
+        多出一根日期为本机日期、数值却等于上一交易日收盘的"假K线"，污染K线图。
+      - --offline / --from-master-db：这两个路径不接行情源（联调 / 电脑兜底），
+        继续用 now_date（本机当天，或 --now-date 指定）作为日期标签。
+    """
     if args.from_master_db:
-        return load_from_master_db(args.from_master_db, symbols, args.limit, trade_date), "master_db"
+        return (load_from_master_db(args.from_master_db, symbols, args.limit, now_date),
+                "master_db", int(now_date.strftime("%Y%m%d")))
 
     if args.offline:
         recs = []
         for sym in symbols:
-            bars = synth_daily(sym["code"], args.limit, trade_date)
+            bars = synth_daily(sym["code"], args.limit, now_date)
             recs.append({"code": sym["code"], "secid": sym["secid"], "name": sym["code"],
                          "type": symbol_type(sym["code"], None, None), "bars": bars})
-        return recs, "offline"
+        return recs, "offline", int(now_date.strftime("%Y%m%d"))
 
-    # 联网：先批量快照拿到"当日这根K线"与名称，再逐标的补齐历史
+    # 联网：先批量快照拿到"当日这根K线"、名称与行情时间戳，再逐标的补齐历史
     snapshot = fetch_snapshot([s["secid"] for s in symbols])
     recs, missing = [], []
+    session_dates = []      # 各标的解析出的 session_date，用于汇总全局 trade_date
     for sym in symbols:
         try:
-            name, bars = fetch_daily_history(sym["secid"], args.limit)
+            name, bars = fetch_daily_history(sym["secid"], args.limit, now_date)
         except Exception as exc:
             print("[warn] %s(%s) 日线拉取失败: %s" % (sym["code"], sym["secid"], exc), file=sys.stderr)
             bars, name = [], ""
         snap = snapshot.get(sym["secid"])
+        last_hist_date = bars[-1]["date"] if bars else None
+        # 快照数据缺失（停牌/非交易时段返回 '-'）时保持原行为：只用历史，不做当日覆盖
         if snap and snap.get("close") is not None:
-            today_bar = {"date": int(trade_date), "open": snap["open"], "high": snap["high"],
-                         "low": snap["low"], "close": snap["close"],
-                         "vol": snap["vol"] or 0.0, "amo": snap["amo"] or 0.0}
-            # 与历史里同一天的行做覆盖（快照为盘中最新值），保证当日只有一根
-            bars = [b for b in bars if b["date"] != today_bar["date"]]
-            if None not in (today_bar["open"], today_bar["high"], today_bar["low"]):
-                bars.append(today_bar)
-                bars.sort(key=lambda b: b["date"])
-            bars = bars[-args.limit:]
+            # session_date 判定顺序：① 快照 f124 的北京时间日期 → ② 该标的日线历史最后一根日期
+            sess = beijing_date_from_ts(snap.get("ts")) or last_hist_date
+            if sess is not None:
+                session_dates.append(sess)
+                session_bar = {"date": sess, "open": snap["open"], "high": snap["high"],
+                               "low": snap["low"], "close": snap["close"],
+                               "vol": snap["vol"] or 0.0, "amo": snap["amo"] or 0.0}
+                if None in (session_bar["open"], session_bar["high"], session_bar["low"]):
+                    print("[warn] %s 快照开/高/低为 '-'，跳过当日覆盖" % sym["code"],
+                          file=sys.stderr)
+                elif last_hist_date is not None and sess < last_hist_date:
+                    # 快照比历史还旧（延迟/停牌残留），忽略，避免回填陈旧数值
+                    print("[warn] %s 快照 session_date=%s 早于历史末日 %s，忽略快照"
+                          % (sym["code"], sess, last_hist_date), file=sys.stderr)
+                else:
+                    # 先剔除同日旧行再写入 = 覆盖同日（同一交易日幂等，写不写都一样）；
+                    # 只有在 session_date **严格大于**历史末日时才追加新行，而它来自
+                    # 行情源时间戳，必定是真实交易日 —— 因此非交易日不会多出K线。
+                    bars = [b for b in bars if b["date"] != sess]
+                    bars.append(session_bar)
+                    bars.sort(key=lambda b: b["date"])
+                    bars = bars[-args.limit:]
         if not bars:
             print("[warn] %s(%s) 无可用日线" % (sym["code"], sym["secid"]), file=sys.stderr)
             missing.append(sym["code"])
@@ -498,7 +557,17 @@ def collect_records(args, symbols, trade_date):
     # 电脑兜底场景，主库本身可能只含部分标的，故只告警不阻断。
     if missing:
         raise SystemExit("联网取数不完整，放弃生成（保留原有产物）。缺失: %s" % ", ".join(missing))
-    return recs, "eastmoney"
+
+    # 全局 trade_date：同一市场各标的 f124 一致，取最大值最稳；全部无 f124 时
+    # 退化为各标的日线历史最后一根日期的最大值（此时不会有"新增更大日期"的风险）。
+    if session_dates:
+        trade_date = max(session_dates)
+    else:
+        trade_date = max((r["bars"][-1]["date"] for r in recs if r["bars"]),
+                         default=int(now_date.strftime("%Y%m%d")))
+        print("[warn] 快照未返回 f124，trade_date 退化为日线历史最后一根日期: %s" % trade_date,
+              file=sys.stderr)
+    return recs, "eastmoney", trade_date
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +793,11 @@ def main(argv=None):
                         help="从本地主库 tdx.db 抽取（只读），不联网")
     parser.add_argument("--check", action="store_true",
                         help="只读产物并打印校验报告，不重新生成")
+    parser.add_argument("--now-date", dest="now_date", default=None, metavar="YYYYMMDD",
+                        help="覆盖\"本机当天\"的认知（仅用于测试/手动补跑，例如模拟某天跑批）。"
+                             "它只影响取数窗口与 --offline/--from-master-db 的日期标签，"
+                             "**不能伪造交易日**：联网写入的当日K线日期始终取自行情源的"
+                             "session_date（快照 f124 的北京时间日期）")
     args = parser.parse_args(argv)
 
     out_dir = os.path.abspath(args.out)
@@ -735,17 +809,28 @@ def main(argv=None):
     if args.limit < 1:
         raise SystemExit("--limit 必须 >= 1")
 
-    # trade_date：优先取当日（YYYYMMDD）。联网时若历史/快照都无当日数据，
-    # 仍以当日作为快照日期标签；离线路径用它生成合成日期。
-    today = datetime.date.today()
-    trade_date = int(today.strftime("%Y%m%d"))
+    # "本机当天"的认知：默认系统日期，可用 --now-date 覆盖（测试/手动补跑）。
+    # 注意：它只决定 beg 取数窗口和离线/主库兜底路径的日期标签；
+    # 联网路径写入的"当日K线"日期一律来自行情源 session_date，无法被它伪造成未来交易日。
+    if args.now_date:
+        try:
+            now_date = datetime.datetime.strptime(args.now_date.strip(), "%Y%m%d").date()
+        except ValueError:
+            raise SystemExit("--now-date 格式应为 YYYYMMDD，例如 --now-date 20261001")
+    else:
+        now_date = datetime.date.today()
+    now_date_int = int(now_date.strftime("%Y%m%d"))
 
     symbols = parse_symbols(args.symbols)
     print("清单: %s -> %d 个标的" % (args.symbols, len(symbols)))
 
-    records, source = collect_records(args, symbols, trade_date)
+    records, source, trade_date = collect_records(args, symbols, now_date)
     if not records:
         raise SystemExit("没有任何标的取到数据，放弃生成（保留原有产物）")
+    trade_date_note = ("（行情源 f124 判定）" if source == "eastmoney"
+                       else "（%s 路径，用本机/--now-date 日期）" % source)
+    print("本机日期(now_date)=%d  交易日(trade_date)=%d%s"
+          % (now_date_int, trade_date, trade_date_note))
 
     generated_at = int(time.time())
     db_path = os.path.join(out_dir, DB_NAME)

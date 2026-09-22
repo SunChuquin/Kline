@@ -1,0 +1,63 @@
+name: Sync Live Data (增量行情库)
+
+# 交易日北京时间 11:00 / 14:30 / 15:05 自动产出"增量行情库"并发布到 data 分支，
+# 供 Kline App 前台定时拉取（spec: .trae/specs/add-live-data-auto-sync）。
+# - 只发增量库（并集清单标的的最近 N 根多周期K线，约百 KB），**不碰**用户设备上的 1GB+ 主库 tdx.db；
+# - 生成/自检不通过 → 整个 job 失败，绝不覆盖 data 分支上的上一版；
+# - data 分支每次用「孤儿提交」覆盖式发布，避免二进制历史把仓库撑大。
+on:
+  schedule:
+    # UTC 03:00 / 06:30 / 07:05 = 北京时间 11:00 / 14:30 / 15:05（周一至周五）
+    - cron: '0 3 * * 1-5'
+    - cron: '30 6 * * 1-5'
+    - cron: '5 7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 三次定时可能因 runner 排队而重叠，串行执行避免互相覆盖 data 分支
+concurrency:
+  group: sync-live-db
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 生成增量库（真实行情接口）
+        run: python3 src/live_db_builder.py --out dist --limit 30
+
+      - name: 自检（manifest 必须与库内容逐项一致）
+        run: python3 src/live_db_builder.py --check --out dist
+
+      - name: 发布到 data 分支
+        run: |
+          set -euo pipefail
+          git config user.name "kline-data-bot"
+          git config user.email "kline-data-bot@users.noreply.github.com"
+
+          # 产物先挪到工作区之外，随后用孤儿提交只发布这两个文件
+          mkdir -p /tmp/live
+          cp dist/tdx_live.db dist/tdx_live.manifest.json /tmp/live/
+
+          git checkout --orphan data-publish
+          git rm -rf --cached . > /dev/null
+          cp /tmp/live/tdx_live.db /tmp/live/tdx_live.manifest.json .
+          git add tdx_live.db tdx_live.manifest.json
+          git commit -m "data: 增量行情库 $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # 强制覆盖 data 分支（单提交、无历史），保持仓库体积恒定
+          git push --force origin HEAD:data
+
+      - name: 汇总（便于在 Actions 页面直接核对）
+        run: |
+          echo "=== manifest ==="
+          cat dist/tdx_live.manifest.json
+          echo
+          echo "=== 产物大小 ==="
+          ls -l dist/
