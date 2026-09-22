@@ -345,6 +345,28 @@ final class KlineHTTPServer {
             }
             respond(connection, status: 200, contentType: "application/json",
                     body: "{\"ok\":true,\"action\":\"reload\"}")
+        case ("POST", let p) where p.hasPrefix("/sync/merge-bucket"):
+            // 电脑侧直推分片（绕过设备侧无外网/防火墙的场景）：
+            // 分片先经 PUT /sandbox/live/<file> 落在 Documents/live/，这里直接把它
+            // 合并进本地增量库（与云端"下载→校验→合并"共用同一 mergeBucket 通路）。
+            // 可选参数 sha256=<hex>：与沙盒分片内容比对，不符则拒绝合并。
+            let name = (Self.queryParam(rawPath, "name") ?? "") as NSString
+            let safeName = name.lastPathComponent
+            guard !safeName.isEmpty, safeName.hasPrefix("bucket_"), safeName.hasSuffix(".db") else {
+                respond(connection, status: 400, body: "{\"error\":\"bad name\"}")
+                return
+            }
+            let bucketPath = sandboxRoot + "/live/" + safeName
+            guard FileManager.default.fileExists(atPath: bucketPath) else {
+                respond(connection, status: 404, body: "{\"error\":\"bucket not found, PUT /sandbox/live/<file> first\"}")
+                return
+            }
+            let expectedSha = Self.queryParam(rawPath, "sha256")
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.mergeBucketAndRespond(bucketPath: bucketPath, expectedSha: expectedSha,
+                                           name: safeName, connection: connection)
+            }
         case ("GET", "/sync/status"):
             // 增量库当前状态（供推送脚本与排查使用）
             DispatchQueue.main.async { [weak self] in
@@ -568,6 +590,36 @@ final class KlineHTTPServer {
             .replacingOccurrences(of: "\"", with: "'")
         respond(connection, status: 200, contentType: "text/plain",
                 body: safe)
+    }
+
+    /// /sync/merge-bucket 的执行体（主线程入口）：可选 sha256 校验 → mergeBucket → JSON 汇报。
+    /// 合并结果里带「合并后的覆盖标的数 / 最新交易日」，推送脚本据此判断是否生效。
+    private func mergeBucketAndRespond(bucketPath: String, expectedSha: String?,
+                                       name: String, connection: NWConnection) {
+        if let expected = expectedSha, !expected.isEmpty {
+            guard let actual = LiveDataStore.sha256Hex(ofFile: bucketPath),
+                  actual.lowercased() == expected.lowercased() else {
+                DebugLogger.shared.log("[TdxSync] 分片 \(name) sha256 不符，拒绝合并")
+                respond(connection, status: 400, contentType: "application/json",
+                        body: "{\"error\":\"sha256 mismatch\"}")
+                return
+            }
+        }
+        LiveDataStore.shared.mergeBucket(atPath: bucketPath) { [weak self] result in
+            guard let self = self else { return }
+            if result.ok {
+                let s = LiveDataStore.shared.status
+                DebugLogger.shared.log("[TdxSync] 电脑侧直推分片 \(name) 合并成功：\(result.message)")
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(result.message))\""
+                                 + ",\"metaCount\":\(s.metaCount),\"dailyCount\":\(s.dailyCount)"
+                                 + ",\"latestDate\":\(s.latestDate)}")
+            } else {
+                DebugLogger.shared.log("[TdxSync] 电脑侧直推分片 \(name) 合并失败：\(result.message)")
+                self.respond(connection, status: 500, contentType: "application/json",
+                             body: "{\"error\":\"\(Self.jsonEsc(result.message))\"}")
+            }
+        }
     }
 
     /// GET /download/<file>：返回 Downloads 目录下的文件

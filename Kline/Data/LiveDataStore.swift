@@ -946,6 +946,14 @@ final class LiveDataStore: ObservableObject {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// 按文件路径计算 sha256（供 `/sync/merge-bucket` 端点核对电脑侧推送的分片）
+    static func sha256Hex(ofFile path: String) -> String? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe) else {
+            return nil
+        }
+        return sha256Hex(data)
+    }
+
     private static func ms(_ interval: TimeInterval) -> String {
         String(format: "%.0fms", interval * 1000)
     }
