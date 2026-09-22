@@ -725,6 +725,19 @@ final class KlineHTTPServer {
         outcome.skippedFiles = max(0, patchFiles - outcome.coveredFiles)   // 主库 meta 里没有的 file（如新上市）
         outcome.latestDate = scalarInt(db: db, sql: "SELECT MAX(date) FROM bkt.bkt_daily;")
 
+        // 批量写入的会话级 pragma（主库连接上原本**一个 pragma 都没设**，用的是默认值，
+        // 对 84 万行的 UPSERT 是偏慢的配置）。这三条都是**会话级、不改变库文件属性**，
+        // 且在 `defer` 里还原，不影响其它读写路径：
+        //   · cache_size：默认约 8MB，对 1400 万行表的 B-tree 遍历太小 → 32MB
+        //   · temp_store：JOIN 的临时结构放内存，避免落盘
+        //   · synchronous：**仍是单事务**（只有一次 commit），这里显式设 NORMAL 只影响本次提交的 fsync 策略；
+        //     WAL 下 NORMAL 对「App 崩溃」是安全的（仅掉电可能丢最近提交），且随时可重推补丁恢复
+        let pragmas = ["PRAGMA cache_size = -32768;",
+                       "PRAGMA temp_store = MEMORY;",
+                       "PRAGMA synchronous = NORMAL;"]
+        for p in pragmas { sqlite3_exec(db, p, nil, nil, nil) }
+        defer { sqlite3_exec(db, "PRAGMA cache_size = -2000; PRAGMA temp_store = DEFAULT; PRAGMA synchronous = FULL;", nil, nil, nil) }
+
         guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
             outcome.message = "开启事务失败：\(String(cString: sqlite3_errmsg(db)))"
             return outcome

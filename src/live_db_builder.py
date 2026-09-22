@@ -717,7 +717,11 @@ def build_bucket_file(tmp_path, rows, updated_at):
         os.remove(tmp_path)
     conn = sqlite3.connect(tmp_path)
     try:
+        # 这是**一次性临时产物**（写完立即 validate → 原子 rename），所以可以安全地用
+        # 「写盘最省」的组合：DELETE 日志 + synchronous=OFF + 大 cache。失败重跑即可，无持久化风险。
         conn.execute("PRAGMA journal_mode=DELETE;")
+        conn.execute("PRAGMA synchronous=OFF;")
+        conn.execute("PRAGMA cache_size=-32768;")
         conn.execute("CREATE TABLE bkt_meta(file TEXT PRIMARY KEY, code TEXT, name TEXT, "
                      "type TEXT, updated_at INTEGER);")
         for period in PERIODS:
