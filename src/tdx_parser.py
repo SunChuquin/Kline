@@ -10,6 +10,10 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stdin.reconfigure(encoding='utf-8')
 
+# 复用全项目唯一一份「新旧 txt 目录变更判定」实现（避免与差分脚本两套漂移）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import txt_changes  # noqa: E402
+
 class TDXDatabase:
     """
     通达信数据库操作封装类
@@ -342,7 +346,8 @@ def sort_like_windows(file_list):
 
 
 class TDXDataGenerator:
-    def __init__(self, is_del: bool = False, is_demo: bool = False, rebuild: bool = False):
+    def __init__(self, is_del: bool = False, is_demo: bool = False, rebuild: bool = False,
+                 prev_dir: Optional[str] = None, txt_compare: str = 'stat'):
         self.db = '../../tdx.db' if platform.system() != 'Windows' else '../../../../tdx.db'
         self.base_path = '../../tdx_data/' if platform.system() != 'Windows' else '../../../../tdx_data/'
         self.skipped_files = {'无变更': [], '条件过滤': [], '编码错误': [], '未知异常': []}
@@ -352,9 +357,17 @@ class TDXDataGenerator:
         self.rebuild = rebuild
         self.rebuilt_files = []
         self.rebuild_daily_rows = 0
+        # 新旧 txt 目录差分：给了 --prev-dir 时，未变更的文件直接跳过；变更的文件从头整文件重读。
+        # 这是修掉「同尺寸复权改写被 getsize==last_size 永久漏掉」的坑（正确性要求）。
+        self.prev_dir = prev_dir
+        self.txt_compare = txt_compare
+        self.prev_changed = None          # 由 create_db_data 用 txt_changes.changed_files 填入
+        self.prev_result = None
 
         if self.rebuild:
             print("全量重读模式（忽略 last_size，从头读取并覆盖写入；不删除整库）")
+        elif self.prev_dir:
+            print(f"增量更新（新旧目录差分：{self.prev_dir} → {self.base_path}，mode={txt_compare}）")
         else:
             print(f"{'全量更新' if is_del else '增量更新'}")
         if os.path.exists(self.db):
@@ -560,6 +573,15 @@ class TDXDataGenerator:
             if self.rebuild:
                 # 全量重读：忽略 last_size 基线，从头读整个 txt 并覆盖写入
                 last_size = 0
+            elif self.prev_dir is not None:
+                # 新旧 txt 目录差分：未变更的文件直接跳过；变更的文件**整文件重读**（last_size=0）。
+                # 复权改写常常"价格缩放后字符数不变"→ 尺寸一模一样，只读尾巴会漏掉改写的历史行。
+                # 例外：库里还没有该 file（空库 / 新标的）时必须读——跳过就等于永不导入。
+                if file not in self.prev_changed and file_name in exist_meta:
+                    result['skipped'] = True
+                    result['skip_reason'] = '无变更'
+                    return result
+                last_size = 0
             else:
                 last_size = exist_meta[file_name]['last_size'] if file_name in exist_meta else 0
                 if last_size > 0:
@@ -650,6 +672,14 @@ class TDXDataGenerator:
         total_files = len(file_list)
         processed = 0
 
+        # 新旧 txt 目录差分（只在给了 --prev-dir 时）：先算出"变更"清单
+        changed_in_new = []
+        if self.prev_dir is not None:
+            self.prev_result = txt_changes.changed_files(
+                self.prev_dir, self.base_path, mode=self.txt_compare)
+            self.prev_changed = self.prev_result['changed']
+            print(f"\n -> 新旧目录差分: {self.prev_result['detail']}")
+
         print(f"\n -> 开始导入数据（日线 + 周线 + 月线 + 季线 + 年线同步生成），共 {total_files} 个文件...")
         with TDXDatabase(self.db) as db:
             exist_meta = db.query("SELECT id, file, code, name, first_date, last_size, type FROM meta ORDER BY id;")
@@ -663,6 +693,13 @@ class TDXDataGenerator:
             for period in exist_periods:
                 exist_periods[period] = {item['meta_id']: item for item in exist_periods[period]}
             exist_file = exist_meta.keys()
+
+            if self.prev_dir is not None:
+                # "变更"= txt 判定变更 或 库里还没有该 file（空库/新标的）——后者必须读，否则永不导入
+                changed_in_new = [f for f in file_list
+                                  if f in self.prev_changed or f[:-4] not in exist_meta]
+                print(f"    变更 {len(changed_in_new)} 个 / 跳过 {total_files - len(changed_in_new)} 个"
+                      f"（仅在旧目录、已删除 {len(self.prev_result['only_old'])} 个）")
 
             before_daily = 0
             if self.rebuild:
@@ -771,6 +808,11 @@ class TDXDataGenerator:
         else:
             print("✅ 所有文件均成功导入，无跳过记录。")
 
+        if self.prev_dir is not None:
+            print(f"\n新旧目录差分汇总: 变更 {len(changed_in_new)} 个 / 跳过 "
+                  f"{total_files - len(changed_in_new)} 个（{self.prev_result['detail']}）")
+            print(f"变更文件清单: {', '.join(changed_in_new) if changed_in_new else '（无）'}")
+
     def show(self):
         pass
 
@@ -778,11 +820,22 @@ class TDXDataGenerator:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='通达信 txt 行情数据导入（默认增量 / --rebuild 全量重读）')
+    parser = argparse.ArgumentParser(
+        description='通达信 txt 行情数据导入（默认增量 / --rebuild 全量重读 / --prev-dir 新旧目录差分）')
     parser.add_argument(
         '--rebuild', action='store_true',
         help='全量重读模式：忽略 meta.last_size，从头读整个 txt 并覆盖写入，'
              '用于通达信复权因子变更后重建历史前复权价；跑完更新 last_size 基线'
+    )
+    parser.add_argument(
+        '--prev-dir', dest='prev_dir', default=None,
+        help='旧 txt 目录（相对/绝对均可）：与当前 txt 目录做新旧差分，未变更的文件直接跳过、'
+             '变更的文件从头整文件重读。修掉"同尺寸复权改写被 getsize==last_size 永久漏掉"的坑。'
+    )
+    parser.add_argument(
+        '--txt-compare', dest='txt_compare', default='stat', choices=['stat', 'content', 'bc'],
+        help='新旧目录变更判定方式（默认 stat：比 size+mtime，~0.1s/3637 文件；content=sha256 全量，~30s；'
+             'bc=Beyond Compare CLI，~27s，失败自动退回 content）'
     )
     args = parser.parse_args()
 
@@ -791,6 +844,10 @@ if __name__ == "__main__":
         is_del = False
         rebuild = True
         print("已启用全量重读模式（--rebuild）")
+    elif args.prev_dir:
+        # 新旧目录差分模式：非交互（管道里可直接跑）
+        is_del = False
+        rebuild = False
     else:
         # 无参数时保持原有交互式行为（直接回车=增量，输入任意字符=全量建库）
         param = input('是否默认使用增量更新？如果是，请直接回车, 否则请输入任意字符再回车, 进行全量更新 > ')
@@ -799,7 +856,8 @@ if __name__ == "__main__":
 
     print(f"\n开始时间: {time.strftime('%Y.%m.%d   %H:%M:%S')}")
     time0 = time.time()
-    tdx = TDXDataGenerator(is_del, rebuild=rebuild)
+    tdx = TDXDataGenerator(is_del, rebuild=rebuild,
+                           prev_dir=args.prev_dir, txt_compare=args.txt_compare)
     #tdx = TDXDataGenerator(param, is_demo=True)
     time1 = time.time()
     print(f"结束时间: {time.strftime('%Y.%m.%d   %H:%M:%S')}")
