@@ -11,6 +11,15 @@ on:
     - cron: '0 3 * * 1-5'
     - cron: '30 6 * * 1-5'
     - cron: '5 7 * * 1-5'
+  # 清单或生成端一改就立刻重新发布一次（改完关注标的无需等到下一个定时点）；
+  # workflow_dispatch 供 Actions 页面手动触发（注意：本机 gh 用的是 GitHub App 集成令牌，
+  # 无 actions:write 权限，命令行下 `gh workflow run` 会 403，需从网页触发或用 push 触发）
+  push:
+    branches: [main]
+    paths:
+      - 'src/data/symbols.txt'
+      - 'src/live_db_builder.py'
+      - '.github/workflows/sync-live-db.yml'
   workflow_dispatch:
 
 permissions:
