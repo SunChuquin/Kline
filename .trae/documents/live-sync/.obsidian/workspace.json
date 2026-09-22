@@ -218,6 +218,8 @@
   },
   "active": "6ce17112ba4191dc",
   "lastOpenFiles": [
+    "decisions/20260923-行情同步-补丁按行落主库而非替换整库.md",
+    "pitfalls/20260923-通达信txt末尾18字节页脚导致纯追加被误判.md",
     "pitfalls/20260922-BC默认按时间戳判差异会漏同尺寸改写.md",
     "decisions/20260922-行情同步-变更判定用新旧txt目录而非库内存状态.md",
     "modules/复权差分重灌通道.md",
