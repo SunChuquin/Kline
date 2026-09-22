@@ -71,22 +71,79 @@ def _sha256(path):
     return h.digest()
 
 
+# 通达信 txt 末尾固定页脚 "#数据来源:通达信\r\n"（GBK，**恰 18 字节**）。导出新数据时
+# 追加在页脚**之前**，所以纯追加文件的最后 18 字节必然与同位置新文件不同 —— 比对时必须
+# 把上限收在 `旧长度 - 18`，否则全部纯追加文件都会被误判成 rewrite（实测 append 3440 → 0）。
+_FOOTER_LEN = 18
+_SAMPLE_LEN = 4096        # 单处采样长度
+
+
+def _stem(name):
+    """txt 文件名 → 不带扩展名的基名（`SH#600519.txt` → `SH#600519`）。"""
+    return os.path.splitext(name)[0]
+
+
+def classify_kind(old_path, new_path):
+    """判定单个文件的变更类型：`"append"` / `"rewrite"` / `"new"`。
+
+    · 旧文件不存在 ⇒ `"new"`
+    · 新文件更小、或旧文件去掉页脚后长度 ≤ 0 ⇒ `"rewrite"`（变小不可能是纯追加）
+    · 否则取三处采样：`(0, 4096)`、`(旧长度-18 的一半处, 4096)`、`(旧长度-18-4096, 4096)`，
+      在**新文件同偏移读同样长度**比对：**三处全一致 ⇒ append，任一处不同 ⇒ rewrite**
+      （长度固定 4096、不做截断：当 `旧长度-18 < 4096` 时头采样会越过可比对区间、必然不同，
+       按"拿不准一律 rewrite"处理 —— 实测正是这 8 个超短文件把 append 定在 3440）
+    · 任何异常（拿不准）一律 `"rewrite"` —— 多干活，绝不漏
+
+    每个文件只开 **2 次句柄**（旧 1、新 1），三处采样在同一句柄内用 seek 完成。
+    """
+    try:
+        if not os.path.exists(old_path):
+            return "new"
+        o_sz = os.path.getsize(old_path)
+        n_sz = os.path.getsize(new_path)
+        if n_sz < o_sz:
+            return "rewrite"
+        lim = o_sz - _FOOTER_LEN
+        if lim <= 0:
+            return "rewrite"
+        offsets = (0, max(0, lim // 2 - _SAMPLE_LEN // 2), max(0, lim - _SAMPLE_LEN))
+        with open(old_path, "rb") as fo, open(new_path, "rb") as fn:
+            for off in offsets:
+                fo.seek(off)
+                fn.seek(off)
+                if fo.read(_SAMPLE_LEN) != fn.read(_SAMPLE_LEN):
+                    return "rewrite"
+        return "append"
+    except OSError:
+        return "rewrite"
+
+
 def _compare_stat(old_dir, new_dir, only_old, only_new, both):
     o = _scan_stat(old_dir)
     n = _scan_stat(new_dir)
     changed = set(o) ^ set(n)                      # 只在单侧 = 该侧新增/删除 → 也算变更
+    kind = {}
     for name in set(o) & set(n):
         if o[name] != n[name]:
             changed.add(name)
-    return {"changed": changed, "only_old": set(o) - set(n), "only_new": set(n) - set(o)}
+            # 与"哪些变了"共用这一趟遍历：mtime 不同也可能是纯追加，故对 size/mtime
+            # 任一不同的文件都采样内容定 kind；只有 (size, mtime) 全同才跳过。
+            kind[_stem(name)] = classify_kind(os.path.join(old_dir, name),
+                                              os.path.join(new_dir, name))
+    return {"changed": changed, "only_old": set(o) - set(n),
+            "only_new": set(n) - set(o), "kind": kind}
 
 
 def _compare_content(old_dir, new_dir, only_old, only_new, both):
     changed = set(only_old) | set(only_new)
+    kind = {}
     for name in both:
         if _sha256(os.path.join(old_dir, name)) != _sha256(os.path.join(new_dir, name)):
             changed.add(name)
-    return {"changed": changed, "only_old": set(only_old), "only_new": set(only_new)}
+            kind[_stem(name)] = classify_kind(os.path.join(old_dir, name),
+                                              os.path.join(new_dir, name))
+    return {"changed": changed, "only_old": set(only_old), "only_new": set(only_new),
+            "kind": kind}
 
 
 def _local(tag):
@@ -156,7 +213,11 @@ def _compare_bc(old_dir, new_dir, only_old, only_new, both, bc_exe, timeout):
                 elif rt_name:
                     e_changed.add(rt_name)
         changed = e_changed | e_old | e_new
-        return {"changed": changed, "only_old": e_old, "only_new": e_new}, ""
+        kind = {}
+        for name in e_changed:                       # BC 只说"有差异"，append/rewrite 仍需自己采样
+            kind[_stem(name)] = classify_kind(os.path.join(old_dir, name),
+                                              os.path.join(new_dir, name))
+        return {"changed": changed, "only_old": e_old, "only_new": e_new, "kind": kind}, ""
     finally:
         for p in (script_path, report_path):
             try:
@@ -178,6 +239,9 @@ def changed_files(old_dir, new_dir, mode="stat", bc_exe=None, timeout=900):
                   —— 只在单侧 = 该侧新增或删除的标的，也算变更
       only_old  : 只在旧目录出现（新侧已删除）
       only_new  : 只在新目录出现（新侧新增）
+      kind      : {不带 .txt 的基名: "append"|"rewrite"|"new"} —— 每文件的变更类型；
+                  两边都有且变更的文件经内容采样定为 append/rewrite，仅新目录出现定为 "new"，
+                  仅旧目录出现（已删除）**不进 kind**
       mode      : 实际生效的 mode（`bc` 失败时会是退回后的 `"content"`）
       detail    : 人类可读的判定说明（含耗时、退回原因）
       old_count : 旧目录文件数
@@ -215,10 +279,15 @@ def changed_files(old_dir, new_dir, mode="stat", bc_exe=None, timeout=900):
     detail = "mode=%s，%d 文件，耗时 %.2fs" % (actual_mode, len(o_names) + len(n_names), el)
     if note:
         detail += "；" + note
+    # kind：变更文件的采样结果 + 仅新目录出现的文件一律 "new"（仅旧目录出现不进 kind）
+    kind = dict(res.get("kind") or {})
+    for name in res["only_new"]:
+        kind[_stem(name)] = "new"
     return {
         "changed": res["changed"],
         "only_old": res["only_old"],
         "only_new": res["only_new"],
+        "kind": kind,
         "mode": actual_mode,
         "detail": detail,
         "old_count": len(o_names),
@@ -246,3 +315,10 @@ if __name__ == "__main__":
     for name in sorted(r["changed"]):
         tag = "仅旧" if name in r["only_old"] else ("仅新" if name in r["only_new"] else "改写")
         print("  [%s] %s" % (tag, name))
+
+    kind = r.get("kind", {})
+    cnt = {"append": 0, "rewrite": 0, "new": 0}
+    for v in kind.values():
+        cnt[v] = cnt.get(v, 0) + 1
+    print("变更类型: append=%d / rewrite=%d / new=%d（合计 %d，耗时见上）"
+          % (cnt["append"], cnt["rewrite"], cnt["new"], len(kind)))

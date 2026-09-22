@@ -7,6 +7,7 @@
 
 import Foundation
 import Network
+import SQLite3
 import UIKit
 import Darwin
 
@@ -372,6 +373,34 @@ final class KlineHTTPServer {
                 self.mergeBucketAndRespond(bucketPath: bucketPath, expectedSha: expectedSha,
                                            name: safeName, connection: connection)
             }
+        case ("POST", let p) where p.hasPrefix("/sync/apply-patch"):
+            // 电脑侧把补丁包（patch_<seq>.db）**直接按行应用到主库 tdx.db**：不经过增量库、
+            // 不替换整库、不需要重启（App 内手点「合并到 tdx.db」走的是 MainDBMerger 那条路，
+            // 这里只是把同一套语义换成「补丁文件 → 主库」，用一条集合式 SQL 完成映射与写入）。
+            // 文件先经 PUT /sandbox/live/<file> 落在 Documents/live/。
+            // 放行 `bucket_`（日分片）与 `patch_`（差分包，表结构一致）两种前缀。
+            // 可选参数 sha256=<hex>：与沙盒文件内容比对，不符则拒绝应用（同 /sync/merge-bucket）。
+            let patchName = (Self.queryParam(rawPath, "name") ?? "") as NSString
+            // ① lastPathComponent 先剥掉任何目录分量（如 `../../x` → `x`），只留纯文件名
+            let safePatchName = patchName.lastPathComponent
+            // ② 只放行 bucket_ / patch_ 两种前缀 + `.db` 后缀（白名单）
+            let patchPrefixOK = safePatchName.hasPrefix("bucket_") || safePatchName.hasPrefix("patch_")
+            guard !safePatchName.isEmpty, patchPrefixOK, safePatchName.hasSuffix(".db") else {
+                respond(connection, status: 400, body: "{\"error\":\"bad name\"}")
+                return
+            }
+            // ③ 再经 resolveSandboxPath 做一次「解析后必须落在 Documents 内」的包含性校验（防穿越）
+            guard let patchPath = Self.resolveSandboxPath("live/" + safePatchName, sandboxRoot: sandboxRoot),
+                  FileManager.default.fileExists(atPath: patchPath) else {
+                respond(connection, status: 404, body: "{\"error\":\"patch not found, PUT /sandbox/live/<file> first\"}")
+                return
+            }
+            let expectedPatchSha = Self.queryParam(rawPath, "sha256")
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.applyPatchAndRespond(patchPath: patchPath, expectedSha: expectedPatchSha,
+                                          name: safePatchName, connection: connection)
+            }
         case ("GET", "/sync/status"):
             // 增量库当前状态（供推送脚本与排查使用）
             DispatchQueue.main.async { [weak self] in
@@ -627,6 +656,158 @@ final class KlineHTTPServer {
         }
     }
 
+    /// /sync/apply-patch 的执行体（主线程入口）：可选 sha256 校验 → 主库按行 UPSERT → JSON 汇报。
+    /// 合并可能耗时数秒，故真正的写库动作全部落到 `DatabaseManager.dbQueue` 上串行执行，
+    /// 完成后由 performOnDBQueue 回主线程写响应（**不在 HTTP 线程同步执行**）。
+    private func applyPatchAndRespond(patchPath: String, expectedSha: String?,
+                                      name: String, connection: NWConnection) {
+        if let expected = expectedSha, !expected.isEmpty {
+            guard let actual = LiveDataStore.sha256Hex(ofFile: patchPath),
+                  actual.lowercased() == expected.lowercased() else {
+                DebugLogger.shared.log("[Patch] 补丁 \(name) sha256 不符，拒绝应用")
+                respond(connection, status: 400, contentType: "application/json",
+                        body: "{\"error\":\"sha256 mismatch\"}")
+                return
+            }
+        }
+        DatabaseManager.shared.performOnDBQueue({ (db: OpaquePointer?) -> PatchApplyOutcome in
+            KlineHTTPServer.applyPatchLocked(db: db, patchPath: patchPath)
+        }, completion: { [weak self] outcome in
+            guard let self = self else { return }
+            if outcome.ok {
+                DebugLogger.shared.log("[Patch] 补丁 \(name) 应用进主库成功：\(outcome.message)")
+                // 主库 last_date 已变 → metaList 必须重读；主库内容被改写 → dataVersion 自增热刷新
+                DatabaseManager.shared.loadMetaList()
+                DatabaseManager.shared.notifyMainDBChanged()
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(outcome.message))\""
+                                 + ",\"dailyRows\":\(outcome.dailyRows)"
+                                 + ",\"weeklyRows\":\(outcome.weeklyRows)"
+                                 + ",\"monthlyRows\":\(outcome.monthlyRows)"
+                                 + ",\"coveredFiles\":\(outcome.coveredFiles)"
+                                 + ",\"skippedFiles\":\(outcome.skippedFiles)"
+                                 + ",\"latestDate\":\(outcome.latestDate)}")
+            } else {
+                DebugLogger.shared.log("[Patch] 补丁 \(name) 应用进主库失败：\(outcome.message)")
+                self.respond(connection, status: 500, contentType: "application/json",
+                             body: "{\"error\":\"\(Self.jsonEsc(outcome.message))\"}")
+            }
+        })
+    }
+
+    // MARK: - 补丁 → 主库（全部在 DatabaseManager.dbQueue 上）
+
+    /// ATTACH 补丁包 → 单事务 → 三张周期表各**一条集合式 SQL**（`INSERT OR REPLACE ... SELECT`，
+    /// 映射键 = `file`）→ 一条集合式 SQL 更新 `meta.last_date` → COMMIT / DETACH。
+    /// 任一步失败：ROLLBACK，主库原样，返回原因。**不触碰增量库、不整库替换**。
+    nonisolated private static func applyPatchLocked(db: OpaquePointer?, patchPath: String) -> PatchApplyOutcome {
+        var outcome: PatchApplyOutcome = (false, 0, 0, 0, 0, 0, 0, "")
+        guard let db = db else {
+            outcome.message = "主库未就绪（连接不可用）"
+            return outcome
+        }
+        // ATTACH 不能在事务内 → 先 ATTACH；路径里的单引号必须转义（同 LiveDataStore）
+        let escaped = patchPath.replacingOccurrences(of: "'", with: "''")
+        guard sqlite3_exec(db, "ATTACH DATABASE '\(escaped)' AS bkt;", nil, nil, nil) == SQLITE_OK else {
+            outcome.message = "补丁 ATTACH 失败：\(String(cString: sqlite3_errmsg(db)))"
+            return outcome
+        }
+        defer { sqlite3_exec(db, "DETACH DATABASE bkt;", nil, nil, nil) }
+
+        // 补丁契约：至少要有 bkt_daily（映射键 = file；主库 meta.file 3611/3611 唯一）
+        guard tableExists(db: db, schema: "bkt", name: "bkt_daily") else {
+            outcome.message = "补丁缺少 bkt_daily 表"
+            return outcome
+        }
+        let patchFiles = scalarInt(db: db, sql: "SELECT COUNT(DISTINCT file) FROM bkt.bkt_daily;")
+        outcome.coveredFiles = scalarInt(db: db,
+            sql: "SELECT COUNT(DISTINCT b.file) FROM bkt.bkt_daily b JOIN main.meta m ON m.file = b.file;")
+        outcome.skippedFiles = max(0, patchFiles - outcome.coveredFiles)   // 主库 meta 里没有的 file（如新上市）
+        outcome.latestDate = scalarInt(db: db, sql: "SELECT MAX(date) FROM bkt.bkt_daily;")
+
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            outcome.message = "开启事务失败：\(String(cString: sqlite3_errmsg(db)))"
+            return outcome
+        }
+
+        var failure: String?
+        for table in ["daily", "weekly", "monthly"] {
+            // 主库缺该表 → 跳过；补丁缺该表 → 跳过（季/年线不参与）
+            guard tableExists(db: db, schema: "main", name: table),
+                  tableExists(db: db, schema: "bkt", name: "bkt_" + table) else { continue }
+            let sql = "INSERT OR REPLACE INTO \(table)(meta_id,date,open,high,low,close,vol,amo) "
+                    + "SELECT m.id, b.date, b.open, b.high, b.low, b.close, b.vol, b.amo "
+                    + "FROM bkt.bkt_\(table) b JOIN main.meta m ON m.file = b.file;"
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                failure = "写入 \(table) 失败：\(String(cString: sqlite3_errmsg(db)))"
+                break
+            }
+            let written = Int(sqlite3_changes(db))
+            switch table {
+            case "daily":   outcome.dailyRows = written
+            case "weekly":  outcome.weeklyRows = written
+            default:        outcome.monthlyRows = written
+            }
+        }
+
+        // meta.last_date 语义 = **日线末日**（与 tdx_parser 里 `last_date = content[-1][:8]` 一致）
+        // → 周/月线不改它。同样用一条集合式 SQL，不逐行 bind。
+        // MAX(...) 兜底：补丁只含**旧日期**时（该 file 尾部无差异）不能让 last_date **回退**，
+        // 否则下一轮「按缺口取片」会把已同步过的分片再取一遍。
+        if failure == nil {
+            let sql = "UPDATE meta SET last_date = "
+                    + "MAX(COALESCE(last_date, 0), "
+                    + "COALESCE((SELECT MAX(b.date) FROM bkt.bkt_daily b WHERE b.file = meta.file), 0)) "
+                    + "WHERE file IN (SELECT DISTINCT file FROM bkt.bkt_daily);"
+            if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+                failure = "更新 meta.last_date 失败：\(String(cString: sqlite3_errmsg(db)))"
+            }
+        }
+
+        if let failure = failure {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            outcome.ok = false
+            outcome.dailyRows = 0
+            outcome.weeklyRows = 0
+            outcome.monthlyRows = 0
+            outcome.coveredFiles = 0
+            outcome.skippedFiles = 0
+            outcome.latestDate = 0
+            outcome.message = "应用补丁失败（已回滚）：\(failure)"
+            return outcome
+        }
+        guard sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            outcome.ok = false
+            outcome.message = "提交失败（已回滚）：\(String(cString: sqlite3_errmsg(db)))"
+            return outcome
+        }
+        outcome.ok = true
+        outcome.message = "已按行写入主库 \(outcome.dailyRows + outcome.weeklyRows + outcome.monthlyRows) 行"
+            + "（日\(outcome.dailyRows)/周\(outcome.weeklyRows)/月\(outcome.monthlyRows)）"
+            + " · 覆盖 \(outcome.coveredFiles) 只 · 最新 \(outcome.latestDate)"
+            + (outcome.skippedFiles > 0 ? " · 跳过(主库无此file) \(outcome.skippedFiles) 只" : "")
+        return outcome
+    }
+
+    /// 指定 schema（`main` / `bkt`）下是否存在某张表
+    nonisolated private static func tableExists(db: OpaquePointer, schema: String, name: String) -> Bool {
+        var statement: OpaquePointer?
+        let sql = "SELECT 1 FROM \(schema).sqlite_master WHERE type = 'table' AND name = ? LIMIT 1;"
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    /// 取单值整数查询结果（无结果 / NULL 均返回 0）
+    nonisolated private static func scalarInt(db: OpaquePointer, sql: String) -> Int {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int64(statement, 0)) : 0
+    }
+
     /// GET /download/<file>：返回 Downloads 目录下的文件
     private func serveFile(_ filename: String, connection: NWConnection) {
         let safeName = (filename as NSString).lastPathComponent
@@ -725,6 +906,21 @@ final class KlineHTTPServer {
         })
     }
 }
+
+// MARK: - /sync/apply-patch 结果契约
+
+/// 补丁 → 主库的执行结果（在 `DatabaseManager.dbQueue` 上产出，回主线程用于拼响应 JSON）。
+/// 用元组别名而非结构体：避免默认 MainActor 隔离下在非主线程上下文构造类型的额外约束。
+private typealias PatchApplyOutcome = (
+    ok: Bool,
+    dailyRows: Int,
+    weeklyRows: Int,
+    monthlyRows: Int,
+    coveredFiles: Int,
+    skippedFiles: Int,
+    latestDate: Int,
+    message: String
+)
 
 // MARK: - URL 参数编码
 

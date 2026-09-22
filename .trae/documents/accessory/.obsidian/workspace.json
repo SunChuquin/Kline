@@ -184,10 +184,10 @@
   },
   "active": "16e320609f6e3fd7",
   "lastOpenFiles": [
+    "INDEX.md",
     "modules/新按钮（转圈驱动光标）.md",
     "modules/悬浮按钮.md",
     "pitfalls/20260919-重叠子视图的透明度被逐层叠加.md",
-    "decisions/20260919-手势期间另一方强制闲置.md",
-    "INDEX.md"
+    "decisions/20260919-手势期间另一方强制闲置.md"
   ]
 }
