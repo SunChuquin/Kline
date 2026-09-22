@@ -219,23 +219,32 @@ class DatabaseManager: ObservableObject {
     /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空。
     ///
     /// **增量优先 + 主库补齐**（三处出口共用同一规则）：
-    /// 结果 = 增量库该 code 的全部行 ∪ 主库该 code 中 `date < 增量最小 date` 的行。
-    /// 主库侧查询带 `AND date < ?` 谓词 → 两侧 date 区间天然无交集，
-    /// 因此「增量 date DESC + 主库 date DESC」拼接即为全局 date DESC，同 date 必以增量库为准。
+    /// 结果 = 增量库该 code 的全部行 ∪ 主库该 code 中「增量库里没有该 date」的行；
+    /// 同一 date 以增量库为准。
+    /// - Note: 不能简单按 `date < 增量最小 date` 切分主库——主库可能比增量库更新
+    ///   （例如云端同步中断几天后手动更新了主库），那样会把主库较新的K线丢掉，比不合并还差。
+    ///   故按 date 集合去重后再整体降序重排。
     /// 增量库不可用 / 未覆盖该 code / 该表无增量行 → 走纯主库路径，结果与改动前完全一致。
     private func fetchPeriodTable(metaId: Int, table: String) -> [KlineItem] {
         if let live = liveSlice(metaId: metaId, table: table) {
             let main: [KlineItem] = dbQueue.sync {
                 guard let db = db else { return [] }
-                return runBarsQuery(db: db, table: table, metaId: metaId,
-                                    maxDateExclusive: live.minDate, limit: nil)
+                return runBarsQuery(db: db, table: table, metaId: metaId, limit: nil)
             }
-            return live.items + main
+            return merge(live: live, main: main)
         }
         return dbQueue.sync {
             guard let db = db else { return [] }
-            return runBarsQuery(db: db, table: table, metaId: metaId, maxDateExclusive: nil, limit: nil)
+            return runBarsQuery(db: db, table: table, metaId: metaId, limit: nil)
         }
+    }
+
+    /// 增量优先合并：主库剔除与增量库重复的 date，再按 date 降序整体重排
+    private func merge(live: LiveSlice, main: [KlineItem]) -> [KlineItem] {
+        guard !main.isEmpty else { return live.items }
+        let liveDates = Set(live.items.map { $0.date })
+        let rest = main.filter { !liveDates.contains($0.date) }
+        return (live.items + rest).sorted { $0.date > $1.date }
     }
 
     /// 增量库该 metaId 对应 code 在某周期表的切片；不可用 / 无 code 映射 / 该表无增量行 → nil
@@ -253,13 +262,10 @@ class DatabaseManager: ObservableObject {
     }
 
     /// 统一执行 K 线查询并组装结果（需已在 dbQueue 上）
-    /// - Parameters:
-    ///   - maxDateExclusive: 非 nil 时追加 `AND date < ?`（增量库覆盖起点，主库只补齐更早的部分）
-    ///   - limit: 非 nil 时追加 `LIMIT ?`
+    /// - Parameter limit: 非 nil 时追加 `LIMIT ?`
     private func runBarsQuery(db: OpaquePointer, table: String,
-                              metaId: Int, maxDateExclusive: Int?, limit: Int?) -> [KlineItem] {
+                              metaId: Int, limit: Int?) -> [KlineItem] {
         var query = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ?"
-        if maxDateExclusive != nil { query += " AND date < ?" }
         query += " ORDER BY date DESC"
         if limit != nil { query += " LIMIT ?" }
         query += ";"
@@ -271,9 +277,6 @@ class DatabaseManager: ObservableObject {
         }
         var index: Int32 = 1
         sqlite3_bind_int64(statement, index, Int64(metaId)); index += 1
-        if let maxDateExclusive = maxDateExclusive {
-            sqlite3_bind_int64(statement, index, Int64(maxDateExclusive)); index += 1
-        }
         if let limit = limit {
             sqlite3_bind_int64(statement, index, Int64(Swift.max(1, limit))); index += 1
         }
@@ -299,23 +302,21 @@ class DatabaseManager: ObservableObject {
 
     /// 取某标的某周期表最近 limit 根（ORDER BY date DESC → 结果从新→旧）。
     /// 用于行情/自选列表表单只需要最近 80 根，避免全量读（一次 1K+ 只的话全量读会卡死）。
-    /// **增量优先 + 主库补齐**后在合并结果上取前 limit 条（增量已够 limit 条时不再查主库）。
+    /// **增量优先 + 主库补齐**后在合并结果上取前 limit 条。
     func fetchPeriodLimited(metaId: Int, table: String, limit: Int) -> [KlineItem] {
         let wanted = Swift.max(1, limit)
         if let live = liveSlice(metaId: metaId, table: table) {
-            if live.items.count >= wanted { return Array(live.items.prefix(wanted)) }
-            let remain = wanted - live.items.count
+            // 主库最多会被增量库顶掉 live.items.count 行，故多取这么多，保证合并后仍够 wanted 条
             let main: [KlineItem] = dbQueue.sync {
                 guard let db = db else { return [] }
                 return runBarsQuery(db: db, table: table, metaId: metaId,
-                                    maxDateExclusive: live.minDate, limit: remain)
+                                    limit: wanted + live.items.count)
             }
-            return live.items + main
+            return Array(merge(live: live, main: main).prefix(wanted))
         }
         return dbQueue.sync {
             guard let db = db else { return [] }
-            return runBarsQuery(db: db, table: table, metaId: metaId,
-                                maxDateExclusive: nil, limit: wanted)
+            return runBarsQuery(db: db, table: table, metaId: metaId, limit: wanted)
         }
     }
 
