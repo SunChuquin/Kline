@@ -56,8 +56,8 @@ final class TdxSyncConfig: ObservableObject {
 
     // MARK: - 持久化项
 
-    /// 是否启用自动拉取（默认 false：需用户显式开启）
-    @Published var enabled: Bool = false {
+    /// 是否启用自动拉取（**默认开启**：本功能的目的就是"自动盯盘"，装好即生效；用户可随时关闭）
+    @Published var enabled: Bool = true {
         didSet { if enabled != oldValue { UserDefaults.standard.set(enabled, forKey: Self.enabledKey) } }
     }
 
@@ -84,7 +84,8 @@ final class TdxSyncConfig: ObservableObject {
     private init() {
         let d = UserDefaults.standard
         // 注：init 内的赋值不会触发 didSet，因此不会反向写回 UserDefaults
-        enabled = d.bool(forKey: Self.enabledKey)
+        // enabled 默认 true（本功能目的就是自动更新）；用 object(forKey:) 区分"从未设置过"与"用户显式关掉"
+        enabled = (d.object(forKey: Self.enabledKey) as? Bool) ?? true
         sourceURLs = Self.load([String].self, key: Self.sourceURLsKey) ?? Self.defaultSourceURLs
         scheduleTimes = Self.load([String].self, key: Self.scheduleTimesKey) ?? Self.defaultScheduleTimes
         tradingDaysOnly = (d.object(forKey: Self.tradingDaysOnlyKey) as? Bool) ?? true
