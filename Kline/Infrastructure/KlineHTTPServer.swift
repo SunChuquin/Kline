@@ -853,31 +853,74 @@ final class KlineHTTPServer {
         }
     }
 
-    /// 响应发出后的**异步** WAL 回写（best-effort）：用一条**独立短连接** `PRAGMA wal_checkpoint(PASSIVE)`。
+    /// 响应发出后的**异步** WAL 回写（best-effort，**有界循环**）：用一条**独立短连接**反复执行
+    /// `PRAGMA wal_checkpoint(PASSIVE)`，直到 `log == checkpointed`（WAL 已全部回写）为止。
     ///
     /// 为什么需要：会话连接关闭了 autocheckpoint（见 `PatchSessionManager.begin`），主库 WAL 会停在
-    /// ~200MB；这里把它回写进主库，避免 WAL 随会话数无限增长，也让「按文件拉 tdx.db」的核对工具
+    /// 几百 MB；这里把它回写进主库，避免 WAL 随会话数无限增长，也让「按文件拉 tdx.db」的核对工具
     /// （verify_main_db.py）拿到完整数据。
     ///
     /// 为什么用独立连接而不是 App 的 `dbQueue`：PASSIVE 会拷贝上百 MB，走 dbQueue 会把 App 自己的
     /// 查询（热刷新 3611 行）堵在它后面十几秒；独立连接则与 App 读并发，拿不到锁时只回写能回写的部分。
     /// **正确性无关**：WAL 语义下已提交数据对其它连接立即可见（不依赖 checkpoint），此处只做空间回收。
+    ///
+    /// 为什么循环：PASSIVE 只回写到「最老读者快照」处，App 侧持续有短读事务时**单次可能只推进一部分**，
+    /// 留下的尾巴长期累积就是 WAL 缓慢膨胀。**必须有界**（最多 10 次 / 总预算 60s / 间隔 1s），否则遇到
+    /// 持续读事务会退化成无限循环；到上限仍未完成就正常收尾并打警告，不报错、不卡死、不重试到卡死。
     private func deferredWALCheckpoint() {
         let dbPath = DatabaseManager.writableDBPath
+        // 有界策略参数（明确写死，便于从日志一眼看出是否在膨胀）
+        let maxAttempts = 10
+        let budgetSec: Double = 60
+        let intervalSec: Double = 1.0
+        // journal_size_limit = 64MB：**连接级**设置（本地实测新连接读回 -1，不随库文件持久化）。
+        // 作用：WAL 被 reset（全部回写完成后复位日志）时把文件截断到 ≤64MB，避免文件本身上限跟着
+        // 会话峰值涨到几百 MB（实测峰值 107~322MB）。取 64MB 的理由：它**不限制事务期间的 WAL 增长**
+        // （只在 reset 时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的峰值、又留出余量避免下轮会话
+        // 刚写入就立刻要重新扩展文件而多付一次分配/IO。
+        let journalSizeLimit = 64 * 1024 * 1024
         DispatchQueue.global(qos: .utility).async {
             var handle: OpaquePointer?
             guard sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
                   let db = handle else {
                 if let h = handle { sqlite3_close(h) }
-                DebugLogger.shared.log("[Patch] WAL 延迟回写：打开独立连接失败")
+                DebugLogger.shared.log("[Patch] 延迟回写：打开独立连接失败")
                 return
             }
-            let before = fileSizeMB(dbPath + "-wal")
+            let walBeforeMB = fileSizeMB(dbPath + "-wal")
+            sqlite3_exec(db, "PRAGMA journal_size_limit = \(journalSizeLimit);", nil, nil, nil)
             let t0 = DispatchTime.now()
-            let rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(PASSIVE);", nil, nil, nil)
+            var attempt = 0
+            var logBytes = 0
+            var ckptBytes = 0
+            var finished = false
+            while attempt < maxAttempts {
+                attempt += 1
+                let r = walCheckpointPassive(db: db)
+                logBytes = r.logBytes
+                ckptBytes = r.ckptBytes
+                DebugLogger.shared.log("[Patch] 延迟回写 第\(attempt)次: log=\(logBytes) checkpointed=\(ckptBytes)"
+                    + " rc=\(r.rc) · WAL=\(String(format: "%.1f", fileSizeMB(dbPath + "-wal")))MB")
+                if logBytes <= ckptBytes {           // 已全部回写（WAL 已复位时 log==ckpt==0）
+                    finished = true
+                    break
+                }
+                if Double(elapsedMsSince(t0)) / 1000.0 >= budgetSec { break }
+                Thread.sleep(forTimeInterval: intervalSec)
+            }
+            let costSec = Double(elapsedMsSince(t0)) / 1000.0
+            let walNowMB = fileSizeMB(dbPath + "-wal")
+            if finished {
+                DebugLogger.shared.log("[Patch] 延迟回写完成（共\(attempt)次，耗时 "
+                    + "\(String(format: "%.1f", costSec))s，WAL "
+                    + "\(String(format: "%.1f", walBeforeMB))MB → \(String(format: "%.1f", walNowMB))MB）")
+            } else {
+                DebugLogger.shared.log("[Patch] 延迟回写未完成（共\(attempt)/\(maxAttempts)次，"
+                    + "log=\(logBytes) checkpointed=\(ckptBytes)，WAL "
+                    + "\(String(format: "%.1f", walNowMB))MB，预算 "
+                    + "\(String(format: "%.0f", budgetSec))s 用尽）")
+            }
             sqlite3_close(db)
-            DebugLogger.shared.log("[Patch] WAL 延迟回写(PASSIVE) 结束：rc=\(rc) 耗时=\(elapsedMsSince(t0))ms"
-                + " · 前 WAL=\(String(format: "%.1f", before))MB · 后 \(dbSizeDesc(dbPath))")
         }
     }
 
@@ -1264,10 +1307,16 @@ nonisolated final class PatchSessionManager {
             // 全量 PASSIVE checkpoint（把 215MB 回写主库），实测 COMMIT 因此高达 **13829ms**（另见
             // close=8ms / UPDATE=62ms，即 12s 全在 COMMIT 这一步）。置 0 后 COMMIT 只追加提交记录，
             // 写响应不再等这次大回写；WAL 回写改由响应之后的 `deferredWALCheckpoint()` 异步补齐。
+            //
+            // `journal_size_limit = 64MB`：**连接级**设置（本地实测：新连接读回 -1，不随库文件持久化），
+            // 故两条会发生「WAL 复位→截断」的路径各自的连接上都要设：这里（提交时日志复位）与
+            // `deferredWALCheckpoint()` 的短连接（回写完成时复位）。它只在日志复位时裁剪文件大小，
+            // 不限制事务期内的 WAL 增长 → 不影响 COMMIT 延迟。
             for p in ["PRAGMA cache_size = -32768;",
                       "PRAGMA temp_store = MEMORY;",
                       "PRAGMA synchronous = NORMAL;",
-                      "PRAGMA wal_autocheckpoint = 0;"] {
+                      "PRAGMA wal_autocheckpoint = 0;",
+                      "PRAGMA journal_size_limit = 67108864;"] {
                 sqlite3_exec(db, p, nil, nil, nil)
             }
             // 会话临时表（TEMP 只属于本连接、随连接关闭消失）：各片 apply 时累积「file → 该片最大日期」，
@@ -1521,6 +1570,32 @@ nonisolated func fileSizeMB(_ path: String) -> Double {
 /// 「主库=X MB WAL=Y MB」描述（判断 checkpoint 规模用）
 nonisolated func dbSizeDesc(_ dbPath: String) -> String {
     String(format: "主库=%.1fMB WAL=%.1fMB", fileSizeMB(dbPath), fileSizeMB(dbPath + "-wal"))
+}
+
+/// 执行**一次** `PRAGMA wal_checkpoint(PASSIVE)`，返回 `(rc, log 字节, 已回写字节)`。
+/// PASSIVE 会返回一行 `(busy, log, checkpointed)`，后两列单位是**页**，按库的 page_size 折算成字节；
+/// 取不到结果行（准备/步进失败）时返回 errcode 与 0，调用方据 `log > checkpointed` 判断是否还需重试。
+nonisolated func walCheckpointPassive(db: OpaquePointer) -> (rc: Int32, logBytes: Int, ckptBytes: Int) {
+    let pageSize = walPageSize(db: db)
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "PRAGMA wal_checkpoint(PASSIVE);", -1, &statement, nil) == SQLITE_OK else {
+        return (sqlite3_errcode(db), 0, 0)
+    }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else { return (sqlite3_errcode(db), 0, 0) }
+    let logBytes = Int(sqlite3_column_int64(statement, 1)) * pageSize
+    let ckptBytes = Int(sqlite3_column_int64(statement, 2)) * pageSize
+    return (SQLITE_OK, logBytes, ckptBytes)
+}
+
+/// 库的 page_size（字节）；读不到时按 SQLite 默认 4096
+nonisolated func walPageSize(db: OpaquePointer) -> Int {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "PRAGMA page_size;", -1, &statement, nil) == SQLITE_OK else { return 4096 }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else { return 4096 }
+    let n = Int(sqlite3_column_int64(statement, 0))
+    return n > 0 ? n : 4096
 }
 
 // MARK: - URL 参数编码
