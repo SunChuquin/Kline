@@ -873,19 +873,19 @@ final class KlineHTTPServer {
     /// （共 1 次、约 15s），但 WAL **文件**仍不收敛（连跑 3 次：321.9 → 429.2 → 536.8MB，每次追加一个
     /// 会话的帧量）——因为文件截断只在「日志被 reset」时发生，而 reset 需要独占全部读者槽位，App 侧并发读
     /// 会让写方/回写方都拿不到，`journal_size_limit` 因此也没机会生效。改用 `TRUNCATE`（独占 + 截断为 0）
-    /// 才能真正让文件收敛；它遇活跃读者返回 `busy=1`（本连接无 busy_timeout，不会阻塞等待）→ 交给下一轮重试。
+    /// 才能真正让文件收敛；它遇活跃读者/写者返回 `busy=1`（本连接无 busy_timeout → 立即失败、绝不阻塞）→ 交给下一轮重试。
     private func deferredWALCheckpoint() {
         let dbPath = DatabaseManager.writableDBPath
         // 有界策略参数（明确写死，便于从日志一眼看出是否在膨胀）
-        // `busyTimeoutMs`：真机实测，TRUNCATE 唯一的失败原因是 **busy=1**，而挡住它的是**紧随其后的
-        // 下一次会话**——背靠背跑流水线时，下一轮的 `BEGIN IMMEDIATE` 写事务（约 35s）正好覆盖整段重试
-        // 窗口，10 次「立即失败」无一成功；而最后一条（无后继会话）一次就把 321.6MB 截到 0.0MB。
-        // 故给这条**独立连接**设 15s busy_timeout，让单次 TRUNCATE **等**写方提交后再截，而不是空转重试。
-        // 影响面可控：等锁期间不持有任何锁，App 的读写不受影响；单次等待上限 15s，再叠加下面的总预算。
-        let maxAttempts = 10
+        // 间隔 2s + 上限 30 次 → 实际由 `budgetSec`（60s）收敛，把重试窗口拉到能覆盖「提交后 App 侧
+        // 3611 行热刷新（约 15~20s 的连续短读）」这个窗口。
+        // ⚠️ **绝不能给这条连接设 busy_timeout**：实测（2026-09-23）把 busy_timeout 设成 15s 后，
+        // 等待中的 TRUNCATE 会让**下一轮会话的 `BEGIN IMMEDIATE` 立刻报 `database is locked`**
+        // （会话连接 busy_timeout=0 → 拿不到写锁立即失败），直接打断流水线（第 3 连跑 begin 失败）。
+        // 故一律用「立即失败 + 有界重试」，宁可这次不截断，也绝不阻塞同步链路。
+        let maxAttempts = 30
         let budgetSec: Double = 60
         let intervalSec: Double = 2.0
-        let busyTimeoutMs = 15_000
         // journal_size_limit = 64MB：**连接级**设置（本地实测新连接读回 -1，不随库文件持久化）。
         // 兜底作用：万一某次日志复位不经 TRUNCATE 路径，文件也会被裁到 ≤64MB。取 64MB 的理由：它
         // **不限制事务期间的 WAL 增长**（只在日志复位时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的
@@ -901,7 +901,6 @@ final class KlineHTTPServer {
             }
             let walBeforeMB = fileSizeMB(dbPath + "-wal")
             sqlite3_exec(db, "PRAGMA journal_size_limit = \(journalSizeLimit);", nil, nil, nil)
-            sqlite3_exec(db, "PRAGMA busy_timeout = \(busyTimeoutMs);", nil, nil, nil)
             let t0 = DispatchTime.now()
             var attempt = 0
             var logBytes = 0
