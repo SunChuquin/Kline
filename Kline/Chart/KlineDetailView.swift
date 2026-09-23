@@ -173,6 +173,9 @@ struct KlineDetailView: View {
     @State private var quarterlySeries: ChartSeries? = nil
     @State private var yearlySeries: ChartSeries? = nil
     @State private var isLoading = true
+    /// 首屏加载完成锁存：isDetailViewLoaded 一旦为真即置 true 且不再回退。
+    /// 后续切周期 / 静默热刷新导致的 isLoading 波动不再影响悬浮按钮可见性（避免按钮忽隐忽现）
+    @State private var didFinishInitialLoad = false
     /// 📌 固定光标模式开关（高亮表示已开启）。联动状态下固定光标完全禁用（只允许单光标）
     @State private var pinEnabled = false
     /// 图表当前是否已有任意十字光标（单视图下控制 📌 按钮可用性）
@@ -231,6 +234,22 @@ struct KlineDetailView: View {
         showSettings || showSearch || showCustomEditor || showSystemEditor
         || showResetLinkedConfirm || showPeriodPicker || showViewCountPicker || showChartStylePicker
         || drillIn != nil
+    }
+
+    /// 首屏是否已加载完成（为真才允许显示两个悬浮按钮）。
+    /// 单图：主 series 查询结束（`isLoading` 落回 false）即可；
+    /// 联动：还要等全部 tile 各自的共享数据槽跑完首屏加载（tile 在 HStack 中全部立即出现，
+    /// 槽位由其 loadData 创建，故「槽位缺失」只可能是刚进入联动的那一两帧，按未加载处理）。
+    /// ⚠️ 只读 `configs` / `tileData`，不调用会写 @Published 与落盘的 `configs(for:nameHint:)`
+    /// （本属性在 body 期求值，写状态会触发「Modifying state during view update」）
+    private var isDetailViewLoaded: Bool {
+        guard !isLoading, !drillInLoading else { return false }
+        guard effectiveDual else { return true }
+        let views = linkedStore.configs[item.id] ?? []
+        guard !views.isEmpty else { return false }
+        return views.allSatisfy { v in
+            linkedStore.tileData[LinkedTileDataKey(ownerMetaID: item.id, tileIndex: v.index)]?.isLoading == false
+        }
     }
 
     /// 当前标的的联动视图数量（用于设置页下拉勾选；无记录时默认 2 视图）。
@@ -360,6 +379,21 @@ struct KlineDetailView: View {
         // 不在 ViewBuilder 闭包里写赋值语句（之前 buggy commit 的坑），用 onChange 在渲染循环外安全推送
         .onChange(of: isAnyPopupActive) { active in
             FloatingAccessoryCoordinator.shared.setDetailViewPopupActive(active)
+        }
+        // 首屏加载完成后才让两个悬浮按钮出现：onAppear 先推初始值（false=加载中，保证本轮打开必先隐藏），
+        // 加载完成时置锁存并推送 true；页面关闭复位 false，下次打开重新走一遍
+        .onAppear {
+            FloatingAccessoryCoordinator.shared.setDetailViewLoaded(didFinishInitialLoad)
+        }
+        .onDisappear {
+            FloatingAccessoryCoordinator.shared.setDetailViewLoaded(false)
+        }
+        .onChange(of: isDetailViewLoaded) { loaded in
+            guard loaded, !didFinishInitialLoad else { return }
+            didFinishInitialLoad = true
+            FloatingAccessoryCoordinator.shared.setDetailViewLoaded(true)
+            // 供外部读沙盒日志校验「按钮在首屏加载完成后才出现」这条链路
+            DebugLogger.shared.log("悬浮按钮：K线页首屏加载完成，两个按钮恢复显示")
         }
         // 键盘避让已由 ContentView 根部全局禁用（覆盖单图搜索与双联动 tile 搜索）；
         // 公式编辑器走 fullScreenCover 独立图层，自管键盘行为，不受影响

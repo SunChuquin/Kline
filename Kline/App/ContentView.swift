@@ -39,10 +39,12 @@ struct ContentView: View {
 
     private var detailItem: MetaItem? { detailRouter.item }
 
-    /// 两个悬浮按钮当前是否应显示：详情页打开 + 自己的面板没开 + K 线详情页无弹窗。
+    /// 两个悬浮按钮当前是否应显示：详情页打开 + 自己的面板没开 + K 线详情页无弹窗
+    /// + K 线详情页首屏已加载完成（加载中不显示，避免页面还在转圈时按钮先露面）。
     /// 联动多图光标自动移动另有 hidesDuringCursorAutoMove() modifier 处理，不在此聚合
     private var isButtonVisible: Bool {
         !isAccessoryPanelPresented && !accessoryCoordinator.isDetailViewPopupActive
+            && accessoryCoordinator.isDetailViewLoaded
     }
 
     var body: some View {
@@ -110,6 +112,8 @@ struct ContentView: View {
         // K 线详情页是根视图的全屏 overlay（detailItem != nil），自选/行情列表页不再显示按钮。
         // KlineDetailView 内任何弹窗（设置/搜索/编辑器/confirmationDialog/钻取）都会通过 coordinator
         // 的 isDetailViewPopupActive 推送出来，此处统一隐藏按钮；弹窗全部关闭后自动恢复。
+        // 首屏加载期间同样不显示（isDetailViewLoaded 由 KlineDetailView 加载完成后锁存推送），
+        // 避免页面还在转圈 / 白屏时按钮先出现。
         // 联动多图光标自动移动期间同样自动隐藏（hidesDuringCursorAutoMove）
         .overlay(
             Group {

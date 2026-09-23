@@ -221,6 +221,58 @@ final class KlineUITests: XCTestCase {
                        "设置面板未铺满屏宽：左内边距=\(leftInset) 右内边距=\(rightInset)（面板相对屏幕存在偏移）")
     }
 
+    // MARK: - 用例 95：两个悬浮按钮待 K 线页首屏加载完成才出现
+    // 注意定位方式：自绘圆钮在无障碍树里是 other（不是 button），要用 descendants(matching: .any)，
+    // 用 app.buttons[...] 会 exists=false（此坑曾导致误判「按钮不可点」）。
+    // 「加载中先隐藏」这一段在模拟器上只有 ~300ms，XCUITest 查询追不上，故不作为断言；
+    // 该阶段的权威证据是沙盒日志：页面打开时先推 false，加载完成后打印
+    // 「悬浮按钮：K线页首屏加载完成，两个按钮恢复显示」。
+
+    func test95_AccessoryButtonsAppearAfterLoad() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let marketTab = app.buttons["tab.market"]
+        XCTAssertTrue(marketTab.waitForExistence(timeout: 15), "底部菜单未出现")
+        marketTab.tap()
+
+        // 列表页不该有悬浮按钮（既有行为）
+        XCTAssertFalse(app.descendants(matching: .any)["accessory.button"].firstMatch.exists,
+                       "行情列表页不应出现悬浮按钮")
+
+        let marketTop = app.buttons["market.topMenu.市场"].firstMatch
+        XCTAssertTrue(marketTop.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
+        let etf = app.staticTexts["ETF指数"].firstMatch
+        if !etf.exists { marketTop.tap() }
+        XCTAssertTrue(etf.waitForExistence(timeout: 8), "二级菜单未展开「ETF指数」")
+        etf.tap()
+
+        let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "行情行未出现")
+        row.tap()
+        let back = app.buttons["kline.backButton"]
+        XCTAssertTrue(back.waitForExistence(timeout: 15), "K线页未打开")
+
+        // 自绘圆钮在无障碍树里是 other（非 button），必须用 descendants(matching: .any) 定位
+        let old = app.descendants(matching: .any)["accessory.button"].firstMatch
+        let wheel = app.descendants(matching: .any)["accessory2.button"].firstMatch
+
+        // 加载完成后两个按钮都应可见可点（新按钮 B' 同样受首屏加载门控制）
+        XCTAssertTrue(waitHittable(old, timeout: 15), "加载完成后旧悬浮按钮未出现/不可点")
+        XCTAssertTrue(waitHittable(wheel, timeout: 15), "加载完成后新悬浮按钮未出现/不可点")
+
+        // 顺带验证按钮真的可操作：点按中心应弹出快捷面板
+        old.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["accessory.close"].waitForExistence(timeout: 8), "点击悬浮按钮未弹出面板")
+        app.buttons["accessory.close"].tap()
+
+        // 返回列表页：按钮应随之消失（页面关闭复位，既有行为）
+        back.tap()
+        XCTAssertTrue(waitHittable(marketTab, timeout: 10), "返回后未回到行情页")
+        XCTAssertFalse(app.descendants(matching: .any)["accessory.button"].firstMatch.exists,
+                       "返回列表页后悬浮按钮仍在")
+    }
+
     // MARK: - 用例 92：刘海屏（异形屏）横屏安全区验证——元素坐标断言 + 内嵌截图
 
     /// 刘海/灵动岛 iPhone 横屏：左右安全区各约 44pt（刘海侧+指示条侧）。

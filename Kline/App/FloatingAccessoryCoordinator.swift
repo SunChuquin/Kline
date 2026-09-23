@@ -64,6 +64,11 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 为真时两个悬浮按钮一起隐藏、避免压在弹窗遮罩之上；弹窗全部关闭即恢复。
     /// 只由 KlineDetailView 通过 setDetailViewPopupActive 推送（聚合自身所有弹窗 state）
     @Published private(set) var isDetailViewPopupActive = false
+
+    /// K 线详情页首屏是否已加载完成（单图 = 主 series 查询结束；联动 = 主 series + 全部 tile 首屏加载结束）。
+    /// 为假时两个悬浮按钮一起隐藏 —— 页面还在转圈 / 白屏时按钮不该先露面，数据到位后再出现。
+    /// 只由 KlineDetailView 通过 setDetailViewLoaded 推送；页面关闭即复位 false。
+    @Published private(set) var isDetailViewLoaded = false
     /// 最新光标推进命令。订阅方建立订阅时会立即收到当前值，故消费端必须用 `seq` 去重。
     /// （不设 private(set)：图表需要订阅投影值 `$cursorAdvance`；只由 advanceCursor(by:) 写入）
     @Published var cursorAdvance: FloatingAccessoryCursorAdvance?
@@ -117,6 +122,13 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 由 KlineDetailView 聚合所有弹窗 state 后推送（避免让 ContentView 观察一堆细节）
     func setDetailViewPopupActive(_ on: Bool) {
         if isDetailViewPopupActive != on { isDetailViewPopupActive = on }
+    }
+
+    /// 上报「K 线详情页首屏是否已加载完成」起止（幂等，仅在实际变化时发布）。
+    /// 由 KlineDetailView 锁存推送：一旦为真不再回退（后续切周期 / 静默热刷新不重新隐藏按钮），
+    /// 页面关闭时复位 false，保证下次打开仍是「先隐藏、加载完再出现」
+    func setDetailViewLoaded(_ on: Bool) {
+        if isDetailViewLoaded != on { isDetailViewLoaded = on }
     }
 
     // MARK: - 同侧互斥（实时，不等抬手）
