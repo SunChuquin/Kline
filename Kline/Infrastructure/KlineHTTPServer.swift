@@ -804,12 +804,21 @@ final class KlineHTTPServer {
     /// POST /sync/patch-session/commit：UPDATE meta.last_date（MAX 防回退）+ COMMIT + 关连接，
     /// 随后重读 metaList + 自增 dataVersion（主库内容已变）。
     private func commitPatchSessionAndRespond(connection: NWConnection) {
+        let tHttp = DispatchTime.now()
         PatchSessionManager.shared.commit { [weak self] r in
             guard let self = self else { return }
+            let tMain = DispatchTime.now()
             if r.ok {
                 DebugLogger.shared.log("[Patch] 会话 commit：\(r.message)")
+                DebugLogger.shared.log("[Patch] commit 分段（主线程）：HTTP 入口→主线程回调=\(Self.elapsedMs(tHttp))ms"
+                    + " · 回调排队=\(Self.elapsedMs(tMain))ms")
+                let tMeta = DispatchTime.now()
                 DatabaseManager.shared.loadMetaList()
+                let metaMs = Self.elapsedMs(tMeta)
+                let tNotify = DispatchTime.now()
                 DatabaseManager.shared.notifyMainDBChanged()
+                let notifyMs = Self.elapsedMs(tNotify)
+                let tResp = DispatchTime.now()
                 self.respond(connection, status: 200, contentType: "application/json",
                              body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(r.message))\""
                                  + ",\"dailyRows\":\(r.dailyRows)"
@@ -820,6 +829,10 @@ final class KlineHTTPServer {
                                  + ",\"coveredFiles\":\(r.coveredFiles)"
                                  + ",\"shards\":\(r.shardCount)"
                                  + ",\"latestDate\":\(r.latestDate)}")
+                DebugLogger.shared.log("[Patch] commit 分段（主线程）：loadMetaList 入队=\(metaMs)ms"
+                    + " · notifyMainDBChanged=\(notifyMs)ms"
+                    + " · 拼+写响应=\(Self.elapsedMs(tResp))ms"
+                    + " · 至此总耗时=\(Self.elapsedMs(tHttp))ms")
             } else {
                 DebugLogger.shared.log("[Patch] 会话 commit 失败：\(r.message)")
                 self.respond(connection, status: 500, contentType: "application/json",
@@ -1050,6 +1063,11 @@ final class KlineHTTPServer {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    /// 距 `t` 的毫秒数（插桩用）
+    private static func elapsedMs(_ t: DispatchTime) -> Int {
+        Int((DispatchTime.now().uptimeNanoseconds - t.uptimeNanoseconds) / 1_000_000)
+    }
+
     private func respond(_ connection: NWConnection, status: Int, contentType: String = "text/plain", body: String) {
         let statusText: String
         switch status {
@@ -1094,6 +1112,8 @@ private typealias PatchApplyOutcome = (
 /// `nonisolated`：只在 `PatchSessionManager.queue` 上读写（默认 MainActor 隔离下需显式放开）。
 nonisolated final class PatchSessionState {
     let db: OpaquePointer
+    /// 主库路径（用于插桩读取 `-wal` 文件大小，判断 checkpoint 规模）
+    let dbPath: String
     var lastProgress: DispatchTime
     var shardCount = 0
     var coveredFiles = 0
@@ -1104,8 +1124,9 @@ nonisolated final class PatchSessionState {
     var quarterlyRows = 0
     var yearlyRows = 0
     var latestDate = 0
-    init(db: OpaquePointer) {
+    init(db: OpaquePointer, dbPath: String) {
         self.db = db
+        self.dbPath = dbPath
         self.lastProgress = DispatchTime.now()
     }
 }
@@ -1143,6 +1164,23 @@ nonisolated final class PatchSessionManager {
 
     private init() {}
 
+    // MARK: - 插桩工具（`[Patch]` 前缀，只在 queue 上调用）
+
+    /// 距 `from` 的毫秒数
+    private static func ms(_ from: DispatchTime) -> Int {
+        Int((DispatchTime.now().uptimeNanoseconds - from.uptimeNanoseconds) / 1_000_000)
+    }
+
+    /// 主库 `-wal` / 主库文件大小（MB），用于判断 checkpoint 规模；不存在返回 0.0
+    private static func sizeMB(_ path: String) -> Double {
+        let n = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber
+        return Double(n?.int64Value ?? 0) / 1_048_576.0
+    }
+
+    private static func dbSizeDesc(_ dbPath: String) -> String {
+        String(format: "主库=%.1fMB WAL=%.1fMB", sizeMB(dbPath), sizeMB(dbPath + "-wal"))
+    }
+
     // MARK: - begin
 
     /// 打开独立连接 + 会话级 pragma + BEGIN IMMEDIATE，把连接与会话状态存下、启动看门狗。
@@ -1178,10 +1216,10 @@ nonisolated final class PatchSessionManager {
                 self.replyMain((ok: false, message: "开启事务失败：\(msg)"), completion)
                 return
             }
-            let st = PatchSessionState(db: db)
+            let st = PatchSessionState(db: db, dbPath: dbPath)
             self.session = st
             self.armWatchdogLocked(st)
-            DebugLogger.shared.log("[Patch] 会话 begin：已开独立连接并 BEGIN IMMEDIATE")
+            DebugLogger.shared.log("[Patch] 会话 begin：已开独立连接并 BEGIN IMMEDIATE · \(Self.dbSizeDesc(dbPath))")
             self.replyMain((ok: true, message: "会话已开启（独立连接 · BEGIN IMMEDIATE）"), completion)
         }
     }
@@ -1199,6 +1237,7 @@ nonisolated final class PatchSessionManager {
     /// 每次成功后刷新看门狗计时；任一步失败 → 整体 ROLLBACK + 关连接，返回原因（含失败片名）。
     func applyShard(name: String, path: String, completion: @escaping (PatchSessionResult) -> Void) {
         queue.async {
+            let t0 = DispatchTime.now()
             guard let st = self.session else {
                 self.replyMain((ok: false, message: "无活跃会话（请先 POST /sync/patch-session/begin）"), completion)
                 return
@@ -1209,7 +1248,8 @@ nonisolated final class PatchSessionManager {
                 return
             }
             st.lastProgress = DispatchTime.now()   // 刷新看门狗计时
-            DebugLogger.shared.log("[Patch] 会话 apply 片 \(name) 完成（累计 \(st.shardCount) 片）")
+            DebugLogger.shared.log("[Patch] 会话 apply 片 \(name) 完成（累计 \(st.shardCount) 片）"
+                + " · 写库耗时=\(Self.ms(t0))ms · \(Self.dbSizeDesc(st.dbPath))")
             self.replyMain((ok: true, message: "已写入片 \(name)（累计 \(st.shardCount) 片）"), completion)
         }
     }
@@ -1220,6 +1260,7 @@ nonisolated final class PatchSessionManager {
     /// 成功后由调用方（主线程）重读 metaList + 自增 dataVersion。
     func commit(completion: @escaping (PatchSessionCommitResult) -> Void) {
         queue.async {
+            let t0 = DispatchTime.now()
             guard let st = self.session else {
                 self.replyCommitMain((ok: false, message: "无活跃会话（请先 POST /sync/patch-session/begin）",
                                       dailyRows: 0, weeklyRows: 0, monthlyRows: 0, quarterlyRows: 0, yearlyRows: 0,
@@ -1240,6 +1281,9 @@ nonisolated final class PatchSessionManager {
                     + "MAX(COALESCE(last_date, 0), "
                     + "COALESCE((SELECT t.last_date FROM temp.patch_file_max t WHERE t.file = meta.file), 0)) "
                     + "WHERE file IN (SELECT file FROM temp.patch_file_max);"
+            DebugLogger.shared.log("[Patch] commit 步前：\(Self.dbSizeDesc(st.dbPath))"
+                + " · 队列排队=\(Self.ms(t0))ms")
+            let tUpdate = DispatchTime.now()
             if sqlite3_exec(st.db, sql, nil, nil, nil) != SQLITE_OK {
                 let msg = String(cString: sqlite3_errmsg(st.db))
                 self.teardownLocked(st, rollback: true, reason: "commit 更新 last_date 失败")
@@ -1248,6 +1292,8 @@ nonisolated final class PatchSessionManager {
                                       coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
                 return
             }
+            let updateMs = Self.ms(tUpdate)
+            let tCommit = DispatchTime.now()
             if sqlite3_exec(st.db, "COMMIT;", nil, nil, nil) != SQLITE_OK {
                 let msg = String(cString: sqlite3_errmsg(st.db))
                 self.teardownLocked(st, rollback: true, reason: "commit 提交失败")
@@ -1256,6 +1302,8 @@ nonisolated final class PatchSessionManager {
                                       coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
                 return
             }
+            let commitMs = Self.ms(tCommit)
+            let walAfterCommit = Self.sizeMB(st.dbPath + "-wal")
             let message = "已提交 \(st.shardCount) 片 · 合计 \(st.dailyRows + st.weeklyRows + st.monthlyRows + st.quarterlyRows + st.yearlyRows) 行"
                 + "（日\(st.dailyRows)/周\(st.weeklyRows)/月\(st.monthlyRows)/季\(st.quarterlyRows)/年\(st.yearlyRows)）"
                 + " · 覆盖 \(st.coveredFiles) 只 · 最新 \(st.latestDate)"
@@ -1265,7 +1313,13 @@ nonisolated final class PatchSessionManager {
                                                     monthlyRows: st.monthlyRows, quarterlyRows: st.quarterlyRows,
                                                     yearlyRows: st.yearlyRows, coveredFiles: st.coveredFiles,
                                                     shardCount: st.shardCount, latestDate: st.latestDate)
-            self.teardownLocked(st, rollback: false, reason: "commit 成功")
+            let closeMs = self.teardownLocked(st, rollback: false, reason: "commit 成功")
+            DebugLogger.shared.log("[Patch] commit 分解：队列排队=\(Self.ms(t0) - updateMs - commitMs - closeMs)ms"
+                + " · UPDATE meta.last_date=\(updateMs)ms · COMMIT=\(commitMs)ms"
+                + " · sqlite3_close(含 WAL checkpoint)=\(closeMs)ms"
+                + " · 会话队列合计=\(Self.ms(t0))ms"
+                + " · COMMIT 后 WAL=\(String(format: "%.1f", walAfterCommit))MB"
+                + " · 关闭后 \(Self.dbSizeDesc(st.dbPath))")
             DebugLogger.shared.log("[Patch] 会话 commit：片=\(result.shardCount) 覆盖=\(result.coveredFiles) 最新=\(result.latestDate)")
             self.replyCommitMain(result, completion)
         }
@@ -1359,14 +1413,20 @@ nonisolated final class PatchSessionManager {
     }
 
     /// 结束会话：可选 ROLLBACK → 关连接（`sqlite3_close` 会隐式 DETACH 所有已挂载的片）→ 清空会话（幂等）。
-    /// 所有调用都在 `queue` 上。
-    private func teardownLocked(_ st: PatchSessionState, rollback: Bool, reason: String) {
+    /// 所有调用都在 `queue` 上。返回 `sqlite3_close` 的耗时（ms），供插桩定位 WAL checkpoint 开销。
+    @discardableResult
+    private func teardownLocked(_ st: PatchSessionState, rollback: Bool, reason: String) -> Int {
+        let walBefore = Self.sizeMB(st.dbPath + "-wal")
         if rollback {
             sqlite3_exec(st.db, "ROLLBACK;", nil, nil, nil)
         }
+        let tClose = DispatchTime.now()
         sqlite3_close(st.db)
+        let closeMs = Self.ms(tClose)
         if self.session === st { self.session = nil }
-        DebugLogger.shared.log("[Patch] 会话关闭（\(reason)）：\(rollback ? "已回滚" : "已提交")")
+        DebugLogger.shared.log("[Patch] 会话关闭（\(reason)）：\(rollback ? "已回滚" : "已提交")"
+            + " · close=\(closeMs)ms · 关前 WAL=\(String(format: "%.1f", walBefore))MB")
+        return closeMs
     }
 
     /// 把会话结果回主线程交付（避免调用方在非主线程触碰 App 状态 / 写响应）
