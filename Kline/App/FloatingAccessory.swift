@@ -268,3 +268,25 @@ struct FloatingAccessoryPanel: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea(edges: .bottom)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// 按布局偏好分发面板内容
+    @ViewBuilder
+    private var panelContent: some View {
+        switch layoutStore.panelLayout {
+        case .a:
+            QuickPanelAView(onClose: onClose)
+        case .b:
+            QuickPanelBView(onClose: onClose)
+        case .c:
+            QuickPanelCView(onClose: onClose)
+        }
+    }
+
+    /// 关闭统一走淡出动画（遮罩点击与「关闭」按钮一致）
+    private func close() {
+        withAnimation(.easeOut(duration: 0.15)) { onClose() }
+    }
+}
