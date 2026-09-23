@@ -59,6 +59,11 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 为真时两个悬浮按钮一起隐藏、让出正在自动滚动的图表，滚动停止即恢复。
     /// 只由多图 tile 上报（见 KlineChartView 的 reportCursorAutoMoving），故单图模式的自动滚动不会隐藏按钮
     @Published private(set) var isCursorAutoMoving = false
+
+    /// K 线详情页是否有任何弹窗打开（设置面板 / 搜索栏 / 公式编辑器 / confirmationDialog / 钻取等）：
+    /// 为真时两个悬浮按钮一起隐藏、避免压在弹窗遮罩之上；弹窗全部关闭即恢复。
+    /// 只由 KlineDetailView 通过 setDetailViewPopupActive 推送（聚合自身所有弹窗 state）
+    @Published private(set) var isDetailViewPopupActive = false
     /// 最新光标推进命令。订阅方建立订阅时会立即收到当前值，故消费端必须用 `seq` 去重。
     /// （不设 private(set)：图表需要订阅投影值 `$cursorAdvance`；只由 advanceCursor(by:) 写入）
     @Published var cursorAdvance: FloatingAccessoryCursorAdvance?
@@ -106,6 +111,12 @@ final class FloatingAccessoryCoordinator: ObservableObject {
     /// 上报「光标正在自动移动」起止（幂等，仅在实际变化时发布）
     func setCursorAutoMoving(_ on: Bool) {
         if isCursorAutoMoving != on { isCursorAutoMoving = on }
+    }
+
+    /// 上报「K 线详情页有弹窗打开」起止（幂等，仅在实际变化时发布）。
+    /// 由 KlineDetailView 聚合所有弹窗 state 后推送（避免让 ContentView 观察一堆细节）
+    func setDetailViewPopupActive(_ on: Bool) {
+        if isDetailViewPopupActive != on { isDetailViewPopupActive = on }
     }
 
     // MARK: - 同侧互斥（实时，不等抬手）

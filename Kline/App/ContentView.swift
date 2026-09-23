@@ -21,6 +21,7 @@ struct ContentView: View {
     /// 想点「首页 / 模拟」切换时容易误触到按钮（它比 Tab 更靠上、命中区 56/128.8pt 也更大）
     @State private var bottomBarHeight: CGFloat = 0
     @ObservedObject private var detailRouter = DetailRouter.shared
+    @ObservedObject private var accessoryCoordinator = FloatingAccessoryCoordinator.shared
     /// 全 App 显示主题（个人中心可切换：日间 / 夜间 / 跟随系统）
     @ObservedObject private var themeStore = KlineThemeStore.shared
     private let doubleTapInterval: TimeInterval = 0.3
@@ -37,6 +38,12 @@ struct ContentView: View {
     private let tabIDs = ["tab.home", "tab.favorites", "tab.market", "tab.simulation"]
 
     private var detailItem: MetaItem? { detailRouter.item }
+
+    /// 两个悬浮按钮当前是否应显示：详情页打开 + 自己的面板没开 + K 线详情页无弹窗。
+    /// 联动多图光标自动移动另有 hidesDuringCursorAutoMove() modifier 处理，不在此聚合
+    private var isButtonVisible: Bool {
+        !isAccessoryPanelPresented && !accessoryCoordinator.isDetailViewPopupActive
+    }
 
     var body: some View {
         ZStack {
@@ -99,26 +106,27 @@ struct ContentView: View {
                 }
             }
         )
-        // 悬浮按钮（仿辅助触控，两个）与快捷面板：只作用于「自选」/「行情」两个 Tab。
-        // K 线详情页是根视图的全屏 overlay、打开时不改变 selectedTab，所以从自选/行情进入的
-        // 详情页（以及其上的多图联动等）都自动命中；首页搜索进入的 K 线页 selectedTab == 0，不显示。
-        // 面板呈现期间按钮隐藏（opacity 0 + 关闭命中），关闭后原位恢复
+        // 悬浮按钮（仿辅助触控，两个）与快捷面板：**只在 K 线详情页打开时显示**。
+        // K 线详情页是根视图的全屏 overlay（detailItem != nil），自选/行情列表页不再显示按钮。
+        // KlineDetailView 内任何弹窗（设置/搜索/编辑器/confirmationDialog/钻取）都会通过 coordinator
+        // 的 isDetailViewPopupActive 推送出来，此处统一隐藏按钮；弹窗全部关闭后自动恢复。
+        // 联动多图光标自动移动期间同样自动隐藏（hidesDuringCursorAutoMove）
         .overlay(
             Group {
-                if selectedTab == 1 || selectedTab == 2 {
+                if detailItem != nil {
                     FloatingAccessoryButton(action: {
                         withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
                     }, bottomClearance: bottomBarHeight)
-                        .opacity(isAccessoryPanelPresented ? 0 : 1)
-                        .allowsHitTesting(!isAccessoryPanelPresented)
+                        .opacity(isButtonVisible ? 1 : 0)
+                        .allowsHitTesting(isButtonVisible)
                         // 联动多图模式下光标自动移动（贴边自动滚动、抬手后仍继续）期间整体隐藏，
                         // 让出正在滚动的图表；停止后自动恢复
                         .hidesDuringCursorAutoMove()
                         // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
                         // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
                         FloatingAccessoryWheel(bottomClearance: bottomBarHeight)
-                            .opacity(isAccessoryPanelPresented ? 0 : 1)
-                            .allowsHitTesting(!isAccessoryPanelPresented)
+                            .opacity(isButtonVisible ? 1 : 0)
+                            .allowsHitTesting(isButtonVisible)
                             .hidesDuringCursorAutoMove()
                 }
                 if isAccessoryPanelPresented {

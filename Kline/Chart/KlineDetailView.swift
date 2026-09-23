@@ -224,6 +224,15 @@ struct KlineDetailView: View {
         }
     }
 
+    /// K 线详情页是否有任何弹窗 / 覆盖层打开（聚合全部弹窗 state）。
+    /// 为真时悬浮按钮应隐藏（避免压在弹窗之上）。推送到 FloatingAccessoryCoordinator，
+    /// 由 ContentView 的 overlay 订阅后统一处理按钮可见性 —— KlineDetailView 不直接持有悬浮按钮
+    private var isAnyPopupActive: Bool {
+        showSettings || showSearch || showCustomEditor || showSystemEditor
+        || showResetLinkedConfirm || showPeriodPicker || showViewCountPicker || showChartStylePicker
+        || drillIn != nil
+    }
+
     /// 当前标的的联动视图数量（用于设置页下拉勾选；无记录时默认 2 视图）。
     /// 传 nameHint：首次初始化/修复旧数据时，把主标的 name/code/type 同步写入 2 个默认视图
     private var linkedViewCount: LinkedViewCount {
@@ -346,6 +355,11 @@ struct KlineDetailView: View {
             if let d = drillIn {
                 queryDrillInSeries(metaID: d.metaID, period: d.period)
             }
+        }
+        // 弹窗聚合推送到协调对象：ContentView 的悬浮按钮 overlay 订阅 isDetailViewPopupActive 后隐藏按钮。
+        // 不在 ViewBuilder 闭包里写赋值语句（之前 buggy commit 的坑），用 onChange 在渲染循环外安全推送
+        .onChange(of: isAnyPopupActive) { active in
+            FloatingAccessoryCoordinator.shared.setDetailViewPopupActive(active)
         }
         // 键盘避让已由 ContentView 根部全局禁用（覆盖单图搜索与双联动 tile 搜索）；
         // 公式编辑器走 fullScreenCover 独立图层，自管键盘行为，不受影响
