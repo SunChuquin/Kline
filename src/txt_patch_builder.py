@@ -33,16 +33,20 @@ docstring）。但它自己会开 2 次句柄，若先调用它再另开一次�
 三条路径
 --------
 · `append`：只解析尾部新增行，**全部日线行直接进包**（不做行级比对，因为文件前 `旧长度-18`
-  字节与旧 txt 逐字节一致 ⇒ 其历史行与库内必然相同）。周/月线**必须重算被触及的周期**：
+  字节与旧 txt 逐字节一致 ⇒ 其历史行与库内必然相同）。周/月/季/年线用**增量合并**：开局
+  **一次性**由基线最大交易日推出当期四个周期（候选集），每个标的**只对被新数据触及的周期**
+  做一次索引范围查询取基线那一根 bar，与新日线合并（基线无该周期 bar → 直接用新数据聚合）。
   基线可能在**未完成周期**处截断（实测基线止于 20260828，20260831 仍在 8 月 → 8 月月线要更新）。
-· `rewrite`：整文件解析 → 聚合 → 与基线**全部**行比对 → 只发真正不同/新增的。
+· `rewrite`：整文件解析 → 聚合 → 与基线**全部**行比对 → 只发真正不同/新增的（整只标的全量重算）。
 · `new`（仅新目录有）：整文件解析 → 全部行进包；meta 从 txt 表头解析 code/name。
 
-周/月线聚合口径（**照抄 `tdx_parser.py:508-551 handle_data`，不得另发明**）
---------------------------------------------------------------------------
+周/月/季/年线聚合口径（**照抄 `tdx_parser.py:493-551 period_key/handle_data`，不得另发明**）
+---------------------------------------------------------------------------------------------
 同一周期内：`open` 取该周期**第一行**、`high = max`、`low = min`、`close` 取**最后一行**、
 `vol`/`amo` **累加**；周期 `date` = **该周期第一个交易日**（周线 = 该周首个交易日、月线 = 该月
-首个交易日）。与 `live_db_builder.py` 的分片口径一致。
+首个交易日、季线 = 该季首个交易日、年线 = 该年首个交易日）。分组键与 `tdx_parser.period_key`
+一致：周 = 该周周一、月 = `YYYYMM`、季 = `YYYYQ`（`year*10+(month-1)//3+1`）、年 = `YYYY`。
+与 `live_db_builder.py` 的分片口径一致。
 
 性能红线（Task 0 实测，缺一条就超时）
 --------------------------------------
@@ -100,8 +104,12 @@ FIELDS = ("open", "high", "low", "close", "vol", "amo")
 PATCH_PREFIX = "patch_"
 DEFAULT_BASE_DB = r"C:\Users\sunck\home\tdx_baseline.db"
 DEFAULT_OUT = r"c:\Users\sunck\home\projects\ios\Kline\build_logs\patches"
-TAIL_PERIOD_ROWS = 8               # append 文件只比基线周/月最后 8 行（性能红线 3）
+TAIL_PERIOD_ROWS = 8               # append 文件只比基线周期表最后 8 行（性能红线 3）
 TXT_EXT = ".txt"
+# 补丁携带的五张周期表（**分片契约仍是三张**，只有补丁走这里）
+PATCH_PERIODS = ("daily", "weekly", "monthly", "quarterly", "yearly")
+# append 时每个周期都要「索引范围查询基线那一根 bar」→ 合并（Task 1.3）
+MERGE_PERIODS = ("weekly", "monthly", "quarterly", "yearly")
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +139,49 @@ def month_first(date_int):
     return date_int // 100 * 100 + 1
 
 
+def quarter_key(date_int):
+    """YYYYMMDD → YYYYQ（Q=1~4），**口径照抄 `tdx_parser.period_key`**。"""
+    y, m = date_int // 10000, date_int // 100 % 100
+    return y * 10 + (m - 1) // 3 + 1
+
+
+def year_key(date_int):
+    """YYYYMMDD → YYYY，**口径照抄 `tdx_parser.period_key`**。"""
+    return date_int // 10000
+
+
+def quarter_first(date_int):
+    """该日期所在季度的日历起始（YYYYMMDD，季首月 1 号）。"""
+    y, m = date_int // 10000, date_int // 100 % 100
+    return y * 10000 + (((m - 1) // 3) * 3 + 1) * 100 + 1
+
+
+def year_first(date_int):
+    """该日期所在年份的日历起始（YYYYMMDD，1 月 1 号）。"""
+    return date_int // 10000 * 10000 + 101
+
+
+def period_start(date_int, period):
+    """该周期行的「日历起始日」：周=周一、月=当月 1 号、季=季首月 1 号、年=1 月 1 号。"""
+    if period == "weekly":
+        return monday_key(date_int)
+    if period == "monthly":
+        return month_first(date_int)
+    if period == "quarterly":
+        return quarter_first(date_int)
+    return year_first(date_int)
+
+
+def period_cal_end(cal_start, period):
+    """周期日历起始日 → 该周期日历结束日（YYYYMMDD）。用于「索引范围查询基线那一根 bar」。"""
+    d = datetime.date(cal_start // 10000, cal_start // 100 % 100, cal_start % 100)
+    if period == "weekly":
+        return L.date_to_int(d + datetime.timedelta(days=6))
+    span = {"monthly": 32, "quarterly": 93, "yearly": 366}[period]
+    nxt = (d + datetime.timedelta(days=span)).replace(day=1)     # 该周期结束月之后的 1 号
+    return L.date_to_int(nxt - datetime.timedelta(days=1))
+
+
 def agg_rows(rows, key_fn):
     """流式聚合（照抄 tdx_parser.handle_data 的语义）。
 
@@ -154,9 +205,61 @@ def agg_rows(rows, key_fn):
     return [tuple(x) for x in out]
 
 
-def period_start(date_int, period):
-    """该周期行的「日历起始日」：周=周一，月=当月 1 号。"""
-    return monday_key(date_int) if period == "weekly" else month_first(date_int)
+# ---------------------------------------------------------------------------
+# 增量合并（append 路径）：基线该周期那一根 bar ⊕ 新日线（Task 1.2 / 1.3）
+# ---------------------------------------------------------------------------
+
+def baseline_period_bar(base, mid, period, cal_start, cal_end):
+    """索引范围查询基线里该周期的那一根 bar（date 落在 [cal_start, cal_end]），无则 None。"""
+    r = base.execute(
+        "SELECT date,open,high,low,close,vol,amo FROM %s "
+        "WHERE meta_id=? AND date>=? AND date<=? ORDER BY date LIMIT 1" % period,
+        (mid, cal_start, cal_end)).fetchone()
+    if r is None:
+        return None
+    return (int(r[0]), r[1], r[2], r[3], r[4], r[5] or 0.0, r[6] or 0.0)
+
+
+def merge_period_bar(new_rows, base_bar):
+    """新日线（升序，同一周期）与基线该周期 bar 合并；基线无 bar → 直接用新数据聚合。
+
+    口径与整周期重算**逐字段等价**（新数据必在基线之后，故 close 取新末行、open 取基线首行）：
+    open 取周期首行、high/low 取极值、close 取末行、vol/amo 累加；date = 该周期首个交易日。
+    """
+    hi = max(r[2] for r in new_rows)
+    lo = min(r[3] for r in new_rows)
+    vol = sum(r[5] for r in new_rows)
+    amo = sum(r[6] for r in new_rows)
+    if base_bar is None:
+        return (new_rows[0][0], new_rows[0][1], hi, lo, new_rows[-1][4], vol, amo)
+    return (base_bar[0], base_bar[1], max(base_bar[2], hi), min(base_bar[3], lo),
+            new_rows[-1][4], base_bar[5] + vol, base_bar[6] + amo)
+
+
+def merge_period_rows(base, mid, period, new_daily, lo):
+    """对某周期，按「被新数据触及的周期」分组 → 取基线那一根 bar → 合并（增量合并）。
+
+    · `lo` = 开局**一次性**由基线最大交易日 dmax 推出的「当期」日历起始（候选集，见 main）。
+      常态下新数据全落在当期（`period_start(last)==lo`）→ 只触及 1 个周期，只查一次基线。
+    · 守卫：日历起始 < lo 的周期直接跳过（基线若未截断到该周期，`min()` 会取到上一周期而
+      产出**局部**周期行；被跳过的周期不受新数据影响，其基线行本就正确）。
+    · 返回升序的周期行 `(date,open,high,low,close,vol,amo)`。
+    """
+    if period_start(new_daily[-1][0], period) == lo:
+        starts = [lo]
+    else:
+        starts = sorted({period_start(r[0], period) for r in new_daily})
+    out = []
+    for cs in starts:
+        if cs < lo:
+            continue
+        rs = sorted((r for r in new_daily if period_start(r[0], period) == cs),
+                    key=lambda x: x[0])
+        if not rs:
+            continue
+        bar = baseline_period_bar(base, mid, period, cs, period_cal_end(cs, period))
+        out.append(merge_period_bar(rs, bar))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +366,12 @@ def diff_rows(cand, have, tol):
     return out
 
 
+def _have_all(base, mid, period):
+    """基线该 file 某周期的**全部**行 → {date: (open,...,amo)}（rewrite 比对用）。"""
+    return {int(r[0]): r[1:] for r in base.execute(
+        "SELECT date,open,high,low,close,vol,amo FROM %s WHERE meta_id=?" % period, (mid,))}
+
+
 def _emit(rows, file_str, period, cand):
     """把候选行写入 `rows[period]`（补丁行格式：file,date,open,high,low,close,vol,amo）。"""
     for r in cand:
@@ -295,9 +404,11 @@ def indep_parse(text):
 
 def indep_group(daily, period):
     """独立聚合（dict 分组，与出包路径的流式聚合实现不同、口径相同）。"""
+    key_fn = {"weekly": monday_key, "monthly": month_key,
+              "quarterly": quarter_key, "yearly": year_key}[period]
     groups, order = {}, []
     for r in daily:
-        k = monday_key(r[0]) if period == "weekly" else month_key(r[0])
+        k = key_fn(r[0])
         if k not in groups:
             groups[k] = list(r)
             order.append(k)
@@ -333,8 +444,8 @@ def run_selfcheck(base, idmap, rows, old_dir, new_dir, kind_map, n, tol, seed):
              sum(1 for f in pick if f in set(rews)), seed, tol))
 
     # 补丁索引：{period: {file: {date: (open..amo)}}}
-    pk = {p: {} for p in L.PERIODS}
-    for period in L.PERIODS:
+    pk = {p: {} for p in PATCH_PERIODS}
+    for period in PATCH_PERIODS:
         for row in rows[period]:
             if row[0] in pick_set:
                 pk[period].setdefault(row[0], {})[row[1]] = row[2:]
@@ -347,11 +458,11 @@ def run_selfcheck(base, idmap, rows, old_dir, new_dir, kind_map, n, tol, seed):
         with open(path, "rb") as fh:
             text = fh.read().decode("gbk", "replace")      # 完整解析整个新 txt（不走尾部捷径）
         cands = {"daily": indep_parse(text)}
-        cands["weekly"] = indep_group(cands["daily"], "weekly")
-        cands["monthly"] = indep_group(cands["daily"], "monthly")
+        for p in MERGE_PERIODS:
+            cands[p] = indep_group(cands["daily"], p)
         mid = idmap.get(f)
         file_bad = []
-        for period in L.PERIODS:
+        for period in PATCH_PERIODS:
             checks += 1
             have = {}
             if mid is not None:
@@ -471,7 +582,15 @@ def main(argv=None):
     names = sorted(n for n in os.listdir(args.new_txt_dir) if n.endswith(TXT_EXT))
     print("新目录 txt 文件数: %d；基线 meta: %d 只" % (len(names), len(idmap)))
 
-    rows = {"meta": [], "daily": [], "weekly": [], "monthly": []}
+    # 开局**一次性**：由基线最大交易日 dmax 推出「当期」周/月/季/年四个周期（可能不完整的
+    # 候选集）。每个标的的增量合并直接复用这组 lo，**不在标的循环里重复判断当期**（Task 1.2）。
+    dmax = base.execute("SELECT MAX(date) FROM daily").fetchone()[0]
+    LO = {p: period_start(int(dmax), p) for p in MERGE_PERIODS}
+    print("基线最大交易日 dmax=%s → 当期日历起始: weekly=%s monthly=%s quarterly=%s yearly=%s"
+          % (dmax, LO["weekly"], LO["monthly"], LO["quarterly"], LO["yearly"]))
+
+    rows = {"meta": [], "daily": [], "weekly": [], "monthly": [],
+            "quarterly": [], "yearly": []}
     per_file = {}
     kind_map = {}
     n_app = n_rew = n_new = 0
@@ -499,63 +618,59 @@ def main(argv=None):
         n_new += kind == "new"
 
         if kind == "append":
-            # 只解析尾部新增行（全部日线直接进包）；周/月线重算被触及的周期
+            # 只解析尾部新增行（全部日线直接进包）；周/月/季/年**只对被新数据触及的周期**
+            # 做一次索引范围查询取基线那一根 bar，与新日线**合并**（不整周期重算）。
             dailies = new_daily
             if new_daily:
-                d0 = new_daily[0][0]
-                lo = min(monday_key(d0), month_first(d0))
-                tail = [(int(r[0]), r[1], r[2], r[3], r[4], r[5] or 0.0, r[6] or 0.0)
-                        for r in base.execute(
-                            "SELECT date,open,high,low,close,vol,amo FROM daily "
-                            "WHERE meta_id=? AND date>=? ORDER BY date", (mid, lo))]
-                merged = tail + new_daily
-                wk = agg_rows(merged, monday_key)
-                mo = agg_rows(merged, month_key)
-                # 只保留「日历起始 >= lo」的周期行：lo 落在上一月/上一周时会产出**局部**周期行，
-                # 那既非真差异、值也是错的（min() 取到上一月时该月只剩几天）。被跳过的周期不受
-                # 新增数据影响，其基线行本来就是对的，故不发。
-                wk = [r for r in wk if period_start(r[0], "weekly") >= lo]
-                mo = [r for r in mo if period_start(r[0], "monthly") >= lo]
+                wk = merge_period_rows(base, mid, "weekly", new_daily, LO["weekly"])
+                mo = merge_period_rows(base, mid, "monthly", new_daily, LO["monthly"])
+                qt = merge_period_rows(base, mid, "quarterly", new_daily, LO["quarterly"])
+                yr = merge_period_rows(base, mid, "yearly", new_daily, LO["yearly"])
             else:
-                wk, mo = [], []
+                # 停牌标的（新数据为空）→ 不产生任何 bar（Task 1.5）
+                wk, mo, qt, yr = [], [], [], []
         else:
-            # rewrite（整文件解析）→ 聚合 → 与基线全部行比对
+            # rewrite（整文件解析）→ 整只标的所有周期**全量重算** → 与基线全部行比对
             wk = agg_rows(new_daily, monday_key)
             mo = agg_rows(new_daily, month_key)
+            qt = agg_rows(new_daily, quarter_key)
+            yr = agg_rows(new_daily, year_key)
             dailies = None
         t_a += time.time() - t0
 
         t0 = time.time()
         if dailies is not None:
             # append / 基线缺失：日线全部直接进包（append 不做行级比对）
-            ddiff, wdiff, mdiff = dailies, wk, mo
+            ddiff = dailies
             if kind == "append":
-                # 周/月：只与基线**最后 8 行**比对（性能红线 3）
-                have_w = {int(r[0]): r[1:] for r in base.execute(
-                    "SELECT date,open,high,low,close,vol,amo FROM weekly WHERE meta_id=? "
-                    "ORDER BY date DESC LIMIT %d" % TAIL_PERIOD_ROWS, (mid,))}
-                have_m = {int(r[0]): r[1:] for r in base.execute(
-                    "SELECT date,open,high,low,close,vol,amo FROM monthly WHERE meta_id=? "
-                    "ORDER BY date DESC LIMIT %d" % TAIL_PERIOD_ROWS, (mid,))}
-                wdiff = diff_rows(wk, have_w, args.tol)
-                mdiff = diff_rows(mo, have_m, args.tol)
+                # 周/月/季/年：只与基线**最后 TAIL_PERIOD_ROWS 行**比对（性能红线 3）
+                period_diff = {}
+                for period, cand in (("weekly", wk), ("monthly", mo),
+                                     ("quarterly", qt), ("yearly", yr)):
+                    have = {int(r[0]): r[1:] for r in base.execute(
+                        "SELECT date,open,high,low,close,vol,amo FROM %s WHERE meta_id=? "
+                        "ORDER BY date DESC LIMIT %d" % (period, TAIL_PERIOD_ROWS), (mid,))}
+                    period_diff[period] = diff_rows(cand, have, args.tol)
+                wdiff, mdiff = period_diff["weekly"], period_diff["monthly"]
+                qdiff, ydiff = period_diff["quarterly"], period_diff["yearly"]
+            else:
+                wdiff, mdiff, qdiff, ydiff = wk, mo, qt, yr
         else:
             # rewrite：与基线**全部**行比对，只发真正不同/新增的
-            have_d = {int(r[0]): r[1:] for r in base.execute(
-                "SELECT date,open,high,low,close,vol,amo FROM daily WHERE meta_id=?", (mid,))}
-            have_w = {int(r[0]): r[1:] for r in base.execute(
-                "SELECT date,open,high,low,close,vol,amo FROM weekly WHERE meta_id=?", (mid,))}
-            have_m = {int(r[0]): r[1:] for r in base.execute(
-                "SELECT date,open,high,low,close,vol,amo FROM monthly WHERE meta_id=?", (mid,))}
-            ddiff = diff_rows(new_daily, have_d, args.tol)
-            wdiff = diff_rows(wk, have_w, args.tol)
-            mdiff = diff_rows(mo, have_m, args.tol)
+            ddiff = diff_rows(new_daily, _have_all(base, mid, "daily"), args.tol)
+            wdiff = diff_rows(wk, _have_all(base, mid, "weekly"), args.tol)
+            mdiff = diff_rows(mo, _have_all(base, mid, "monthly"), args.tol)
+            qdiff = diff_rows(qt, _have_all(base, mid, "quarterly"), args.tol)
+            ydiff = diff_rows(yr, _have_all(base, mid, "yearly"), args.tol)
         _emit(rows, f, "daily", ddiff)
         _emit(rows, f, "weekly", wdiff)
         _emit(rows, f, "monthly", mdiff)
+        _emit(rows, f, "quarterly", qdiff)
+        _emit(rows, f, "yearly", ydiff)
 
-        rec = {"daily": len(ddiff), "weekly": len(wdiff), "monthly": len(mdiff)}
-        if any(rec.get(p) for p in L.PERIODS):
+        rec = {"daily": len(ddiff), "weekly": len(wdiff), "monthly": len(mdiff),
+               "quarterly": len(qdiff), "yearly": len(ydiff)}
+        if any(rec.get(p) for p in PATCH_PERIODS):
             per_file[f] = rec
             m = meta_src.get(f)
             if m:
@@ -568,8 +683,8 @@ def main(argv=None):
         t_b += time.time() - t0
 
     t_loop = time.time() - t0_all
-    n_daily, n_weekly, n_monthly = (len(rows["daily"]), len(rows["weekly"]), len(rows["monthly"]))
-    total_rows = n_daily + n_weekly + n_monthly
+    n_daily = len(rows["daily"])
+    total_rows = sum(len(rows[p]) for p in PATCH_PERIODS)
     print("-" * 78)
     print("分类: append=%d rewrite=%d new=%d（合计 %d）" % (n_app, n_rew, n_new, len(names)))
     if skipped_no_meta:
@@ -579,7 +694,8 @@ def main(argv=None):
     print("阶段 A（分类+解析，融合，2 次句柄/文件）  %.1fs" % t_a)
     print("阶段 B（比对/聚合/汇总）               %.1fs" % t_b)
     print("受影响 file 数: %d（bkt_meta）" % len(rows["meta"]))
-    print("补丁行数: daily=%d weekly=%d monthly=%d 合计=%d" % (n_daily, n_weekly, n_monthly, total_rows))
+    print("补丁行数: %s 合计=%d"
+          % (" ".join("%s=%d" % (p, len(rows[p])) for p in PATCH_PERIODS), total_rows))
     print("（逐文件主循环总耗时 %.1fs）" % t_loop)
 
     if total_rows == 0:
@@ -589,7 +705,7 @@ def main(argv=None):
                                        "✅ 未被修改" if db_state(args.base_db) == before_base else "❌ 被修改!"))
         return 0
 
-    max_date = max(r[1] for p in L.PERIODS for r in rows[p])
+    max_date = max(r[1] for p in PATCH_PERIODS for r in rows[p])
     updated_at = L.date_int_to_epoch_utc(max_date)
     print("包内最新日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at))
 
@@ -604,14 +720,14 @@ def main(argv=None):
         os.makedirs(out_dir, exist_ok=True)
         tmp_path = out_path + ".tmp"
         t0 = time.time()
-        # 表结构 / 字段顺序逐字沿用 live_db_builder.build_bucket_file（bkt_meta/daily/weekly/monthly）
-        L.build_bucket_file(tmp_path, rows, updated_at)
+        # 表结构 / 字段顺序逐字沿用 live_db_builder.build_bucket_file；补丁携带**五张表**
+        L.build_bucket_file(tmp_path, rows, updated_at, periods=PATCH_PERIODS)
         # 写后轻量自检：各表行数与内存 rows 一致、bkt_meta 无重复
         chk = sqlite3.connect(L.ro_uri(tmp_path), uri=True)
         try:
             got = chk.execute("SELECT COUNT(*) FROM bkt_meta").fetchone()[0]
             assert got == len(rows["meta"]), "bkt_meta 行数不一致: %d/%d" % (got, len(rows["meta"]))
-            for period in L.PERIODS:
+            for period in PATCH_PERIODS:
                 cnt = chk.execute("SELECT COUNT(*) FROM bkt_%s" % period).fetchone()[0]
                 assert cnt == len(rows[period]), \
                     "bkt_%s 行数不一致: %d/%d" % (period, cnt, len(rows[period]))
@@ -627,12 +743,12 @@ def main(argv=None):
 
         # 受影响 file 清单（file / 序号 / 各周期行数 / 累计 rows 与累计 bytes 估计）
         avg_row = size / float(total_rows)
-        columns = ["daily", "weekly", "monthly", "rows", "cum_rows", "cum_bytes_est"]
+        columns = list(PATCH_PERIODS) + ["rows", "cum_rows", "cum_bytes_est"]
         cum_r = 0
         per_file_report = {}
         for f in per_file:
             rec = dict(per_file[f])
-            rec["rows"] = sum(rec.get(p, 0) for p in L.PERIODS)
+            rec["rows"] = sum(rec.get(p, 0) for p in PATCH_PERIODS)
             per_file_report[f] = rec
         cum_r = 0
         ordered = {}
@@ -652,7 +768,8 @@ def main(argv=None):
             "容差   : abs(a-b) > %g（字段 %s 任一变化即计入）" % (args.tol, "/".join(FIELDS)),
             "包内最新日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at),
             "包文件 : %s   bytes=%d   sha256=%s" % (out_path, size, sha),
-            "包内行数: daily=%d weekly=%d monthly=%d 合计=%d" % (n_daily, n_weekly, n_monthly, total_rows),
+            "包内行数: %s 合计=%d"
+            % (" ".join("%s=%d" % (p, len(rows[p])) for p in PATCH_PERIODS), total_rows),
             "平均每行约 %.1f B；cum_bytes_est = 累计行数 × 平均行字节（SQLite 单文件无法按 file 精确归因）"
             % avg_row,
         ]

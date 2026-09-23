@@ -13,10 +13,12 @@
 //   3) 指纹 = (size, mtime) 快速键 + 可选 sha256（CryptoKit，iOS 13+）；
 //   4) reload()：清缓存、关旧连接、重开、重算指纹、更新 isAvailable，返回重载前后行数 / 日期区间；
 //   5) startWatching(interval:)：前台定时指纹检查（指纹未变则什么都不做）+ 回前台立即检查一次；
-//   6) **写入**：`mergeBucket(atPath:)` 把云端分片（`bkt_meta/bkt_daily/bkt_weekly/bkt_monthly`）
-//      合并进本地 `live_meta/live_daily/live_weekly/live_monthly`（INSERT OR REPLACE，同 date 以分片为准）；
+//   6) **写入**：`mergeBucket(atPath:)` 把云端分片（`bkt_meta` + `bkt_<周期>`）合并进本地
+//      `live_meta` + `live_<周期>`（INSERT OR REPLACE，同 date 以分片为准）；
 //      `trim(beforeDate:)` 删掉主库已有的冗余日期；本地库不存在时按 schema 新建。
-//  只发布 daily/weekly/monthly（季/年线无法被有限窗口完整覆盖 → 视图回落主库）。
+//  发布**五张**周期表（daily/weekly/monthly/quarterly/yearly），查询层统一「live 覆盖 main」；
+//  季/年线裁剪按**周期感知**只保留当期 bar —— 它们的 date = 该周期**首个交易日**（如季线 20260701），
+//  远早于「最近 N 个交易日」，按 `date <= beforeDate` 裁会误删当期 bar。
 //
 //  硬约束：
 //   - 主库 `tdx.db` 全程只读不改（写回主库是 `MainDBMerger` 显式动作）；增量库不可用时行为与「没有本类」完全一致；
@@ -111,6 +113,9 @@ struct LiveMergeResult {
     var dailyRows = 0
     var weeklyRows = 0
     var monthlyRows = 0
+    /// 当期季/年 bar 的写入行数（分片 / 每日路径写入 `live_quarterly`、`live_yearly`）
+    var quarterlyRows = 0
+    var yearlyRows = 0
     var metaRows = 0
     /// 合并后本地增量库覆盖的 file 数（live_meta 行数）
     var coveredFiles = 0
@@ -144,14 +149,18 @@ struct LiveIncrementRow {
     var amo: Double
 }
 
-/// 增量库三表 + meta 的全量快照（在 LiveDataStore 队列上取出后交主库写）
+/// 增量库五表 + meta 的全量快照（在 LiveDataStore 队列上取出后交主库写）
 struct LiveIncrementSnapshot {
     var meta: [LiveIncrementMeta] = []
     var daily: [LiveIncrementRow] = []
     var weekly: [LiveIncrementRow] = []
     var monthly: [LiveIncrementRow] = []
+    var quarterly: [LiveIncrementRow] = []
+    var yearly: [LiveIncrementRow] = []
 
-    var isEmpty: Bool { daily.isEmpty && weekly.isEmpty && monthly.isEmpty }
+    var isEmpty: Bool {
+        daily.isEmpty && weekly.isEmpty && monthly.isEmpty && quarterly.isEmpty && yearly.isEmpty
+    }
 }
 
 /// 「直接写入当日K线」的 meta 行（东财取数结果 → `live_meta`；键 = file）
@@ -182,18 +191,22 @@ final class LiveDataStore: ObservableObject {
     /// 增量库文件名（Documents 下，由外部推送覆盖）
     static let dbFileName = "tdx_live.db"
 
-    /// 增量库只发布的周期表（与主库同名、同字段；**本地实际表名带 `live_` 前缀**）。
-    /// 季/年线不发布 → `slice(file:table:)` 对它们返回 nil，查询层自然回落主库。
-    static let periodTables = ["daily", "weekly", "monthly"]
+    /// 增量库发布的周期表（与主库同名、同字段；**本地实际表名带 `live_` 前缀**）。
+    /// 五张表全发布 → 查询层统一「live 覆盖 main」（季/年线不再回落主库）。
+    static let periodTables = ["daily", "weekly", "monthly", "quarterly", "yearly"]
 
-    /// 云端分片表名 → 本地表名 的显式映射（分片由生成端发布，表名带 `bkt_` 前缀）
+    /// 云端分片表名 → 本地表名 的显式映射（分片由生成端发布，表名带 `bkt_` 前缀）。
+    /// 分片缺 `bkt_quarterly`/`bkt_yearly` 时按「跳过该表」处理（合并逻辑逐个判存在性）。
     static let bucketTableMap: [(local: String, bucket: String)] = [
         ("live_daily", "bkt_daily"),
         ("live_weekly", "bkt_weekly"),
         ("live_monthly", "bkt_monthly"),
+        ("live_quarterly", "bkt_quarterly"),
+        ("live_yearly", "bkt_yearly"),
     ]
 
-    /// 本地表结构（v3：键为 `file`；本地增量库不存在时按此新建）
+    /// 本地表结构（v3：键为 `file`；本地增量库不存在时按此新建）。
+    /// 全为 `CREATE TABLE IF NOT EXISTS` → 可**幂等**重复执行，用于补齐老库缺失的新周期表。
     private static let schemaSQL = """
         CREATE TABLE IF NOT EXISTS live_meta(file TEXT PRIMARY KEY, code TEXT, name TEXT,
                      type TEXT, updated_at INTEGER);
@@ -203,6 +216,10 @@ final class LiveDataStore: ObservableObject {
                      close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));
         CREATE TABLE IF NOT EXISTS live_monthly(file TEXT, date INTEGER, open REAL, high REAL, low REAL,
                      close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));
+        CREATE TABLE IF NOT EXISTS live_quarterly(file TEXT, date INTEGER, open REAL, high REAL, low REAL,
+                     close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));
+        CREATE TABLE IF NOT EXISTS live_yearly(file TEXT, date INTEGER, open REAL, high REAL, low REAL,
+                     close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));
         """
 
     /// 旧版（`code` 键）增量库的表清理：增量内容可由分片完全重建，故直接丢弃
@@ -210,8 +227,6 @@ final class LiveDataStore: ObservableObject {
         DROP TABLE IF EXISTS live_daily;
         DROP TABLE IF EXISTS live_weekly;
         DROP TABLE IF EXISTS live_monthly;
-        DROP TABLE IF EXISTS live_quarterly;
-        DROP TABLE IF EXISTS live_yearly;
         DROP TABLE IF EXISTS live_meta;
         """
 
@@ -275,8 +290,8 @@ final class LiveDataStore: ObservableObject {
     // MARK: - 取数：某 file 在某周期表的全部增量行
 
     /// 某 file（如 `SH#600000`）在某周期表上的全部增量行（date 降序）。
-    /// - 增量库不可用 / 表名不合法（含季/年线）→ 返回 nil（调用方走纯主库路径）；
-    /// - 该 file 无增量行 → 返回空切片（`isEmpty == true`）。
+    /// - 增量库不可用 / 表名不合法（不在 `periodTables` 内）→ 返回 nil（调用方走纯主库路径）；
+    /// - 该 file 无增量行 / 本地无该表 → 返回空切片（`isEmpty == true`）。
     func slice(file: String, table: String) -> LiveSlice? {
         guard !file.isEmpty, Self.periodTables.contains(table) else { return nil }
         return queue.sync {
@@ -295,7 +310,7 @@ final class LiveDataStore: ObservableObject {
         queue.sync { fp }
     }
 
-    /// 三表 + meta 的全量快照（在自身队列上取出，供 MainDBMerger 回写主库；不可用时为空快照）
+    /// 五表 + meta 的全量快照（在自身队列上取出，供 MainDBMerger 回写主库；不可用时为空快照）
     func allIncrementRows() -> LiveIncrementSnapshot {
         queue.sync { _allIncrementRowsLocked() }
     }
@@ -323,23 +338,33 @@ final class LiveDataStore: ObservableObject {
     /// **先与库内逐字段比对，只写真正变化 / 新增的行**（浮点容差 1e-6），单事务内
     /// `live_meta` 补缺失标的（`INSERT OR IGNORE`）+ `live_daily` 按 `(file, date)` UPSERT
     /// （表名 / 字段顺序与 `_mergeBucketLocked` 一致）。本地增量库不存在时按既有 schema 新建。
+    /// - Parameter periodBars: 可选「当期季/年 bar」（键 = `quarterly` / `yearly`，由调用方用
+    ///   **主库当期 bar ⊕ 新日线** 合并得到），在同一事务内 UPSERT 进 `live_quarterly` / `live_yearly`；
+    ///   同样只写与库内不一致的行。默认空 → 行为与改动前完全一致。
     /// 与库内完全一致时不写任何行、不开事务，也**不**走热刷新（库文件 sha256 不变 → 不自增 `dataVersion`）。
     /// 确有变化时才刷新缓存与自身指纹（随后的 `reloadAsync` 才判定内容是否真变化）。
     /// completion 在主线程回调。
-    func upsertDaily(metas: [LiveUpsertMeta], bars: [LiveUpsertBar], updatedAt: Int,
+    func upsertDaily(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
+                     periodBars: [String: [LiveUpsertBar]] = [:], updatedAt: Int,
                      completion: @escaping (LiveMergeResult) -> Void) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            let result = self._upsertDailyLocked(metas: metas, bars: bars, updatedAt: updatedAt)
+            let result = self._upsertDailyLocked(metas: metas, bars: bars,
+                                                 periodBars: periodBars, updatedAt: updatedAt)
             // 无变化时 metaRows / dailyRows 均为 0：库文件未变，跳过刷新（否则会白走一次指纹比对链路）
-            if result.ok && (result.metaRows > 0 || result.dailyRows > 0) {
+            if result.ok && (result.metaRows > 0 || result.dailyRows > 0
+                             || result.quarterlyRows > 0 || result.yearlyRows > 0) {
                 self._refreshAfterInternalWriteLocked(reason: "外部写入·清单东财")
             }
             DispatchQueue.main.async { completion(result) }
         }
     }
 
-    /// 删除本地增量三表中 `date <= beforeDate` 的行（主库已有 → 冗余），单事务；completion 在主线程回调
+    /// 裁剪本地增量库（单事务）：
+    /// - 日/周/月：删除 `date <= beforeDate` 的行（主库已有 → 冗余，**行为与改动前一致**）；
+    /// - 季/年：bar 的 `date` = 该周期**首个交易日**，只保留**当期**（`date >= 当期日历起始`），
+    ///   更早周期删掉（否则旧 bar 会在主库更新后遮蔽主库正确值）。
+    /// completion 在主线程回调。
     func trim(beforeDate: Int, completion: @escaping (LiveTrimResult) -> Void) {
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -675,16 +700,15 @@ final class LiveDataStore: ObservableObject {
         return true
     }
 
-    /// 确保表结构是 v3（键为 `file`、daily/weekly/monthly 三表）：
-    /// - 缺 `live_meta`（新库 / 半成品）→ 按 `schemaSQL` 补齐；
-    /// - 存在但是**旧版 `code` 键**（v2 及更早）→ 丢弃重建：增量内容可由分片完全重建，无数据损失。
+    /// 确保表结构是 v3（键为 `file`、五张周期表）：
+    /// - **旧版 `code` 键**（v2 及更早）→ 丢弃重建：增量内容可由分片完全重建，无数据损失；
+    /// - 其余情况一律再执行一次 `schemaSQL`（全为 `CREATE TABLE IF NOT EXISTS`，幂等）→
+    ///   补齐老库缺失的新周期表（`live_quarterly` / `live_yearly`），否则写入会因缺表整体回滚。
     private func _ensureWritableSchemaLocked(_ handle: OpaquePointer) -> Bool {
-        if !_hasTableLocked(handle, "live_meta") {
-            return sqlite3_exec(handle, Self.schemaSQL, nil, nil, nil) == SQLITE_OK
+        if _hasTableLocked(handle, "live_meta") && _hasLegacySchemaLocked(handle) {
+            DebugLogger.shared.log("[Live] 检测到旧版（code 键）增量库 → 重建为 v3（file 键）表结构")
+            guard sqlite3_exec(handle, Self.dropLegacySQL, nil, nil, nil) == SQLITE_OK else { return false }
         }
-        guard _hasLegacySchemaLocked(handle) else { return true }
-        DebugLogger.shared.log("[Live] 检测到旧版（code 键）增量库 → 重建为 v3（file 键）表结构")
-        guard sqlite3_exec(handle, Self.dropLegacySQL, nil, nil, nil) == SQLITE_OK else { return false }
         return sqlite3_exec(handle, Self.schemaSQL, nil, nil, nil) == SQLITE_OK
     }
 
@@ -756,7 +780,8 @@ final class LiveDataStore: ObservableObject {
         } else {
             failed = String(cString: sqlite3_errmsg(handle))
         }
-        // ② 三张周期表（分片表名 bkt_* → 本地 live_*，字段顺序 file,date,open,high,low,close,vol,amo）
+        // ② 五张周期表（分片表名 bkt_* → 本地 live_*，字段顺序 file,date,open,high,low,close,vol,amo）
+        //    分片缺某张表（如老分片没有 bkt_quarterly/bkt_yearly）→ 跳过该表，不影响其余
         if failed == nil {
             for m in Self.bucketTableMap {
                 let exists = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='\(m.bucket)' LIMIT 1;")
@@ -769,9 +794,11 @@ final class LiveDataStore: ObservableObject {
                 }
                 let n = Int(sqlite3_changes(handle))
                 switch m.local {
-                case "live_daily":   r.dailyRows = n
-                case "live_weekly":  r.weeklyRows = n
-                case "live_monthly": r.monthlyRows = n
+                case "live_daily":     r.dailyRows = n
+                case "live_weekly":    r.weeklyRows = n
+                case "live_monthly":   r.monthlyRows = n
+                case "live_quarterly": r.quarterlyRows = n
+                case "live_yearly":    r.yearlyRows = n
                 default: break
                 }
             }
@@ -788,16 +815,18 @@ final class LiveDataStore: ObservableObject {
         }
         r.ok = true
         r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
-        r.message = "合并完成 meta=\(r.metaRows) daily=\(r.dailyRows) weekly=\(r.weeklyRows) monthly=\(r.monthlyRows) 覆盖=\(r.coveredFiles)只"
+        r.message = "合并完成 meta=\(r.metaRows) daily=\(r.dailyRows) weekly=\(r.weeklyRows) monthly=\(r.monthlyRows) quarterly=\(r.quarterlyRows) yearly=\(r.yearlyRows) 覆盖=\(r.coveredFiles)只"
         return r
     }
 
     /// 东财当日K线 → 本地增量库：**先比对后写入**（单事务），全程预处理语句 + 绑定（不拼字符串 SQL），
     /// 任一步失败整体回滚。与库内完全一致（浮点容差 `upsertEpsilon`）时不写任何行、不开事务。
+    /// `periodBars`（键 = `quarterly`/`yearly`）为「当期季/年 bar」，在同一事务内 UPSERT。
     private func _upsertDailyLocked(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
+                                    periodBars: [String: [LiveUpsertBar]],
                                     updatedAt: Int) -> LiveMergeResult {
         var r = LiveMergeResult()
-        guard !metas.isEmpty || !bars.isEmpty else {
+        guard !metas.isEmpty || !bars.isEmpty || !periodBars.isEmpty else {
             r.message = "无数据可写入"
             return r
         }
@@ -806,13 +835,21 @@ final class LiveDataStore: ObservableObject {
             return r
         }
 
-        // ① 写前判定：只保留「库里没有该 (file,date)」或「任一字段不同」的日线，以及 live_meta 尚不存在的标的。
-        //    重复写入同一快照 → 两个数组均为空 → 直接返回（不写库、不刷新，库文件 sha256 不变）
-        let changedBars = bars.filter { !_dailyRowIdenticalLocked(handle, bar: $0) }
+        // ① 写前判定：只保留「库里没有该 (file,date)」或「任一字段不同」的日线、live_meta 尚不存在的标的，
+        //    以及库内不一致的当期季/年 bar。重复写入同一快照 → 全部为空 → 直接返回（不写库、不刷新，库文件 sha256 不变）
+        let changedBars = bars.filter { !_rowIdenticalLocked(handle, table: "live_daily", bar: $0) }
         let newMetas = metas.filter { !_metaExistsLocked(handle, file: $0.file) }
-        guard !changedBars.isEmpty || !newMetas.isEmpty else {
+        var changedPeriodBars: [(table: String, bars: [LiveUpsertBar])] = []
+        for period in ["quarterly", "yearly"] {
+            guard let rows = periodBars[period], !rows.isEmpty,
+                  let table = _localTableNameLocked(period) else { continue }
+            let changed = rows.filter { !_rowIdenticalLocked(handle, table: table, bar: $0) }
+            if !changed.isEmpty { changedPeriodBars.append((table: table, bars: changed)) }
+        }
+        let periodRowCount = periodBars.values.reduce(0) { $0 + $1.count }
+        guard !changedBars.isEmpty || !newMetas.isEmpty || !changedPeriodBars.isEmpty else {
             r.ok = true
-            r.message = "无变化：日线 \(bars.count) 行 / meta \(metas.count) 条均与库内一致 → 跳过写入"
+            r.message = "无变化：日线 \(bars.count) 行 / meta \(metas.count) 条 / 当期季年 \(periodRowCount) 行均与库内一致 → 跳过写入"
             return r
         }
 
@@ -876,6 +913,39 @@ final class LiveDataStore: ObservableObject {
             }
         }
 
+        // ④ 当期季/年 bar：同一事务内按 (file,date) UPSERT（字段顺序与日线一致）
+        if failed == nil {
+            for item in changedPeriodBars {
+                var statement: OpaquePointer?
+                let sql = "INSERT OR REPLACE INTO \(item.table)(file,date,open,high,low,close,vol,amo) "
+                        + "VALUES(?,?,?,?,?,?,?,?);"
+                if sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK {
+                    for b in item.bars {
+                        sqlite3_reset(statement)
+                        sqlite3_clear_bindings(statement)
+                        sqlite3_bind_text(statement, 1, b.file, -1, SQLITE_TRANSIENT)
+                        sqlite3_bind_int64(statement, 2, Int64(b.date))
+                        sqlite3_bind_double(statement, 3, b.open)
+                        sqlite3_bind_double(statement, 4, b.high)
+                        sqlite3_bind_double(statement, 5, b.low)
+                        sqlite3_bind_double(statement, 6, b.close)
+                        sqlite3_bind_double(statement, 7, b.vol)
+                        sqlite3_bind_double(statement, 8, b.amo)
+                        guard sqlite3_step(statement) == SQLITE_DONE else {
+                            failed = "\(item.table)：\(String(cString: sqlite3_errmsg(handle)))"
+                            break
+                        }
+                        let n = Int(sqlite3_changes(handle))
+                        if item.table == "live_quarterly" { r.quarterlyRows += n } else { r.yearlyRows += n }
+                    }
+                    sqlite3_finalize(statement)
+                } else {
+                    failed = "\(item.table) 准备失败：\(String(cString: sqlite3_errmsg(handle)))"
+                }
+                if failed != nil { break }
+            }
+        }
+
         if let failed = failed {
             sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
             r.message = "写入失败（已回滚）\(failed)"
@@ -889,18 +959,19 @@ final class LiveDataStore: ObservableObject {
         r.ok = true
         r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
         r.message = "写入完成 meta新增=\(r.metaRows) 条 / daily变化=\(r.dailyRows) 行"
-            + "（传入 meta \(metas.count) 条 / 日线 \(bars.count) 行，其余与库内一致已跳过）覆盖=\(r.coveredFiles)只"
+            + " / 季\(r.quarterlyRows)行·年\(r.yearlyRows)行"
+            + "（传入 meta \(metas.count) 条 / 日线 \(bars.count) 行 / 当期季年 \(periodRowCount) 行，其余与库内一致已跳过）覆盖=\(r.coveredFiles)只"
         return r
     }
 
     /// 浮点比对容差：仅用于「这次要不要写」，不影响写入值的精度
     private static let upsertEpsilon: Double = 1e-6
 
-    /// live_daily 是否已有该 `(file,date)` 且 6 个数值字段与传入值一致（容差 `upsertEpsilon`）。
+    /// 某周期表是否已有该 `(file,date)` 且 6 个数值字段与传入值一致（容差 `upsertEpsilon`）。
     /// 无该行 / 值不同 / 查询失败 → false（视为需要写入）。
-    private func _dailyRowIdenticalLocked(_ handle: OpaquePointer, bar: LiveUpsertBar) -> Bool {
+    private func _rowIdenticalLocked(_ handle: OpaquePointer, table: String, bar: LiveUpsertBar) -> Bool {
         var statement: OpaquePointer?
-        let sql = "SELECT open,high,low,close,vol,amo FROM live_daily WHERE file = ? AND date = ?;"
+        let sql = "SELECT open,high,low,close,vol,amo FROM \(table) WHERE file = ? AND date = ?;"
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, bar.file, -1, SQLITE_TRANSIENT)
@@ -929,7 +1000,13 @@ final class LiveDataStore: ObservableObject {
         abs(a - b) < upsertEpsilon
     }
 
-    /// 删除三表中 `date <= beforeDate` 的行（单事务；表不存在则跳过）
+    /// 裁剪增量库（单事务；表不存在则跳过）：
+    /// - 日/周/月：`DELETE ... WHERE date <= beforeDate`（主库已有 → 冗余，**行为与改动前一致**）；
+    /// - 季/年：**周期感知**，只保留当期 bar（`DELETE ... WHERE date < 当期日历起始`）。
+    ///   季/年 bar 的 `date` = 该周期**首个交易日**（如季线 `20260701`），远早于「最近 N 个交易日」，
+    ///   若按 `date <= beforeDate` 会被误删（当期 bar 丢）；完全不裁又会累积旧周期 bar，
+    ///   在后续主库更新后**遮蔽**主库正确值。故按周期边界裁。
+    ///   「当期」以 `max(beforeDate, 增量库日线最新交易日)` 为参考日推算（季：当季首月 1 日；年：当年 1 月 1 日）。
     private func _trimLocked(beforeDate: Int) -> LiveTrimResult {
         var r = LiveTrimResult()
         guard let handle = db, beforeDate > 0 else {
@@ -941,16 +1018,22 @@ final class LiveDataStore: ObservableObject {
             r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
             return r
         }
+        // 参考日：取增量库日线最新交易日与 beforeDate 的较大者（主库 lastDate 可能落后于增量库）
+        let referenceDate = Swift.max(beforeDate, _scalarLocked(handle, sql: "SELECT MAX(date) FROM live_daily;"))
         var total = 0
-        for period in ["daily", "weekly", "monthly"] {
+        for period in Self.periodTables {
             guard let table = _localTableNameLocked(period) else { continue }
+            // 季/年按「当期日历起始」为界（严格小于 → 当期 bar 保留）；日/周/月保持 `<= beforeDate`
+            let periodStart = Self.periodCalendarStart(period, referenceDate: referenceDate)
+            let bound = periodStart ?? beforeDate
+            let op = periodStart == nil ? "<=" : "<"
             var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(handle, "DELETE FROM \(table) WHERE date <= ?;", -1, &statement, nil) == SQLITE_OK else {
+            guard sqlite3_prepare_v2(handle, "DELETE FROM \(table) WHERE date \(op) ?;", -1, &statement, nil) == SQLITE_OK else {
                 sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
                 r.message = "准备裁剪 \(table) 语句失败"
                 return r
             }
-            sqlite3_bind_int64(statement, 1, Int64(beforeDate))
+            sqlite3_bind_int64(statement, 1, Int64(bound))
             let stepOK = sqlite3_step(statement) == SQLITE_DONE
             sqlite3_finalize(statement)
             guard stepOK else {
@@ -967,11 +1050,23 @@ final class LiveDataStore: ObservableObject {
         }
         r.ok = true
         r.deletedRows = total
-        r.message = "裁剪完成：删除 \(total) 行（date <= \(beforeDate)）"
+        r.message = "裁剪完成：删除 \(total) 行（日/周/月 date <= \(beforeDate)；季/年 < 当期起始"
+            + "（参考日 \(referenceDate)））"
         return r
     }
 
-    /// 一次读全三表（供 MainDBMerger 在主库侧回写；避免跨队列嵌套）
+    /// 季/年线在参考日所在**当期**的日历起始日（YYYYMMDD）：季 = 当季首月 1 日、年 = 当年 1 月 1 日。
+    /// 复用 `KlinePeriod.periodDateRange` 的既有口径；其余周期返回 nil（走 `<= beforeDate` 老行为）。
+    private static func periodCalendarStart(_ period: String, referenceDate: Int) -> Int? {
+        guard referenceDate > 0 else { return nil }
+        switch period {
+        case "quarterly": return KlinePeriod.periodDateRange(.quarterly, date: referenceDate).0
+        case "yearly":    return KlinePeriod.periodDateRange(.yearly, date: referenceDate).0
+        default:          return nil
+        }
+    }
+
+    /// 一次读全五表（供 MainDBMerger 在主库侧回写；避免跨队列嵌套）
     private func _allIncrementRowsLocked() -> LiveIncrementSnapshot {
         var snap = LiveIncrementSnapshot()
         guard let handle = db else { return snap }
@@ -988,6 +1083,8 @@ final class LiveDataStore: ObservableObject {
         snap.daily = _readRowsLocked(handle, period: "daily")
         snap.weekly = _readRowsLocked(handle, period: "weekly")
         snap.monthly = _readRowsLocked(handle, period: "monthly")
+        snap.quarterly = _readRowsLocked(handle, period: "quarterly")
+        snap.yearly = _readRowsLocked(handle, period: "yearly")
         return snap
     }
 

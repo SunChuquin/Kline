@@ -711,8 +711,14 @@ CREATE TABLE {tbl}(file TEXT, date INTEGER, open REAL, high REAL, low REAL,
 """
 
 
-def build_bucket_file(tmp_path, rows, updated_at):
-    """写一个分片到临时文件。表名/字段名是两端契约，不要改。"""
+def build_bucket_file(tmp_path, rows, updated_at, periods=PERIODS):
+    """写一个分片到临时文件。表名/字段名是两端契约，不要改。
+
+    periods 默认 `PERIODS`（daily/weekly/monthly 三张表）—— **分片契约不变**：
+    `bucket_<id>.db` 仍只有 `bkt_daily`/`bkt_weekly`/`bkt_monthly`，分片生成器
+    （`build_live_buckets_pc.py` / 云端）调用本函数时**不传** periods，行为与耗时等价。
+    只有补丁出包（`txt_patch_builder.py`）才显式传五张表（含 quarterly/yearly）。
+    """
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
     conn = sqlite3.connect(tmp_path)
@@ -724,12 +730,12 @@ def build_bucket_file(tmp_path, rows, updated_at):
         conn.execute("PRAGMA cache_size=-32768;")
         conn.execute("CREATE TABLE bkt_meta(file TEXT PRIMARY KEY, code TEXT, name TEXT, "
                      "type TEXT, updated_at INTEGER);")
-        for period in PERIODS:
+        for period in periods:
             conn.execute(BUCKET_DDL.format(tbl="bkt_" + period))
         conn.executemany("INSERT OR REPLACE INTO bkt_meta(file,code,name,type,updated_at) "
                          "VALUES(?,?,?,?,?)",
                          [(f, c, n, t, updated_at) for (f, c, n, t) in rows.get("meta") or []])
-        for period in PERIODS:
+        for period in periods:
             data = rows.get(period) or []
             if data:
                 conn.executemany(

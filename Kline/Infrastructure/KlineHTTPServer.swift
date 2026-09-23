@@ -401,6 +401,43 @@ final class KlineHTTPServer {
                 self.applyPatchAndRespond(patchPath: patchPath, expectedSha: expectedPatchSha,
                                           name: safePatchName, connection: connection)
             }
+        case ("POST", "/sync/patch-session/begin"):
+            // 会话式单事务落主库（Task 5）：开一条**独立连接** + BEGIN IMMEDIATE，跨多个 HTTP 请求保持。
+            // 让设备落库与 PC 出包完全重叠（PC 出第 i+1 片的同时设备在 apply 第 i 片）。
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.beginPatchSessionAndRespond(connection: connection)
+            }
+        case ("POST", "/sync/patch-session/apply"):
+            // apply?name=<片>：在会话连接上 ATTACH 该片（唯一别名）→ 写五张表。可多次调用（每片一次）。
+            // 注：DETACH 不能在活跃事务内做（SQLite 报 locked），故别名保持到会话结束随连接关闭释放。
+            let sName = ((Self.queryParam(rawPath, "name") ?? "") as NSString).lastPathComponent
+            let sPrefixOK = sName.hasPrefix("bucket_") || sName.hasPrefix("patch_")
+            guard !sName.isEmpty, sPrefixOK, sName.hasSuffix(".db") else {
+                respond(connection, status: 400, body: "{\"error\":\"bad name\"}")
+                return
+            }
+            guard let sPath = Self.resolveSandboxPath("live/" + sName, sandboxRoot: sandboxRoot),
+                  FileManager.default.fileExists(atPath: sPath) else {
+                respond(connection, status: 404, body: "{\"error\":\"patch not found, PUT /sandbox/live/<file> first\"}")
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.applyPatchSessionShard(name: sName, path: sPath, connection: connection)
+            }
+        case ("POST", "/sync/patch-session/commit"):
+            // commit：UPDATE meta.last_date（MAX 防回退）+ COMMIT + 关连接 + loadMetaList + notifyMainDBChanged
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.commitPatchSessionAndRespond(connection: connection)
+            }
+        case ("POST", "/sync/patch-session/rollback"):
+            // rollback：ROLLBACK + 关连接（释放写锁，已喂入的片全部丢弃）
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.rollbackPatchSessionAndRespond(connection: connection)
+            }
         case ("GET", "/sync/status"):
             // 增量库当前状态（供推送脚本与排查使用）
             DispatchQueue.main.async { [weak self] in
@@ -487,16 +524,49 @@ final class KlineHTTPServer {
             respond(connection, status: 500, body: "read failed")
             return
         }
-        defer { try? handle.close() }
-        let data = handle.readDataToEndOfFile()
+        // 大文件（如 1.4GB 主库 tdx.db）**流式**返回：先发 header（带 Content-Length），
+        // 再分块 FileHandle 读 + send，避免整份读进内存。
+        // 原实现 `readDataToEndOfFile()` 把整个 1.4GB 读进内存再一次性 send →
+        // 内存爆掉 / 单次 send 超大 content 失败 → 客户端拿到 503 / 连接中断。
+        let size = Int(((try? FileManager.default.attributesOfItem(atPath: target))?[.size] as? NSNumber)?.int64Value ?? 0)
         let head = "HTTP/1.1 200 OK\r\n"
             + "Content-Type: application/octet-stream\r\n"
-            + "Content-Length: \(data.count)\r\n"
+            + "Content-Length: \(size)\r\n"
             + "Connection: close\r\n\r\n"
-        var out = Data(head.utf8)
-        out.append(data)
-        connection.send(content: out, completion: .contentProcessed { _ in
-            connection.cancel()
+        DebugLogger.shared.log("沙盒GET 流式返回 target=[\(target)] size=\(size)")
+        streamFileLocked(handle: handle, connection: connection, header: Data(head.utf8))
+    }
+
+    /// 分块把 FileHandle 内容写进 socket（每块 1MB），全部写完后以 finalMessage 收尾并关连接。
+    /// 与 `/upload` 的流式**写**对称：这里只保留一块在内存，不做整份缓冲。
+    private func streamFileLocked(handle: FileHandle, connection: NWConnection, header: Data) {
+        connection.send(content: header, completion: .contentProcessed { [weak self] error in
+            guard let self = self, error == nil else {
+                try? handle.close()
+                connection.cancel()
+                return
+            }
+            self.sendNextChunkLocked(handle: handle, connection: connection)
+        })
+    }
+
+    /// 读下一块（1MB）并发送；读到 EOF 则发一个 isComplete 的 finalMessage 关闭流。
+    private func sendNextChunkLocked(handle: FileHandle, connection: NWConnection) {
+        let chunk = handle.readData(ofLength: 1 << 20)
+        guard !chunk.isEmpty else {
+            try? handle.close()
+            // Content-Length 已给出，这里显式标记流结束（TCP 半关），客户端据此判定下载完成
+            connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                            completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
+        connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
+            guard let self = self, error == nil else {
+                try? handle.close()
+                connection.cancel()
+                return
+            }
+            self.sendNextChunkLocked(handle: handle, connection: connection)
         })
     }
 
@@ -684,6 +754,8 @@ final class KlineHTTPServer {
                                  + ",\"dailyRows\":\(outcome.dailyRows)"
                                  + ",\"weeklyRows\":\(outcome.weeklyRows)"
                                  + ",\"monthlyRows\":\(outcome.monthlyRows)"
+                                 + ",\"quarterlyRows\":\(outcome.quarterlyRows)"
+                                 + ",\"yearlyRows\":\(outcome.yearlyRows)"
                                  + ",\"coveredFiles\":\(outcome.coveredFiles)"
                                  + ",\"skippedFiles\":\(outcome.skippedFiles)"
                                  + ",\"latestDate\":\(outcome.latestDate)}")
@@ -695,13 +767,86 @@ final class KlineHTTPServer {
         })
     }
 
+    // MARK: - 会话式单事务落主库（Task 5）
+
+    /// POST /sync/patch-session/begin：开独立连接 + BEGIN IMMEDIATE，启动 120s 看门狗。
+    private func beginPatchSessionAndRespond(connection: NWConnection) {
+        PatchSessionManager.shared.begin(dbPath: DatabaseManager.writableDBPath) { [weak self] result in
+            guard let self = self else { return }
+            if result.ok {
+                DebugLogger.shared.log("[Patch] 会话 begin：\(result.message)")
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(result.message))\"}")
+            } else {
+                DebugLogger.shared.log("[Patch] 会话 begin 失败：\(result.message)")
+                self.respond(connection, status: 500, contentType: "application/json",
+                             body: "{\"error\":\"\(Self.jsonEsc(result.message))\"}")
+            }
+        }
+    }
+
+    /// POST /sync/patch-session/apply?name=<片>：在会话连接上 ATTACH 该片 + 写五张表 + DETACH。
+    private func applyPatchSessionShard(name: String, path: String, connection: NWConnection) {
+        PatchSessionManager.shared.applyShard(name: name, path: path) { [weak self] result in
+            guard let self = self else { return }
+            if result.ok {
+                DebugLogger.shared.log("[Patch] 会话 apply 片 \(name)：\(result.message)")
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(result.message))\"}")
+            } else {
+                DebugLogger.shared.log("[Patch] 会话 apply 片 \(name) 失败：\(result.message)")
+                self.respond(connection, status: 500, contentType: "application/json",
+                             body: "{\"error\":\"\(Self.jsonEsc(result.message))\"}")
+            }
+        }
+    }
+
+    /// POST /sync/patch-session/commit：UPDATE meta.last_date（MAX 防回退）+ COMMIT + 关连接，
+    /// 随后重读 metaList + 自增 dataVersion（主库内容已变）。
+    private func commitPatchSessionAndRespond(connection: NWConnection) {
+        PatchSessionManager.shared.commit { [weak self] r in
+            guard let self = self else { return }
+            if r.ok {
+                DebugLogger.shared.log("[Patch] 会话 commit：\(r.message)")
+                DatabaseManager.shared.loadMetaList()
+                DatabaseManager.shared.notifyMainDBChanged()
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(r.message))\""
+                                 + ",\"dailyRows\":\(r.dailyRows)"
+                                 + ",\"weeklyRows\":\(r.weeklyRows)"
+                                 + ",\"monthlyRows\":\(r.monthlyRows)"
+                                 + ",\"quarterlyRows\":\(r.quarterlyRows)"
+                                 + ",\"yearlyRows\":\(r.yearlyRows)"
+                                 + ",\"coveredFiles\":\(r.coveredFiles)"
+                                 + ",\"shards\":\(r.shardCount)"
+                                 + ",\"latestDate\":\(r.latestDate)}")
+            } else {
+                DebugLogger.shared.log("[Patch] 会话 commit 失败：\(r.message)")
+                self.respond(connection, status: 500, contentType: "application/json",
+                             body: "{\"error\":\"\(Self.jsonEsc(r.message))\"}")
+            }
+        }
+    }
+
+    /// POST /sync/patch-session/rollback：ROLLBACK + 关连接（释放写锁，已喂入的片全部丢弃）。
+    private func rollbackPatchSessionAndRespond(connection: NWConnection) {
+        PatchSessionManager.shared.rollback(reason: "客户端请求") { [weak self] result in
+            guard let self = self else { return }
+            DebugLogger.shared.log("[Patch] 会话 rollback：\(result.message)")
+            self.respond(connection, status: result.ok ? 200 : 500, contentType: "application/json",
+                         body: result.ok
+                             ? "{\"ok\":true,\"message\":\"\(Self.jsonEsc(result.message))\"}"
+                             : "{\"error\":\"\(Self.jsonEsc(result.message))\"}")
+        }
+    }
+
     // MARK: - 补丁 → 主库（全部在 DatabaseManager.dbQueue 上）
 
-    /// ATTACH 补丁包 → 单事务 → 三张周期表各**一条集合式 SQL**（`INSERT OR REPLACE ... SELECT`，
+    /// ATTACH 补丁包 → 单事务 → 五张周期表各**一条集合式 SQL**（`INSERT OR REPLACE ... SELECT`，
     /// 映射键 = `file`）→ 一条集合式 SQL 更新 `meta.last_date` → COMMIT / DETACH。
     /// 任一步失败：ROLLBACK，主库原样，返回原因。**不触碰增量库、不整库替换**。
     nonisolated private static func applyPatchLocked(db: OpaquePointer?, patchPath: String) -> PatchApplyOutcome {
-        var outcome: PatchApplyOutcome = (false, 0, 0, 0, 0, 0, 0, "")
+        var outcome: PatchApplyOutcome = (false, 0, 0, 0, 0, 0, 0, 0, 0, "")
         guard let db = db else {
             outcome.message = "主库未就绪（连接不可用）"
             return outcome
@@ -744,8 +889,9 @@ final class KlineHTTPServer {
         }
 
         var failure: String?
-        for table in ["daily", "weekly", "monthly"] {
-            // 主库缺该表 → 跳过；补丁缺该表 → 跳过（季/年线不参与）
+        // 五张周期表（Task 2.3）：补丁携带 bkt_quarterly/bkt_yearly 后，季/年线也要跟上。
+        // 主库缺该表 → 跳过；补丁缺该表 → 跳过（老补丁不含季/年线时行为与原来一致）。
+        for table in ["daily", "weekly", "monthly", "quarterly", "yearly"] {
             guard tableExists(db: db, schema: "main", name: table),
                   tableExists(db: db, schema: "bkt", name: "bkt_" + table) else { continue }
             let sql = "INSERT OR REPLACE INTO \(table)(meta_id,date,open,high,low,close,vol,amo) "
@@ -757,9 +903,11 @@ final class KlineHTTPServer {
             }
             let written = Int(sqlite3_changes(db))
             switch table {
-            case "daily":   outcome.dailyRows = written
-            case "weekly":  outcome.weeklyRows = written
-            default:        outcome.monthlyRows = written
+            case "daily":     outcome.dailyRows = written
+            case "weekly":    outcome.weeklyRows = written
+            case "quarterly": outcome.quarterlyRows = written
+            case "yearly":    outcome.yearlyRows = written
+            default:          outcome.monthlyRows = written
             }
         }
 
@@ -783,6 +931,8 @@ final class KlineHTTPServer {
             outcome.dailyRows = 0
             outcome.weeklyRows = 0
             outcome.monthlyRows = 0
+            outcome.quarterlyRows = 0
+            outcome.yearlyRows = 0
             outcome.coveredFiles = 0
             outcome.skippedFiles = 0
             outcome.latestDate = 0
@@ -796,15 +946,16 @@ final class KlineHTTPServer {
             return outcome
         }
         outcome.ok = true
-        outcome.message = "已按行写入主库 \(outcome.dailyRows + outcome.weeklyRows + outcome.monthlyRows) 行"
-            + "（日\(outcome.dailyRows)/周\(outcome.weeklyRows)/月\(outcome.monthlyRows)）"
+        outcome.message = "已按行写入主库 \(outcome.dailyRows + outcome.weeklyRows + outcome.monthlyRows + outcome.quarterlyRows + outcome.yearlyRows) 行"
+            + "（日\(outcome.dailyRows)/周\(outcome.weeklyRows)/月\(outcome.monthlyRows)/季\(outcome.quarterlyRows)/年\(outcome.yearlyRows)）"
             + " · 覆盖 \(outcome.coveredFiles) 只 · 最新 \(outcome.latestDate)"
             + (outcome.skippedFiles > 0 ? " · 跳过(主库无此file) \(outcome.skippedFiles) 只" : "")
         return outcome
     }
 
     /// 指定 schema（`main` / `bkt`）下是否存在某张表
-    nonisolated private static func tableExists(db: OpaquePointer, schema: String, name: String) -> Bool {
+    /// （`fileprivate`：同文件的 `PatchSessionManager` 复用同一套存在性/取值判断）
+    nonisolated fileprivate static func tableExists(db: OpaquePointer, schema: String, name: String) -> Bool {
         var statement: OpaquePointer?
         let sql = "SELECT 1 FROM \(schema).sqlite_master WHERE type = 'table' AND name = ? LIMIT 1;"
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return false }
@@ -814,7 +965,7 @@ final class KlineHTTPServer {
     }
 
     /// 取单值整数查询结果（无结果 / NULL 均返回 0）
-    nonisolated private static func scalarInt(db: OpaquePointer, sql: String) -> Int {
+    nonisolated fileprivate static func scalarInt(db: OpaquePointer, sql: String) -> Int {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(statement) }
@@ -929,11 +1080,305 @@ private typealias PatchApplyOutcome = (
     dailyRows: Int,
     weeklyRows: Int,
     monthlyRows: Int,
+    quarterlyRows: Int,
+    yearlyRows: Int,
     coveredFiles: Int,
     skippedFiles: Int,
     latestDate: Int,
     message: String
 )
+
+// MARK: - 会话式单事务落主库（Task 5）
+
+/// 会话状态：**一条独立 sqlite3 连接** + 进度时间戳 + 累计计数。
+/// `nonisolated`：只在 `PatchSessionManager.queue` 上读写（默认 MainActor 隔离下需显式放开）。
+nonisolated final class PatchSessionState {
+    let db: OpaquePointer
+    var lastProgress: DispatchTime
+    var shardCount = 0
+    var coveredFiles = 0
+    var skippedFiles = 0
+    var dailyRows = 0
+    var weeklyRows = 0
+    var monthlyRows = 0
+    var quarterlyRows = 0
+    var yearlyRows = 0
+    var latestDate = 0
+    init(db: OpaquePointer) {
+        self.db = db
+        self.lastProgress = DispatchTime.now()
+    }
+}
+
+/// 会话单步结果（元组别名：避免默认 MainActor 隔离下在非主线程上下文构造类型的额外约束）
+typealias PatchSessionResult = (ok: Bool, message: String)
+/// 会话提交结果（含 commit 返回的合计行数 / 覆盖标的数 / 片数 / 最新交易日）
+typealias PatchSessionCommitResult = (
+    ok: Bool, message: String,
+    dailyRows: Int, weeklyRows: Int, monthlyRows: Int, quarterlyRows: Int, yearlyRows: Int,
+    coveredFiles: Int, shardCount: Int, latestDate: Int
+)
+
+/// 会话式单事务落主库的管理器（Task 5）：用**一条独立连接**跨多个 HTTP 请求保持一个写事务，
+/// 使设备落库与 PC 出包**完全重叠**（PC 出第 i+1 片的同时设备在 apply 第 i 片）。
+///
+/// **连接隔离是硬要求**：本管理器用 `sqlite3_open_v2` 自开一条连接打开同一个主库路径，
+/// 会话的全部 SQL（ATTACH / 写五表 / 更新 last_date / COMMIT / ROLLBACK）都只在这条连接上执行；
+/// **不走** `DatabaseManager.performOnDBQueue`——那条连接属于 App，在它上面开事务会把 App 期间的
+/// 所有写操作**静默卷进我们的事务**，回滚时一起丢。
+///
+/// 状态只在 `queue` 上读写 → 天然串行，不会与 App 的 dbQueue 争用同一连接。
+/// 主库是 WAL：长写事务**不阻塞读**，但会阻塞其它**写**（拿 SQLITE_BUSY），故有 120s 看门狗兜底。
+nonisolated final class PatchSessionManager {
+    static let shared = PatchSessionManager()
+
+    /// 会话专用串行队列：保护会话状态（连接句柄 / 计时 / 计数），也保证同一时刻只有一步在跑。
+    private let queue = DispatchQueue(label: "com.sunck.Kline.patchsession")
+
+    /// 看门狗超时：120s（2 分钟）。取 2 分钟而非更短：冷缓存下 PC 单分片出包 / 设备单分片写入
+    /// 都可能到十几秒，30s 会误杀「正常但慢」的会话；2 分钟给足余量，同时仍能兜住真正被遗弃的会话。
+    private static let watchdogTimeout: Double = 120
+
+    private var session: PatchSessionState?
+
+    private init() {}
+
+    // MARK: - begin
+
+    /// 打开独立连接 + 会话级 pragma + BEGIN IMMEDIATE，把连接与会话状态存下、启动看门狗。
+    /// 若已有活跃会话 → **先 ROLLBACK 旧会话**（选「自动回滚旧会话」而非报错，避免半开连接占着写锁）。
+    func begin(dbPath: String, completion: @escaping (PatchSessionResult) -> Void) {
+        queue.async {
+            if let old = self.session {
+                self.teardownLocked(old, rollback: true, reason: "被新会话 begin 顶替")
+            }
+            var handle: OpaquePointer?
+            let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+            guard sqlite3_open_v2(dbPath, &handle, flags, nil) == SQLITE_OK, let db = handle else {
+                let msg = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "open 失败"
+                if let h = handle { sqlite3_close(h) }
+                DebugLogger.shared.log("[Patch] 会话 begin 打开主库失败：\(msg)")
+                self.replyMain((ok: false, message: "打开主库连接失败：\(msg)"), completion)
+                return
+            }
+            // 会话级 pragma（不改变库文件属性）：cache_size 32MB / temp_store 内存 / synchronous NORMAL
+            for p in ["PRAGMA cache_size = -32768;",
+                      "PRAGMA temp_store = MEMORY;",
+                      "PRAGMA synchronous = NORMAL;"] {
+                sqlite3_exec(db, p, nil, nil, nil)
+            }
+            // 会话临时表（TEMP 只属于本连接、随连接关闭消失）：各片 apply 时累积「file → 该片最大日期」，
+            // commit 时据此更新 meta.last_date（无需知道各片的挂载别名，逻辑与单包 apply-patch 等价）。
+            sqlite3_exec(db, "CREATE TEMP TABLE IF NOT EXISTS patch_file_max(file TEXT PRIMARY KEY, last_date INTEGER);",
+                         nil, nil, nil)
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+                let msg = String(cString: sqlite3_errmsg(db))
+                sqlite3_close(db)
+                DebugLogger.shared.log("[Patch] 会话 begin BEGIN IMMEDIATE 失败：\(msg)")
+                self.replyMain((ok: false, message: "开启事务失败：\(msg)"), completion)
+                return
+            }
+            let st = PatchSessionState(db: db)
+            self.session = st
+            self.armWatchdogLocked(st)
+            DebugLogger.shared.log("[Patch] 会话 begin：已开独立连接并 BEGIN IMMEDIATE")
+            self.replyMain((ok: true, message: "会话已开启（独立连接 · BEGIN IMMEDIATE）"), completion)
+        }
+    }
+
+    // MARK: - apply
+
+    /// 在会话连接上 ATTACH 该片（唯一别名）→ 写**五张表** → 累积 last_date。可被多次调用（每片一次）。
+    ///
+    /// ⚠️ 与 spec 措辞的偏差（实测 SQLite 3.40.1）：**在活跃事务内 `DETACH` 会返回
+    /// `SQLITE_LOCKED: database bkt is locked`**（无论该片是否被读过）。本会话是「一个事务跨多个
+    /// HTTP 请求」，因此每片的 DETACH **不能**在事务内做 → 改为：每片用**唯一别名** `bkt<seq>`
+    /// 保持挂载，直到会话结束时随连接关闭一并释放（`sqlite3_close` 隐式 DETACH）。
+    /// 代价：同一会话最多同时挂载 N 个片（SQLite 默认 `SQLITE_MAX_ATTACHED=10`，N≤6 足够）。
+    ///
+    /// 每次成功后刷新看门狗计时；任一步失败 → 整体 ROLLBACK + 关连接，返回原因（含失败片名）。
+    func applyShard(name: String, path: String, completion: @escaping (PatchSessionResult) -> Void) {
+        queue.async {
+            guard let st = self.session else {
+                self.replyMain((ok: false, message: "无活跃会话（请先 POST /sync/patch-session/begin）"), completion)
+                return
+            }
+            if let failure = Self.applyShardLocked(st, name: name, path: path) {
+                self.teardownLocked(st, rollback: true, reason: "apply \(name) 失败")
+                self.replyMain((ok: false, message: failure), completion)
+                return
+            }
+            st.lastProgress = DispatchTime.now()   // 刷新看门狗计时
+            DebugLogger.shared.log("[Patch] 会话 apply 片 \(name) 完成（累计 \(st.shardCount) 片）")
+            self.replyMain((ok: true, message: "已写入片 \(name)（累计 \(st.shardCount) 片）"), completion)
+        }
+    }
+
+    // MARK: - commit
+
+    /// UPDATE meta.last_date（MAX 防回退）→ COMMIT → 关连接。返回合计行数/覆盖标的数/片数/最新日期。
+    /// 成功后由调用方（主线程）重读 metaList + 自增 dataVersion。
+    func commit(completion: @escaping (PatchSessionCommitResult) -> Void) {
+        queue.async {
+            guard let st = self.session else {
+                self.replyCommitMain((ok: false, message: "无活跃会话（请先 POST /sync/patch-session/begin）",
+                                      dailyRows: 0, weeklyRows: 0, monthlyRows: 0, quarterlyRows: 0, yearlyRows: 0,
+                                      coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
+                return
+            }
+            guard st.shardCount > 0 else {
+                // 空会话（没喂入任何片）→ 直接回滚关连接，避免「空提交」也自增 dataVersion
+                self.teardownLocked(st, rollback: true, reason: "commit 时无已应用分片")
+                self.replyCommitMain((ok: false, message: "会话中没有任何已应用分片",
+                                      dailyRows: 0, weeklyRows: 0, monthlyRows: 0, quarterlyRows: 0, yearlyRows: 0,
+                                      coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
+                return
+            }
+            // meta.last_date 语义 = **日线末日**；用会话临时表（各片 apply 时累积）做 MAX(...) 防回退，
+            // 与单包 apply-patch 的 `MAX(COALESCE(last_date,0), 补丁该 file 最大日期)` 等价。
+            let sql = "UPDATE meta SET last_date = "
+                    + "MAX(COALESCE(last_date, 0), "
+                    + "COALESCE((SELECT t.last_date FROM temp.patch_file_max t WHERE t.file = meta.file), 0)) "
+                    + "WHERE file IN (SELECT file FROM temp.patch_file_max);"
+            if sqlite3_exec(st.db, sql, nil, nil, nil) != SQLITE_OK {
+                let msg = String(cString: sqlite3_errmsg(st.db))
+                self.teardownLocked(st, rollback: true, reason: "commit 更新 last_date 失败")
+                self.replyCommitMain((ok: false, message: "更新 meta.last_date 失败（已回滚）：\(msg)",
+                                      dailyRows: 0, weeklyRows: 0, monthlyRows: 0, quarterlyRows: 0, yearlyRows: 0,
+                                      coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
+                return
+            }
+            if sqlite3_exec(st.db, "COMMIT;", nil, nil, nil) != SQLITE_OK {
+                let msg = String(cString: sqlite3_errmsg(st.db))
+                self.teardownLocked(st, rollback: true, reason: "commit 提交失败")
+                self.replyCommitMain((ok: false, message: "提交失败（已回滚）：\(msg)",
+                                      dailyRows: 0, weeklyRows: 0, monthlyRows: 0, quarterlyRows: 0, yearlyRows: 0,
+                                      coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
+                return
+            }
+            let message = "已提交 \(st.shardCount) 片 · 合计 \(st.dailyRows + st.weeklyRows + st.monthlyRows + st.quarterlyRows + st.yearlyRows) 行"
+                + "（日\(st.dailyRows)/周\(st.weeklyRows)/月\(st.monthlyRows)/季\(st.quarterlyRows)/年\(st.yearlyRows)）"
+                + " · 覆盖 \(st.coveredFiles) 只 · 最新 \(st.latestDate)"
+                + (st.skippedFiles > 0 ? " · 跳过(主库无此file) \(st.skippedFiles) 只" : "")
+            let result: PatchSessionCommitResult = (ok: true, message: message,
+                                                    dailyRows: st.dailyRows, weeklyRows: st.weeklyRows,
+                                                    monthlyRows: st.monthlyRows, quarterlyRows: st.quarterlyRows,
+                                                    yearlyRows: st.yearlyRows, coveredFiles: st.coveredFiles,
+                                                    shardCount: st.shardCount, latestDate: st.latestDate)
+            self.teardownLocked(st, rollback: false, reason: "commit 成功")
+            DebugLogger.shared.log("[Patch] 会话 commit：片=\(result.shardCount) 覆盖=\(result.coveredFiles) 最新=\(result.latestDate)")
+            self.replyCommitMain(result, completion)
+        }
+    }
+
+    // MARK: - rollback
+
+    /// ROLLBACK + 关连接（释放写锁，已喂入的片全部丢弃）。
+    func rollback(reason: String, completion: @escaping (PatchSessionResult) -> Void) {
+        queue.async {
+            guard let st = self.session else {
+                self.replyMain((ok: false, message: "无活跃会话"), completion)
+                return
+            }
+            self.teardownLocked(st, rollback: true, reason: reason)
+            self.replyMain((ok: true, message: "会话已回滚并关闭连接（\(reason)）"), completion)
+        }
+    }
+
+    // MARK: - 看门狗
+
+    /// `watchdogTimeout` 内无进展 → 自动 ROLLBACK + 关连接（释放写锁）。
+    /// 每次成功 apply 刷新 `st.lastProgress`，这里按「剩余时间」重新计时。
+    private func armWatchdogLocked(_ st: PatchSessionState) {
+        queue.asyncAfter(deadline: .now() + Self.watchdogTimeout) { [weak self] in
+            guard let self = self, self.session === st else { return }
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - st.lastProgress.uptimeNanoseconds) / 1_000_000_000
+            if elapsed < Self.watchdogTimeout {
+                self.armWatchdogLocked(st)   // 期间有进展 → 按剩余时间重新计时
+                return
+            }
+            DebugLogger.shared.log("[Patch] 会话看门狗触发：\(Int(elapsed))s 无进展 → 自动回滚关连接")
+            self.teardownLocked(st, rollback: true, reason: "看门狗超时")
+        }
+    }
+
+    // MARK: - 内部（全部在 queue 上）
+
+    /// ATTACH（唯一别名）+ 写五张表 + 累积 last_date（全在会话连接上、同一未提交事务内）。
+    /// 返回 nil 表示成功，否则返回失败原因（含失败片名）。
+    /// ⚠️ **不在事务内 DETACH**（SQLite 会报 `database ... is locked`）；别名保持到连接关闭时隐式释放。
+    private static func applyShardLocked(_ st: PatchSessionState, name: String, path: String) -> String? {
+        // 每片一个唯一别名，避免同一会话内多次 ATTACH 同名冲突
+        let alias = "bkt" + String(st.shardCount)
+        // ATTACH 路径里的单引号必须转义（同 LiveDataStore / applyPatchLocked）
+        let escaped = path.replacingOccurrences(of: "'", with: "''")
+        guard sqlite3_exec(st.db, "ATTACH DATABASE '\(escaped)' AS \(alias);", nil, nil, nil) == SQLITE_OK else {
+            return "片 \(name) ATTACH 失败：\(String(cString: sqlite3_errmsg(st.db)))"
+        }
+
+        guard KlineHTTPServer.tableExists(db: st.db, schema: alias, name: "bkt_daily") else {
+            return "片 \(name) 缺少 bkt_daily 表"
+        }
+        let patchFiles = KlineHTTPServer.scalarInt(db: st.db, sql: "SELECT COUNT(DISTINCT file) FROM \(alias).bkt_daily;")
+        let covered = KlineHTTPServer.scalarInt(db: st.db,
+            sql: "SELECT COUNT(DISTINCT b.file) FROM \(alias).bkt_daily b JOIN main.meta m ON m.file = b.file;")
+        let latest = KlineHTTPServer.scalarInt(db: st.db, sql: "SELECT MAX(date) FROM \(alias).bkt_daily;")
+
+        // 五张周期表各一条集合式 SQL（映射键 = file；主库缺该表 / 补丁缺该表 → 跳过）
+        for table in ["daily", "weekly", "monthly", "quarterly", "yearly"] {
+            guard KlineHTTPServer.tableExists(db: st.db, schema: "main", name: table),
+                  KlineHTTPServer.tableExists(db: st.db, schema: alias, name: "bkt_" + table) else { continue }
+            let sql = "INSERT OR REPLACE INTO \(table)(meta_id,date,open,high,low,close,vol,amo) "
+                    + "SELECT m.id, b.date, b.open, b.high, b.low, b.close, b.vol, b.amo "
+                    + "FROM \(alias).bkt_\(table) b JOIN main.meta m ON m.file = b.file;"
+            guard sqlite3_exec(st.db, sql, nil, nil, nil) == SQLITE_OK else {
+                return "片 \(name) 写入 \(table) 失败：\(String(cString: sqlite3_errmsg(st.db)))"
+            }
+            let written = Int(sqlite3_changes(st.db))
+            switch table {
+            case "daily":     st.dailyRows += written
+            case "weekly":    st.weeklyRows += written
+            case "quarterly": st.quarterlyRows += written
+            case "yearly":    st.yearlyRows += written
+            default:          st.monthlyRows += written
+            }
+        }
+        // 累积「file → 该片最大日期」到会话临时表（供 commit 更新 meta.last_date；各片不相交，
+        // UPSERT 取 MAX 只为稳妥，防止同 file 出现在多片时被较小值覆盖）
+        let upsert = "INSERT INTO temp.patch_file_max(file, last_date) "
+            + "SELECT b.file, MAX(b.date) FROM \(alias).bkt_daily b JOIN main.meta m ON m.file = b.file GROUP BY b.file "
+            + "ON CONFLICT(file) DO UPDATE SET last_date = MAX(last_date, excluded.last_date);"
+        if sqlite3_exec(st.db, upsert, nil, nil, nil) != SQLITE_OK {
+            return "片 \(name) 累积 last_date 失败：\(String(cString: sqlite3_errmsg(st.db)))"
+        }
+        st.shardCount += 1
+        st.coveredFiles += covered
+        st.skippedFiles += max(0, patchFiles - covered)
+        st.latestDate = max(st.latestDate, latest)
+        return nil
+    }
+
+    /// 结束会话：可选 ROLLBACK → 关连接（`sqlite3_close` 会隐式 DETACH 所有已挂载的片）→ 清空会话（幂等）。
+    /// 所有调用都在 `queue` 上。
+    private func teardownLocked(_ st: PatchSessionState, rollback: Bool, reason: String) {
+        if rollback {
+            sqlite3_exec(st.db, "ROLLBACK;", nil, nil, nil)
+        }
+        sqlite3_close(st.db)
+        if self.session === st { self.session = nil }
+        DebugLogger.shared.log("[Patch] 会话关闭（\(reason)）：\(rollback ? "已回滚" : "已提交")")
+    }
+
+    /// 把会话结果回主线程交付（避免调用方在非主线程触碰 App 状态 / 写响应）
+    private func replyMain(_ r: PatchSessionResult, _ completion: @escaping (PatchSessionResult) -> Void) {
+        DispatchQueue.main.async { completion(r) }
+    }
+
+    private func replyCommitMain(_ r: PatchSessionCommitResult,
+                                 _ completion: @escaping (PatchSessionCommitResult) -> Void) {
+        DispatchQueue.main.async { completion(r) }
+    }
+}
 
 // MARK: - URL 参数编码
 

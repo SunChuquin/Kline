@@ -6,20 +6,27 @@
 //    清单并集（WatchlistSymbols） → 东财直连拉取当日K线（EastmoneyQuoteFetcher）
 //    → 直写增量库（LiveDataStore.upsertDaily）→ 走既有热刷新链路（dataVersion 自增 → 监控重扫）
 //
+//  五表一致性：除当日日线外，还会用「**主库当期 bar ⊕ 新日线**」合并出**当期季/年 bar**
+//  （`live_quarterly` / `live_yearly`），与日线在同一事务写入增量库。
+//  口径与 `tdx_parser.period_key` 一致：季 `YYYYQ`、年 `YYYY`，`date` = 该周期**首个交易日**；
+//  当期周期允许是**进行中的**（与 `aggregate_full_periods` 既有约定一致）。
+//
 //  硬约束：
 //   - **不依赖云端 manifest**：与 TdxSyncManager 各自独立触发、成败互不影响（云端源不可达也能跑）；
 //   - 门禁复用 TdxSyncConfig.enabled（总开关）与 tradingDaysOnly（交易日限制，由 TdxSyncManager 统一判定）；
 //   - 并集为空 → 记状态「跳过：清单为空」并直接返回，不写库、不报错；
 //   - 不新增任何监控触发机制：写入后只调 LiveDataStore.upsertDaily + reloadAsync，
 //     由既有 `reloadPublisher` → `DatabaseManager.dataVersion` → `MarketRowCache` / `SimStore.sweepConditions`；
+//   - 当期季/年 bar 的基期**只取主库**（不读增量库窗口内的几天）：同一交易日重复跑结果相同 → 幂等；
 //   - UI 状态一律在主线程写。
 //
 //  线程：`sync(reason:slot:)` 须在主线程调用（内部再切主线程执行）；东财 completion 在它自己的串行队列，
-//  本类在回调处显式切回主线程。
+//  本类在回调处显式切回主线程；主库基期 bar 查询走 `DatabaseManager.performOnDBQueue`（在 dbQueue 上批量查）。
 //
 
 import Foundation
 import Combine
+import SQLite3
 
 // MARK: - 结果分类
 
@@ -159,27 +166,47 @@ final class WatchlistSyncManager: ObservableObject {
         }
         let updatedAt = Self.utcMidnightEpoch(result.tradeDate)
 
-        // ④ 直写增量库（成功后由既有热刷新链路自增 dataVersion → 监控重扫）
-        LiveDataStore.shared.upsertDaily(metas: metas, bars: bars, updatedAt: updatedAt) { [weak self] merge in
+        // ④ 当期季/年 bar：**主库当期 bar ⊕ 新日线**（在主库 dbQueue 上批量查一次，避免逐只跨队列）
+        var metaIdByFile: [String: Int] = [:]
+        for b in bars { if let m = metaByFile[b.file] { metaIdByFile[b.file] = m.id } }
+        let quarterStart = result.tradeDate > 0 ? KlinePeriod.periodDateRange(.quarterly, date: result.tradeDate).0 : 0
+        let yearStart = result.tradeDate > 0 ? KlinePeriod.periodDateRange(.yearly, date: result.tradeDate).0 : 0
+        let t0 = Date()
+        DatabaseManager.shared.performOnDBQueue({ db -> [String: [LiveUpsertBar]] in
+            guard quarterStart > 0, yearStart > 0 else { return [:] }
+            return Self.currentPeriodBars(db: db, dailyBars: bars, metaIdByFile: metaIdByFile,
+                                          quarterStart: quarterStart, yearStart: yearStart)
+        }, completion: { [weak self] periodBars in
             guard let self = self else { return }
-            if merge.ok {
-                DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库成功 \(merge.message)")
-                LiveDataStore.shared.reloadAsync(completion: { summary in
-                    DebugLogger.shared.log("[WatchlistSync] 热刷新完成 可用=\(summary.isAvailable)"
-                        + " 内容变化=\(summary.contentChanged) 最新=\(summary.latestDateAfter)")
-                })
-                self.finish(outcome: .success,
-                            text: "成功：写入 \(merge.dailyRows) 行 / \(result.hitCount) 只",
-                            reason: reason, slot: slot, tradeDate: result.tradeDate,
-                            hit: result.hitCount, skipped: result.skipped.count,
-                            batchFailures: result.batchFailures.count)
-            } else {
-                DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库失败 \(merge.message)")
-                self.finish(outcome: .failed, text: "失败：\(merge.message)", reason: reason, slot: slot,
-                            tradeDate: result.tradeDate, hit: 0, skipped: result.skipped.count,
-                            batchFailures: result.batchFailures.count)
+            let elapsed = Date().timeIntervalSince(t0)
+            let rows = periodBars.values.reduce(0) { $0 + $1.count }
+            DebugLogger.shared.log("[WatchlistSync] \(reason)：当期季/年 bar \(rows) 行"
+                + "（季 \(periodBars["quarterly"]?.count ?? 0) 行 / 年 \(periodBars["yearly"]?.count ?? 0) 行）"
+                + " = 主库当期 bar ⊕ 新日线，耗时=\(String(format: "%.0fms", elapsed * 1000))")
+
+            // ⑤ 直写增量库（成功后由既有热刷新链路自增 dataVersion → 监控重扫）
+            LiveDataStore.shared.upsertDaily(metas: metas, bars: bars,
+                                             periodBars: periodBars, updatedAt: updatedAt) { [weak self] merge in
+                guard let self = self else { return }
+                if merge.ok {
+                    DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库成功 \(merge.message)")
+                    LiveDataStore.shared.reloadAsync(completion: { summary in
+                        DebugLogger.shared.log("[WatchlistSync] 热刷新完成 可用=\(summary.isAvailable)"
+                            + " 内容变化=\(summary.contentChanged) 最新=\(summary.latestDateAfter)")
+                    })
+                    self.finish(outcome: .success,
+                                text: "成功：写入 \(merge.dailyRows) 行 / \(result.hitCount) 只",
+                                reason: reason, slot: slot, tradeDate: result.tradeDate,
+                                hit: result.hitCount, skipped: result.skipped.count,
+                                batchFailures: result.batchFailures.count)
+                } else {
+                    DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库失败 \(merge.message)")
+                    self.finish(outcome: .failed, text: "失败：\(merge.message)", reason: reason, slot: slot,
+                                tradeDate: result.tradeDate, hit: 0, skipped: result.skipped.count,
+                                batchFailures: result.batchFailures.count)
+                }
             }
-        }
+        })
     }
 
     // MARK: - 收尾（主线程）
@@ -203,6 +230,69 @@ final class WatchlistSyncManager: ObservableObject {
         }
         if isRunning { isRunning = false }
         DebugLogger.shared.log("[WatchlistSync] \(reason)：\(outcome.text) — \(text)")
+    }
+
+    // MARK: - 当期季/年 bar（主库当期 bar ⊕ 新日线）
+
+    /// 受影响标的的**当期**季/年 bar（键 = `quarterly` / `yearly`）。
+    /// 基期取**主库**该标的当期最新一根 bar（`date >= 当期日历起始`，其 `date` 即该周期首个交易日），
+    /// 与新日线合并：`open` 取周期首行、`high/low` 取极值、`close` 取末行、`vol/amo` 累加。
+    /// 主库无当期 bar → 直接用新日线聚合（`date` 取新日线日期）。
+    /// - Note: 需在主库 `dbQueue` 上执行；**只读主库**，不碰增量库窗口内的几天（否则会写坏完整周期值）。
+    private static func currentPeriodBars(db: OpaquePointer?, dailyBars: [LiveUpsertBar],
+                                          metaIdByFile: [String: Int],
+                                          quarterStart: Int, yearStart: Int) -> [String: [LiveUpsertBar]] {
+        guard let db = db, !dailyBars.isEmpty, !metaIdByFile.isEmpty else { return [:] }
+        let quarterBase = basePeriodBars(db: db, table: "quarterly", start: quarterStart, metaIdByFile: metaIdByFile)
+        let yearBase = basePeriodBars(db: db, table: "yearly", start: yearStart, metaIdByFile: metaIdByFile)
+        var out: [String: [LiveUpsertBar]] = [:]
+        for (period, base) in [("quarterly", quarterBase), ("yearly", yearBase)] {
+            out[period] = dailyBars.map { mergePeriodBar(file: $0.file, daily: $0, base: base[$0.file]) }
+        }
+        return out
+    }
+
+    /// 主库某周期表「当期」的最新一根 bar（键 = file）：**一次 SQL** 取回全部受影响标的
+    /// （`ORDER BY meta_id, date DESC` 时每个 `meta_id` 只留首行 = 该标的当期最新 bar）。
+    private static func basePeriodBars(db: OpaquePointer, table: String, start: Int,
+                                       metaIdByFile: [String: Int]) -> [String: KlineItem] {
+        guard start > 0 else { return [:] }
+        let idToFile = Dictionary(metaIdByFile.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+        let ids = idToFile.keys.sorted().map { String($0) }.joined(separator: ",")
+        guard !ids.isEmpty else { return [:] }
+        // meta_id 来自本机主库（整数），直接内联为字面量，避免 3611 个绑定参数
+        let sql = "SELECT meta_id, date, open, high, low, close, vol, amo FROM \(table) "
+            + "WHERE meta_id IN (\(ids)) AND date >= \(start) ORDER BY meta_id, date DESC;"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        var out: [String: KlineItem] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let metaId = Int(sqlite3_column_int64(statement, 0))
+            guard let file = idToFile[metaId], out[file] == nil else { continue }
+            out[file] = KlineItem(date: Int(sqlite3_column_int64(statement, 1)),
+                                  open: sqlite3_column_double(statement, 2),
+                                  high: sqlite3_column_double(statement, 3),
+                                  low: sqlite3_column_double(statement, 4),
+                                  close: sqlite3_column_double(statement, 5),
+                                  volume: sqlite3_column_double(statement, 6),
+                                  turnover: sqlite3_column_double(statement, 7))
+        }
+        return out
+    }
+
+    /// 基期 bar ⊕ 新日线 → 当期 bar（`open` 取基期、`high/low` 取极值、`close` 取新值、`vol/amo` 累加）
+    private static func mergePeriodBar(file: String, daily: LiveUpsertBar, base: KlineItem?) -> LiveUpsertBar {
+        guard let base = base else {
+            return LiveUpsertBar(file: file, date: daily.date, open: daily.open, high: daily.high,
+                                 low: daily.low, close: daily.close, vol: daily.vol, amo: daily.amo)
+        }
+        return LiveUpsertBar(file: file, date: base.date, open: base.open,
+                             high: Swift.max(base.high, daily.high),
+                             low: Swift.min(base.low, daily.low),
+                             close: daily.close,
+                             vol: base.volume + daily.vol,
+                             amo: base.turnover + daily.amo)
     }
 
     // MARK: - 工具
