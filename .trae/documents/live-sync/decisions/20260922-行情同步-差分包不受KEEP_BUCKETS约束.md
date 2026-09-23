@@ -2,7 +2,7 @@
 
 ## 决策
 
-新增 `patch_<seq>.db` 作为「历史重灌包」：表结构与分片完全一致，但**可含任意多个历史日期**，
+新增 `patch_<seq>.db` 作为「历史重灌包」：与分片共用表结构与合并入口，但**可含任意多个历史日期**，
 且**不受分片 30 片滚动上限约束**；manifest 增加 `patches` 数组与 `buckets` 并列。
 
 ## 为什么（根因）
@@ -21,7 +21,8 @@
   `lastPathComponent` 剥目录 + `.db` 后缀 + `resolveSandboxPath` 越界校验三道防护。
 - 清理策略独立：补丁与分片一样「合并成功即删」，所以「最近 N 个」上限只作用于
   **幂等记录长度**（`maxMergedPatchRecords = 10`），与分片 30 片滚动互不影响。
-- 已知不入包的周期：契约里没有 `bkt_quarterly` / `bkt_yearly`，这两张表只统计不打进包。
+- 周期表：**主路径补丁（`txt_patch_builder.py`）已携带 `bkt_quarterly` / `bkt_yearly`**（`PATCH_PERIODS`）。
+  仅**旧路径 `diff_live_patch.py`** 里这两张表只统计、不打进包。
 
 ## 关联代码
 
