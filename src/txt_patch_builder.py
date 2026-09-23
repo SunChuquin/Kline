@@ -34,8 +34,9 @@ docstring）。但它自己会开 2 次句柄，若先调用它再另开一次�
 --------
 · `append`：只解析尾部新增行，**全部日线行直接进包**（不做行级比对，因为文件前 `旧长度-18`
   字节与旧 txt 逐字节一致 ⇒ 其历史行与库内必然相同）。周/月/季/年线用**增量合并**：开局
-  **一次性**由基线最大交易日推出当期四个周期（候选集），每个标的**只对被新数据触及的周期**
-  做一次索引范围查询取基线那一根 bar，与新日线合并（基线无该周期 bar → 直接用新数据聚合）。
+  **一次性**由基线最大交易日推出当期四个周期（候选集），并用 **4 条批量查询**把四张周期表的
+  「当期 bar」整表捞出（`{meta_id: bar}`）；每个标的**只对被新数据触及的周期**与该 bar 合并
+  （基线无该周期 bar → 直接用新数据聚合）。**不再逐标的探查基线**（性能红线 3）。
   基线可能在**未完成周期**处截断（实测基线止于 20260828，20260831 仍在 8 月 → 8 月月线要更新）。
 · `rewrite`：整文件解析 → 聚合 → 与基线**全部**行比对 → 只发真正不同/新增的（整只标的全量重算）。
 · `new`（仅新目录有）：整文件解析 → 全部行进包；meta 从 txt 表头解析 code/name。
@@ -52,8 +53,10 @@ docstring）。但它自己会开 2 次句柄，若先调用它再另开一次�
 --------------------------------------
 1. 分类与解析**融合**，每文件**只开 2 次句柄**。
 2. **周一映射必须缓存**（每行构造 `datetime` 会让 B 段从 10s 涨到 20s）。
-3. append 文件的基线周/月**只取最后 8 行**比对（`ORDER BY date DESC LIMIT 8`）——
-   若取整段历史，3440 只 × ~1200 行会白取，B 段多花约 50s。
+3. append 的周期合并**只做 4 条批量查询**：开局一次性把四张周期表的「当期 bar」整表捞出
+   （`load_current_bars`，`WHERE date BETWEEN 周期起始 AND 周期结束`）→ `{meta_id: bar}`，
+   每个标的直接查字典合并。**禁止逐标的探查基线**（3611 只 × 4 周期 ≈ 14k 次随机探查，
+   每次进 4 张大表约 3ms → A 段从 ~12s 退化到 ~60s）。
 
 安全与只读（硬约束）
 --------------------
@@ -78,6 +81,7 @@ rewrite），对每个文件**完整解析整个新 txt**（不走 append 尾部
 
 import argparse
 import datetime
+import multiprocessing
 import os
 import random
 import sqlite3
@@ -104,11 +108,10 @@ FIELDS = ("open", "high", "low", "close", "vol", "amo")
 PATCH_PREFIX = "patch_"
 DEFAULT_BASE_DB = r"C:\Users\sunck\home\tdx_baseline.db"
 DEFAULT_OUT = r"c:\Users\sunck\home\projects\ios\Kline\build_logs\patches"
-TAIL_PERIOD_ROWS = 8               # append 文件只比基线周期表最后 8 行（性能红线 3）
 TXT_EXT = ".txt"
 # 补丁携带的五张周期表（**分片契约仍是三张**，只有补丁走这里）
 PATCH_PERIODS = ("daily", "weekly", "monthly", "quarterly", "yearly")
-# append 时每个周期都要「索引范围查询基线那一根 bar」→ 合并（Task 1.3）
+# append 时按周期把「基线当期 bar」批量预取 → 与新日线合并（Task 1.3）
 MERGE_PERIODS = ("weekly", "monthly", "quarterly", "yearly")
 
 
@@ -117,6 +120,7 @@ MERGE_PERIODS = ("weekly", "monthly", "quarterly", "yearly")
 # ---------------------------------------------------------------------------
 
 _MON = {}                          # 周一映射缓存（性能红线 2）
+_KEYS = {}                         # 日期 → 周/月/季/年四个分组键的缓存（性能红线 2）
 
 
 def monday_key(date_int):
@@ -182,42 +186,59 @@ def period_cal_end(cal_start, period):
     return L.date_to_int(nxt - datetime.timedelta(days=1))
 
 
-def agg_rows(rows, key_fn):
-    """流式聚合（照抄 tdx_parser.handle_data 的语义）。
+def agg_all_periods(rows):
+    """**一趟**聚合出周/月/季/年四张周期表（照抄 tdx_parser.handle_data 的语义）。
 
     rows 为**按日期升序**的 `(date, open, high, low, close, vol, amo)`；同一周期内
     open 取第一行、high=max、low=min、close 取最后一行、vol/amo 累加；周期 date 取该周期首个交易日。
-    返回同结构的元组列表（周期内首个交易日的 date）。
+    返回 `{period: [(date,open,high,low,close,vol,amo), ...]}`。
+
+    性能（rewrite 路径的红线）：四个分组键按**日期**缓存（`_KEYS`，全市场仅 ~8000 个交易日），
+    避免每行重复做 `//10000`/`//100` 之类的除法——实测 4 趟独立聚合 6.0s → 一趟 3.7s。
     """
-    out, last = [], None
+    out = {p: [] for p in MERGE_PERIODS}
+    last = {p: None for p in MERGE_PERIODS}
+    get = _KEYS.get
     for r in rows:
-        k = key_fn(r[0])
-        if k != last:
-            out.append([r[0], r[1], r[2], r[3], r[4], r[5], r[6]])
-            last = k
-        else:
-            c = out[-1]
-            c[2] = max(c[2], r[2])       # high
-            c[3] = min(c[3], r[3])       # low
-            c[4] = r[4]                  # close
-            c[5] += r[5]                 # vol
-            c[6] += r[6]                 # amo
-    return [tuple(x) for x in out]
+        d = r[0]
+        ks = get(d)
+        if ks is None:
+            ks = (monday_key(d), month_key(d), quarter_key(d), year_key(d))
+            _KEYS[d] = ks
+        for p, k in zip(MERGE_PERIODS, ks):
+            cur = out[p]
+            if k != last[p]:
+                cur.append([d, r[1], r[2], r[3], r[4], r[5], r[6]])
+                last[p] = k
+            else:
+                c = cur[-1]
+                if r[2] > c[2]:
+                    c[2] = r[2]              # high
+                if r[3] < c[3]:
+                    c[3] = r[3]              # low
+                c[4] = r[4]                  # close
+                c[5] += r[5]                 # vol
+                c[6] += r[6]                 # amo
+    return {p: [tuple(x) for x in out[p]] for p in MERGE_PERIODS}
 
 
 # ---------------------------------------------------------------------------
 # 增量合并（append 路径）：基线该周期那一根 bar ⊕ 新日线（Task 1.2 / 1.3）
 # ---------------------------------------------------------------------------
 
-def baseline_period_bar(base, mid, period, cal_start, cal_end):
-    """索引范围查询基线里该周期的那一根 bar（date 落在 [cal_start, cal_end]），无则 None。"""
-    r = base.execute(
-        "SELECT date,open,high,low,close,vol,amo FROM %s "
-        "WHERE meta_id=? AND date>=? AND date<=? ORDER BY date LIMIT 1" % period,
-        (mid, cal_start, cal_end)).fetchone()
-    if r is None:
-        return None
-    return (int(r[0]), r[1], r[2], r[3], r[4], r[5] or 0.0, r[6] or 0.0)
+def load_current_bars(base, period, lo):
+    """开局**一次性**把该周期「当期 bar」整表捞出 → `{meta_id: (date,o,h,l,c,v,a)}`。
+
+    周期 `date` = 该周期首个交易日，必落在 `[lo, period_cal_end(lo)]` 内 → 一条范围查询就能
+    拿到**所有标的**的当期 bar，**取代逐标的的 14k 次索引探查**（这是 A 段性能红线的关键）。
+    """
+    ce = period_cal_end(lo, period)
+    out = {}
+    for r in base.execute(
+            "SELECT meta_id,date,open,high,low,close,vol,amo FROM %s "
+            "WHERE date>=? AND date<=?" % period, (lo, ce)):
+        out[int(r[0])] = (int(r[1]), r[2], r[3], r[4], r[5], r[6] or 0.0, r[7] or 0.0)
+    return out
 
 
 def merge_period_bar(new_rows, base_bar):
@@ -236,29 +257,40 @@ def merge_period_bar(new_rows, base_bar):
             new_rows[-1][4], base_bar[5] + vol, base_bar[6] + amo)
 
 
-def merge_period_rows(base, mid, period, new_daily, lo):
-    """对某周期，按「被新数据触及的周期」分组 → 取基线那一根 bar → 合并（增量合并）。
+def merge_period_rows(new_daily, period, lo, cur_bar):
+    """对某周期，按「被新数据触及的周期」分组 → 与基线**当期 bar** 合并（增量合并）。
 
-    · `lo` = 开局**一次性**由基线最大交易日 dmax 推出的「当期」日历起始（候选集，见 main）。
-      常态下新数据全落在当期（`period_start(last)==lo`）→ 只触及 1 个周期，只查一次基线。
-    · 守卫：日历起始 < lo 的周期直接跳过（基线若未截断到该周期，`min()` 会取到上一周期而
-      产出**局部**周期行；被跳过的周期不受新数据影响，其基线行本就正确）。
+    · `cur_bar` = 该标的基线**当期** bar（`load_current_bars` 批量预取）或 None。
+      只有 `cs == lo` 的周期才可能在基线里有 bar；`cs > lo` 的周期起始于 dmax 之后，
+      基线必然没有 → 直接用新数据聚合（**不回查基线**，Task 1.3 / 细节 3）。
+    · 守卫：日历起始 < lo 的周期直接跳过（与旧实现一致；基线若未截断到该周期，`min()` 会取到
+      上一周期而产出**局部**周期行——被跳过的周期不受新数据影响，其基线行本就正确）。
     · 返回升序的周期行 `(date,open,high,low,close,vol,amo)`。
     """
-    if period_start(new_daily[-1][0], period) == lo:
-        starts = [lo]
-    else:
-        starts = sorted({period_start(r[0], period) for r in new_daily})
+    groups = {}
+    for r in new_daily:
+        groups.setdefault(period_start(r[0], period), []).append(r)
     out = []
-    for cs in starts:
+    for cs in sorted(groups):
         if cs < lo:
             continue
-        rs = sorted((r for r in new_daily if period_start(r[0], period) == cs),
-                    key=lambda x: x[0])
-        if not rs:
-            continue
-        bar = baseline_period_bar(base, mid, period, cs, period_cal_end(cs, period))
-        out.append(merge_period_bar(rs, bar))
+        rs = sorted(groups[cs], key=lambda x: x[0])
+        out.append(merge_period_bar(rs, cur_bar if cs == lo else None))
+    return out
+
+
+def diff_period_append(cand, period, lo, cur_bar, tol):
+    """append 的周期比对：只有当期（`cs==lo`）在基线里有 bar 可比，其余是新周期 → 直接发。
+
+    取代原先「逐标的 `ORDER BY date DESC LIMIT 8`」的两次探查（细节 1）。
+    """
+    out = []
+    for r in cand:
+        if period_start(r[0], period) == lo and cur_bar is not None:
+            if not _same6(r[1:], cur_bar[1:], tol):
+                out.append(r)
+        else:
+            out.append(r)
     return out
 
 
@@ -536,58 +568,31 @@ def db_state(path):
     return (st.st_size, st.st_mtime_ns)
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(
-        description="Kline「txt 直出差分」出包器：新 txt 目录 + 基线库 → patch_<seq>.db（不重建库，基线只读）")
-    ap.add_argument("--old-txt-dir", dest="old_txt_dir", required=True,
-                    help="旧 txt 目录（分类与 append 定位的参照）")
-    ap.add_argument("--new-txt-dir", dest="new_txt_dir", required=True, help="新 txt 目录（差异来源）")
-    ap.add_argument("--base-db", dest="base_db", default=DEFAULT_BASE_DB,
-                    help="基线库（**只读打开**，默认 %s）" % DEFAULT_BASE_DB)
-    ap.add_argument("--out", default=DEFAULT_OUT,
-                    help="输出目录（默认 %s，放 patch_<seq>.db 与清单 txt）" % DEFAULT_OUT)
-    ap.add_argument("--seq", type=int, default=None,
-                    help="补丁序号，命名 patch_<seq>.db（默认取输出目录里已有序号 +1）")
-    ap.add_argument("--dry-run", dest="dry_run", action="store_true",
-                    help="只统计不落盘（不产出 patch_<seq>.db，也不写清单 txt）")
-    ap.add_argument("--tol", type=float, default=FLOAT_TOL,
-                    help="浮点容差，判定 abs(a-b)>tol 为变化（默认 %g）" % FLOAT_TOL)
-    ap.add_argument("--self-check", dest="self_check", type=int, default=0, metavar="N",
-                    help="出包后用**独立全量重算**交叉验证 N 个文件（0=关闭；建议 200）")
-    ap.add_argument("--self-check-seed", dest="self_check_seed", type=int, default=20260923,
-                    help="交叉验证抽样种子（默认 20260923，便于复现）")
-    args = ap.parse_args(argv)
+# ---------------------------------------------------------------------------
+# 核心处理（单包与分片共用同一份实现，避免两套口径漂移）
+# ---------------------------------------------------------------------------
 
-    t_all = time.time()
-    if not os.path.isdir(args.old_txt_dir):
-        raise SystemExit("旧 txt 目录不存在: %s" % args.old_txt_dir)
-    if not os.path.isdir(args.new_txt_dir):
-        raise SystemExit("新 txt 目录不存在: %s" % args.new_txt_dir)
-    if not os.path.exists(args.base_db):
-        raise SystemExit("基线库不存在: %s" % args.base_db)
+def process_files(base, names, old_dir, new_dir, tol):
+    """给定一批 txt 文件名，完成「分类+解析 → 合并/聚合 → 比对 → 汇总」。
 
-    out_dir = os.path.abspath(args.out)
-    print("旧 txt : %s" % args.old_txt_dir)
-    print("新 txt : %s" % args.new_txt_dir)
-    print("基线库 : %s（只读）" % args.base_db)
-    print("输出   : %s%s" % (out_dir, "（--dry-run：不落盘）" if args.dry_run else ""))
+    `base` 是**调用方持有的只读连接**（单包 = 主连接；分片 = worker 自己的连接）。
+    返回不含 sqlite 连接的 dict：rows / per_file / kind_map / idmap / 计数 / A·B 耗时
+    / dmax·LO·当期 bar 数量（供调用方打印）。
 
-    before_base = db_state(args.base_db)
-
-    base = sqlite3.connect(L.ro_uri(args.base_db), uri=True)   # 只读打开
-    base.execute("PRAGMA query_only=1")                        # 双保险：本连接任何写操作都被拒绝
+    ⚠ 本函数是单包与分片的**唯一**实现：`--shards 1` 与每片的行数口径因此天然一致。
+    """
     idmap = {f: i for i, f in base.execute("SELECT id, file FROM meta")}
     meta_src = {r[0]: r for r in base.execute("SELECT file, code, name, type FROM meta")}
 
-    names = sorted(n for n in os.listdir(args.new_txt_dir) if n.endswith(TXT_EXT))
-    print("新目录 txt 文件数: %d；基线 meta: %d 只" % (len(names), len(idmap)))
-
     # 开局**一次性**：由基线最大交易日 dmax 推出「当期」周/月/季/年四个周期（可能不完整的
     # 候选集）。每个标的的增量合并直接复用这组 lo，**不在标的循环里重复判断当期**（Task 1.2）。
-    dmax = base.execute("SELECT MAX(date) FROM daily").fetchone()[0]
+    # dmax 取 `meta.last_date`（每只标的的最大日线日期，tdx_parser 写入）的 MAX：
+    # 与 `SELECT MAX(date) FROM daily` **口径等价**（实测 3611/3611 完全一致），但只扫 3611 行，
+    # 比全表扫 daily（14M 行，冷缓存 >2s）快三个数量级（性能红线 3）。
+    dmax = base.execute("SELECT MAX(last_date) FROM meta").fetchone()[0]
     LO = {p: period_start(int(dmax), p) for p in MERGE_PERIODS}
-    print("基线最大交易日 dmax=%s → 当期日历起始: weekly=%s monthly=%s quarterly=%s yearly=%s"
-          % (dmax, LO["weekly"], LO["monthly"], LO["quarterly"], LO["yearly"]))
+    # 开局**一次性**把四张周期表的「当期 bar」整表捞出（4 条批量查询取代逐标的的 14k 次探查）
+    CUR_BAR = {p: load_current_bars(base, p, LO[p]) for p in MERGE_PERIODS}
 
     rows = {"meta": [], "daily": [], "weekly": [], "monthly": [],
             "quarterly": [], "yearly": []}
@@ -611,30 +616,29 @@ def main(argv=None):
             skipped_no_meta.append(f)
             continue
         kind, new_daily, header = classify_and_read(
-            os.path.join(args.old_txt_dir, nm), os.path.join(args.new_txt_dir, nm))
+            os.path.join(old_dir, nm), os.path.join(new_dir, nm))
         kind_map[f] = kind
         n_app += kind == "append"
         n_rew += kind == "rewrite"
         n_new += kind == "new"
 
         if kind == "append":
-            # 只解析尾部新增行（全部日线直接进包）；周/月/季/年**只对被新数据触及的周期**
-            # 做一次索引范围查询取基线那一根 bar，与新日线**合并**（不整周期重算）。
+            # 只解析尾部新增行（全部日线直接进包）；周/月/季/年**只对被新数据触及的周期**与
+            # 基线**当期 bar**（开局批量预取）**合并**（不整周期重算、不再逐标的查基线）。
             dailies = new_daily
             if new_daily:
-                wk = merge_period_rows(base, mid, "weekly", new_daily, LO["weekly"])
-                mo = merge_period_rows(base, mid, "monthly", new_daily, LO["monthly"])
-                qt = merge_period_rows(base, mid, "quarterly", new_daily, LO["quarterly"])
-                yr = merge_period_rows(base, mid, "yearly", new_daily, LO["yearly"])
+                wk = merge_period_rows(new_daily, "weekly", LO["weekly"], CUR_BAR["weekly"].get(mid))
+                mo = merge_period_rows(new_daily, "monthly", LO["monthly"], CUR_BAR["monthly"].get(mid))
+                qt = merge_period_rows(new_daily, "quarterly", LO["quarterly"], CUR_BAR["quarterly"].get(mid))
+                yr = merge_period_rows(new_daily, "yearly", LO["yearly"], CUR_BAR["yearly"].get(mid))
             else:
                 # 停牌标的（新数据为空）→ 不产生任何 bar（Task 1.5）
                 wk, mo, qt, yr = [], [], [], []
         else:
             # rewrite（整文件解析）→ 整只标的所有周期**全量重算** → 与基线全部行比对
-            wk = agg_rows(new_daily, monday_key)
-            mo = agg_rows(new_daily, month_key)
-            qt = agg_rows(new_daily, quarter_key)
-            yr = agg_rows(new_daily, year_key)
+            per = agg_all_periods(new_daily)
+            wk, mo = per["weekly"], per["monthly"]
+            qt, yr = per["quarterly"], per["yearly"]
             dailies = None
         t_a += time.time() - t0
 
@@ -643,25 +647,20 @@ def main(argv=None):
             # append / 基线缺失：日线全部直接进包（append 不做行级比对）
             ddiff = dailies
             if kind == "append":
-                # 周/月/季/年：只与基线**最后 TAIL_PERIOD_ROWS 行**比对（性能红线 3）
-                period_diff = {}
-                for period, cand in (("weekly", wk), ("monthly", mo),
-                                     ("quarterly", qt), ("yearly", yr)):
-                    have = {int(r[0]): r[1:] for r in base.execute(
-                        "SELECT date,open,high,low,close,vol,amo FROM %s WHERE meta_id=? "
-                        "ORDER BY date DESC LIMIT %d" % (period, TAIL_PERIOD_ROWS), (mid,))}
-                    period_diff[period] = diff_rows(cand, have, args.tol)
-                wdiff, mdiff = period_diff["weekly"], period_diff["monthly"]
-                qdiff, ydiff = period_diff["quarterly"], period_diff["yearly"]
+                # 周/月/季/年：当期与预取的基线当期 bar 比，其余（新周期）直接发（无逐标查询）
+                wdiff = diff_period_append(wk, "weekly", LO["weekly"], CUR_BAR["weekly"].get(mid), tol)
+                mdiff = diff_period_append(mo, "monthly", LO["monthly"], CUR_BAR["monthly"].get(mid), tol)
+                qdiff = diff_period_append(qt, "quarterly", LO["quarterly"], CUR_BAR["quarterly"].get(mid), tol)
+                ydiff = diff_period_append(yr, "yearly", LO["yearly"], CUR_BAR["yearly"].get(mid), tol)
             else:
                 wdiff, mdiff, qdiff, ydiff = wk, mo, qt, yr
         else:
             # rewrite：与基线**全部**行比对，只发真正不同/新增的
-            ddiff = diff_rows(new_daily, _have_all(base, mid, "daily"), args.tol)
-            wdiff = diff_rows(wk, _have_all(base, mid, "weekly"), args.tol)
-            mdiff = diff_rows(mo, _have_all(base, mid, "monthly"), args.tol)
-            qdiff = diff_rows(qt, _have_all(base, mid, "quarterly"), args.tol)
-            ydiff = diff_rows(yr, _have_all(base, mid, "yearly"), args.tol)
+            ddiff = diff_rows(new_daily, _have_all(base, mid, "daily"), tol)
+            wdiff = diff_rows(wk, _have_all(base, mid, "weekly"), tol)
+            mdiff = diff_rows(mo, _have_all(base, mid, "monthly"), tol)
+            qdiff = diff_rows(qt, _have_all(base, mid, "quarterly"), tol)
+            ydiff = diff_rows(yr, _have_all(base, mid, "yearly"), tol)
         _emit(rows, f, "daily", ddiff)
         _emit(rows, f, "weekly", wdiff)
         _emit(rows, f, "monthly", mdiff)
@@ -682,115 +681,464 @@ def main(argv=None):
                 rows["meta"].append((f, f.split("#")[-1], "", guess_type(f)))
         t_b += time.time() - t0
 
-    t_loop = time.time() - t0_all
-    n_daily = len(rows["daily"])
-    total_rows = sum(len(rows[p]) for p in PATCH_PERIODS)
-    print("-" * 78)
-    print("分类: append=%d rewrite=%d new=%d（合计 %d）" % (n_app, n_rew, n_new, len(names)))
-    if skipped_no_meta:
-        print("跳过 %d 个「主库无此标的」的 txt（不进包，设备侧会被 JOIN 丢弃）: %s"
-              % (len(skipped_no_meta), ", ".join(sorted(skipped_no_meta)[:12])
-                 + (" …" if len(skipped_no_meta) > 12 else "")))
-    print("阶段 A（分类+解析，融合，2 次句柄/文件）  %.1fs" % t_a)
-    print("阶段 B（比对/聚合/汇总）               %.1fs" % t_b)
-    print("受影响 file 数: %d（bkt_meta）" % len(rows["meta"]))
-    print("补丁行数: %s 合计=%d"
-          % (" ".join("%s=%d" % (p, len(rows[p])) for p in PATCH_PERIODS), total_rows))
-    print("（逐文件主循环总耗时 %.1fs）" % t_loop)
+    return {"rows": rows, "per_file": per_file, "kind_map": kind_map, "idmap": idmap,
+            "n_app": n_app, "n_rew": n_rew, "n_new": n_new,
+            "skipped_no_meta": skipped_no_meta, "t_a": t_a, "t_b": t_b,
+            "t_loop": time.time() - t0_all,
+            "dmax": dmax, "lo": LO,
+            "cur_counts": {p: len(CUR_BAR[p]) for p in MERGE_PERIODS}}
 
-    if total_rows == 0:
-        print("无差异：不产出空补丁包。")
+
+def report_ordered(per_file, size, total_rows):
+    """受影响 file 清单的累计列（cum_rows / cum_bytes_est）。单包与每片各自调用。"""
+    avg_row = size / float(total_rows) if total_rows else 0.0
+    recs = {}
+    for f in per_file:
+        rec = dict(per_file[f])
+        rec["rows"] = sum(rec.get(p, 0) for p in PATCH_PERIODS)
+        recs[f] = rec
+    cum, ordered = 0, {}
+    for f in sorted(recs):
+        rec = recs[f]
+        cum += rec["rows"]
+        rec["cum_rows"] = cum
+        rec["cum_bytes_est"] = int(cum * avg_row)
+        ordered[f] = rec
+    return ordered, avg_row
+
+
+def report_header(old_dir, new_dir, base_db, tol, rows, total_rows,
+                  out_path, size, sha, updated_at, max_date, shard=None):
+    """清单 txt 的头部（单包与每片共用，保证格式一致）。shard=(i,N) 时标注分片。"""
+    head = [
+        "Kline txt 直出差分补丁包 · 受影响 file 清单",
+        "生成时间: %s" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "旧 txt : %s" % old_dir,
+        "新 txt : %s" % new_dir,
+        "基线库 : %s（只读，跑完 size+mtime 未变）" % base_db,
+    ]
+    if shard is not None:
+        head.append("分片   : 第 %d/%d 片（file 稳定分组 index %% N）" % (shard[0], shard[1]))
+    head += [
+        "容差   : abs(a-b) > %g（字段 %s 任一变化即计入）" % (tol, "/".join(FIELDS)),
+        "包内最新日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at),
+        "包文件 : %s   bytes=%d   sha256=%s" % (out_path, size, sha),
+        "包内行数: %s 合计=%d"
+        % (" ".join("%s=%d" % (p, len(rows[p])) for p in PATCH_PERIODS), total_rows),
+        "平均每行约 %.1f B；cum_bytes_est = 累计行数 × 平均行字节（SQLite 单文件无法按 file 精确归因）"
+        % (size / float(total_rows) if total_rows else 0.0),
+    ]
+    return head
+
+
+# ---------------------------------------------------------------------------
+# 分片：稳定分组 / 全局 updated_at / multiprocessing worker
+# ---------------------------------------------------------------------------
+
+def last_date_in_txt(path):
+    """新 txt 里最后一根日线的日期（文件按日期升序 → 末条数据行即该 file 的最大日期）。
+
+    只读文件尾部 4KB 并反向找第一条数据行 —— 用于**开局一次性**算出全局最大日期，
+    避免为了 `updated_at` 把 3611 个文件再完整解析一遍（实测 1.3s）。
+    """
+    try:
+        sz = os.path.getsize(path)
+    except OSError:
+        return None
+    if sz <= 0:
+        return None
+    with open(path, "rb") as fh:
+        fh.seek(max(0, sz - 4096))
+        buf = fh.read().decode("gbk", "replace")
+    for line in reversed(buf.splitlines()):
+        if ";" not in line:
+            continue
+        parts = line.split(";")
+        if len(parts) < 7:
+            continue
+        try:
+            d = int(parts[0])
+        except ValueError:
+            continue
+        if d > 19000101:
+            return d
+    return None
+
+
+def global_max_date(new_dir, names):
+    """全局最大交易日：`updated_at` 的口径（取全局最大 date）。
+
+    必须在**全量待处理标的**上算（不是按片算），否则各片 `bkt_meta.updated_at` 会不一致、
+    `--only-shard i` 单独调用也会与整跑不一致。
+    """
+    mx = 0
+    for nm in names:
+        d = last_date_in_txt(os.path.join(new_dir, nm))
+        if d and d > mx:
+            mx = d
+    return mx
+
+
+def shard_pending(pending, n_shards):
+    """把待处理标的按 **file 稳定分组**：排序后「index % N」 → 两两不交、并集 = 全集。
+
+    只依赖「全局排序列表 + i + N」，所以 `--only-shard i` 单独跑得到的片与整跑的第 i 片**逐字相同**。
+    """
+    s = sorted(pending)
+    return [s[i::n_shards] for i in range(n_shards)]
+
+
+def _shard_worker(payload):
+    """multiprocessing worker：**独立**完成自己那一份的 A+B+C（自己开只读连接、自己出包）。
+
+    只回传**轻量摘要**（行数 / meta file 列表 / 路径 / 字节 / sha256 / 各段耗时 / 自检结论），
+    **不回传 rows** —— 20 万级元组过 IPC 会把并行的收益吃掉。
+    """
+    (idx, files, old_dir, new_dir, base_db, tol, out_dir, seq, n_shards,
+     updated_at, max_date, dry_run, sc_n, sc_seed) = payload
+    res = {"index": idx, "n_files": len(files), "path": None, "bytes": 0, "sha256": None,
+           "n_rows": {p: 0 for p in PATCH_PERIODS}, "total": 0,
+           "a": 0.0, "b": 0.0, "c": 0.0, "wall": 0.0,
+           "meta_files": [], "skipped": [], "n_app": 0, "n_rew": 0, "n_new": 0,
+           "dmax": None, "lo": None, "cur_counts": {}, "selfcheck": None}
+    t_wall = time.time()
+    base = sqlite3.connect(L.ro_uri(base_db), uri=True)     # 每个 worker 自己的只读连接
+    base.execute("PRAGMA query_only=1")
+    try:
+        r = process_files(base, files, old_dir, new_dir, tol)
+        rows, per_file = r["rows"], r["per_file"]
+        n_rows = {p: len(rows[p]) for p in PATCH_PERIODS}
+        res.update({"n_rows": n_rows, "total": sum(n_rows.values()),
+                    "a": r["t_a"], "b": r["t_b"], "n_files": len(per_file),
+                    "meta_files": [m[0] for m in rows["meta"]],
+                    "skipped": r["skipped_no_meta"], "n_app": r["n_app"],
+                    "n_rew": r["n_rew"], "n_new": r["n_new"], "dmax": r["dmax"],
+                    "lo": r["lo"], "cur_counts": r["cur_counts"]})
+        if res["total"] == 0:
+            res["wall"] = time.time() - t_wall
+            return res
+
+        if not dry_run:
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, "%s%d_s%d.db" % (PATCH_PREFIX, seq, idx))
+            tmp_path = out_path + ".tmp"
+            t0 = time.time()
+            # 表结构 / 字段顺序逐字沿用 live_db_builder.build_bucket_file（五张表）
+            L.build_bucket_file(tmp_path, rows, updated_at, periods=PATCH_PERIODS)
+            chk = sqlite3.connect(L.ro_uri(tmp_path), uri=True)
+            try:
+                got = chk.execute("SELECT COUNT(*) FROM bkt_meta").fetchone()[0]
+                assert got == len(rows["meta"]), \
+                    "bkt_meta 行数不一致: %d/%d" % (got, len(rows["meta"]))
+                for period in PATCH_PERIODS:
+                    cnt = chk.execute("SELECT COUNT(*) FROM bkt_%s" % period).fetchone()[0]
+                    assert cnt == n_rows[period], \
+                        "bkt_%s 行数不一致: %d/%d" % (period, cnt, n_rows[period])
+            finally:
+                chk.close()
+            os.replace(tmp_path, out_path)              # 原子替换：编排器按 size 稳定发现
+            res["c"] = time.time() - t0
+            res["path"] = out_path
+            res["bytes"] = os.path.getsize(out_path)
+            res["sha256"] = L.sha256_file(out_path)
+
+            ordered, _avg = report_ordered(per_file, res["bytes"], res["total"])
+            report_path = os.path.join(out_dir, "%s%d_s%d_files.txt" % (PATCH_PREFIX, seq, idx))
+            write_patch_report(
+                report_path,
+                report_header(old_dir, new_dir, base_db, tol, rows, res["total"],
+                              out_path, res["bytes"], res["sha256"], updated_at,
+                              max_date, shard=(idx, n_shards)),
+                list(PATCH_PERIODS) + ["rows", "cum_rows", "cum_bytes_est"], ordered)
+            res["report"] = report_path
+
+        # 自检：每片各自抽样（总抽样数按片分配），结论并入整跑
+        if sc_n > 0:
+            res["selfcheck"] = run_selfcheck(base, r["idmap"], rows, old_dir, new_dir,
+                                             r["kind_map"], sc_n, tol, sc_seed)
+        res["wall"] = time.time() - t_wall
+        return res
+    finally:
         base.close()
-        print("基线库完整性: %s  %s" % (db_state(args.base_db),
-                                       "✅ 未被修改" if db_state(args.base_db) == before_base else "❌ 被修改!"))
-        return 0
 
-    max_date = max(r[1] for p in PATCH_PERIODS for r in rows[p])
+
+def run_sharded(args, out_dir, before_base, t_all):
+    """`--shards N > 1`：N 片由 W 个 worker **并行**独立出包（每个 worker 全流程自包含）。"""
+    n_shards = args.shards
+    workers = min(max(1, args.workers), n_shards)
+    names = sorted(n for n in os.listdir(args.new_txt_dir) if n.endswith(TXT_EXT))
+
+    # 待处理标的 = 新目录里有、且**基线 meta 里有**（否则设备侧 JOIN 会丢弃、进不了包）
+    pbase = sqlite3.connect(L.ro_uri(args.base_db), uri=True)
+    pbase.execute("PRAGMA query_only=1")
+    idmap = {f for _, f in pbase.execute("SELECT id, file FROM meta")}
+    pbase.close()
+    pending = sorted(os.path.splitext(n)[0] for n in names if os.path.splitext(n)[0] in idmap)
+    groups = shard_pending(pending, n_shards)
+    print("待处理标的: %d（新目录 txt %d 个，基线无 meta 跳过 %d）→ 分 %d 片"
+          % (len(pending), len(names), len(names) - len(pending), n_shards))
+    print("分片策略: file 排序后 index %% %d（两两不交、并集 = 全集）；"
+          "worker 数 = min(%d, %d) = %d；仅出第 %s 片"
+          % (n_shards, args.workers, n_shards, workers,
+             args.only_shard if args.only_shard is not None else "全部"))
+
+    # updated_at 取**全局**最大 date（在全量待处理标的上算）→ 各片一致、--only-shard 单独跑也一致
+    max_date = global_max_date(args.new_txt_dir, [f + TXT_EXT for f in pending])
+    if max_date == 0:
+        raise SystemExit("新目录取不到任何有效日期，放弃生成")
     updated_at = L.date_int_to_epoch_utc(max_date)
-    print("包内最新日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at))
+    print("全局最大日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at))
 
     seq = args.seq if args.seq is not None else next_seq(out_dir)
-    out_path = os.path.join(out_dir, "%s%d.db" % (PATCH_PREFIX, seq))
-    report_path = os.path.join(out_dir, "%s%d_files.txt" % (PATCH_PREFIX, seq))
-    size = sha = None
+    idxs = [args.only_shard] if args.only_shard is not None else list(range(n_shards))
+    n_sc = args.self_check
+    sc_by_shard = {i: (n_sc // n_shards + (1 if i < n_sc % n_shards else 0))
+                   for i in range(n_shards)}
 
-    if args.dry_run:
-        print("--dry-run：不落盘（本应写入 %s）" % out_path)
+    payloads = [(i, [f + TXT_EXT for f in groups[i]], args.old_txt_dir, args.new_txt_dir,
+                 args.base_db, args.tol, out_dir, seq, n_shards, updated_at, max_date,
+                 args.dry_run, sc_by_shard[i], args.self_check_seed) for i in idxs]
+
+    print("-" * 78)
+    t0 = time.time()
+    if workers == 1 or len(payloads) == 1:
+        results = [_shard_worker(p) for p in payloads]        # 单进程：便于对照耗时
     else:
-        os.makedirs(out_dir, exist_ok=True)
-        tmp_path = out_path + ".tmp"
-        t0 = time.time()
-        # 表结构 / 字段顺序逐字沿用 live_db_builder.build_bucket_file；补丁携带**五张表**
-        L.build_bucket_file(tmp_path, rows, updated_at, periods=PATCH_PERIODS)
-        # 写后轻量自检：各表行数与内存 rows 一致、bkt_meta 无重复
-        chk = sqlite3.connect(L.ro_uri(tmp_path), uri=True)
-        try:
-            got = chk.execute("SELECT COUNT(*) FROM bkt_meta").fetchone()[0]
-            assert got == len(rows["meta"]), "bkt_meta 行数不一致: %d/%d" % (got, len(rows["meta"]))
-            for period in PATCH_PERIODS:
-                cnt = chk.execute("SELECT COUNT(*) FROM bkt_%s" % period).fetchone()[0]
-                assert cnt == len(rows[period]), \
-                    "bkt_%s 行数不一致: %d/%d" % (period, cnt, len(rows[period]))
-        finally:
-            chk.close()
-        os.replace(tmp_path, out_path)
-        size = os.path.getsize(out_path)
-        sha = L.sha256_file(out_path)
-        t_c = time.time() - t0
-        print("阶段 C（出包）                        %.1fs  →  %d B (%.1f MB)  sha256=%s…"
-              % (t_c, size, size / 1048576.0, sha[:16]))
-        print("补丁包: %s" % out_path)
+        with multiprocessing.Pool(processes=workers) as pool:
+            results = pool.map(_shard_worker, payloads)
+    t_build = time.time() - t0
+    results.sort(key=lambda r: r["index"])
 
-        # 受影响 file 清单（file / 序号 / 各周期行数 / 累计 rows 与累计 bytes 估计）
-        avg_row = size / float(total_rows)
-        columns = list(PATCH_PERIODS) + ["rows", "cum_rows", "cum_bytes_est"]
-        cum_r = 0
-        per_file_report = {}
-        for f in per_file:
-            rec = dict(per_file[f])
-            rec["rows"] = sum(rec.get(p, 0) for p in PATCH_PERIODS)
-            per_file_report[f] = rec
-        cum_r = 0
-        ordered = {}
-        for f in sorted(per_file_report):
-            rec = per_file_report[f]
-            cum_r += rec["rows"]
-            rec["cum_rows"] = cum_r
-            rec["cum_bytes_est"] = int(cum_r * avg_row)
-            ordered[f] = rec
-        header = [
-            "Kline txt 直出差分补丁包 · 受影响 file 清单",
-            "生成时间: %s" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "旧 txt : %s" % args.old_txt_dir,
-            "新 txt : %s" % args.new_txt_dir,
-            "基线库 : %s（只读，跑完 size+mtime 未变）" % args.base_db,
-            "分类   : append=%d rewrite=%d new=%d" % (n_app, n_rew, n_new),
-            "容差   : abs(a-b) > %g（字段 %s 任一变化即计入）" % (args.tol, "/".join(FIELDS)),
-            "包内最新日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at),
-            "包文件 : %s   bytes=%d   sha256=%s" % (out_path, size, sha),
-            "包内行数: %s 合计=%d"
-            % (" ".join("%s=%d" % (p, len(rows[p])) for p in PATCH_PERIODS), total_rows),
-            "平均每行约 %.1f B；cum_bytes_est = 累计行数 × 平均行字节（SQLite 单文件无法按 file 精确归因）"
-            % avg_row,
-        ]
-        write_patch_report(report_path, header, columns, ordered)
-        print("受影响 file 清单: %s（%d 个 file）" % (report_path, len(ordered)))
-    if not args.dry_run:
-        print("PC 侧 A+B+C = %.1fs（A %.1fs + B %.1fs + C %.1fs）"
-              % (t_a + t_b + t_c, t_a, t_b, t_c))
+    # ---- 逐片汇总 ----
+    print("-" * 78)
+    print("%-6s %-8s %s %s" % ("片", "file数", " ".join("%-10s" % p for p in PATCH_PERIODS),
+                               "合计 / 体积 / 耗时(A+B+C)"))
+    sum_rows = {p: 0 for p in PATCH_PERIODS}
+    for r in results:
+        sum_rows = {p: sum_rows[p] + r["n_rows"][p] for p in PATCH_PERIODS}
+        print("%-6d %-8d %s %-8d %8.1f MB  A %.1f + B %.1f + C %.1f"
+              % (r["index"], r["n_files"],
+                 " ".join("%-10d" % r["n_rows"][p] for p in PATCH_PERIODS),
+                 r["total"], r["bytes"] / 1048576.0, r["a"], r["b"], r["c"]))
+    print("各片行数之和: %s 合计=%d"
+          % (" ".join("%s=%d" % (p, sum_rows[p]) for p in PATCH_PERIODS),
+             sum(sum_rows.values())))
+    print("出包总耗时 %.1fs（%d 片，%d 个 worker，墙钟；各片 A+B+C 之和 %.1fs）"
+          % (t_build, len(results), workers, sum(r["a"] + r["b"] + r["c"] for r in results)))
 
-    # ---- 正确性硬门槛：独立全量重算交叉验证 ----
-    if args.self_check > 0:
-        run_selfcheck(base, idmap, rows, args.old_txt_dir, args.new_txt_dir,
-                      kind_map, args.self_check, args.tol, args.self_check_seed)
+    # ---- 并集 / 交集自检（bkt_meta.file）----
+    # 每片先做最强的一句断言：**产出集 == 分配集**（`groups[i]`）。因为 groups 本身是对 pending
+    # 的划分（两两不交、并集 = 全集），这一句在整跑与 `--only-shard` 两种模式下都成立且充分。
+    produced = {r["index"]: set(r["meta_files"]) for r in results}
+    bad_shards = sorted(i for i in produced if produced[i] != set(groups[i]))
+    sets = list(produced.values())
+    pair_inter = sum(len(sets[a] & sets[b])
+                     for a in range(len(sets)) for b in range(a + 1, len(sets)))
+    full_run = args.only_shard is None
+    union = set().union(*sets) if sets else set()
+    ok_union = (len(union) == len(pending)) if full_run else True
+    ok_inter = (pair_inter == 0) if len(sets) > 1 else True
+    ok_sum = all(sum_rows[p] == sum(r["n_rows"][p] for r in results) for p in PATCH_PERIODS)
+    print("-" * 78)
+    print("自检: 每片「产出集 = 分配集」 %s（%s）   ·   各片行数之和与逐片一致 %s"
+          % ("✅" if not bad_shards else "❌ 片 %s" % bad_shards,
+             "分配按 file 排序 index%N 划分 → 两两不交、并集 = 全集" if full_run
+             else "分配集来自全量划分，故与整跑的第 %d 片逐字相同" % args.only_shard,
+             "✅" if ok_sum else "❌"))
+    if full_run:
+        print("      并集 %d / 待处理 %d %s   ·   两两交集 %d %s"
+              % (len(union), len(pending), "✅" if ok_union else "❌",
+                 pair_inter, "✅" if ok_inter else "❌"))
+    if bad_shards or not (ok_union and ok_inter and ok_sum):
+        print("❌ 分片自检失败：不重不漏被破坏！")
 
-    base.close()
+    sk = sorted({f for r in results for f in r["skipped"]})
+    if sk:
+        print("跳过 %d 个「主库无此标的」的 txt（不进包）: %s"
+              % (len(sk), ", ".join(sk[:12]) + (" …" if len(sk) > 12 else "")))
+    if args.dry_run:
+        print("--dry-run：不落盘（本应写入 %s%d_s0..%d.db）"
+              % (os.path.join(out_dir, PATCH_PREFIX), seq, n_shards - 1))
+
+    # ---- 自检结论（各片独立抽样，汇总）----
+    sc = [r["selfcheck"] for r in results if r.get("selfcheck")]
+    if sc:
+        okf = sum(x[0] for x in sc)
+        badf = sum(x[1] for x in sc)
+        ck = sum(x[2] for x in sc)
+        bc = sum(x[3] for x in sc)
+        print("分片交叉验证汇总：文件级 匹配 %d / 不一致 %d  ·  周期级 匹配 %d / 不一致 %d"
+              % (okf, badf, ck - bc, bc))
+
+    after_base = db_state(args.base_db)
+    print("-" * 78)
+    print("基线库完整性（mode=size+mtime）: before=%s after=%s  %s"
+          % (before_base, after_base, "✅ 未被修改" if after_base == before_base else "❌ 被修改了！"))
+    print("总耗时 %.1fs" % (time.time() - t_all))
+    return 0 if (not bad_shards and ok_union and ok_inter and ok_sum) else 1
+
+
+def run_single(args, out_dir, before_base, t_all):
+    """`--shards 1`（默认）：单进程单包 —— 行为与耗时与既有实现**等价**（走同一条路径）。"""
+    base = sqlite3.connect(L.ro_uri(args.base_db), uri=True)   # 只读打开
+    base.execute("PRAGMA query_only=1")                        # 双保险：本连接任何写操作都被拒绝
+    try:
+        names = sorted(n for n in os.listdir(args.new_txt_dir) if n.endswith(TXT_EXT))
+        print("新目录 txt 文件数: %d；基线 meta: %d 只"
+              % (len(names), base.execute("SELECT COUNT(*) FROM meta").fetchone()[0]))
+
+        r = process_files(base, names, args.old_txt_dir, args.new_txt_dir, args.tol)
+        rows, per_file, kind_map = r["rows"], r["per_file"], r["kind_map"]
+        print("基线最大交易日 dmax=%s → 当期日历起始: weekly=%s monthly=%s quarterly=%s yearly=%s"
+              % (r["dmax"], r["lo"]["weekly"], r["lo"]["monthly"],
+                 r["lo"]["quarterly"], r["lo"]["yearly"]))
+        print("当期 bar 批量预取: %s（各 1 条范围查询）"
+              % " ".join("%s=%d" % (p, r["cur_counts"][p]) for p in MERGE_PERIODS))
+
+        total_rows = sum(len(rows[p]) for p in PATCH_PERIODS)
+        t_a, t_b = r["t_a"], r["t_b"]
+        print("-" * 78)
+        print("分类: append=%d rewrite=%d new=%d（合计 %d）"
+              % (r["n_app"], r["n_rew"], r["n_new"], len(names)))
+        if r["skipped_no_meta"]:
+            print("跳过 %d 个「主库无此标的」的 txt（不进包，设备侧会被 JOIN 丢弃）: %s"
+                  % (len(r["skipped_no_meta"]),
+                     ", ".join(sorted(r["skipped_no_meta"])[:12])
+                     + (" …" if len(r["skipped_no_meta"]) > 12 else "")))
+        print("阶段 A（分类+解析，融合，2 次句柄/文件）  %.1fs" % t_a)
+        print("阶段 B（比对/聚合/汇总）               %.1fs" % t_b)
+        print("受影响 file 数: %d（bkt_meta）" % len(rows["meta"]))
+        print("补丁行数: %s 合计=%d"
+              % (" ".join("%s=%d" % (p, len(rows[p])) for p in PATCH_PERIODS), total_rows))
+        print("（逐文件主循环总耗时 %.1fs）" % r["t_loop"])
+
+        if total_rows == 0:
+            print("无差异：不产出空补丁包。")
+            base.close()
+            print("基线库完整性: %s  %s" % (db_state(args.base_db),
+                  "✅ 未被修改" if db_state(args.base_db) == before_base else "❌ 被修改!"))
+            return 0
+
+        max_date = max(x[1] for p in PATCH_PERIODS for x in rows[p])
+        updated_at = L.date_int_to_epoch_utc(max_date)
+        print("包内最新日期: %s   updated_at(UTC epoch)=%d" % (max_date, updated_at))
+
+        seq = args.seq if args.seq is not None else next_seq(out_dir)
+        out_path = os.path.join(out_dir, "%s%d.db" % (PATCH_PREFIX, seq))
+        report_path = os.path.join(out_dir, "%s%d_files.txt" % (PATCH_PREFIX, seq))
+        size = sha = None
+        t_c = 0.0
+
+        if args.dry_run:
+            print("--dry-run：不落盘（本应写入 %s）" % out_path)
+        else:
+            os.makedirs(out_dir, exist_ok=True)
+            tmp_path = out_path + ".tmp"
+            t0 = time.time()
+            # 表结构 / 字段顺序逐字沿用 live_db_builder.build_bucket_file；补丁携带**五张表**
+            L.build_bucket_file(tmp_path, rows, updated_at, periods=PATCH_PERIODS)
+            # 写后轻量自检：各表行数与内存 rows 一致、bkt_meta 无重复
+            chk = sqlite3.connect(L.ro_uri(tmp_path), uri=True)
+            try:
+                got = chk.execute("SELECT COUNT(*) FROM bkt_meta").fetchone()[0]
+                assert got == len(rows["meta"]), \
+                    "bkt_meta 行数不一致: %d/%d" % (got, len(rows["meta"]))
+                for period in PATCH_PERIODS:
+                    cnt = chk.execute("SELECT COUNT(*) FROM bkt_%s" % period).fetchone()[0]
+                    assert cnt == len(rows[period]), \
+                        "bkt_%s 行数不一致: %d/%d" % (period, cnt, len(rows[period]))
+            finally:
+                chk.close()
+            os.replace(tmp_path, out_path)
+            size = os.path.getsize(out_path)
+            sha = L.sha256_file(out_path)
+            t_c = time.time() - t0
+            print("阶段 C（出包）                        %.1fs  →  %d B (%.1f MB)  sha256=%s…"
+                  % (t_c, size, size / 1048576.0, sha[:16]))
+            print("补丁包: %s" % out_path)
+
+            # 受影响 file 清单（file / 序号 / 各周期行数 / 累计 rows 与累计 bytes 估计）
+            ordered, avg_row = report_ordered(per_file, size, total_rows)
+            header = report_header(args.old_txt_dir, args.new_txt_dir, args.base_db, args.tol,
+                                   rows, total_rows, out_path, size, sha, updated_at, max_date)
+            header.insert(5, "分类   : append=%d rewrite=%d new=%d" % (r["n_app"], r["n_rew"], r["n_new"]))
+            write_patch_report(report_path, header,
+                               list(PATCH_PERIODS) + ["rows", "cum_rows", "cum_bytes_est"], ordered)
+            print("受影响 file 清单: %s（%d 个 file）" % (report_path, len(ordered)))
+        if not args.dry_run:
+            print("PC 侧 A+B+C = %.1fs（A %.1fs + B %.1fs + C %.1fs）"
+                  % (t_a + t_b + t_c, t_a, t_b, t_c))
+
+        # ---- 正确性硬门槛：独立全量重算交叉验证 ----
+        if args.self_check > 0:
+            run_selfcheck(base, r["idmap"], rows, args.old_txt_dir, args.new_txt_dir,
+                          kind_map, args.self_check, args.tol, args.self_check_seed)
+    finally:
+        base.close()
     after_base = db_state(args.base_db)
     print("-" * 78)
     print("基线库完整性（mode=size+mtime）: before=%s after=%s  %s"
           % (before_base, after_base, "✅ 未被修改" if after_base == before_base else "❌ 被修改了！"))
     print("总耗时 %.1fs" % (time.time() - t_all))
     return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="Kline「txt 直出差分」出包器：新 txt 目录 + 基线库 → patch_<seq>.db（不重建库，基线只读）")
+    ap.add_argument("--old-txt-dir", dest="old_txt_dir", required=True,
+                    help="旧 txt 目录（分类与 append 定位的参照）")
+    ap.add_argument("--new-txt-dir", dest="new_txt_dir", required=True, help="新 txt 目录（差异来源）")
+    ap.add_argument("--base-db", dest="base_db", default=DEFAULT_BASE_DB,
+                    help="基线库（**只读打开**，默认 %s）" % DEFAULT_BASE_DB)
+    ap.add_argument("--out", default=DEFAULT_OUT,
+                    help="输出目录（默认 %s，放 patch_<seq>.db 与清单 txt）" % DEFAULT_OUT)
+    ap.add_argument("--seq", type=int, default=None,
+                    help="补丁序号，命名 patch_<seq>.db（默认取输出目录里已有序号 +1）")
+    ap.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="只统计不落盘（不产出 patch_<seq>.db，也不写清单 txt）")
+    ap.add_argument("--tol", type=float, default=FLOAT_TOL,
+                    help="浮点容差，判定 abs(a-b)>tol 为变化（默认 %g）" % FLOAT_TOL)
+    ap.add_argument("--self-check", dest="self_check", type=int, default=0, metavar="N",
+                    help="出包后用**独立全量重算**交叉验证 N 个文件（0=关闭；建议 200）")
+    ap.add_argument("--self-check-seed", dest="self_check_seed", type=int, default=20260923,
+                    help="交叉验证抽样种子（默认 20260923，便于复现）")
+    ap.add_argument("--shards", type=int, default=1, metavar="N",
+                    help="把待处理标的按 file 稳定分组切成 N 片，各出 patch_<seq>_s<i>.db"
+                         "（默认 1 = 单包，行为与耗时与既有实现等价）")
+    ap.add_argument("--workers", type=int, default=1, metavar="W",
+                    help="分片出包的并行进程数（默认 1；仅 --shards > 1 时有意义，"
+                         "上限 min(W, N)，用 multiprocessing 绕过 GIL）")
+    ap.add_argument("--only-shard", dest="only_shard", type=int, default=None, metavar="i",
+                    help="只出第 i 片（0-based），单进程。分组与 updated_at 仍按**全量**算，"
+                         "故单独调用与整跑的第 i 片逐字相同（编排器逐片调用用）")
+    args = ap.parse_args(argv)
+
+    t_all = time.time()
+    if not os.path.isdir(args.old_txt_dir):
+        raise SystemExit("旧 txt 目录不存在: %s" % args.old_txt_dir)
+    if not os.path.isdir(args.new_txt_dir):
+        raise SystemExit("新 txt 目录不存在: %s" % args.new_txt_dir)
+    if not os.path.exists(args.base_db):
+        raise SystemExit("基线库不存在: %s" % args.base_db)
+    if args.shards < 1:
+        raise SystemExit("--shards 必须 ≥ 1，当前 %d" % args.shards)
+    if args.workers < 1:
+        raise SystemExit("--workers 必须 ≥ 1，当前 %d" % args.workers)
+    if args.only_shard is not None and not (0 <= args.only_shard < args.shards):
+        raise SystemExit("--only-shard 必须在 0..%d，当前 %d" % (args.shards - 1, args.only_shard))
+
+    out_dir = os.path.abspath(args.out)
+    print("旧 txt : %s" % args.old_txt_dir)
+    print("新 txt : %s" % args.new_txt_dir)
+    print("基线库 : %s（只读）" % args.base_db)
+    print("输出   : %s%s" % (out_dir, "（--dry-run：不落盘）" if args.dry_run else ""))
+
+    before_base = db_state(args.base_db)
+
+    if args.shards == 1 and args.only_shard is None:
+        return run_single(args, out_dir, before_base, t_all)
+    return run_sharded(args, out_dir, before_base, t_all)
 
 
 if __name__ == "__main__":
