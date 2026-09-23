@@ -50,8 +50,12 @@ struct HomeSearchModeView: View {
                 .padding(.trailing, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(.systemBackground))
+            // 顺序要紧：先撑满宽度、再定 56 高，最后铺底 ——
+            // `.background` 若写在 `.frame(minHeight:)` 之前，背景只覆盖内容自然高度（约 40pt），
+            // 被 56pt 框居中后上下各留约 8pt 透明带
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: 56)
+            .background(Color(.systemBackground))
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     searchFocused = true
@@ -63,5 +67,9 @@ struct HomeSearchModeView: View {
             SearchPageView(searchText: $searchText)
                 .frame(maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // 整页铺底：本视图既作为首页搜索态、也作为行情页搜索浮层（MarketSheets overlay）呈现，
+        // 无底色时行情表会从搜索区透出、点击还会穿透到背后的行情行上
+        .background(Color(.systemBackground))
     }
 }

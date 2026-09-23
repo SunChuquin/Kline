@@ -606,3 +606,67 @@ enum FavoritesAlertKit {
         return firstError
     }
 }
+
+// MARK: - 「无分组上下文」行菜单（行情页 / 搜索页共用）
+
+/// 没有分组上下文的长按面板逻辑：行情页与搜索页共用同一份口径
+/// （面板项与顺序、不可用原因、动作落点），避免两处各写一份。
+/// 自选页有分组口径（固顶 / 移前移后 / 从分组移除），仍走 `FavoritesPageKit.rowMenuItems`。
+@MainActor
+enum MetaRowMenuKit {
+
+    /// 面板项：加自选 / 取消自选、加入指定分组、备注…、设置 / 取消预警
+    static func items(for meta: MetaItem) -> [FavoritesRowMenuItem] {
+        let fav = FavoritesStore.shared
+        let faved = fav.isFavorited(meta.id)
+        var items: [FavoritesRowMenuItem] = [
+            FavoritesRowMenuItem(action: .toggleFavorite,
+                                 title: faved ? "取消自选" : "加自选",
+                                 icon: faved ? "star.slash" : "star"),
+            FavoritesRowMenuItem(action: .addToGroup, title: "加入指定分组",
+                                 icon: "folder.badge.plus")
+        ]
+        let note = fav.note(for: meta.id)
+        items.append(FavoritesRowMenuItem(action: .note, title: "备注…", icon: "note.text",
+                                          trailing: note.map { FavoritesRowMenuItem.noteSummary($0) }))
+        let hasAlert = FavoritesAlertKit.hasAlert(metaID: meta.id)
+        let canAlert = hasAlert || FavoritesAlertKit.accountID != nil
+        items.append(FavoritesRowMenuItem(action: .toggleAlert,
+                                          title: hasAlert ? "取消预警" : "设置预警",
+                                          icon: hasAlert ? "bell.slash" : "bell",
+                                          enabled: canAlert,
+                                          reason: canAlert ? nil : "请先在模拟页创建账户"))
+        return items
+    }
+
+    /// 需要弹窗的动作交回调用方（调用方据此写自己的浮层目标）
+    enum Outcome {
+        case addToGroup(MetaItem)
+        case note(FavoritesRowMenuTarget)
+        case alert(MetaItem)
+    }
+
+    /// 执行面板动作（面板已在调用处关闭）；就地完成的动作返回 nil
+    static func perform(_ action: FavoritesRowMenuAction,
+                        for target: FavoritesRowMenuTarget) -> Outcome? {
+        let meta = target.meta
+        switch action {
+        case .toggleFavorite:
+            FavoritesStore.shared.toggleFavorite(meta.id)
+            return nil
+        case .addToGroup:
+            return .addToGroup(meta)
+        case .note:
+            return .note(target)
+        case .toggleAlert:
+            if FavoritesAlertKit.hasAlert(metaID: meta.id) {
+                FavoritesAlertKit.cancelAlerts(metaID: meta.id)
+                return nil
+            }
+            return .alert(meta)
+        case .togglePin, .moveToFirst, .moveToLast, .removeFromGroup:
+            // 无分组上下文：这几项不会出现在面板里，防御性忽略
+            return nil
+        }
+    }
+}

@@ -402,49 +402,22 @@ final class MarketPageModel: ObservableObject {
     }
 
     /// 面板项：加自选 / 取消自选、加入指定分组、备注…、设置 / 取消预警
-    /// （行情页无分组概念，故不出现固顶与移前移后；「加入指定分组」复用既有 AddToGroupSheet）
+    /// （行情页无分组概念，故不出现固顶与移前移后；口径与搜索页共用 `MetaRowMenuKit`，
+    /// 「加入指定分组」复用既有 AddToGroupSheet）
     func rowMenuItems(for target: FavoritesRowMenuTarget) -> [FavoritesRowMenuItem] {
-        let meta = target.meta
-        let faved = fav.isFavorited(meta.id)
-        var items: [FavoritesRowMenuItem] = [
-            FavoritesRowMenuItem(action: .toggleFavorite,
-                                 title: faved ? "取消自选" : "加自选",
-                                 icon: faved ? "star.slash" : "star"),
-            FavoritesRowMenuItem(action: .addToGroup, title: "加入指定分组",
-                                 icon: "folder.badge.plus")
-        ]
-        let note = fav.note(for: meta.id)
-        items.append(FavoritesRowMenuItem(action: .note, title: "备注…", icon: "note.text",
-                                          trailing: note.map { FavoritesRowMenuItem.noteSummary($0) }))
-        let hasAlert = FavoritesAlertKit.hasAlert(metaID: meta.id)
-        let canAlert = hasAlert || FavoritesAlertKit.accountID != nil
-        items.append(FavoritesRowMenuItem(action: .toggleAlert,
-                                          title: hasAlert ? "取消预警" : "设置预警",
-                                          icon: hasAlert ? "bell.slash" : "bell",
-                                          enabled: canAlert,
-                                          reason: canAlert ? nil : "请先在模拟页创建账户"))
-        return items
+        MetaRowMenuKit.items(for: target.meta)
     }
 
-    /// 执行面板动作（面板已在调用处关闭）
+    /// 执行面板动作（面板已在调用处关闭）：需要弹窗的动作写进本模型的浮层目标
     func performRowMenu(_ action: FavoritesRowMenuAction, for target: FavoritesRowMenuTarget) {
-        let meta = target.meta
-        switch action {
-        case .toggleFavorite:
-            fav.toggleFavorite(meta.id)
-        case .addToGroup:
+        guard let outcome = MetaRowMenuKit.perform(action, for: target) else { return }
+        switch outcome {
+        case .addToGroup(let meta):
             addGroupTarget = meta
-        case .note:
-            noteEditorTarget = target
-        case .toggleAlert:
-            if FavoritesAlertKit.hasAlert(metaID: meta.id) {
-                FavoritesAlertKit.cancelAlerts(metaID: meta.id)
-            } else {
-                alertSheetTargets = [meta]
-            }
-        case .togglePin, .moveToFirst, .moveToLast, .removeFromGroup:
-            // 行情页无分组上下文：这几项不会出现在面板里，防御性忽略
-            break
+        case .note(let noteTarget):
+            noteEditorTarget = noteTarget
+        case .alert(let meta):
+            alertSheetTargets = [meta]
         }
     }
 }
