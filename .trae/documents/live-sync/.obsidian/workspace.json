@@ -218,6 +218,9 @@
   },
   "active": "6ce17112ba4191dc",
   "lastOpenFiles": [
+    "pitfalls/20260923-本机HTTP代理导致本地下载假503.md",
+    "pitfalls/20260923-活跃事务内DETACH必失败.md",
+    "decisions/20260923-行情同步-五张周期表全路径一致性.md",
     "decisions/20260923-行情同步-补丁按行落主库而非替换整库.md",
     "pitfalls/20260923-通达信txt末尾18字节页脚导致纯追加被误判.md",
     "pitfalls/20260922-BC默认按时间戳判差异会漏同尺寸改写.md",
