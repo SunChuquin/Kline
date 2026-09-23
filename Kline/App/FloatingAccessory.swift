@@ -268,6 +268,4 @@ struct FloatingAccessoryPanel: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea(edges: .bottom)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)```html
-\
-```
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
