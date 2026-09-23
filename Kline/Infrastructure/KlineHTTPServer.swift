@@ -445,6 +445,13 @@ final class KlineHTTPServer {
                 self.respond(connection, status: 200, contentType: "application/json",
                              body: LiveDataStore.shared.currentStatusJSON())
             }
+        case ("GET", "/sync/probe"):
+            // ?file=SH%23600519：在 App 自身连接上读回该标的的日线末日 / 最新季线 bar（只读核对用）
+            let probeFile = Self.queryParam(rawPath, "file") ?? ""
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.probeMainDB(file: probeFile, connection: connection)
+            }
         case ("GET", "/opener-log"):
             handleOpenerLog(connection: connection)
         case ("GET", "/sandbox"), ("GET", "/sandbox/"):
@@ -803,6 +810,10 @@ final class KlineHTTPServer {
 
     /// POST /sync/patch-session/commit：UPDATE meta.last_date（MAX 防回退）+ COMMIT + 关连接，
     /// 随后重读 metaList + 自增 dataVersion（主库内容已变）。
+    ///
+    /// ⚠️ 时序要点（真机实测后调整）：会话连接在 `begin` 置 `wal_autocheckpoint=0`，COMMIT 不再在
+    /// 提交语句内做全量 checkpoint（否则 12s）；故**响应发出后**用 `deferredWALCheckpoint()`
+    /// 异步补一次 PASSIVE checkpoint（独立短连接，不阻塞 App 的 dbQueue，也不阻塞读响应）。
     private func commitPatchSessionAndRespond(connection: NWConnection) {
         let tHttp = DispatchTime.now()
         PatchSessionManager.shared.commit { [weak self] r in
@@ -810,14 +821,14 @@ final class KlineHTTPServer {
             let tMain = DispatchTime.now()
             if r.ok {
                 DebugLogger.shared.log("[Patch] 会话 commit：\(r.message)")
-                DebugLogger.shared.log("[Patch] commit 分段（主线程）：HTTP 入口→主线程回调=\(Self.elapsedMs(tHttp))ms"
-                    + " · 回调排队=\(Self.elapsedMs(tMain))ms")
+                DebugLogger.shared.log("[Patch] commit 分段（主线程）：HTTP 入口→主线程回调=\(elapsedMsSince(tHttp))ms"
+                    + " · 回调排队=\(elapsedMsSince(tMain))ms")
                 let tMeta = DispatchTime.now()
                 DatabaseManager.shared.loadMetaList()
-                let metaMs = Self.elapsedMs(tMeta)
+                let metaMs = elapsedMsSince(tMeta)
                 let tNotify = DispatchTime.now()
                 DatabaseManager.shared.notifyMainDBChanged()
-                let notifyMs = Self.elapsedMs(tNotify)
+                let notifyMs = elapsedMsSince(tNotify)
                 let tResp = DispatchTime.now()
                 self.respond(connection, status: 200, contentType: "application/json",
                              body: "{\"ok\":true,\"message\":\"\(Self.jsonEsc(r.message))\""
@@ -831,14 +842,84 @@ final class KlineHTTPServer {
                                  + ",\"latestDate\":\(r.latestDate)}")
                 DebugLogger.shared.log("[Patch] commit 分段（主线程）：loadMetaList 入队=\(metaMs)ms"
                     + " · notifyMainDBChanged=\(notifyMs)ms"
-                    + " · 拼+写响应=\(Self.elapsedMs(tResp))ms"
-                    + " · 至此总耗时=\(Self.elapsedMs(tHttp))ms")
+                    + " · 拼+写响应=\(elapsedMsSince(tResp))ms"
+                    + " · 至此总耗时=\(elapsedMsSince(tHttp))ms")
+                self.deferredWALCheckpoint()
             } else {
                 DebugLogger.shared.log("[Patch] 会话 commit 失败：\(r.message)")
                 self.respond(connection, status: 500, contentType: "application/json",
                              body: "{\"error\":\"\(Self.jsonEsc(r.message))\"}")
             }
         }
+    }
+
+    /// 响应发出后的**异步** WAL 回写（best-effort）：用一条**独立短连接** `PRAGMA wal_checkpoint(PASSIVE)`。
+    ///
+    /// 为什么需要：会话连接关闭了 autocheckpoint（见 `PatchSessionManager.begin`），主库 WAL 会停在
+    /// ~200MB；这里把它回写进主库，避免 WAL 随会话数无限增长，也让「按文件拉 tdx.db」的核对工具
+    /// （verify_main_db.py）拿到完整数据。
+    ///
+    /// 为什么用独立连接而不是 App 的 `dbQueue`：PASSIVE 会拷贝上百 MB，走 dbQueue 会把 App 自己的
+    /// 查询（热刷新 3611 行）堵在它后面十几秒；独立连接则与 App 读并发，拿不到锁时只回写能回写的部分。
+    /// **正确性无关**：WAL 语义下已提交数据对其它连接立即可见（不依赖 checkpoint），此处只做空间回收。
+    private func deferredWALCheckpoint() {
+        let dbPath = DatabaseManager.writableDBPath
+        DispatchQueue.global(qos: .utility).async {
+            var handle: OpaquePointer?
+            guard sqlite3_open_v2(dbPath, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+                  let db = handle else {
+                if let h = handle { sqlite3_close(h) }
+                DebugLogger.shared.log("[Patch] WAL 延迟回写：打开独立连接失败")
+                return
+            }
+            let before = fileSizeMB(dbPath + "-wal")
+            let t0 = DispatchTime.now()
+            let rc = sqlite3_exec(db, "PRAGMA wal_checkpoint(PASSIVE);", nil, nil, nil)
+            sqlite3_close(db)
+            DebugLogger.shared.log("[Patch] WAL 延迟回写(PASSIVE) 结束：rc=\(rc) 耗时=\(elapsedMsSince(t0))ms"
+                + " · 前 WAL=\(String(format: "%.1f", before))MB · 后 \(dbSizeDesc(dbPath))")
+        }
+    }
+
+    /// GET /sync/probe?file=<file>：在 **App 自身连接**（`DatabaseManager.dbQueue`）上读回指定标的的
+    /// 日线末日与该标的最新季线 bar，供校验「延后 checkpoint / 异步刷新后 App 仍能读到新数据」。
+    /// 只读、单行查询，不写任何状态。
+    private func probeMainDB(file: String, connection: NWConnection) {
+        guard !file.isEmpty else {
+            respond(connection, status: 400, contentType: "application/json",
+                    body: "{\"error\":\"missing file\"}")
+            return
+        }
+        let escaped = file.replacingOccurrences(of: "'", with: "''")
+        let dbPath = DatabaseManager.writableDBPath   // 主线程取值后带入 dbQueue 闭包（避免跨隔离域读）
+        DatabaseManager.shared.performOnDBQueue({ (db: OpaquePointer?) -> String in
+            guard let db = db else { return "{\"ok\":false,\"error\":\"主库未就绪\"}" }
+            let metaId = KlineHTTPServer.scalarInt(db: db,
+                sql: "SELECT id FROM meta WHERE file = '\(escaped)' LIMIT 1;")
+            let dailyMax = KlineHTTPServer.scalarInt(db: db,
+                sql: "SELECT MAX(date) FROM daily WHERE meta_id = \(metaId);")
+            let dailyCount = KlineHTTPServer.scalarInt(db: db,
+                sql: "SELECT COUNT(*) FROM daily WHERE meta_id = \(metaId);")
+            var qDate = 0
+            var qClose = "null"
+            var st: OpaquePointer?
+            let q = "SELECT date, close FROM quarterly WHERE meta_id = \(metaId) ORDER BY date DESC LIMIT 1;"
+            if sqlite3_prepare_v2(db, q, -1, &st, nil) == SQLITE_OK {
+                if sqlite3_step(st) == SQLITE_ROW {
+                    qDate = Int(sqlite3_column_int64(st, 0))
+                    qClose = String(format: "%.4f", sqlite3_column_double(st, 1))
+                }
+                sqlite3_finalize(st)
+            }
+            return "{\"ok\":\(metaId > 0),\"file\":\"\(file)\",\"metaId\":\(metaId)"
+                + ",\"dailyMaxDate\":\(dailyMax),\"dailyCount\":\(dailyCount)"
+                + ",\"quarterlyLastDate\":\(qDate),\"quarterlyLastClose\":\(qClose)"
+                + ",\"walMB\":\(String(format: "%.1f", fileSizeMB(dbPath + "-wal")))"
+                + ",\"mainDBMB\":\(String(format: "%.1f", fileSizeMB(dbPath)))}"
+        }, completion: { [weak self] json in
+            DebugLogger.shared.log("[Patch] 主库读回探针（App 连接）：\(json)")
+            self?.respond(connection, status: 200, contentType: "application/json", body: json)
+        })
     }
 
     /// POST /sync/patch-session/rollback：ROLLBACK + 关连接（释放写锁，已喂入的片全部丢弃）。
@@ -1063,11 +1144,6 @@ final class KlineHTTPServer {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    /// 距 `t` 的毫秒数（插桩用）
-    private static func elapsedMs(_ t: DispatchTime) -> Int {
-        Int((DispatchTime.now().uptimeNanoseconds - t.uptimeNanoseconds) / 1_000_000)
-    }
-
     private func respond(_ connection: NWConnection, status: Int, contentType: String = "text/plain", body: String) {
         let statusText: String
         switch status {
@@ -1164,23 +1240,6 @@ nonisolated final class PatchSessionManager {
 
     private init() {}
 
-    // MARK: - 插桩工具（`[Patch]` 前缀，只在 queue 上调用）
-
-    /// 距 `from` 的毫秒数
-    private static func ms(_ from: DispatchTime) -> Int {
-        Int((DispatchTime.now().uptimeNanoseconds - from.uptimeNanoseconds) / 1_000_000)
-    }
-
-    /// 主库 `-wal` / 主库文件大小（MB），用于判断 checkpoint 规模；不存在返回 0.0
-    private static func sizeMB(_ path: String) -> Double {
-        let n = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber
-        return Double(n?.int64Value ?? 0) / 1_048_576.0
-    }
-
-    private static func dbSizeDesc(_ dbPath: String) -> String {
-        String(format: "主库=%.1fMB WAL=%.1fMB", sizeMB(dbPath), sizeMB(dbPath + "-wal"))
-    }
-
     // MARK: - begin
 
     /// 打开独立连接 + 会话级 pragma + BEGIN IMMEDIATE，把连接与会话状态存下、启动看门狗。
@@ -1200,9 +1259,15 @@ nonisolated final class PatchSessionManager {
                 return
             }
             // 会话级 pragma（不改变库文件属性）：cache_size 32MB / temp_store 内存 / synchronous NORMAL
+            // `wal_autocheckpoint = 0`：**真机实测（2026-09-23）的关键改动** —— 本会话一个大事务累积
+            // ~215MB WAL，默认 autocheckpoint（1000 页 = 4MB）会让 SQLite 在 **COMMIT 语句内部**做一次
+            // 全量 PASSIVE checkpoint（把 215MB 回写主库），实测 COMMIT 因此高达 **13829ms**（另见
+            // close=8ms / UPDATE=62ms，即 12s 全在 COMMIT 这一步）。置 0 后 COMMIT 只追加提交记录，
+            // 写响应不再等这次大回写；WAL 回写改由响应之后的 `deferredWALCheckpoint()` 异步补齐。
             for p in ["PRAGMA cache_size = -32768;",
                       "PRAGMA temp_store = MEMORY;",
-                      "PRAGMA synchronous = NORMAL;"] {
+                      "PRAGMA synchronous = NORMAL;",
+                      "PRAGMA wal_autocheckpoint = 0;"] {
                 sqlite3_exec(db, p, nil, nil, nil)
             }
             // 会话临时表（TEMP 只属于本连接、随连接关闭消失）：各片 apply 时累积「file → 该片最大日期」，
@@ -1219,7 +1284,7 @@ nonisolated final class PatchSessionManager {
             let st = PatchSessionState(db: db, dbPath: dbPath)
             self.session = st
             self.armWatchdogLocked(st)
-            DebugLogger.shared.log("[Patch] 会话 begin：已开独立连接并 BEGIN IMMEDIATE · \(Self.dbSizeDesc(dbPath))")
+            DebugLogger.shared.log("[Patch] 会话 begin：已开独立连接并 BEGIN IMMEDIATE · \(dbSizeDesc(dbPath))")
             self.replyMain((ok: true, message: "会话已开启（独立连接 · BEGIN IMMEDIATE）"), completion)
         }
     }
@@ -1249,7 +1314,7 @@ nonisolated final class PatchSessionManager {
             }
             st.lastProgress = DispatchTime.now()   // 刷新看门狗计时
             DebugLogger.shared.log("[Patch] 会话 apply 片 \(name) 完成（累计 \(st.shardCount) 片）"
-                + " · 写库耗时=\(Self.ms(t0))ms · \(Self.dbSizeDesc(st.dbPath))")
+                + " · 写库耗时=\(elapsedMsSince(t0))ms · \(dbSizeDesc(st.dbPath))")
             self.replyMain((ok: true, message: "已写入片 \(name)（累计 \(st.shardCount) 片）"), completion)
         }
     }
@@ -1281,8 +1346,8 @@ nonisolated final class PatchSessionManager {
                     + "MAX(COALESCE(last_date, 0), "
                     + "COALESCE((SELECT t.last_date FROM temp.patch_file_max t WHERE t.file = meta.file), 0)) "
                     + "WHERE file IN (SELECT file FROM temp.patch_file_max);"
-            DebugLogger.shared.log("[Patch] commit 步前：\(Self.dbSizeDesc(st.dbPath))"
-                + " · 队列排队=\(Self.ms(t0))ms")
+            DebugLogger.shared.log("[Patch] commit 步前：\(dbSizeDesc(st.dbPath))"
+                + " · 队列排队=\(elapsedMsSince(t0))ms")
             let tUpdate = DispatchTime.now()
             if sqlite3_exec(st.db, sql, nil, nil, nil) != SQLITE_OK {
                 let msg = String(cString: sqlite3_errmsg(st.db))
@@ -1292,7 +1357,7 @@ nonisolated final class PatchSessionManager {
                                       coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
                 return
             }
-            let updateMs = Self.ms(tUpdate)
+            let updateMs = elapsedMsSince(tUpdate)
             let tCommit = DispatchTime.now()
             if sqlite3_exec(st.db, "COMMIT;", nil, nil, nil) != SQLITE_OK {
                 let msg = String(cString: sqlite3_errmsg(st.db))
@@ -1302,8 +1367,8 @@ nonisolated final class PatchSessionManager {
                                       coveredFiles: 0, shardCount: 0, latestDate: 0), completion)
                 return
             }
-            let commitMs = Self.ms(tCommit)
-            let walAfterCommit = Self.sizeMB(st.dbPath + "-wal")
+            let commitMs = elapsedMsSince(tCommit)
+            let walAfterCommit = fileSizeMB(st.dbPath + "-wal")
             let message = "已提交 \(st.shardCount) 片 · 合计 \(st.dailyRows + st.weeklyRows + st.monthlyRows + st.quarterlyRows + st.yearlyRows) 行"
                 + "（日\(st.dailyRows)/周\(st.weeklyRows)/月\(st.monthlyRows)/季\(st.quarterlyRows)/年\(st.yearlyRows)）"
                 + " · 覆盖 \(st.coveredFiles) 只 · 最新 \(st.latestDate)"
@@ -1314,12 +1379,12 @@ nonisolated final class PatchSessionManager {
                                                     yearlyRows: st.yearlyRows, coveredFiles: st.coveredFiles,
                                                     shardCount: st.shardCount, latestDate: st.latestDate)
             let closeMs = self.teardownLocked(st, rollback: false, reason: "commit 成功")
-            DebugLogger.shared.log("[Patch] commit 分解：队列排队=\(Self.ms(t0) - updateMs - commitMs - closeMs)ms"
+            DebugLogger.shared.log("[Patch] commit 分解：队列排队=\(elapsedMsSince(t0) - updateMs - commitMs - closeMs)ms"
                 + " · UPDATE meta.last_date=\(updateMs)ms · COMMIT=\(commitMs)ms"
                 + " · sqlite3_close(含 WAL checkpoint)=\(closeMs)ms"
-                + " · 会话队列合计=\(Self.ms(t0))ms"
+                + " · 会话队列合计=\(elapsedMsSince(t0))ms"
                 + " · COMMIT 后 WAL=\(String(format: "%.1f", walAfterCommit))MB"
-                + " · 关闭后 \(Self.dbSizeDesc(st.dbPath))")
+                + " · 关闭后 \(dbSizeDesc(st.dbPath))")
             DebugLogger.shared.log("[Patch] 会话 commit：片=\(result.shardCount) 覆盖=\(result.coveredFiles) 最新=\(result.latestDate)")
             self.replyCommitMain(result, completion)
         }
@@ -1416,13 +1481,13 @@ nonisolated final class PatchSessionManager {
     /// 所有调用都在 `queue` 上。返回 `sqlite3_close` 的耗时（ms），供插桩定位 WAL checkpoint 开销。
     @discardableResult
     private func teardownLocked(_ st: PatchSessionState, rollback: Bool, reason: String) -> Int {
-        let walBefore = Self.sizeMB(st.dbPath + "-wal")
+        let walBefore = fileSizeMB(st.dbPath + "-wal")
         if rollback {
             sqlite3_exec(st.db, "ROLLBACK;", nil, nil, nil)
         }
         let tClose = DispatchTime.now()
         sqlite3_close(st.db)
-        let closeMs = Self.ms(tClose)
+        let closeMs = elapsedMsSince(tClose)
         if self.session === st { self.session = nil }
         DebugLogger.shared.log("[Patch] 会话关闭（\(reason)）：\(rollback ? "已回滚" : "已提交")"
             + " · close=\(closeMs)ms · 关前 WAL=\(String(format: "%.1f", walBefore))MB")
@@ -1438,6 +1503,24 @@ nonisolated final class PatchSessionManager {
                                  _ completion: @escaping (PatchSessionCommitResult) -> Void) {
         DispatchQueue.main.async { completion(r) }
     }
+}
+
+// MARK: - 插桩工具（`[Patch]` 前缀日志共用；文件级 nonisolated，供同文件的 PatchSessionManager 调用）
+
+/// 距 `t` 的毫秒数
+nonisolated func elapsedMsSince(_ t: DispatchTime) -> Int {
+    Int((DispatchTime.now().uptimeNanoseconds - t.uptimeNanoseconds) / 1_000_000)
+}
+
+/// 文件大小（MB）；不存在返回 0
+nonisolated func fileSizeMB(_ path: String) -> Double {
+    let n = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber
+    return Double(n?.int64Value ?? 0) / 1_048_576.0
+}
+
+/// 「主库=X MB WAL=Y MB」描述（判断 checkpoint 规模用）
+nonisolated func dbSizeDesc(_ dbPath: String) -> String {
+    String(format: "主库=%.1fMB WAL=%.1fMB", fileSizeMB(dbPath), fileSizeMB(dbPath + "-wal"))
 }
 
 // MARK: - URL 参数编码
