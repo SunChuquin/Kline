@@ -853,8 +853,9 @@ final class KlineHTTPServer {
         }
     }
 
-    /// 响应发出后的**异步** WAL 回写（best-effort，**有界循环**）：用一条**独立短连接**反复执行
-    /// `PRAGMA wal_checkpoint(PASSIVE)`，直到 `log == checkpointed`（WAL 已全部回写）为止。
+    /// 响应发出后的**异步** WAL 回写（best-effort，**有界循环**）：用一条**独立短连接**反复
+    /// `wal_checkpoint(PASSIVE)` 直到 `log == checkpointed`（WAL 已全部回写），随后再 `TRUNCATE`
+    /// 把 WAL 文件真正截断。
     ///
     /// 为什么需要：会话连接关闭了 autocheckpoint（见 `PatchSessionManager.begin`），主库 WAL 会停在
     /// 几百 MB；这里把它回写进主库，避免 WAL 随会话数无限增长，也让「按文件拉 tdx.db」的核对工具
@@ -867,6 +868,12 @@ final class KlineHTTPServer {
     /// 为什么循环：PASSIVE 只回写到「最老读者快照」处，App 侧持续有短读事务时**单次可能只推进一部分**，
     /// 留下的尾巴长期累积就是 WAL 缓慢膨胀。**必须有界**（最多 10 次 / 总预算 60s / 间隔 1s），否则遇到
     /// 持续读事务会退化成无限循环；到上限仍未完成就正常收尾并打警告，不报错、不卡死、不重试到卡死。
+    ///
+    /// 为什么要额外 TRUNCATE（真机实测 2026-09-23）：观察到的状态是 PASSIVE **一次就能** log==checkpointed
+    /// （共 1 次、约 15s），但 WAL **文件**仍不收敛（连跑 3 次：321.9 → 429.2 → 536.8MB，每次追加一个
+    /// 会话的帧量）——因为文件截断只在「日志被 reset」时发生，而 reset 需要独占全部读者槽位，App 侧并发读
+    /// 会让写方/回写方都拿不到，`journal_size_limit` 因此也没机会生效。改用 `TRUNCATE`（独占 + 截断为 0）
+    /// 才能真正让文件收敛；它遇活跃读者返回 `busy=1`（本连接无 busy_timeout，不会阻塞等待）→ 交给下一轮重试。
     private func deferredWALCheckpoint() {
         let dbPath = DatabaseManager.writableDBPath
         // 有界策略参数（明确写死，便于从日志一眼看出是否在膨胀）
@@ -874,10 +881,9 @@ final class KlineHTTPServer {
         let budgetSec: Double = 60
         let intervalSec: Double = 1.0
         // journal_size_limit = 64MB：**连接级**设置（本地实测新连接读回 -1，不随库文件持久化）。
-        // 作用：WAL 被 reset（全部回写完成后复位日志）时把文件截断到 ≤64MB，避免文件本身上限跟着
-        // 会话峰值涨到几百 MB（实测峰值 107~322MB）。取 64MB 的理由：它**不限制事务期间的 WAL 增长**
-        // （只在 reset 时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的峰值、又留出余量避免下轮会话
-        // 刚写入就立刻要重新扩展文件而多付一次分配/IO。
+        // 兜底作用：万一某次日志复位不经 TRUNCATE 路径，文件也会被裁到 ≤64MB。取 64MB 的理由：它
+        // **不限制事务期间的 WAL 增长**（只在日志复位时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的
+        // 峰值（107~537MB），又留出余量避免下轮会话刚写入就要重新扩展文件而多付一次分配/IO。
         let journalSizeLimit = 64 * 1024 * 1024
         DispatchQueue.global(qos: .utility).async {
             var handle: OpaquePointer?
@@ -893,18 +899,28 @@ final class KlineHTTPServer {
             var attempt = 0
             var logBytes = 0
             var ckptBytes = 0
+            var truncateBusy = -1
+            var backfilled = false
             var finished = false
             while attempt < maxAttempts {
                 attempt += 1
-                let r = walCheckpointPassive(db: db)
-                logBytes = r.logBytes
-                ckptBytes = r.ckptBytes
-                DebugLogger.shared.log("[Patch] 延迟回写 第\(attempt)次: log=\(logBytes) checkpointed=\(ckptBytes)"
-                    + " rc=\(r.rc) · WAL=\(String(format: "%.1f", fileSizeMB(dbPath + "-wal")))MB")
-                if logBytes <= ckptBytes {           // 已全部回写（WAL 已复位时 log==ckpt==0）
-                    finished = true
-                    break
+                let passive = walCheckpoint(db: db, mode: "PASSIVE")
+                logBytes = passive.logBytes
+                ckptBytes = passive.ckptBytes
+                var line = "[Patch] 延迟回写 第\(attempt)次: log=\(logBytes) checkpointed=\(ckptBytes)"
+                    + " rc=\(passive.rc)"
+                backfilled = logBytes <= ckptBytes          // 已全部回写（日志已复位时为 0==0）
+                if backfilled {
+                    // 全部回写到位 → 再尝试真正截断 WAL 文件（并复位日志，使下轮写从帧 1 开始）
+                    let trunc = walCheckpoint(db: db, mode: "TRUNCATE")
+                    truncateBusy = trunc.busy
+                    line += " · TRUNCATE: busy=\(trunc.busy) log=\(trunc.logBytes)"
+                        + " checkpointed=\(trunc.ckptBytes) rc=\(trunc.rc)"
+                    finished = trunc.busy == 0 && trunc.logBytes == 0
                 }
+                line += " · WAL=\(String(format: "%.1f", fileSizeMB(dbPath + "-wal")))MB"
+                DebugLogger.shared.log(line)
+                if finished { break }
                 if Double(elapsedMsSince(t0)) / 1000.0 >= budgetSec { break }
                 Thread.sleep(forTimeInterval: intervalSec)
             }
@@ -914,6 +930,11 @@ final class KlineHTTPServer {
                 DebugLogger.shared.log("[Patch] 延迟回写完成（共\(attempt)次，耗时 "
                     + "\(String(format: "%.1f", costSec))s，WAL "
                     + "\(String(format: "%.1f", walBeforeMB))MB → \(String(format: "%.1f", walNowMB))MB）")
+            } else if backfilled {
+                DebugLogger.shared.log("[Patch] 延迟回写已回写未截断（共\(attempt)/\(maxAttempts)次，"
+                    + "log=\(logBytes) checkpointed=\(ckptBytes) TRUNCATE busy=\(truncateBusy)，WAL "
+                    + "\(String(format: "%.1f", walNowMB))MB，预算 "
+                    + "\(String(format: "%.0f", budgetSec))s 用尽）")
             } else {
                 DebugLogger.shared.log("[Patch] 延迟回写未完成（共\(attempt)/\(maxAttempts)次，"
                     + "log=\(logBytes) checkpointed=\(ckptBytes)，WAL "
@@ -1572,20 +1593,23 @@ nonisolated func dbSizeDesc(_ dbPath: String) -> String {
     String(format: "主库=%.1fMB WAL=%.1fMB", fileSizeMB(dbPath), fileSizeMB(dbPath + "-wal"))
 }
 
-/// 执行**一次** `PRAGMA wal_checkpoint(PASSIVE)`，返回 `(rc, log 字节, 已回写字节)`。
-/// PASSIVE 会返回一行 `(busy, log, checkpointed)`，后两列单位是**页**，按库的 page_size 折算成字节；
-/// 取不到结果行（准备/步进失败）时返回 errcode 与 0，调用方据 `log > checkpointed` 判断是否还需重试。
-nonisolated func walCheckpointPassive(db: OpaquePointer) -> (rc: Int32, logBytes: Int, ckptBytes: Int) {
+/// 执行**一次** `PRAGMA wal_checkpoint(<mode>)`，返回 `(rc, busy, log 字节, 已回写字节)`。
+/// 该 pragma 返回一行 `(busy, log, checkpointed)`，后两列单位是**页**，按库的 page_size 折算成字节。
+/// PASSIVE 不会等读者（拿不到就只回写一部分、busy 恒 0）；TRUNCATE 需要独占所有读者槽位，
+/// 有活跃读者时返回 `busy=1`（本连接未设 busy_timeout → 不会阻塞等待）。
+nonisolated func walCheckpoint(db: OpaquePointer, mode: String)
+    -> (rc: Int32, busy: Int, logBytes: Int, ckptBytes: Int) {
     let pageSize = walPageSize(db: db)
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, "PRAGMA wal_checkpoint(PASSIVE);", -1, &statement, nil) == SQLITE_OK else {
-        return (sqlite3_errcode(db), 0, 0)
+    guard sqlite3_prepare_v2(db, "PRAGMA wal_checkpoint(\(mode));", -1, &statement, nil) == SQLITE_OK else {
+        return (sqlite3_errcode(db), -1, 0, 0)
     }
     defer { sqlite3_finalize(statement) }
-    guard sqlite3_step(statement) == SQLITE_ROW else { return (sqlite3_errcode(db), 0, 0) }
-    let logBytes = Int(sqlite3_column_int64(statement, 1)) * pageSize
-    let ckptBytes = Int(sqlite3_column_int64(statement, 2)) * pageSize
-    return (SQLITE_OK, logBytes, ckptBytes)
+    guard sqlite3_step(statement) == SQLITE_ROW else { return (sqlite3_errcode(db), -1, 0, 0) }
+    return (SQLITE_OK,
+            Int(sqlite3_column_int64(statement, 0)),
+            Int(sqlite3_column_int64(statement, 1)) * pageSize,
+            Int(sqlite3_column_int64(statement, 2)) * pageSize)
 }
 
 /// 库的 page_size（字节）；读不到时按 SQLite 默认 4096
