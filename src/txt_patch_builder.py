@@ -83,6 +83,7 @@ import argparse
 import datetime
 import multiprocessing
 import os
+import pickle
 import random
 import sqlite3
 import sys
@@ -572,27 +573,51 @@ def db_state(path):
 # 核心处理（单包与分片共用同一份实现，避免两套口径漂移）
 # ---------------------------------------------------------------------------
 
-def process_files(base, names, old_dir, new_dir, tol):
-    """给定一批 txt 文件名，完成「分类+解析 → 合并/聚合 → 比对 → 汇总」。
+def load_shared(base, timing=None):
+    """开局的**共享工作**：idmap / meta_src / dmax·LO / 四张周期表的当期 bar。
 
-    `base` 是**调用方持有的只读连接**（单包 = 主连接；分片 = worker 自己的连接）。
-    返回不含 sqlite 连接的 dict：rows / per_file / kind_map / idmap / 计数 / A·B 耗时
-    / dmax·LO·当期 bar 数量（供调用方打印）。
-
-    ⚠ 本函数是单包与分片的**唯一**实现：`--shards 1` 与每片的行数口径因此天然一致。
+    这些只依赖基线库、与「分到哪些 file」无关 → **父进程做一次**，用 payload 下发；
+    多进程分片时不再每片重复（原来 4 片各做一遍，其中 `CUR_BAR` 的 4 条全表扫描约 1s/份）。
+    `timing` 传入 dict 时写入各步耗时（供 --only-shard 的分解表用）。
     """
+    t = {} if timing is None else timing
+
+    t0 = time.time()
     idmap = {f: i for i, f in base.execute("SELECT id, file FROM meta")}
+    t["idmap"] = time.time() - t0
+
+    t0 = time.time()
     meta_src = {r[0]: r for r in base.execute("SELECT file, code, name, type FROM meta")}
+    t["meta_src"] = time.time() - t0
 
     # 开局**一次性**：由基线最大交易日 dmax 推出「当期」周/月/季/年四个周期（可能不完整的
     # 候选集）。每个标的的增量合并直接复用这组 lo，**不在标的循环里重复判断当期**（Task 1.2）。
     # dmax 取 `meta.last_date`（每只标的的最大日线日期，tdx_parser 写入）的 MAX：
     # 与 `SELECT MAX(date) FROM daily` **口径等价**（实测 3611/3611 完全一致），但只扫 3611 行，
     # 比全表扫 daily（14M 行，冷缓存 >2s）快三个数量级（性能红线 3）。
+    t0 = time.time()
     dmax = base.execute("SELECT MAX(last_date) FROM meta").fetchone()[0]
     LO = {p: period_start(int(dmax), p) for p in MERGE_PERIODS}
+    t["dmax_lo"] = time.time() - t0
+
     # 开局**一次性**把四张周期表的「当期 bar」整表捞出（4 条批量查询取代逐标的的 14k 次探查）
+    t0 = time.time()
     CUR_BAR = {p: load_current_bars(base, p, LO[p]) for p in MERGE_PERIODS}
+    t["cur_bar"] = time.time() - t0
+    return {"idmap": idmap, "meta_src": meta_src, "dmax": dmax, "LO": LO, "CUR_BAR": CUR_BAR}
+
+
+def process_files(base, names, old_dir, new_dir, tol, shared):
+    """给定一批 txt 文件名，完成「分类+解析 → 合并/聚合 → 比对 → 汇总」。
+
+    `base` 是**调用方持有的只读连接**（单包 = 主连接；分片 = worker 自己的连接）。
+    `shared` = `load_shared()` 的结果（父进程做一次后下发，避免各片重复）。
+    返回不含 sqlite 连接的 dict：rows / per_file / kind_map / idmap / 计数 / A·B 耗时。
+
+    ⚠ 本函数是单包与分片的**唯一**实现：`--shards 1` 与每片的行数口径因此天然一致。
+    """
+    idmap, meta_src = shared["idmap"], shared["meta_src"]
+    dmax, LO, CUR_BAR = shared["dmax"], shared["LO"], shared["CUR_BAR"]
 
     rows = {"meta": [], "daily": [], "weekly": [], "monthly": [],
             "quarterly": [], "yearly": []}
@@ -793,19 +818,35 @@ def _shard_worker(payload):
 
     只回传**轻量摘要**（行数 / meta file 列表 / 路径 / 字节 / sha256 / 各段耗时 / 自检结论），
     **不回传 rows** —— 20 万级元组过 IPC 会把并行的收益吃掉。
+
+    `stages` 逐段计时（**用于把 A+B+C 之外的固定开销找出来**）：connect / shared(仅未下发时) /
+    proc(A+B) / build / verify / sha / report / selfcheck / pickle(回传体积与耗时)。
     """
     (idx, files, old_dir, new_dir, base_db, tol, out_dir, seq, n_shards,
-     updated_at, max_date, dry_run, sc_n, sc_seed) = payload
+     updated_at, max_date, dry_run, sc_n, sc_seed, shared) = payload
     res = {"index": idx, "n_files": len(files), "path": None, "bytes": 0, "sha256": None,
            "n_rows": {p: 0 for p in PATCH_PERIODS}, "total": 0,
            "a": 0.0, "b": 0.0, "c": 0.0, "wall": 0.0,
            "meta_files": [], "skipped": [], "n_app": 0, "n_rew": 0, "n_new": 0,
-           "dmax": None, "lo": None, "cur_counts": {}, "selfcheck": None}
+           "dmax": None, "lo": None, "cur_counts": {}, "selfcheck": None,
+           "stages": {}, "pickle_bytes": 0, "pickle_s": 0.0, "shared_pickle_bytes": 0}
     t_wall = time.time()
+
+    t0 = time.time()
     base = sqlite3.connect(L.ro_uri(base_db), uri=True)     # 每个 worker 自己的只读连接
     base.execute("PRAGMA query_only=1")
+    res["stages"]["connect"] = time.time() - t0
     try:
-        r = process_files(base, files, old_dir, new_dir, tol)
+        t0 = time.time()
+        if shared is None:                                 # 未下发 → 自己算（含 CUR_BAR 全表扫）
+            sh_t = {}
+            shared = load_shared(base, sh_t)
+            res["stages"].update({"shared_" + k: v for k, v in sh_t.items()})
+        res["stages"]["shared"] = time.time() - t0
+
+        t0 = time.time()
+        r = process_files(base, files, old_dir, new_dir, tol, shared)
+        res["stages"]["proc_AB"] = time.time() - t0
         rows, per_file = r["rows"], r["per_file"]
         n_rows = {p: len(rows[p]) for p in PATCH_PERIODS}
         res.update({"n_rows": n_rows, "total": sum(n_rows.values()),
@@ -825,6 +866,9 @@ def _shard_worker(payload):
             t0 = time.time()
             # 表结构 / 字段顺序逐字沿用 live_db_builder.build_bucket_file（五张表）
             L.build_bucket_file(tmp_path, rows, updated_at, periods=PATCH_PERIODS)
+            res["stages"]["build"] = time.time() - t0
+
+            t0 = time.time()
             chk = sqlite3.connect(L.ro_uri(tmp_path), uri=True)
             try:
                 got = chk.execute("SELECT COUNT(*) FROM bkt_meta").fetchone()[0]
@@ -837,11 +881,17 @@ def _shard_worker(payload):
             finally:
                 chk.close()
             os.replace(tmp_path, out_path)              # 原子替换：编排器按 size 稳定发现
-            res["c"] = time.time() - t0
+            res["stages"]["verify"] = time.time() - t0
             res["path"] = out_path
+
+            t0 = time.time()
             res["bytes"] = os.path.getsize(out_path)
             res["sha256"] = L.sha256_file(out_path)
+            res["stages"]["sha"] = time.time() - t0
+            res["c"] = (res["stages"]["build"] + res["stages"]["verify"]
+                        + res["stages"]["sha"])
 
+            t0 = time.time()
             ordered, _avg = report_ordered(per_file, res["bytes"], res["total"])
             report_path = os.path.join(out_dir, "%s%d_s%d_files.txt" % (PATCH_PREFIX, seq, idx))
             write_patch_report(
@@ -851,11 +901,23 @@ def _shard_worker(payload):
                               max_date, shard=(idx, n_shards)),
                 list(PATCH_PERIODS) + ["rows", "cum_rows", "cum_bytes_est"], ordered)
             res["report"] = report_path
+            res["stages"]["report"] = time.time() - t0
 
         # 自检：每片各自抽样（总抽样数按片分配），结论并入整跑
         if sc_n > 0:
+            t0 = time.time()
             res["selfcheck"] = run_selfcheck(base, r["idmap"], rows, old_dir, new_dir,
                                              r["kind_map"], sc_n, tol, sc_seed)
+            res["stages"]["selfcheck"] = time.time() - t0
+
+        # 回传 payload 的 pickle 体积与耗时（IPC 成本必须可见，不能靠猜）
+        t0 = time.time()
+        blob = pickle.dumps(res)
+        res["stages"]["pickle_dumps"] = time.time() - t0
+        blob = None
+        res["pickle_bytes"] = len(pickle.dumps(res))
+        if shared is not None:
+            res["shared_pickle_bytes"] = len(pickle.dumps({"shared": shared}))
         res["wall"] = time.time() - t_wall
         return res
     finally:
@@ -863,9 +925,20 @@ def _shard_worker(payload):
 
 
 def run_sharded(args, out_dir, before_base, t_all):
-    """`--shards N > 1`：N 片由 W 个 worker **并行**独立出包（每个 worker 全流程自包含）。"""
+    """`--shards N > 1`：N 片由 W 个 worker **并行**独立出包。
+
+    分工：**父进程**做一次「只依赖基线库、与分到哪些 file 无关」的共享工作
+    （`load_shared`：idmap / meta_src / dmax·LO / 四张周期表的当期 bar），用 payload 下发；
+    每个 worker 只做自己那 1/N 的「解析→合并→比对→出包」（各自独立的只读连接）。
+
+    为什么共享工作上提：`CUR_BAR` 是 4 条周期表全表扫描（实测 ~1.0–1.6s/份），
+    原来每片各做一遍 → 4 片白花 ~4–6s，且在 4 进程并行时还要抢盘；上提后只做一次
+    （下发成本 = pickle 1.15 MB，约 10ms，远低于 1s 级的重算）。
+
+    分段计时（`res["stages"]`）会打印**每片 A+B+C 之外**的开销，便于继续定位瓶颈。
+    """
     n_shards = args.shards
-    workers = min(max(1, args.workers), n_shards)
+    workers = min(args.workers or (os.cpu_count() or 1), n_shards)   # 0 = 自动
     names = sorted(n for n in os.listdir(args.new_txt_dir) if n.endswith(TXT_EXT))
 
     # 待处理标的 = 新目录里有、且**基线 meta 里有**（否则设备侧 JOIN 会丢弃、进不了包）
@@ -877,9 +950,11 @@ def run_sharded(args, out_dir, before_base, t_all):
     groups = shard_pending(pending, n_shards)
     print("待处理标的: %d（新目录 txt %d 个，基线无 meta 跳过 %d）→ 分 %d 片"
           % (len(pending), len(names), len(names) - len(pending), n_shards))
-    print("分片策略: file 排序后 index %% %d（两两不交、并集 = 全集）；"
-          "worker 数 = min(%d, %d) = %d；仅出第 %s 片"
-          % (n_shards, args.workers, n_shards, workers,
+    print("分片策略: file 排序后按 index%%N 分组（两两不交、并集 = 全集）；"
+          "worker 数 = %d（%s）；仅出第 %s 片"
+          % (workers,
+             "自动 min(CPU %d, N)" % (os.cpu_count() or 1) if not args.workers
+             else "--workers %d" % args.workers,
              args.only_shard if args.only_shard is not None else "全部"))
 
     # updated_at 取**全局**最大 date（在全量待处理标的上算）→ 各片一致、--only-shard 单独跑也一致
@@ -895,9 +970,22 @@ def run_sharded(args, out_dir, before_base, t_all):
     sc_by_shard = {i: (n_sc // n_shards + (1 if i < n_sc % n_shards else 0))
                    for i in range(n_shards)}
 
+    # ---- 共享工作**上提**：父进程做一次，payload 下发（多进程时不再每片重复）----
+    t0 = time.time()
+    pbase = sqlite3.connect(L.ro_uri(args.base_db), uri=True)
+    pbase.execute("PRAGMA query_only=1")
+    sh_t = {}
+    shared = load_shared(pbase, sh_t)
+    pbase.close()
+    t_shared = time.time() - t0
+    shared_bytes = len(pickle.dumps({"shared": shared}))
+    print("共享工作（父进程一次）%.2fs: %s → pickle %d B (%.2f MB)"
+          % (t_shared, " ".join("%s=%.2f" % (k, v) for k, v in sh_t.items()),
+             shared_bytes, shared_bytes / 1048576.0))
+
     payloads = [(i, [f + TXT_EXT for f in groups[i]], args.old_txt_dir, args.new_txt_dir,
                  args.base_db, args.tol, out_dir, seq, n_shards, updated_at, max_date,
-                 args.dry_run, sc_by_shard[i], args.self_check_seed) for i in idxs]
+                 args.dry_run, sc_by_shard[i], args.self_check_seed, shared) for i in idxs]
 
     print("-" * 78)
     t0 = time.time()
@@ -925,6 +1013,18 @@ def run_sharded(args, out_dir, before_base, t_all):
              sum(sum_rows.values())))
     print("出包总耗时 %.1fs（%d 片，%d 个 worker，墙钟；各片 A+B+C 之和 %.1fs）"
           % (t_build, len(results), workers, sum(r["a"] + r["b"] + r["c"] for r in results)))
+
+    # ---- 分段计时分解：把「A+B+C 之外」的开销显式列出（不许猜）----
+    for r in results:
+        st = r["stages"]
+        parts = ["%s %.2f" % (k, st[k]) for k in
+                 ("connect", "shared", "proc_AB", "build", "verify", "sha",
+                  "report", "selfcheck", "pickle_dumps") if k in st]
+        accounted = sum(v for k, v in st.items() if not k.startswith("shared_"))
+        print("  [片 %d 分解] worker 墙钟 %.2fs = %s ｜ 已计 %.2fs ｜ **未计 %.2fs**"
+              " ｜ 回传 %d B ｜ 下发 shared %d B"
+              % (r["index"], r["wall"], " + ".join(parts), accounted,
+                 r["wall"] - accounted, r["pickle_bytes"], r["shared_pickle_bytes"]))
 
     # ---- 并集 / 交集自检（bkt_meta.file）----
     # 每片先做最强的一句断言：**产出集 == 分配集**（`groups[i]`）。因为 groups 本身是对 pending
@@ -987,7 +1087,8 @@ def run_single(args, out_dir, before_base, t_all):
         print("新目录 txt 文件数: %d；基线 meta: %d 只"
               % (len(names), base.execute("SELECT COUNT(*) FROM meta").fetchone()[0]))
 
-        r = process_files(base, names, args.old_txt_dir, args.new_txt_dir, args.tol)
+        r = process_files(base, names, args.old_txt_dir, args.new_txt_dir, args.tol,
+                          load_shared(base))
         rows, per_file, kind_map = r["rows"], r["per_file"], r["kind_map"]
         print("基线最大交易日 dmax=%s → 当期日历起始: weekly=%s monthly=%s quarterly=%s yearly=%s"
               % (r["dmax"], r["lo"]["weekly"], r["lo"]["monthly"],
@@ -1106,9 +1207,14 @@ def main(argv=None):
     ap.add_argument("--shards", type=int, default=1, metavar="N",
                     help="把待处理标的按 file 稳定分组切成 N 片，各出 patch_<seq>_s<i>.db"
                          "（默认 1 = 单包，行为与耗时与既有实现等价）")
-    ap.add_argument("--workers", type=int, default=1, metavar="W",
-                    help="分片出包的并行进程数（默认 1；仅 --shards > 1 时有意义，"
-                         "上限 min(W, N)，用 multiprocessing 绕过 GIL）")
+    ap.add_argument("--workers", type=int, default=0, metavar="W",
+                    help="分片出包的并行进程数（默认 0 = 自动 min(CPU 核数, N)；"
+                         "仅 --shards > 1 时有意义，用 multiprocessing 绕过 GIL）。"
+                         "本机 6 核实测（热缓存，墙钟/总耗时）：4片4worker=9.5~11.4s，"
+                         "2片2worker=14.9~18.0s，4片1worker=22.7~28.1s，单包=22.6~26.4s → "
+                         "**并行确实更快**（分片串行反而更慢，因每片有连接/出包/清单等固定开销）。"
+                         "注意本负载偏 I/O 密集（读 701MB txt + 1.4GB 基线随机页），"
+                         "若数据全不在 page cache 且磁盘繁忙，加速比会缩小，此时可用 --workers 1 串行对照")
     ap.add_argument("--only-shard", dest="only_shard", type=int, default=None, metavar="i",
                     help="只出第 i 片（0-based），单进程。分组与 updated_at 仍按**全量**算，"
                          "故单独调用与整跑的第 i 片逐字相同（编排器逐片调用用）")
@@ -1123,8 +1229,8 @@ def main(argv=None):
         raise SystemExit("基线库不存在: %s" % args.base_db)
     if args.shards < 1:
         raise SystemExit("--shards 必须 ≥ 1，当前 %d" % args.shards)
-    if args.workers < 1:
-        raise SystemExit("--workers 必须 ≥ 1，当前 %d" % args.workers)
+    if args.workers < 0:
+        raise SystemExit("--workers 必须 ≥ 0（0 = 自动），当前 %d" % args.workers)
     if args.only_shard is not None and not (0 <= args.only_shard < args.shards):
         raise SystemExit("--only-shard 必须在 0..%d，当前 %d" % (args.shards - 1, args.only_shard))
 
