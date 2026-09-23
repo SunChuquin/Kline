@@ -73,18 +73,44 @@ struct FavoritesLayoutBView: View {
         Button {
             WatchlistSyncManager.shared.sync(reason: "手动")
         } label: {
-            if watchlistSync.isRunning {
-                ProgressView().scaleEffect(0.7)
-            } else {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.blue)
+            HStack(spacing: 5) {
+                if let p = model.refreshProgress {
+                    // 显示进度：图标 + 进度文字
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                    Text("\(p.done)/\(p.total)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                } else if watchlistSync.isRunning {
+                    // 显示加载中：图标 + 加载文字
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                    Text("刷新中...")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                } else {
+                    // 正常状态：图标 + 刷新文字
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                    Text("刷新")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                }
             }
+            .foregroundColor(.blue)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Color(.systemGray6))
+            .cornerRadius(7)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .disabled(!watchlistTappable)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
         .buttonStyle(.plain)
+        .fixedSize()
     }
     
     /// 清单标的自动更新状态（用于刷新按钮控制）
