@@ -33,6 +33,9 @@ enum FavoritesRowMenuAction: String, Identifiable {
     case moveToFirst
     case moveToLast
     case addToGroup
+    /// 进入批量编辑（多选）态：自选页进编辑态、行情页进批量态，并把当前长按的这只预选中。
+    /// 已在批量态时该面板项不出现（冗余），由调用方通过 includeBatchEdit 控制
+    case batchEdit
     case note
     case toggleAlert
     case toggleFavorite
@@ -203,6 +206,7 @@ struct FavoritesRowMenuPanel: View {
         }
         .buttonStyle(.plain)
         .disabled(!item.enabled)
+        .accessibilityIdentifier("rowMenu.\(item.action.rawValue)")
     }
 
     /// 主行颜色：危险项红、可用项主色、不可用项置灰（原因行固定用 secondary）
@@ -475,20 +479,32 @@ struct BatchAlertTarget: Identifiable {
     var count: Int { metas.count }
 }
 
-/// 底部批量条：左侧「已选 N 只」（固定宽，数量位数变化不推挤按钮）+ 右侧横向可滚动作按钮。
-/// 高 56 + 1pt 分隔线；公式分组另加一行 11pt 原因说明（与分组类型绑定，不随选择数量抖动）。
+/// 批量条通用条目（自选页 / 行情页共用同一套视觉）：id 由各页的动作 rawValue 提供，
+/// 点击后原样回传，调用方再映射回自己的动作枚举 —— 这样两页只共用「画法」、不共用动作类型
+struct BatchBarEntry: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    var enabled: Bool = true
+    /// 不可用原因（只取首个带原因项在条上显示一行说明）
+    var reason: String? = nil
+}
+
+/// 底部批量条（纯展示，自选页 / 行情页共用）：左侧可选「完成」+「已选 N 只」（固定宽，
+/// 数量位数变化不推挤按钮）+ 右侧横向可滚动作按钮。
+/// 高 56 + 1pt 分隔线；另加一行 11pt 原因说明（与上下文绑定，不随选择数量抖动）。
 /// 按钮观感与行情页 `MarketToolButton` 同款（`systemGray6` 胶囊 + 蓝色前景、命中区 44pt），
-/// 不可用时置灰并 `.disabled`。批量条挂在编辑态列表下方 → A/B/C/D 与 C 档卡片形态共用同一处。
-struct FavoritesBatchBar: View {
-    @ObservedObject var model: FavoritesPageModel
+/// 不可用时置灰并 `.disabled`。挂在批量列表下方 → 四档布局与 C 档卡片形态共用同一处。
+struct BatchActionBar: View {
+    let entries: [BatchBarEntry]
+    let countText: String
+    /// 是否在计数左侧常驻一个「完成」按钮（行情页批量态没有工具栏开关，靠它退出）
+    var showsDone: Bool = false
+    var onDone: () -> Void = {}
+    let onSelect: (String) -> Void
 
-    private var items: [FavoritesBatchItem] { model.batchBarItems() }
-    /// 置灰项的说明（公式分组「顺序由公式计算得到」；只取首个带原因项，避免重复多行）
-    private var reasonText: String? { items.compactMap { $0.reason }.first }
-
-    private var countText: String {
-        model.batchSelection.isEmpty ? "未选择" : "已选 \(model.batchSelection.count) 只"
-    }
+    /// 置灰项的说明（只取首个带原因项，避免重复多行）
+    private var reasonText: String? { entries.compactMap { $0.reason }.first }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -505,21 +521,40 @@ struct FavoritesBatchBar: View {
                 .frame(height: 20)
             }
             HStack(spacing: 10) {
+                // 「完成」槽位：不显示时留空分支，不占位、不产生额外 spacing
+                if showsDone {
+                    Button(action: onDone) {
+                        Text("完成")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(7)
+                            .frame(height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .accessibilityIdentifier("market.batchBar.done")
+                }
                 Text(countText)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                     // 固定宽：数量从 1 位变 3 位时右侧按钮不位移（不抖动）
                     .frame(width: 86, alignment: .leading)
+                    .accessibilityIdentifier("batch.count")
                 Divider().frame(height: 22)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(items) { item in
-                            barButton(item)
+                        ForEach(entries) { entry in
+                            barButton(entry)
                         }
                     }
                     .padding(.trailing, 12)
                 }
+                .accessibilityIdentifier("batch.actions")
             }
             .padding(.leading, 12)
             .frame(height: 56)
@@ -528,15 +563,15 @@ struct FavoritesBatchBar: View {
     }
 
     /// 动作按钮：图标 + 文字 12pt、systemGray6 胶囊、44pt 命中区（观感对齐 MarketToolButton）
-    private func barButton(_ item: FavoritesBatchItem) -> some View {
+    private func barButton(_ entry: BatchBarEntry) -> some View {
         Button {
-            model.performBatch(item.action)
+            onSelect(entry.id)
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: item.icon).font(.system(size: 12, weight: .medium))
-                Text(item.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Image(systemName: entry.icon).font(.system(size: 12, weight: .medium))
+                Text(entry.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
             }
-            .foregroundColor(item.enabled ? .blue : Color(.tertiaryLabel))
+            .foregroundColor(entry.enabled ? .blue : Color(.tertiaryLabel))
             .padding(.horizontal, 10)
             .frame(height: 28)
             .background(Color(.systemGray6))
@@ -545,8 +580,30 @@ struct FavoritesBatchBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!item.enabled)
+        .disabled(!entry.enabled)
         .fixedSize()
+        .accessibilityIdentifier("batch.\(entry.id)")
+    }
+}
+
+/// 自选页批量条：`BatchActionBar` 的薄适配层（对外 API 与调用点零改动）
+struct FavoritesBatchBar: View {
+    @ObservedObject var model: FavoritesPageModel
+
+    private var items: [FavoritesBatchItem] { model.batchBarItems() }
+
+    private var countText: String {
+        model.batchSelection.isEmpty ? "未选择" : "已选 \(model.batchSelection.count) 只"
+    }
+
+    var body: some View {
+        BatchActionBar(entries: items.map {
+            BatchBarEntry(id: $0.action.rawValue, title: $0.title, icon: $0.icon,
+                          enabled: $0.enabled, reason: $0.reason)
+        }, countText: countText) { raw in
+            guard let action = FavoritesBatchAction(rawValue: raw) else { return }
+            model.performBatch(action)
+        }
     }
 }
 
@@ -615,8 +672,10 @@ enum FavoritesAlertKit {
 @MainActor
 enum MetaRowMenuKit {
 
-    /// 面板项：加自选 / 取消自选、固定 / 取消固定、加入指定分组、备注…、设置 / 取消预警
-    static func items(for meta: MetaItem) -> [FavoritesRowMenuItem] {
+    /// 面板项：加自选 / 取消自选、固定 / 取消固定、加入指定分组、（可选）批量编辑、备注…、设置 / 取消预警
+    /// - Parameter includeBatchEdit: 是否出现「批量编辑」。默认 false —— 搜索页与行情页共用本方法，
+    ///   而搜索页没有批量态（出现即点了没反应）；行情页传 true，且已在批量态时传 false（冗余项）
+    static func items(for meta: MetaItem, includeBatchEdit: Bool = false) -> [FavoritesRowMenuItem] {
         let fav = FavoritesStore.shared
         let faved = fav.isFavorited(meta.id)
         let pinned = fav.isPinned(meta.id)
@@ -630,6 +689,12 @@ enum MetaRowMenuKit {
             FavoritesRowMenuItem(action: .addToGroup, title: "加入指定分组",
                                  icon: "folder.badge.plus")
         ]
+        // 批量编辑入口：插在「加入指定分组」之后、备注之前 —— 面板项多时会进 320pt 滚动容器，
+        // 放末尾可能要先滚动才看得见
+        if includeBatchEdit {
+            items.append(FavoritesRowMenuItem(action: .batchEdit, title: "批量编辑",
+                                              icon: "checklist"))
+        }
         let note = fav.note(for: meta.id)
         items.append(FavoritesRowMenuItem(action: .note, title: "备注…", icon: "note.text",
                                           trailing: note.map { FavoritesRowMenuItem.noteSummary($0) }))
@@ -643,11 +708,13 @@ enum MetaRowMenuKit {
         return items
     }
 
-    /// 需要弹窗的动作交回调用方（调用方据此写自己的浮层目标）
+    /// 需要弹窗 / 需要调用方接管状态的动作交回调用方（调用方据此写自己的浮层目标）
     enum Outcome {
         case addToGroup(MetaItem)
         case note(FavoritesRowMenuTarget)
         case alert(MetaItem)
+        /// 进入批量编辑态并预选该标的（携带 metaID）
+        case batchEdit(Int)
     }
 
     /// 执行面板动作（面板已在调用处关闭）；就地完成的动作返回 nil
@@ -668,6 +735,8 @@ enum MetaRowMenuKit {
             return nil
         case .addToGroup:
             return .addToGroup(meta)
+        case .batchEdit:
+            return .batchEdit(meta.id)
         case .note:
             return .note(target)
         case .toggleAlert:

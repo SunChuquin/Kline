@@ -102,8 +102,16 @@ final class MarketPageModel: ObservableObject {
     @Published var rowMenuTarget: FavoritesRowMenuTarget? = nil
     /// 备注弹窗目标（全局备注，与自选页共享同一条）
     @Published var noteEditorTarget: FavoritesRowMenuTarget? = nil
-    /// 预警弹窗目标（本轮单只预警 = 1 只；批量预警下一轮复用同一弹窗与创建路径）
+    /// 预警弹窗目标（单只预警 = 1 只；批量预警 = N 只，同一弹窗与创建路径）
     @Published var alertSheetTargets: [MetaItem] = []
+
+    // MARK: 批量编辑（长按面板「批量编辑」进入；列表换成简易多选列表 + 底部批量条）
+    /// 是否处于批量编辑态：true 时表格/磁贴整体换成 `MarketBatchList`
+    @Published var batchMode = false
+    /// 批量编辑：多选集合（SelectionValue = metaID）
+    @Published var batchSelection: Set<Int> = []
+    /// 批量备注弹窗载体（打开瞬间快照选中标的）；批量预警复用上面的 alertSheetTargets
+    @Published var batchNoteTarget: BatchNoteTarget? = nil
     /// 点击顶部搜索图标后弹出搜索页（复用 HomeView 搜索模式，等同双击首页的效果）
     @Published var homeSearchActive = false
     /// 公式管理中心页（全屏 overlay）开合：仅「选股」Tab 工具区入口触发
@@ -126,6 +134,32 @@ final class MarketPageModel: ObservableObject {
         forward(colCfg.objectWillChange)
         forward(rowCache.objectWillChange)
         forward(databaseManager.objectWillChange)
+
+        // 批量编辑：切换分类 / 一级二级菜单 / 布局 / 磁贴表格态后，行集已完全不同，
+        // 「看不见的行」不应继续被批量动作命中 → 清空选择、但保持批量态
+        // （与自选页「切分组清空选择、保持编辑态」口径一致，见 FavoritesPageKit.init）
+        $selectedTab.dropFirst().sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+        $topMenu.dropFirst().sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+        $pickerSeg.dropFirst().sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+        $favSeg.dropFirst().sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+        $showsTileMode.dropFirst().sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+        PageLayoutStore.shared.$marketLayout.dropFirst()
+            .sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+
+        // ⚠️ 自选页没有的坑：切到无标的分类时四档都渲染空态视图，批量列表与「完成」按钮会一起消失，
+        // 用户将卡在批量态且没有出口 → 行集变空即自动退出批量编辑
+        $displayRows.map(\.isEmpty).removeDuplicates().dropFirst()
+            .sink { [weak self] isEmpty in
+                guard isEmpty, let self, self.batchMode else { return }
+                self.exitBatchMode()
+            }
+            .store(in: &cancellables)
     }
 
     /// 把数据源的 objectWillChange 转发到本模型
@@ -401,11 +435,12 @@ final class MarketPageModel: ObservableObject {
         if rowMenuTarget != target { rowMenuTarget = target }
     }
 
-    /// 面板项：加自选 / 取消自选、加入指定分组、备注…、设置 / 取消预警
-    /// （行情页无分组概念，故不出现固顶与移前移后；口径与搜索页共用 `MetaRowMenuKit`，
+    /// 面板项：加自选 / 取消自选、固定 / 取消固定、加入指定分组、批量编辑、备注…、设置 / 取消预警
+    /// （行情页无分组概念，故不出现移前移后；口径与搜索页共用 `MetaRowMenuKit`，
     /// 「加入指定分组」复用既有 AddToGroupSheet）
+    /// `includeBatchEdit`：已在批量态时不显示（冗余项）
     func rowMenuItems(for target: FavoritesRowMenuTarget) -> [FavoritesRowMenuItem] {
-        MetaRowMenuKit.items(for: target.meta)
+        MetaRowMenuKit.items(for: target.meta, includeBatchEdit: !batchMode)
     }
 
     /// 执行面板动作（面板已在调用处关闭）：需要弹窗的动作写进本模型的浮层目标
@@ -418,8 +453,166 @@ final class MarketPageModel: ObservableObject {
             noteEditorTarget = noteTarget
         case .alert(let meta):
             alertSheetTargets = [meta]
+        case .batchEdit(let metaID):
+            enterBatchMode(preselect: metaID)
         }
     }
+
+    // MARK: - 批量编辑（多选 + 底部批量条）
+
+    /// 进入批量编辑态并预选指定标的（长按面板「批量编辑」入口用：长按哪只就勾上哪只）
+    func enterBatchMode(preselect: Int?) {
+        if !batchMode { batchMode = true }
+        setBatchSelection(preselect.map { [$0] } ?? [])
+    }
+
+    /// 退出批量编辑态：清空选择并回到表格 / 磁贴
+    func exitBatchMode() {
+        setBatchSelection([])
+        if batchMode { batchMode = false }
+    }
+
+    /// 写多选（同值不写，避免 @Published 发布风暴）
+    func setBatchSelection(_ new: Set<Int>) {
+        if batchSelection != new { batchSelection = new }
+    }
+
+    /// 选中标的快照：按列表当前显示顺序（Set 无序，动作一律按显示顺序执行）
+    func batchSelectedMetas() -> [MetaItem] {
+        guard !batchSelection.isEmpty else { return [] }
+        let selected = batchSelection
+        return displayRows.map(\.meta).filter { selected.contains($0.id) }
+    }
+
+    /// 批量条项目：行情页无分组上下文，故只给「行情页适用子集」
+    /// （加 / 取消自选、固顶 / 取消固顶、设置 / 清除备注、设置 / 取消预警、全选 / 取消全选）。
+    /// 「加自选」与「取消自选」刻意拆成两个独立项（与自选页的 固顶/取消固顶、设置备注/清除备注 一致），
+    /// 由执行侧「先判方向」保证不会反向操作
+    func batchBarItems() -> [MarketBatchItem] {
+        let hasSelection = !batchSelection.isEmpty
+        let hasAccount = FavoritesAlertKit.accountID != nil
+        return [
+            MarketBatchItem(action: .addFavorite, title: "加自选",
+                           icon: "star", enabled: hasSelection),
+            MarketBatchItem(action: .removeFavorite, title: "取消自选",
+                           icon: "star.slash", enabled: hasSelection),
+            MarketBatchItem(action: .pin, title: "固顶",
+                           icon: "pin", enabled: hasSelection),
+            MarketBatchItem(action: .unpin, title: "取消固顶",
+                           icon: "pin.slash", enabled: hasSelection),
+            MarketBatchItem(action: .setNote, title: "设置备注",
+                           icon: "note.text", enabled: hasSelection),
+            MarketBatchItem(action: .clearNote, title: "清除备注",
+                           icon: "trash", enabled: hasSelection),
+            MarketBatchItem(action: .setAlert, title: "设置预警",
+                           icon: "bell", enabled: hasSelection && hasAccount,
+                           reason: hasAccount ? nil : "请先在模拟页创建账户"),
+            MarketBatchItem(action: .cancelAlert, title: "取消预警",
+                           icon: "bell.slash", enabled: hasSelection),
+            // 全选是「从无到有」的入口：批量条只在有行时才渲染，故恒可用；已全选时再点为幂等 no-op
+            MarketBatchItem(action: .selectAll, title: "全选",
+                           icon: "checkmark.circle", enabled: true),
+            MarketBatchItem(action: .deselectAll, title: "取消全选",
+                           icon: "circle", enabled: hasSelection)
+        ]
+    }
+
+    /// 执行批量动作（动作完成后清空选择并保持批量态；单个标的失败只记日志、继续处理其余标的）
+    func performBatch(_ action: MarketBatchAction) {
+        switch action {
+        case .selectAll:
+            setBatchSelection(Set(displayRows.map(\.metaID)))
+        case .deselectAll:
+            setBatchSelection([])
+
+        case .addFavorite:
+            // ⚠️ toggleFavorite 是纯 toggle：裸调会把「已自选」的反向删掉，故必须先判方向
+            for meta in batchSelectedMetas() where !fav.isFavorited(meta.id) {
+                fav.toggleFavorite(meta.id)
+            }
+            finishBatch()
+
+        case .removeFavorite:
+            for meta in batchSelectedMetas() where fav.isFavorited(meta.id) {
+                fav.toggleFavorite(meta.id)
+            }
+            finishBatch()
+
+        case .pin:
+            setBatchPinned(true)
+        case .unpin:
+            setBatchPinned(false)
+
+        case .setNote:
+            batchNoteTarget = BatchNoteTarget(metas: batchSelectedMetas())
+
+        case .clearNote:
+            for meta in batchSelectedMetas() { fav.setNote(metaID: meta.id, text: "") }
+            finishBatch()
+
+        case .setAlert:
+            // 批量预警复用既有预警弹窗载体（1 只与 N 只同一套创建路径）
+            alertSheetTargets = batchSelectedMetas()
+
+        case .cancelAlert:
+            for meta in batchSelectedMetas() { FavoritesAlertKit.cancelAlerts(metaID: meta.id) }
+            finishBatch()
+        }
+    }
+
+    /// 批量固顶 / 取消固顶：按列表当前显示顺序逐个执行（Set 无序，不能按点击顺序）；
+    /// 用 `isPinned` 先判方向，保证「固顶」不会把已固顶项反向取消（反之亦然）
+    private func setBatchPinned(_ pinned: Bool) {
+        let selected = batchSelection
+        for row in displayRows where selected.contains(row.metaID) {
+            if fav.isPinned(row.metaID) != pinned {
+                if pinned { fav.pin(row.metaID) } else { fav.unpin(row.metaID) }
+            }
+        }
+        finishBatch()
+    }
+
+    /// 批量备注落库（弹窗「保存」传文本；「清空」传空串 = 删除 key）
+    func applyBatchNote(_ text: String) {
+        let metas = batchNoteTarget?.metas ?? []
+        for meta in metas { fav.setNote(metaID: meta.id, text: text) }
+        finishBatch()
+    }
+
+    /// 批量动作收尾：只清空选择、保持批量态（用户可继续下一轮选择）
+    func finishBatch() {
+        setBatchSelection([])
+    }
+}
+
+// MARK: - 行情页批量动作
+
+/// 行情页批量动作（与自选页的 `FavoritesBatchAction` 是两套：行情页无分组上下文，
+/// 故不含「移出 / 移到分组」；固顶走行情页的全局固顶 API）
+enum MarketBatchAction: String, Identifiable {
+    case addFavorite
+    case removeFavorite
+    case pin
+    case unpin
+    case setNote
+    case clearNote
+    case setAlert
+    case cancelAlert
+    case selectAll
+    case deselectAll
+
+    var id: String { rawValue }
+}
+
+/// 批量条单项：动作 / 标题 / 图标 / 是否可用 / 不可用原因（不可用原因在条上统一显示一行）
+struct MarketBatchItem: Identifiable {
+    let action: MarketBatchAction
+    let title: String
+    let icon: String
+    var enabled: Bool = true
+    var reason: String? = nil
+
+    var id: String { action.rawValue }
 }
 
 // MARK: - 顶部一级菜单栏（含二级胶囊栏）
@@ -644,6 +837,16 @@ struct MarketTableBody: View {
     var metrics: MarketRowMetrics = .regular
 
     var body: some View {
+        // 批量编辑态：连表头一起换成简易多选列表 —— 批量态下排序无意义，
+        // 且简易行与列网格（冻结列 + 横向 offset）不对齐会误导
+        if model.batchMode {
+            MarketBatchList(model: model)
+        } else {
+            tableContent
+        }
+    }
+
+    private var tableContent: some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
                 // 表头（吸顶，冻结前 N 列）
@@ -662,7 +865,8 @@ struct MarketTableBody: View {
                     }
                 }
                 // 面板打开期间也禁用横向拖动：避免长按 / 面板弹出时整表位移
-                .simultaneousGesture((model.edgeAdjust || model.rowMenuTarget != nil)
+                // （批量态下表已不在树上，这里补 batchMode 只为语义明确 + 防御）
+                .simultaneousGesture((model.edgeAdjust || model.rowMenuTarget != nil || model.batchMode)
                                      ? nil : model.horizontalDragGesture)
                 .refreshable {
                     // 重新拉 meta + 刷新 rows（触发重新计算字段值）
@@ -714,6 +918,102 @@ struct MarketTableBody: View {
             withAnimation(.easeOut(duration: 0.15)) {
                 model.openRowMenu(model.menuTarget(for: meta))
             }
+        }
+    }
+}
+
+// MARK: - 批量编辑（简易多选列表 + 底部批量条）
+
+/// 行情页批量编辑列表：勾选圈 + 名称/代码 + 现价 + 涨跌幅，整行点击即切换选中；底部常驻批量条。
+/// ⚠️ 刻意**不用** `List(selection:)` + `editMode`：自选页编辑态把 `MarketTableRow` 放进 List 且
+/// 照常传 onOpen，而该行在整行挂了 `.onTapGesture`（见 MarketTableRow.body 末尾）——
+/// 二者谁抢到 tap 由 UIKit 触碰管线决定、静态无法判定；这里用自绘勾选圈 + 自己的 onTapGesture，
+/// 语义 100% 确定，同时避免 List 行内缩进破坏列对齐。
+/// 数值与颜色沿用表格口径（`rowCache.textFor/colorFor`），与只读态看到的一致。
+struct MarketBatchList: View {
+    @ObservedObject var model: MarketPageModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.displayRows) { row in
+                        batchRow(row.meta)
+                        Divider()
+                    }
+                }
+            }
+            MarketBatchBar(model: model)
+        }
+    }
+
+    /// 单行：勾选圈（44pt 命中区）+ 名称/代码双行 + 右侧现价 / 涨跌幅（红涨绿跌，与表格一致）
+    private func batchRow(_ meta: MetaItem) -> some View {
+        let selected = model.batchSelection.contains(meta.id)
+        return HStack(spacing: 10) {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 20))
+                .foregroundColor(selected ? .blue : Color(.tertiaryLabel))
+                .frame(width: 28, height: 44)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(meta.name)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(meta.displayCode)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(model.rowCache.textFor(meta.id, .latestPrice))
+                .font(.system(size: 15, design: .monospaced))
+                .foregroundColor(model.rowCache.colorFor(meta.id, .latestPrice))
+                .lineLimit(1)
+                .frame(width: 84, alignment: .trailing)
+            Text(model.rowCache.textFor(meta.id, .changePct))
+                .font(.system(size: 15, design: .monospaced))
+                .foregroundColor(model.rowCache.colorFor(meta.id, .changePct))
+                .lineLimit(1)
+                .frame(width: 84, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 52)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(selected ? Color.blue.opacity(0.08) : Color(.systemBackground))
+        .onTapGesture {
+            var next = model.batchSelection
+            if selected { next.remove(meta.id) } else { next.insert(meta.id) }
+            model.setBatchSelection(next)
+        }
+        .accessibilityIdentifier("market.batchRow")
+    }
+}
+
+/// 行情页批量条：`BatchActionBar` 的薄适配层；比自选页多一个常驻「完成」按钮
+/// （行情页没有工具栏「编辑/完成」开关，批量态只能靠它退出）
+struct MarketBatchBar: View {
+    @ObservedObject var model: MarketPageModel
+
+    private var items: [MarketBatchItem] { model.batchBarItems() }
+
+    private var countText: String {
+        model.batchSelection.isEmpty ? "未选择" : "已选 \(model.batchSelection.count) 只"
+    }
+
+    var body: some View {
+        BatchActionBar(entries: items.map {
+            BatchBarEntry(id: $0.action.rawValue, title: $0.title, icon: $0.icon,
+                          enabled: $0.enabled, reason: $0.reason)
+        }, countText: countText, showsDone: true, onDone: {
+            withAnimation(.easeOut(duration: 0.15)) { model.exitBatchMode() }
+        }) { raw in
+            guard let action = MarketBatchAction(rawValue: raw) else { return }
+            model.performBatch(action)
         }
     }
 }
@@ -797,6 +1097,23 @@ struct MarketSheets: ViewModifier {
                                    onCancel: { closeNoteEditor() })
             }
         }
+        // 批量备注：复用自选页同一套弹窗（titleOverride 换成「批量备注 · N 只」）
+        if let target = model.batchNoteTarget, let first = target.metas.first {
+            FavoritesOverlayCard(onDismiss: { closeBatchNote() }) {
+                FavoritesNoteSheet(meta: first,
+                                   initialText: "",
+                                   titleOverride: "批量备注 · \(target.count) 只",
+                                   onSave: { text in
+                                       closeBatchNote()
+                                       model.applyBatchNote(text)
+                                   },
+                                   onClear: {
+                                       closeBatchNote()
+                                       model.applyBatchNote("")
+                                   },
+                                   onCancel: { closeBatchNote() })
+            }
+        }
         if !model.alertSheetTargets.isEmpty {
             FavoritesOverlayCard(onDismiss: { closeAlertSheet() }) {
                 FavoritesBatchAlertSheet(metas: model.alertSheetTargets,
@@ -825,6 +1142,11 @@ struct MarketSheets: ViewModifier {
     private func closeAlertSheet() {
         guard !model.alertSheetTargets.isEmpty else { return }
         withAnimation(.easeOut(duration: 0.15)) { model.alertSheetTargets = [] }
+    }
+
+    private func closeBatchNote() {
+        guard model.batchNoteTarget != nil else { return }
+        withAnimation(.easeOut(duration: 0.15)) { model.batchNoteTarget = nil }
     }
 }
 

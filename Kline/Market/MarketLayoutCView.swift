@@ -41,6 +41,10 @@ struct MarketLayoutCView: View {
         if databaseManager.isLoaded {
             if model.tabItems.isEmpty {
                 MarketEmptyStateView(icon: "magnifyingglass", message: "暂无标的")
+            } else if model.batchMode {
+                // 批量编辑态：磁贴与表格都换成同一套简易多选列表
+                // （表格态那条分支在 MarketTableBody 内部，此处只补磁贴态）
+                MarketBatchList(model: model)
             } else if model.showsTileMode {
                 tileGrid
             } else {

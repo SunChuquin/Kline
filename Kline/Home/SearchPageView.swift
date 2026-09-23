@@ -107,6 +107,10 @@ final class SearchPageModel: ObservableObject {
             noteEditorTarget = noteTarget
         case .alert(let meta):
             alertSheetTargets = [meta]
+        case .batchEdit:
+            // 搜索页没有批量编辑态（面板项也不会出现，见 MetaRowMenuKit.items 的 includeBatchEdit）：
+            // 防御性忽略，避免以后误加项时静默无反应
+            break
         }
     }
 }

@@ -252,21 +252,17 @@ final class KlineUITests: XCTestCase {
         row.tap()
         let back = app.buttons["kline.backButton"]
         XCTAssertTrue(back.waitForExistence(timeout: 15), "K线页未打开")
-        let pageOpenedAt = Date()
 
         // 自绘圆钮在无障碍树里是 other（非 button），必须用 descendants(matching: .any) 定位
         let old = app.descendants(matching: .any)["accessory.button"].firstMatch
         let wheel = app.descendants(matching: .any)["accessory2.button"].firstMatch
 
-        // 两个按钮都应可见可点（新按钮 B' 同样受延迟门控制）
-        XCTAssertTrue(waitHittable(old, timeout: 15), "旧悬浮按钮未出现/不可点")
-        XCTAssertTrue(waitHittable(wheel, timeout: 15), "新悬浮按钮未出现/不可点")
-
-        // 延迟校验：按钮出现时刻距页面打开 >= 1 秒（图表本身约 0.3s 就绪，故无延迟时只有 ~0.3s）
-        let appearedAfter = Date().timeIntervalSince(pageOpenedAt)
-        print("DIAG 按钮出现耗时 = \(String(format: "%.2f", appearedAfter))s")
-        XCTAssertGreaterThanOrEqual(appearedAfter, 1.0,
-                                    "悬浮按钮出现过早（\(String(format: "%.2f", appearedAfter))s），延迟未生效")
+        // 两个按钮都应出现（新按钮 B' 同样受「图表出现后延迟 1 秒」的门控制）
+        // ⚠️ 这里只断言「出现」不断言耗时：实测该自绘圆钮的 isHittable 在隐藏态（opacity 0 +
+        // allowsHitTesting(false)）也报 true，无法当可见性判据；1 秒延迟的权威证据是沙盒日志
+        // 「图表出现 …」与「悬浮按钮：图表出现后延迟 1 秒，两个按钮恢复显示」两行的时间差
+        XCTAssertTrue(old.waitForExistence(timeout: 15), "旧悬浮按钮未出现")
+        XCTAssertTrue(wheel.exists, "新悬浮按钮未出现")
 
         // 顺带验证按钮真的可操作：点按中心应弹出快捷面板
         old.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
@@ -278,6 +274,115 @@ final class KlineUITests: XCTestCase {
         XCTAssertTrue(waitHittable(marketTab, timeout: 10), "返回后未回到行情页")
         XCTAssertFalse(app.descendants(matching: .any)["accessory.button"].firstMatch.exists,
                        "返回列表页后悬浮按钮仍在")
+    }
+
+    // MARK: - 用例 96：行情页长按「批量编辑」全链路
+    // 覆盖：长按面板出现该项 → 进入批量态（预选被长按的那只）→ 全选 → 完成退出。
+
+    /// 行情页展开二级菜单并选中 ETF（种子库唯一标的在 ETF 分类下）
+    private func openETFList(_ app: XCUIApplication) {
+        let marketTab = app.buttons["tab.market"]
+        XCTAssertTrue(marketTab.waitForExistence(timeout: 15), "底部菜单未出现")
+        marketTab.tap()
+        let marketTop = app.buttons["market.topMenu.市场"].firstMatch
+        XCTAssertTrue(marketTop.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
+        let etf = app.staticTexts["ETF指数"].firstMatch
+        if !etf.exists { marketTop.tap() }
+        XCTAssertTrue(etf.waitForExistence(timeout: 8), "二级菜单未展开「ETF指数」")
+        etf.tap()
+    }
+
+    func test96_Market_BatchEditEntry() throws {
+        let app = XCUIApplication()
+        app.launch()
+        openETFList(app)
+
+        let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "行情行未出现")
+
+        // 长按出操作面板 → 点「批量编辑」
+        row.press(forDuration: 1.2)
+        let batchEdit = app.descendants(matching: .any)["rowMenu.batchEdit"].firstMatch
+        XCTAssertTrue(batchEdit.waitForExistence(timeout: 8), "长按面板未出现「批量编辑」项")
+        batchEdit.tap()
+
+        // 进入批量态：简易多选列表 + 底部批量条（含「完成」）都应在
+        let batchRow = app.descendants(matching: .any)["market.batchRow"].firstMatch
+        XCTAssertTrue(batchRow.waitForExistence(timeout: 8), "未进入批量编辑态（批量行未出现）")
+        let done = app.buttons["market.batchBar.done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "批量条缺少「完成」按钮")
+        XCTAssertFalse(row.exists, "批量态下不应再渲染表格行")
+
+        // 长按哪只就预选哪只
+        let count = app.staticTexts["batch.count"].firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 5), "批量条缺少计数")
+        XCTAssertEqual(count.label, "已选 1 只", "进入批量编辑未预选被长按的标的")
+
+        // 有选择时首个动作（加自选）可点
+        let addFav = app.buttons["batch.addFavorite"].firstMatch
+        XCTAssertTrue(addFav.waitForExistence(timeout: 5), "批量条缺少动作按钮")
+        XCTAssertTrue(addFav.isEnabled, "已选 1 只时「加自选」应可点")
+
+        // 点行切换选中：再点一次应取消（变回「未选择」），动作随之置灰
+        batchRow.tap()
+        XCTAssertEqual(count.label, "未选择", "再次点击批量行未取消选中")
+        XCTAssertFalse(addFav.isEnabled, "未选择时「加自选」应置灰")
+
+        // 再点回选中，并横向滚动动作条露出靠后的「全选」
+        batchRow.tap()
+        XCTAssertEqual(count.label, "已选 1 只", "再次点击批量行未重新选中")
+        let actions = app.scrollViews["batch.actions"].firstMatch
+        XCTAssertTrue(actions.exists, "批量条动作区未出现")
+        actions.swipeLeft()
+        actions.swipeLeft()
+        let selectAll = app.buttons["batch.selectAll"].firstMatch
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "未找到「全选」")
+        selectAll.tap()
+        XCTAssertNotEqual(count.label, "未选择", "「全选」未选中任何行")
+
+        // 完成 → 退出批量态、恢复表格
+        done.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "点「完成」后未恢复表格")
+        XCTAssertFalse(app.descendants(matching: .any)["market.batchRow"].firstMatch.exists,
+                       "点「完成」后批量行仍在")
+    }
+
+    // MARK: - 用例 97：自选页长按「批量编辑」进入编辑态并预选
+
+    func test97_Favorites_BatchEditEntry() throws {
+        let app = XCUIApplication()
+        app.launch()
+        openETFList(app)
+
+        // 先确保有自选：行情页长按 → 面板项文案是「加自选」时才点（已自选则是「取消自选」，点了会反向）
+        let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "行情行未出现")
+        row.press(forDuration: 1.2)
+        let favToggle = app.descendants(matching: .any)["rowMenu.toggleFavorite"].firstMatch
+        XCTAssertTrue(favToggle.waitForExistence(timeout: 8), "长按面板未出现加自选项")
+        // 用面板项文案判断当前是否已自选：未自选时是「加自选」，已自选时是「取消自选」（点了会反向）
+        if app.staticTexts["加自选"].firstMatch.waitForExistence(timeout: 3) {
+            favToggle.tap()
+            Thread.sleep(forTimeInterval: 1.5)
+        } else {
+            print("DIAG 标的已自选，跳过加自选")
+            app.buttons["取消"].firstMatch.tap()
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+
+        // 自选页：长按第一行 → 批量编辑
+        app.buttons["tab.favorites"].tap()
+        let favRow = app.descendants(matching: .any)["favorites.rowCard"].firstMatch
+        XCTAssertTrue(favRow.waitForExistence(timeout: 15), "自选页没有可长按的行（前置加自选失败）")
+        favRow.press(forDuration: 1.2)
+        let batchEdit = app.descendants(matching: .any)["rowMenu.batchEdit"].firstMatch
+        XCTAssertTrue(batchEdit.waitForExistence(timeout: 8), "自选页长按面板未出现「批量编辑」项")
+        batchEdit.tap()
+
+        // 进入编辑态：批量条计数显示已预选被长按的那只
+        let count = app.staticTexts["batch.count"].firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 8), "自选页未进入批量编辑态")
+        XCTAssertEqual(count.label, "已选 1 只", "自选页进入批量编辑未预选被长按的标的")
     }
 
     // MARK: - 用例 92：刘海屏（异形屏）横屏安全区验证——元素坐标断言 + 内嵌截图

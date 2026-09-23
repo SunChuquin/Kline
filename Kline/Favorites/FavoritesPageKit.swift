@@ -269,7 +269,8 @@ final class FavoritesPageModel: ObservableObject {
     /// - 公式分组：固顶 / 加入其它分组 / 备注 / 设置·取消预警（移前移后置灰给原因；取消自选不出现）
     /// - 「全部」虚拟组：加入其它分组 / 备注 / 设置·取消预警 / 取消自选（无固顶与移前移后）
     func rowMenuItems(for target: FavoritesRowMenuTarget,
-                      includeRemoveFromGroup: Bool = false) -> [FavoritesRowMenuItem] {
+                      includeRemoveFromGroup: Bool = false,
+                      includeBatchEdit: Bool = true) -> [FavoritesRowMenuItem] {
         let meta = target.meta
         guard let gid = target.groupID else { return [] }
         let group = fav.groups.first(where: { $0.id == gid })
@@ -320,6 +321,13 @@ final class FavoritesPageModel: ObservableObject {
         items.append(FavoritesRowMenuItem(action: .addToGroup, title: "加入其它分组",
                                           icon: "folder.badge.plus"))
 
+        // 批量编辑入口：已在编辑态时不出现（冗余）。插在「加入其它分组」之后、备注之前 ——
+        // 面板项多时会进 320pt 滚动容器，放末尾可能要先滚动才看得见
+        if includeBatchEdit {
+            items.append(FavoritesRowMenuItem(action: .batchEdit, title: "批量编辑",
+                                              icon: "checklist"))
+        }
+
         // 备注…（有备注时右侧给首行摘要）
         let note = fav.note(for: meta.id)
         items.append(FavoritesRowMenuItem(action: .note, title: "备注…", icon: "note.text",
@@ -360,6 +368,8 @@ final class FavoritesPageModel: ObservableObject {
             if let gid = target.groupID { fav.moveToLast(groupID: gid, metaID: meta.id) }
         case .addToGroup:
             addGroupTarget = meta
+        case .batchEdit:
+            enterEditingMode(preselect: meta.id)
         case .note:
             noteEditorTarget = target
         case .toggleAlert:
@@ -389,6 +399,13 @@ final class FavoritesPageModel: ObservableObject {
         } else {
             showEditingMode = true
         }
+    }
+
+    /// 进入编辑态并预选指定标的（长按面板「批量编辑」入口用：长按哪只就勾上哪只）。
+    /// 已在编辑态时只更新选择，不重复置位
+    func enterEditingMode(preselect: Int?) {
+        if !showEditingMode { showEditingMode = true }
+        setBatchSelection(preselect.map { [$0] } ?? [])
     }
 
     /// 写多选（同值不写，避免 @Published 发布风暴）
@@ -890,6 +907,7 @@ struct FavoritesTableBody: View {
                 model.openRowMenu(model.menuTarget(for: meta))
             }
         }
+        .accessibilityIdentifier("favorites.rowCard")
     }
 
     private var formulaGroupEmptyState: some View {
@@ -1003,6 +1021,7 @@ struct FavoritesManualEditingList: View {
                 }
             }
         }
+        .accessibilityIdentifier("favorites.rowCard")
     }
 }
 
@@ -1061,7 +1080,8 @@ struct FavoritesSheets: ViewModifier {
                 FavoritesRowMenuPanel(title: target.meta.name,
                                       subtitle: target.meta.displayCode,
                                       items: model.rowMenuItems(for: target,
-                                                                includeRemoveFromGroup: model.isManualEditingList),
+                                                                includeRemoveFromGroup: model.isManualEditingList,
+                                                                includeBatchEdit: !model.showEditingMode),
                                       onSelect: { action in
                                           closeRowMenu()
                                           model.performRowMenu(action, for: target)
