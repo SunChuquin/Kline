@@ -165,8 +165,6 @@ struct KlineDetailView: View {
     @State private var showSystemEditor = false
     /// 联动多图：当前正在编辑公式的视图下标；仅该 tile 全屏弹出编辑器，其余 tile 不响应
     @State private var editorOwnerIndex: Int? = nil
-    /// 悬浮按钮是否应该显示：仅在K线详情页且无弹窗时显示
-    @State private var shouldShowFloatingButtons = true
     @ObservedObject private var config = ChartConfigStore.shared
     @ObservedObject private var linkedStore = LinkedViewStore.shared
     @State private var dailySeries: ChartSeries? = nil
@@ -301,7 +299,6 @@ struct KlineDetailView: View {
                     settingsOverlay(geometry: geometry)
                         .transition(.opacity)
                         .zIndex(10)
-                    shouldShowFloatingButtons = false
                 }
                 // 单图 副图2 🔍 覆盖式搜索栏：顶部锚定后下移工具栏高度，
                 // 使搜索栏正好落在主图指标数值栏（KlineChartView 第一行 mainLegendRow）。
@@ -312,19 +309,6 @@ struct KlineDetailView: View {
                         .offset(y: infoBarTopOffset)
                         .transition(.opacity)
                         .zIndex(20)
-                    shouldShowFloatingButtons = false
-                }
-                
-                // 弹窗消失时重新显示悬浮按钮
-                .onChange(of: showSettings) { _, newValue in
-                    if !newValue {
-                        shouldShowFloatingButtons = true
-                    }
-                }
-                .onChange(of: showSearch) { _, newValue in
-                    if !newValue {
-                        shouldShowFloatingButtons = true
-                    }
                 }
             }
             .onPreferenceChange(TopBarHeightPreferenceKey.self) { h in
@@ -823,12 +807,6 @@ struct KlineDetailView: View {
                               metaID: effectiveMetaID,
                               mainLegendPortal: mainLegendPortal)
                 }
-            }
-            
-            // 悬浮按钮：仅在K线详情页且无弹窗时显示
-            if shouldShowFloatingButtons {
-                FloatingAccessory()
-                FloatingAccessoryWheel()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
