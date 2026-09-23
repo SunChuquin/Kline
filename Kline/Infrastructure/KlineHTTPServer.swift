@@ -877,9 +877,12 @@ final class KlineHTTPServer {
     private func deferredWALCheckpoint() {
         let dbPath = DatabaseManager.writableDBPath
         // 有界策略参数（明确写死，便于从日志一眼看出是否在膨胀）
+        // 间隔取 2s（区间上限）：真机实测 PASSIVE 一轮就把 log 追平（约 15s），而紧随其后的 TRUNCATE
+        // 会被「App 提交后立刻开始的 3611 行热刷新读」挡住并返回 busy=1；1s 间隔的 10 次都落在该窗口内
+        // 全部失败，改 2s 间隔可把重试窗口拉到回写完成后再约 18s，覆盖热刷新结束的时刻。
         let maxAttempts = 10
         let budgetSec: Double = 60
-        let intervalSec: Double = 1.0
+        let intervalSec: Double = 2.0
         // journal_size_limit = 64MB：**连接级**设置（本地实测新连接读回 -1，不随库文件持久化）。
         // 兜底作用：万一某次日志复位不经 TRUNCATE 路径，文件也会被裁到 ≤64MB。取 64MB 的理由：它
         // **不限制事务期间的 WAL 增长**（只在日志复位时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的
