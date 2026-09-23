@@ -70,6 +70,16 @@ final class FavoritesPageModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        // 数据源的 objectWillChange 全部在主线程发布，直接转发到本模型 → 所有 Observed 本模型的
+        // 子视图（表格主体、Tab 条、列表行等）能在数据源变化时立即重算，不依赖容器层逐层传递。
+        // 根因：之前只在容器 FavoritesView Observed fav，但子视图 FavoritesLayoutAView /
+        // FavoritesTableBody 只 Observed model；model 自身没发 objectWillChange → 子视图不重算，
+        // 直到用户触发别的 @Published（如长按打开 rowMenuTarget）才间接刷新。
+        forward(fav.objectWillChange)
+        forward(dbm.objectWillChange)
+        forward(rowCache.objectWillChange)
+        forward(colCfg.objectWillChange)
+
         // 跨分组 / 跨档位的多选语义不清（"看不见的行"不应被批量动作命中）→ 一旦切换就清空。
         // 放在模型里订阅，避免在 GroupTabs / B 侧栏 / D 看板 / 容器等每个写入点各加一段守卫。
         fav.$selectedGroupID
@@ -79,6 +89,13 @@ final class FavoritesPageModel: ObservableObject {
         PageLayoutStore.shared.$favoritesLayout
             .dropFirst()
             .sink { [weak self] _ in self?.setBatchSelection([]) }
+            .store(in: &cancellables)
+    }
+
+    /// 把数据源的 objectWillChange 转发到本模型（与 MarketPageModel.forward 同模式）
+    private func forward<P: Publisher>(_ publisher: P) where P.Failure == Never {
+        publisher
+            .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
     }
 
@@ -860,6 +877,7 @@ struct FavoritesTableBody: View {
                            onOpen: { m in
                 model.detailRouter.open(m, in: items)
             }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
+                           isPinned: model.fav.isPinned(groupID: model.currentGroup.id, metaID: meta.id),
                            heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
         }
         .padding(.trailing, 8)
@@ -976,6 +994,7 @@ struct FavoritesManualEditingList: View {
                            onOpen: { m in
                 model.detailRouter.open(m, in: model.items(groupID: gid))
             }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
+                           isPinned: model.fav.isPinned(groupID: gid, metaID: meta.id),
                            heightOverride: heightOverride, fontSizeOverride: fontSizeOverride)
             // 长按出同一套操作面板（该列表的「从该分组移除」并入面板项）
             .onLongPressGesture(minimumDuration: 0.5) {

@@ -74,6 +74,9 @@ private struct FavoritesRoot: Codable {
     /// schema 3：全局备注，key = `String(metaID)`，顺序无关；nil / 缺字段 = 无备注。
     /// 禁止改成 `[Int: String]`：Swift 对非 String key 的字典会被 `JSONEncoder` 编码成交替数组
     var notes: [String: String]? = nil
+    /// schema 4：行情页全局固顶标的（与分组内固顶 FavoritesGroup.pinnedMetaIDs 互为独立）。
+    /// Set → [Int] 用 sorted() 保持 JSON 稳定顺序，读回时再转 Set。
+    var globalPinnedMetaIDs: [Int]? = nil
 }
 
 // MARK: - Store
@@ -120,8 +123,10 @@ final class FavoritesStore: ObservableObject {
 
     private let fm = FileManager.default
     /// 档结构版本：2 起公式分组只存 `formulaID` 引用（1 为内嵌 formula 文本的旧档）；
-    /// 3 起新增「分组内固顶」与「全局备注」（二者都是可选字段，旧档解码即为 nil / 空）
-    private let currentSchema = 3
+    /// 3 起新增「分组内固顶」与「全局备注」；
+    /// 4 起新增「行情页全局固顶」（globalPinnedMetaIDs）—— 旧档 decode 自动 nil，
+    /// 启动时 needsSchemaRewrite 触发 saveToDisk 自动升级
+    private let currentSchema = 4
     /// 读到的档版本低于 `currentSchema` 时为 true：即使没有任何分组改动也要回写一次
     private var needsSchemaRewrite = false
 
@@ -244,6 +249,9 @@ final class FavoritesStore: ObservableObject {
             // schema 3 全局备注（旧档无该字段 → 空）
             let loadedNotes = root.notes ?? [:]
             if notes != loadedNotes { notes = loadedNotes }
+            // schema 4 行情页全局固顶（旧档无该字段 → 空）
+            let loadedGlobalPinned = Set(root.globalPinnedMetaIDs ?? [])
+            if pinnedMetaIDs != loadedGlobalPinned { pinnedMetaIDs = loadedGlobalPinned }
             return true
         } catch {
             DebugLogger.shared.log("[FavoritesStore] load failed \(error)")
@@ -257,7 +265,8 @@ final class FavoritesStore: ObservableObject {
         _ = migrateItemOpsIfNeeded()
         let root = FavoritesRoot(groups: groups, selectedGroupID: selectedGroupID,
                                  schemaVersion: currentSchema,
-                                 notes: notes.isEmpty ? nil : notes)
+                                 notes: notes.isEmpty ? nil : notes,
+                                 globalPinnedMetaIDs: pinnedMetaIDs.isEmpty ? nil : Array(pinnedMetaIDs).sorted())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601

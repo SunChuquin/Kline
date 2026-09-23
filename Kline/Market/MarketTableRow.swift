@@ -50,9 +50,12 @@ struct MarketTableRow: View {
     /// 主字号覆盖：nil 时沿用既有 18；代码副行按 0.72 比例缩放（下限 10）
     var fontSizeOverride: CGFloat? = nil
 
-    /// 持仓高亮背景色：比普通行更深（浅灰底）
+    /// 行背景色：持仓 = 深灰（systemGray5），固顶 = 浅灰（systemGray6），普通 = 系统背景
+    /// 若同时持仓 + 固顶，持仓优先（语义更重要），仍用深灰
     private var rowBackground: Color {
-        isPositioned ? Color(.systemGray5) : Color(.systemBackground)
+        if isPositioned { return Color(.systemGray5) }
+        if isPinned     { return Color(.systemGray6) }
+        return Color(.systemBackground)
     }
 
     /// 统一列宽（保留当前表格样式：固定 108pt 等宽 + 竖线）
