@@ -702,7 +702,7 @@ struct MarketTableBody: View {
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = model.displayRows.map { $0.meta }
                 DetailRouter.shared.open(meta, in: ctx)
-            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: isFaved,
+            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
                heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
         }
         .padding(.trailing, 8)

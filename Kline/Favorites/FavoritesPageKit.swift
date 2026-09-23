@@ -57,6 +57,8 @@ final class FavoritesPageModel: ObservableObject {
     @Published var batchGroupPickerActive: Bool = false
     /// C 档列表形态：true = 卡片流（默认），false = 表格
     @Published var showsCardMode: Bool = true
+    /// 搜索页面激活状态
+    @Published var homeSearchActive: Bool = false
     /// 布局自身常驻占据的横向宽度（B 档左侧分组侧栏 216pt；其余档 0），
     /// 由容器按当前布局写入：容器实测的是整页宽度，含侧栏时必须扣掉才是表格可视宽
     @Published var tableWidthInset: CGFloat = 0
@@ -831,7 +833,7 @@ struct FavoritesTableBody: View {
             MarketTableRow(page: .favorites, mode: .data(meta: meta), config: model.colCfg, rowCache: model.rowCache,
                            onOpen: { m in
                 model.detailRouter.open(m, in: items)
-            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false,
+            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
                            heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
         }
         .padding(.trailing, 8)
@@ -947,7 +949,7 @@ struct FavoritesManualEditingList: View {
             MarketTableRow(page: .favorites, mode: .data(meta: meta), config: model.colCfg, rowCache: model.rowCache,
                            onOpen: { m in
                 model.detailRouter.open(m, in: model.items(groupID: gid))
-            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset, isFaved: false,
+            }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
                            heightOverride: heightOverride, fontSizeOverride: fontSizeOverride)
             // 长按出同一套操作面板（该列表的「从该分组移除」并入面板项）
             .onLongPressGesture(minimumDuration: 0.5) {
