@@ -47,6 +47,30 @@ SQLite 的 **`wal_autocheckpoint` 默认 = 1000 页**（约 4 MB）。
    可后续加「循环回写至 `log == checkpointed`」兜底。
 3. 不要为了省这点时间去动 `PRAGMA synchronous=OFF`（未采纳，无必要）。
 
+## 回写必须**有界循环**，且 `busy_timeout` 绝对不能设
+
+`wal_checkpoint(PASSIVE)` 在有并发读时**可能只回写一部分**（甚至一次都不推进），所以必须有兜底：
+
+**实现（`deferredWALCheckpoint()`）**：
+- 主循环 `PASSIVE` → 直到 `log == checkpointed`，再做 `TRUNCATE` 截断 WAL 文件；
+  **上限 30 次 / 总预算 60s / 间隔 2s**
+- **延迟段**：实测那 60s 窗口几乎全程与 App 提交后的 3611 行热刷新重叠（25/25 次 TRUNCATE 全 `busy=1`），
+  故当「已回写、只差截断」时，**等 60s 再试最多 3 次**（间隔 20s）。合计 ≤33 次、≤~160s，**全程后台 sleep**
+- `PRAGMA journal_size_limit=64MB`（**连接级、不随库持久化**，所以会话连接与回写连接都要设）
+- 每轮都打日志：`log` / `checkpointed` / `rc` / `busy` / WAL 字节数；结束时打「完成 or 未完成」+ 最终 WAL
+
+**实测收敛证据**（背靠背 3 次流水线）：
+`begin 0.0MB → commit 时 107.2 / 214.3 / 322.0MB → 回写后 0.0 / 0.0 / 0.0MB`，
+落盘 `tdx.db-wal = 0.0KB`，**无单调增长**（修正前是 321.9 → 429.2 → 536.8 递增）。
+
+### 两个踩过的坑（都已被实测否掉，别重走）
+
+1. **`busy_timeout` 有害**：给回写连接设 `busy_timeout=15s` 后，等待中的 `TRUNCATE` 会让**下一轮
+   `BEGIN IMMEDIATE` 立即报 `database is locked`** → 连跑第 3 次时 `begin` 失败、流水线中断。
+   **结论：回写一律「立即失败 + 有界重试」，绝不设 `busy_timeout`。**
+2. **别把 SQLite 返回的 `(-1, -1)` 当成「已回写」**：连 CKPT 锁都没拿到时 `log`/`checkpointed` 返回 -1
+   （乘法后表现为 `log=-4096`），曾被误判为完成。判据要写成 **`log >= 0 && log <= checkpointed`**。
+
 ## 关联代码
 
 - `Kline/Infrastructure/KlineHTTPServer.swift`（`PatchSessionManager.begin` 的 `wal_autocheckpoint=0`、
