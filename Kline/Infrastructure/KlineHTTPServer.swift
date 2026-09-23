@@ -877,12 +877,15 @@ final class KlineHTTPServer {
     private func deferredWALCheckpoint() {
         let dbPath = DatabaseManager.writableDBPath
         // 有界策略参数（明确写死，便于从日志一眼看出是否在膨胀）
-        // 间隔取 2s（区间上限）：真机实测 PASSIVE 一轮就把 log 追平（约 15s），而紧随其后的 TRUNCATE
-        // 会被「App 提交后立刻开始的 3611 行热刷新读」挡住并返回 busy=1；1s 间隔的 10 次都落在该窗口内
-        // 全部失败，改 2s 间隔可把重试窗口拉到回写完成后再约 18s，覆盖热刷新结束的时刻。
+        // `busyTimeoutMs`：真机实测，TRUNCATE 唯一的失败原因是 **busy=1**，而挡住它的是**紧随其后的
+        // 下一次会话**——背靠背跑流水线时，下一轮的 `BEGIN IMMEDIATE` 写事务（约 35s）正好覆盖整段重试
+        // 窗口，10 次「立即失败」无一成功；而最后一条（无后继会话）一次就把 321.6MB 截到 0.0MB。
+        // 故给这条**独立连接**设 15s busy_timeout，让单次 TRUNCATE **等**写方提交后再截，而不是空转重试。
+        // 影响面可控：等锁期间不持有任何锁，App 的读写不受影响；单次等待上限 15s，再叠加下面的总预算。
         let maxAttempts = 10
         let budgetSec: Double = 60
         let intervalSec: Double = 2.0
+        let busyTimeoutMs = 15_000
         // journal_size_limit = 64MB：**连接级**设置（本地实测新连接读回 -1，不随库文件持久化）。
         // 兜底作用：万一某次日志复位不经 TRUNCATE 路径，文件也会被裁到 ≤64MB。取 64MB 的理由：它
         // **不限制事务期间的 WAL 增长**（只在日志复位时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的
@@ -898,6 +901,7 @@ final class KlineHTTPServer {
             }
             let walBeforeMB = fileSizeMB(dbPath + "-wal")
             sqlite3_exec(db, "PRAGMA journal_size_limit = \(journalSizeLimit);", nil, nil, nil)
+            sqlite3_exec(db, "PRAGMA busy_timeout = \(busyTimeoutMs);", nil, nil, nil)
             let t0 = DispatchTime.now()
             var attempt = 0
             var logBytes = 0
@@ -905,6 +909,7 @@ final class KlineHTTPServer {
             var truncateBusy = -1
             var backfilled = false
             var finished = false
+            var stopReason = "尝试次数用尽(\(maxAttempts)次)"
             while attempt < maxAttempts {
                 attempt += 1
                 let passive = walCheckpoint(db: db, mode: "PASSIVE")
@@ -924,7 +929,10 @@ final class KlineHTTPServer {
                 line += " · WAL=\(String(format: "%.1f", fileSizeMB(dbPath + "-wal")))MB"
                 DebugLogger.shared.log(line)
                 if finished { break }
-                if Double(elapsedMsSince(t0)) / 1000.0 >= budgetSec { break }
+                if Double(elapsedMsSince(t0)) / 1000.0 >= budgetSec {
+                    stopReason = "总预算 \(Int(budgetSec))s 用尽"
+                    break
+                }
                 Thread.sleep(forTimeInterval: intervalSec)
             }
             let costSec = Double(elapsedMsSince(t0)) / 1000.0
@@ -936,13 +944,11 @@ final class KlineHTTPServer {
             } else if backfilled {
                 DebugLogger.shared.log("[Patch] 延迟回写已回写未截断（共\(attempt)/\(maxAttempts)次，"
                     + "log=\(logBytes) checkpointed=\(ckptBytes) TRUNCATE busy=\(truncateBusy)，WAL "
-                    + "\(String(format: "%.1f", walNowMB))MB，预算 "
-                    + "\(String(format: "%.0f", budgetSec))s 用尽）")
+                    + "\(String(format: "%.1f", walNowMB))MB，\(stopReason)）")
             } else {
                 DebugLogger.shared.log("[Patch] 延迟回写未完成（共\(attempt)/\(maxAttempts)次，"
                     + "log=\(logBytes) checkpointed=\(ckptBytes)，WAL "
-                    + "\(String(format: "%.1f", walNowMB))MB，预算 "
-                    + "\(String(format: "%.0f", budgetSec))s 用尽）")
+                    + "\(String(format: "%.1f", walNowMB))MB，\(stopReason)）")
             }
             sqlite3_close(db)
         }
@@ -1598,8 +1604,8 @@ nonisolated func dbSizeDesc(_ dbPath: String) -> String {
 
 /// 执行**一次** `PRAGMA wal_checkpoint(<mode>)`，返回 `(rc, busy, log 字节, 已回写字节)`。
 /// 该 pragma 返回一行 `(busy, log, checkpointed)`，后两列单位是**页**，按库的 page_size 折算成字节。
-/// PASSIVE 不会等读者（拿不到就只回写一部分、busy 恒 0）；TRUNCATE 需要独占所有读者槽位，
-/// 有活跃读者时返回 `busy=1`（本连接未设 busy_timeout → 不会阻塞等待）。
+/// PASSIVE 不会等读者（拿不到就只回写一部分、busy 恒 0）；TRUNCATE 需要独占全部读者/写者槽位，
+/// 有活跃写事务时返回 `busy=1`（是否阻塞等待取决于该连接自己的 `busy_timeout`）。
 nonisolated func walCheckpoint(db: OpaquePointer, mode: String)
     -> (rc: Int32, busy: Int, logBytes: Int, ckptBytes: Int) {
     let pageSize = walPageSize(db: db)
