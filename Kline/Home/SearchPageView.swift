@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import Combine
 
 // MARK: - 搜索页状态模型
 
