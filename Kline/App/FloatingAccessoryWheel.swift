@@ -25,6 +25,145 @@ import Combine
 /// - 命中区：A' 围出的圆盘（即 B' 盘 ∪ 环 Z' 环带）
 /// - 落位：默认落在旧按钮的对侧；启动 / 尺寸变化时若两按钮同侧，强制移回旧按钮的对侧
 struct FloatingAccessoryWheel: View {
+    var body: some View {
+        if KlineDetailView.shouldShowFloatingButtons {
+            GeometryReader { geo in
+                let bounds = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter,
+                                                              bottomClearance: bottomClearance)
+                let base = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
+                let shown = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + dragDelta.width, y: base.y + dragDelta.height), in: bounds)
+                // B' 被操作（点击 / 摁着 / 拖着）期间，整个按钮临时呈现「旧按钮拖动状态」的外观；
+                // 环上转圈与稳定态都用新按钮自身的三圆图形。
+                // 外层 frame 恒取 A' 直径：命中区始终是 A' 圆盘、不随外观切换而缩小；
+                // 56pt 的旧按钮图形居中在同一个盘心，故圆心与落点判定口径不变
+                ZStack {
+                    if showsOldLook {
+                        FloatingAccessoryRings()
+                    } else {
+                        disc
+                    }
+                }
+                .frame(width: FloatingAccessoryMetrics.wheelOuterDiameter,
+                       height: FloatingAccessoryMetrics.wheelOuterDiameter)
+                    // 摁住 / 拖动 / 转圈放大 15%，叠加点击时的果冻缩放
+                    .scaleEffect((isPressing ? FloatingAccessoryMetrics.pressScaleFactor : 1) * jellyScale)
+                    // 与旧按钮同理：A' / B' 描边与 C' 相互重叠，.opacity 默认逐层施加会做多次半透明
+                    // 混合（内层反而更深）；先 compositingGroup 合成一张图再整体乘透明度
+                    .compositingGroup()
+                    .opacity(overallOpacity)
+                    // 命中形状按规格取「A' 圆盘」：A'/B' 都只是 1pt 描边，若用默认命中区域
+                    // 可点到的只有描边那一圈细线；规格里「大圆 A' 本身不接收任何手势」按
+                    // 「A' 的描边没有独立行为」理解 —— A' 只提供轮廓与命中范围，
+                    // 真正的可交互区域仍是它围出的整个圆盘（盘内分区见 resolveTouchMode）
+                    .contentShape(Circle())
+                    .position(shown)
+                    // ⚠️ 手势必须挂在 .position **之后**（与旧按钮完全同构）：此时它的 .local 是 GeometryReader
+                    // 的容器坐标系，**不受 scaleEffect 影响**，手指位移 1:1 映射，拖动才跟手。
+                    // 若挂在 .position 之前（即落在 scaleEffect 内部），.local 会变成被 1.15 倍缩放过的 disc
+                    // 坐标系：上报的 translation 被缩小 1.15 倍，按钮永远追不上手指（越拖越落后）；
+                    // 且按下瞬间缩放 1.0→1.15 的动画期间映射还在变，会额外「发飘」。
+                    // 代价：坐标是容器系，落点半径与 atan2 的圆心须用 shown，不能再用 disc 的 (64.4, 64.4)
+                    .gesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                            .onChanged { value in
+                                // 模式只在本手势的第一次回调里定下，之后整个手势沿用
+                                let mode = touchMode ?? beginTouch(at: value.startLocation, center: shown)
+                                if mode == .whole {
+                                    dragDelta = value.translation
+                                    // 同侧互斥每帧判定（廉价读字典，不发布）：中心越过屏幕中线时请求另一按钮反向吸附
+                                    let dragged = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + value.translation.width,
+                                                                                            y: base.y + value.translation.height),
+                                                                                   in: bounds)
+                                    FloatingAccessoryCoordinator.shared.reportDrag(owner: .secondary,
+                                                                                   side: FloatingAccessoryPlacement.side(of: dragged, in: geo.size))
+                                } else {
+                                    updateRingAngle(to: value.location, center: shown)
+                                }
+                            }
+                            .onEnded { value in
+                                withAnimation(.easeOut(duration: 0.15)) { isPressing = false }
+                                let wasWhole = touchMode == .whole
+                                touchMode = nil
+                                FloatingAccessoryCoordinator.shared.setRotating(false)
+                                FloatingAccessoryCoordinator.shared.endGesture(.secondary)
+                                if wasWhole {
+                                    let t = value.translation
+                                    let moved = max(abs(t.width), abs(t.height)) > FloatingAccessoryMetrics.tapSlop
+                                    if !moved {
+                                        // 点击：果冻弹一下 + 把整个「点击语义」交给主格执行（见 applyAccessoryWindowNudge）：
+                                        // 主格先按自身状态决定是否需要清除屏幕上全部视图的光标（若它已是驱动来源、
+                                        // 光标也已在最右侧，就不清），再把窗口朝「更新」方向平移 1 根，
+                                        // 最后把光标放在平移后的最右侧可见 K 线上。果冻只是反馈，不延后动作
+                                        dragDelta = .zero
+                                        playJelly()
+                                        FloatingAccessoryCoordinator.shared.nudgeWindow(by: 1)
+                                    } else {
+                                        let raw = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), in: bounds)
+                                        // 吸附到更近的一侧边缘（纵向保持）；两按钮同侧互斥属后续阶段，这里只做单钮吸附
+                                        let left = bounds.x.lowerBound
+                                        let right = bounds.x.upperBound
+                                        let target = CGPoint(x: (raw.x - left <= right - raw.x) ? left : right, y: raw.y)
+                                        withAnimation(.easeOut(duration: 0.2)) {
+                                            center = target
+                                            dragDelta = .zero
+                                        }
+                                        FloatingAccessoryStore.save(target, for: .secondary)
+                                        // 抬手后的最终侧上报：协调对象据此继续保证两侧互斥
+                                        FloatingAccessoryCoordinator.shared.reportSide(.secondary,
+                                                                                       FloatingAccessoryPlacement.side(of: target, in: geo.size))
+                                    }
+                                }
+                                // 任何触碰后抬手：保持 100% 透明度 3 秒，再降到 25%
+                                scheduleIdleFade()
+                            }
+                    )
+                    .onAppear {
+                        containerSize = geo.size
+                        let resolved = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: bounds), in: bounds)
+                        center = resolved
+                        reportSide(of: resolved, in: geo.size)
+                        // 初始 100% 起算：3 秒未触碰即降到 25%
+                        scheduleIdleFade()
+                    }
+                    .onDisappear {
+                        idleFadeToken += 1
+                        // 手势被打断时不会有 onEnded，模式必须在这里清零，否则下次触摸会沿用上一次的模式
+                        touchMode = nil
+                        // 转圈标记与手势占用者同样要复位，避免视图消失后残留「正在转圈」状态 / 让对方永久闲置
+                        FloatingAccessoryCoordinator.shared.setRotating(false)
+                        FloatingAccessoryCoordinator.shared.endGesture(.secondary)
+                    }
+                    // 尺寸变化（旋转 / 分屏 / 多任务）后把已落位点夹回可视范围，避免停在屏幕外
+                    .onChange(of: geo.size) { newSize in
+                        containerSize = newSize
+                        let b = FloatingAccessoryPlacement.bounds(in: geo.size, diameter: FloatingAccessoryMetrics.wheelOuterDiameter,
+                                                             bottomClearance: bottomClearance)
+                        let resolved = FloatingAccessoryPlacement.clamped(center ?? resolvedCenter(in: geo.size, bounds: b), in: b)
+                        center = resolved
+                        reportSide(of: resolved, in: newSize)
+                    }
+                    // 另一按钮拖过屏幕中线 → 本按钮立即反向吸附（实时、不等抬手；与对方跟手拖动并行）。
+                    // dropFirst：@Published 订阅时会重放当前值，那只是「建立订阅那一刻的旧请求」，须丢掉
+                    .onReceive(FloatingAccessoryCoordinator.shared.$snapRequest.dropFirst()) { req in
+                        handleSnapRequest(req)
+                    }
+                    // 任一方进入手势（含本按钮环上转圈）→ 本按钮强制闲置；手势结束不自动恢复
+                    .onReceive(FloatingAccessoryCoordinator.shared.$activeOwner) { owner in
+                        guard let owner, owner != .secondary else { return }
+                        // 例外：本按钮此刻正摁着转圈 → 不执行强制闲置。
+                        // 双手同时操作时（一手摁着 C' 转圈、一手拖旧按钮），旧按钮的 beginGesture 会把
+                        // activeOwner 抢成 .primary 并广播过来；若在此淡出，C' 会被 opacity 0 藏掉，
+                        // 而转圈走的是另一条路径、照常推进 K 线 —— 于是「转得动却看不见转了多少」，
+                        // 操作反馈完全丢失。转圈是本按钮的**主动操作**，其可见性优先于耦合规则的被动淡出
+                        guard touchMode != .ring else { return }
+                        forceIdle()
+                    }
+                    .accessibilityIdentifier("accessory2.button")
+            }
+        } else {
+            EmptyView()
+        }
+    }
 
     /// 底部需避让的高度（「自选 / 行情」页的底部导航栏实测高度）。
     /// 不避让时按钮能被拖到物理屏幕底边、与 Tab 的命中区重叠，想切首页/模拟页时会误触到它
