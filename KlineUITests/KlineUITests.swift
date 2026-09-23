@@ -221,12 +221,12 @@ final class KlineUITests: XCTestCase {
                        "设置面板未铺满屏宽：左内边距=\(leftInset) 右内边距=\(rightInset)（面板相对屏幕存在偏移）")
     }
 
-    // MARK: - 用例 95：两个悬浮按钮待 K 线页首屏加载完成才出现
+    // MARK: - 用例 95：两个悬浮按钮在图表出现后延迟 1 秒才显示
     // 注意定位方式：自绘圆钮在无障碍树里是 other（不是 button），要用 descendants(matching: .any)，
     // 用 app.buttons[...] 会 exists=false（此坑曾导致误判「按钮不可点」）。
-    // 「加载中先隐藏」这一段在模拟器上只有 ~300ms，XCUITest 查询追不上，故不作为断言；
-    // 该阶段的权威证据是沙盒日志：页面打开时先推 false，加载完成后打印
-    // 「悬浮按钮：K线页首屏加载完成，两个按钮恢复显示」。
+    // 延迟量级用「页面打开 → 按钮可点」的耗时间接校验：无延迟时约 0.3s（纯加载耗时），
+    // 有 1 秒延迟时约 1.3s；两者相差悬殊，用 >=1.0s 作判据既能抓住「延迟被删掉」的回归，
+    // 也不会被模拟器快慢影响。精确时序另见沙盒日志的「悬浮按钮：图表出现后延迟 1 秒」行。
 
     func test95_AccessoryButtonsAppearAfterLoad() throws {
         let app = XCUIApplication()
@@ -252,14 +252,21 @@ final class KlineUITests: XCTestCase {
         row.tap()
         let back = app.buttons["kline.backButton"]
         XCTAssertTrue(back.waitForExistence(timeout: 15), "K线页未打开")
+        let pageOpenedAt = Date()
 
         // 自绘圆钮在无障碍树里是 other（非 button），必须用 descendants(matching: .any) 定位
         let old = app.descendants(matching: .any)["accessory.button"].firstMatch
         let wheel = app.descendants(matching: .any)["accessory2.button"].firstMatch
 
-        // 加载完成后两个按钮都应可见可点（新按钮 B' 同样受首屏加载门控制）
-        XCTAssertTrue(waitHittable(old, timeout: 15), "加载完成后旧悬浮按钮未出现/不可点")
-        XCTAssertTrue(waitHittable(wheel, timeout: 15), "加载完成后新悬浮按钮未出现/不可点")
+        // 两个按钮都应可见可点（新按钮 B' 同样受延迟门控制）
+        XCTAssertTrue(waitHittable(old, timeout: 15), "旧悬浮按钮未出现/不可点")
+        XCTAssertTrue(waitHittable(wheel, timeout: 15), "新悬浮按钮未出现/不可点")
+
+        // 延迟校验：按钮出现时刻距页面打开 >= 1 秒（图表本身约 0.3s 就绪，故无延迟时只有 ~0.3s）
+        let appearedAfter = Date().timeIntervalSince(pageOpenedAt)
+        print("DIAG 按钮出现耗时 = \(String(format: "%.2f", appearedAfter))s")
+        XCTAssertGreaterThanOrEqual(appearedAfter, 1.0,
+                                    "悬浮按钮出现过早（\(String(format: "%.2f", appearedAfter))s），延迟未生效")
 
         // 顺带验证按钮真的可操作：点按中心应弹出快捷面板
         old.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

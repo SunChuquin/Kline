@@ -176,6 +176,8 @@ struct KlineDetailView: View {
     /// 首屏加载完成锁存：isDetailViewLoaded 一旦为真即置 true 且不再回退。
     /// 后续切周期 / 静默热刷新导致的 isLoading 波动不再影响悬浮按钮可见性（避免按钮忽隐忽现）
     @State private var didFinishInitialLoad = false
+    /// 悬浮按钮延迟出现令牌：图表出现后安排一次「1 秒后显示」，期间页面关闭 / 重进则自增作废在途任务
+    @State private var accessoryShowToken = 0
     /// 📌 固定光标模式开关（高亮表示已开启）。联动状态下固定光标完全禁用（只允许单光标）
     @State private var pinEnabled = false
     /// 图表当前是否已有任意十字光标（单视图下控制 📌 按钮可用性）
@@ -249,6 +251,20 @@ struct KlineDetailView: View {
         guard !views.isEmpty else { return false }
         return views.allSatisfy { v in
             linkedStore.tileData[LinkedTileDataKey(ownerMetaID: item.id, tileIndex: v.index)]?.isLoading == false
+        }
+    }
+
+    /// 图表出现后再等 1 秒，才让两个悬浮按钮淡入（用户要求：按钮不与图表首帧抢视线）。
+    /// 用令牌作废在途任务：页面关闭（onDisappear）会自增令牌，使尚未到点的那次延迟失效，
+    /// 否则返回列表页 1 秒后按钮会自己冒出来
+    private func scheduleAccessoryAppear() {
+        accessoryShowToken += 1
+        let token = accessoryShowToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard token == accessoryShowToken else { return }
+            FloatingAccessoryCoordinator.shared.setDetailViewLoaded(true)
+            // 供外部读沙盒日志校验「图表出现 → 延迟 1 秒 → 按钮显示」这条链路
+            DebugLogger.shared.log("悬浮按钮：图表出现后延迟 1 秒，两个按钮恢复显示")
         }
     }
 
@@ -380,20 +396,19 @@ struct KlineDetailView: View {
         .onChange(of: isAnyPopupActive) { active in
             FloatingAccessoryCoordinator.shared.setDetailViewPopupActive(active)
         }
-        // 首屏加载完成后才让两个悬浮按钮出现：onAppear 先推初始值（false=加载中，保证本轮打开必先隐藏），
-        // 加载完成时置锁存并推送 true；页面关闭复位 false，下次打开重新走一遍
+        // 两个悬浮按钮的出现时机：图表先露面，**再等 1 秒**按钮才淡入（避免与图表首帧抢视线）。
+        // onAppear 先推初始值 false（保证本轮打开必先隐藏），页面关闭复位 false 并作废在途延迟任务
         .onAppear {
             FloatingAccessoryCoordinator.shared.setDetailViewLoaded(didFinishInitialLoad)
         }
         .onDisappear {
+            accessoryShowToken += 1   // 作废在途的「1 秒后显示」，否则返回列表页后按钮会自己冒出来
             FloatingAccessoryCoordinator.shared.setDetailViewLoaded(false)
         }
         .onChange(of: isDetailViewLoaded) { loaded in
             guard loaded, !didFinishInitialLoad else { return }
             didFinishInitialLoad = true
-            FloatingAccessoryCoordinator.shared.setDetailViewLoaded(true)
-            // 供外部读沙盒日志校验「按钮在首屏加载完成后才出现」这条链路
-            DebugLogger.shared.log("悬浮按钮：K线页首屏加载完成，两个按钮恢复显示")
+            scheduleAccessoryAppear()
         }
         // 键盘避让已由 ContentView 根部全局禁用（覆盖单图搜索与双联动 tile 搜索）；
         // 公式编辑器走 fullScreenCover 独立图层，自管键盘行为，不受影响
