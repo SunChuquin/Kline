@@ -253,27 +253,27 @@ final class MarketPageModel: ObservableObject {
             return
         }
         let metas = tabItems
-        // 1) 分置顶 / 非置顶
-        let favedMetas = metas.filter { fav.isFavorited($0.id) }
-        let othersMetas = metas.filter { !fav.isFavorited($0.id) }
+        // 1) 分固定 / 非固定
+        let pinnedMetas = metas.filter { fav.isPinned($0.id) }
+        let othersMetas = metas.filter { !fav.isPinned($0.id) }
 
         // 2) **先**触发带优先级的预取（置顶先查，非置顶随后）。
         //    这一步会在 inFlight 中为置顶标先占位，保证它们进入高优先级队列。
-        if !favedMetas.isEmpty || !othersMetas.isEmpty {
-            rowCache.prefetchPrioritized(high: favedMetas, low: othersMetas)
+        if !pinnedMetas.isEmpty || !othersMetas.isEmpty {
+            rowCache.prefetchPrioritized(high: pinnedMetas, low: othersMetas)
         }
 
         // 3) 注册所有行的壳（prefetch:false，不触发低优预取抢占 inFlight）
         for m in metas { _ = rowCache.row(for: m, prefetch: false) }
 
         // 4) 按排序规则取快照写入 displayRows
-        let faved = favedMetas.compactMap { rowCache.rows[$0.id] }
+        let pinned = pinnedMetas.compactMap { rowCache.rows[$0.id] }
         let others = othersMetas.compactMap { rowCache.rows[$0.id] }
         let list: [MarketRow]
         if let rule = colCfg.sortRule(for: .marketBoard) {
-            list = faved.sorted(by: rule) + others.sorted(by: rule)
+            list = pinned.sorted(by: rule) + others.sorted(by: rule)
         } else {
-            list = faved + others
+            list = pinned + others
         }
         // 5) 字段筛选（表头设置面板配置，可多字段同时生效；同字段多档取 OR，跨字段取 AND）
         let filters = colCfg.activeFilters(for: .marketBoard)
@@ -692,10 +692,12 @@ struct MarketTableBody: View {
 
     private func rowCard(row: MarketRow) -> some View {
         let meta = row.meta
-        let isFaved = model.fav.isFavorited(meta.id)
+        let isPositioned = model.fav.isPositioned(meta.id)
+        let isPinned = model.fav.isPinned(meta.id)
         return HStack(spacing: 0) {
-            // 整行单元格（冻结前 N 列 + 滚动列）；自选高亮由 MarketTableRow.isFaved 呈现
+            // 整行单元格（冻结前 N 列 + 滚动列）；持仓高亮由 MarketTableRow.isPositioned 呈现
             MarketTableRow(page: .marketBoard, mode: .data(meta: meta), config: model.colCfg, rowCache: model.rowCache,
+                           isPositioned: isPositioned, isPinned: isPinned,
                            onOpen: { meta in
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = model.displayRows.map { $0.meta }

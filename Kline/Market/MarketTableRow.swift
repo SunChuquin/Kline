@@ -39,8 +39,10 @@ struct MarketTableRow: View {
     var frozenCount: Int = 3
     /// 整表共享的横向滚动偏移（由外层手势驱动）
     var xOffset: CGFloat = 0
-    /// 是否为自选（置顶）标：高亮整行背景 + 标的文字变红；默认 false
-    var isFaved: Bool = false
+    /// 是否为持仓标：高亮整行背景 + 标的文字变红；默认 false
+    var isPositioned: Bool = false
+    /// 是否为固定标：置顶显示；默认 false
+    var isPinned: Bool = false
 
     // === 行高 / 字号覆盖（紧凑布局用；nil = 沿用既有写死值，A 档渲染零变化） ===
     /// 行高覆盖：nil 时沿用既有 38（表头）/ 45（数据行）
@@ -48,9 +50,9 @@ struct MarketTableRow: View {
     /// 主字号覆盖：nil 时沿用既有 18；代码副行按 0.72 比例缩放（下限 10）
     var fontSizeOverride: CGFloat? = nil
 
-    /// 自选高亮背景色：比普通行更深（浅灰底）
+    /// 持仓高亮背景色：比普通行更深（浅灰底）
     private var rowBackground: Color {
-        isFaved ? Color(.systemGray5) : Color(.systemBackground)
+        isPositioned ? Color(.systemGray5) : Color(.systemBackground)
     }
 
     /// 统一列宽（保留当前表格样式：固定 108pt 等宽 + 竖线）
@@ -244,9 +246,9 @@ struct MarketTableRow: View {
             }
             .buttonStyle(.plain)
         } else if let meta = meta {
-            // 自选高亮：名称/代码/板块等「标的」列文字变红（指标数值仍红涨绿跌）
+            // 持仓高亮：名称/代码/板块等「标的」列文字变红（指标数值仍红涨绿跌）
             if col.isNameCode {
-                let fg: Color = isFaved ? .red : .primary
+                let fg: Color = isPositioned ? .red : .primary
                 VStack(alignment: .leading, spacing: 1) {
                     Text(meta.name)
                         .font(.system(size: mainFont, weight: .medium))
@@ -254,13 +256,13 @@ struct MarketTableRow: View {
                         .lineLimit(1)
                     Text(meta.displayCode)
                         .font(.system(size: subFont))
-                        .foregroundColor(isFaved ? fg : Color(.secondaryLabel))
+                        .foregroundColor(isPositioned ? fg : Color(.secondaryLabel))
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             } else {
                 let isLabel = col.field == .name || col.field == .code || col.field == .type
-                let cellFg: Color = isFaved && isLabel ? Color.red : rowCache.colorFor(meta.id, col.field)
+                let cellFg: Color = isPositioned && isLabel ? Color.red : rowCache.colorFor(meta.id, col.field)
                 Text(rowCache.textFor(meta.id, col.field))
                     .font(.system(size: mainFont))
                     .foregroundColor(cellFg)

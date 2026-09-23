@@ -99,6 +99,12 @@ struct FavoritesLayoutDView: View {
                 .accessibilityIdentifier("favorites.title")
                 .padding(.leading, 16)
             Spacer(minLength: 8)
+            // 刷新监控标的列表（全局刷新按钮）
+            refreshButton
+            // 搜索按钮
+            iconButton("magnifyingglass") { 
+                model.homeSearchActive = true 
+            }
             // 编辑态开关：与 A/B/C 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
             FavoritesEditToggleButton(model: model)
             iconButton("slider.horizontal.3") { model.showColumnPanel = true }
@@ -109,6 +115,36 @@ struct FavoritesLayoutDView: View {
         .frame(height: 48)
         .background(Color(.systemBackground))
     }
+    
+    /// 刷新按钮
+    private var refreshButton: some View {
+        Button {
+            WatchlistSyncManager.shared.sync(reason: "手动")
+        } label: {
+            if watchlistSync.isRunning {
+                ProgressView().scaleEffect(0.7)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+        }
+        .disabled(!watchlistTappable)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+    }
+    
+    /// 清单标的自动更新状态（用于刷新按钮控制）
+    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
+    
+    /// 刷新按钮可点条件：已启用且当前不在执行中
+    private var watchlistTappable: Bool {
+        syncConfig.enabled && !watchlistSync.isRunning
+    }
+    
+    /// 同步配置（用于判断是否启用）
+    @ObservedObject private var syncConfig = TdxSyncConfig.shared
 
     /// 顶部图标按钮：统一 44x44 命中区
     private func iconButton(_ systemName: String, color: Color = .secondary,

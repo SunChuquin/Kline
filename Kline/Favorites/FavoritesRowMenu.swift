@@ -615,11 +615,15 @@ enum FavoritesAlertKit {
 @MainActor
 enum MetaRowMenuKit {
 
-    /// 面板项：加自选 / 取消自选、加入指定分组、备注…、设置 / 取消预警
+    /// 面板项：加自选 / 取消自选、固定 / 取消固定、加入指定分组、备注…、设置 / 取消预警
     static func items(for meta: MetaItem) -> [FavoritesRowMenuItem] {
         let fav = FavoritesStore.shared
         let faved = fav.isFavorited(meta.id)
+        let pinned = fav.isPinned(meta.id)
         var items: [FavoritesRowMenuItem] = [
+            FavoritesRowMenuItem(action: .togglePin,
+                                 title: pinned ? "取消固定" : "固定",
+                                 icon: pinned ? "pin.slash" : "pin.fill"),
             FavoritesRowMenuItem(action: .toggleFavorite,
                                  title: faved ? "取消自选" : "加自选",
                                  icon: faved ? "star.slash" : "star"),
@@ -651,6 +655,14 @@ enum MetaRowMenuKit {
                         for target: FavoritesRowMenuTarget) -> Outcome? {
         let meta = target.meta
         switch action {
+        case .togglePin:
+            let fav = FavoritesStore.shared
+            if fav.isPinned(meta.id) {
+                fav.unpin(meta.id)
+            } else {
+                fav.pin(meta.id)
+            }
+            return nil
         case .toggleFavorite:
             FavoritesStore.shared.toggleFavorite(meta.id)
             return nil
@@ -664,7 +676,7 @@ enum MetaRowMenuKit {
                 return nil
             }
             return .alert(meta)
-        case .togglePin, .moveToFirst, .moveToLast, .removeFromGroup:
+        case .moveToFirst, .moveToLast, .removeFromGroup:
             // 无分组上下文：这几项不会出现在面板里，防御性忽略
             return nil
         }

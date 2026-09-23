@@ -574,6 +574,17 @@ struct FavoritesEditToggleButton: View {
 /// 选中公式分组时额外显示「刷新选股」与「选择公式 / 编辑公式」。A/B/C/D 四档共用。
 struct FavoritesToolbar: View {
     @ObservedObject var model: FavoritesPageModel
+    
+    /// 清单标的自动更新状态（用于刷新按钮控制）
+    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
+    
+    /// 刷新按钮可点条件：已启用且当前不在执行中
+    private var watchlistTappable: Bool {
+        syncConfig.enabled && !watchlistSync.isRunning
+    }
+    
+    /// 同步配置（用于判断是否启用）
+    @ObservedObject private var syncConfig = TdxSyncConfig.shared
 
     var body: some View {
         HStack(spacing: 4) {
@@ -582,6 +593,28 @@ struct FavoritesToolbar: View {
                 .accessibilityIdentifier("favorites.title")
                 .padding(.leading, 16)
             Spacer()
+            // 刷新监控标的列表（全局刷新按钮）
+            Button {
+                WatchlistSyncManager.shared.sync(reason: "手动")
+            } label: {
+                if watchlistSync.isRunning {
+                    ProgressView().scaleEffect(0.8)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.blue)
+                }
+            }
+            .disabled(!watchlistTappable)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            
+            // 搜索按钮
+            MarketToolButton(icon: "magnifyingglass", title: "搜索") {
+                model.homeSearchActive = true
+            }
+            
             // 刷新公式分组（仅当选中 formula 分组）
             if model.currentGroup.kind == .formula {
                 Button {

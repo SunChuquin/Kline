@@ -92,6 +92,12 @@ final class FavoritesStore: ObservableObject {
     /// key = `String(metaID)`；空 / 不存在的 key = 无备注（空串一律按删除处理，不存空串）
     @Published private(set) var notes: [String: String] = [:]
 
+    /// 全局固定的标的ID集合（用于行情页面置顶显示）
+    @Published private(set) var pinnedMetaIDs: Set<Int> = []
+
+    /// 持仓中的标的ID集合（用于行情页面红色高亮显示）
+    private var positionedMetaIDs: Set<Int> = []
+
     /// 「全部」虚拟分组的固定 id：它不是 groups 里的实体，但 Tab 选中、计数、取数都要靠
     /// 一个稳定标识反查。若用 `UUID()` 每次新建，`resolveMetaItems` 永远查不到 → 计数恒为 0、
     /// 内容恒为空、选中态与重启后的选中都会失配
@@ -135,6 +141,9 @@ final class FavoritesStore: ObservableObject {
             selectedGroupID = def.id
             saveToDisk()
         }
+        
+        // 初始化持仓状态
+        updatePositionedMetaIDs()
     }
 
     // MARK: - 迁移
@@ -606,5 +615,45 @@ final class FavoritesStore: ObservableObject {
         guard groups[idx].kind == .formula else { return }
         groups[idx].cachedMatches = nil
         saveToDisk()
+    }
+
+    // MARK: - 持仓状态判断
+
+    /// 更新持仓状态（从 SimStore 获取持仓数据）
+    func updatePositionedMetaIDs() {
+        positionedMetaIDs = Set(SimStore.shared.positions.map { $0.metaID })
+    }
+
+    /// 判断是否为持仓中的标的（用于行情页面红色高亮显示）
+    func isPositioned(_ metaID: Int) -> Bool {
+        return positionedMetaIDs.contains(metaID)
+    }
+
+    // MARK: - 全局固定状态管理
+
+    /// 固定标的（全局置顶，用于行情页面）
+    func pin(_ metaID: Int) {
+        pinnedMetaIDs.insert(metaID)
+        saveToDisk()
+    }
+
+    /// 取消固定标的
+    func unpin(_ metaID: Int) {
+        pinnedMetaIDs.remove(metaID)
+        saveToDisk()
+    }
+
+    /// 判断是否已固定（全局置顶）
+    func isPinned(_ metaID: Int) -> Bool {
+        return pinnedMetaIDs.contains(metaID)
+    }
+
+    /// 切换固定状态
+    func togglePin(_ metaID: Int) {
+        if isPinned(metaID) {
+            unpin(metaID)
+        } else {
+            pin(metaID)
+        }
     }
 }

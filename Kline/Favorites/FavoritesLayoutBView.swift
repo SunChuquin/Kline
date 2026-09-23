@@ -48,6 +48,12 @@ struct FavoritesLayoutBView: View {
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
             Spacer(minLength: 8)
+            // 刷新监控标的列表（全局刷新按钮）
+            refreshButton
+            // 搜索按钮
+            toolButton("搜索", icon: "magnifyingglass") {
+                model.homeSearchActive = true
+            }
             if model.currentGroup.kind == .formula {
                 formulaRefreshButton(group: model.currentGroup)
             }
@@ -61,6 +67,36 @@ struct FavoritesLayoutBView: View {
         .frame(height: 46)
         .background(Color(.systemBackground))
     }
+    
+    /// 刷新按钮
+    private var refreshButton: some View {
+        Button {
+            WatchlistSyncManager.shared.sync(reason: "手动")
+        } label: {
+            if watchlistSync.isRunning {
+                ProgressView().scaleEffect(0.7)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+        }
+        .disabled(!watchlistTappable)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+    }
+    
+    /// 清单标的自动更新状态（用于刷新按钮控制）
+    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
+    
+    /// 刷新按钮可点条件：已启用且当前不在执行中
+    private var watchlistTappable: Bool {
+        syncConfig.enabled && !watchlistSync.isRunning
+    }
+    
+    /// 同步配置（用于判断是否启用）
+    @ObservedObject private var syncConfig = TdxSyncConfig.shared
 
     /// 工具条胶囊按钮（文字 + 图标）：外观 28pt，命中区纵向补到 44pt
     private func toolButton(_ title: String, icon: String, active: Bool = false,
