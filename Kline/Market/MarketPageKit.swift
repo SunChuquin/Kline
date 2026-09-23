@@ -697,13 +697,13 @@ struct MarketTableBody: View {
         return HStack(spacing: 0) {
             // 整行单元格（冻结前 N 列 + 滚动列）；持仓高亮由 MarketTableRow.isPositioned 呈现
             MarketTableRow(page: .marketBoard, mode: .data(meta: meta), config: model.colCfg, rowCache: model.rowCache,
-                           isPositioned: isPositioned, isPinned: isPinned,
                            onOpen: { meta in
                 // 预取当前 Tab 全部 rows，便于详情页左右切换时 tile 直接命中缓存
                 let ctx = model.displayRows.map { $0.meta }
                 DetailRouter.shared.open(meta, in: ctx)
             }, frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
-               heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
+                           isPositioned: isPositioned, isPinned: isPinned,
+                           heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
         }
         .padding(.trailing, 8)
         .accessibilityIdentifier("market.rowCard")
