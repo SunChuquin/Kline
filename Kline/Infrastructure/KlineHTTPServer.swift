@@ -866,30 +866,33 @@ final class KlineHTTPServer {
     /// **正确性无关**：WAL 语义下已提交数据对其它连接立即可见（不依赖 checkpoint），此处只做空间回收。
     ///
     /// 为什么循环：PASSIVE 只回写到「最老读者快照」处，App 侧持续有短读事务时**单次可能只推进一部分**，
-    /// 留下的尾巴长期累积就是 WAL 缓慢膨胀。**必须有界**（最多 10 次 / 总预算 60s / 间隔 1s），否则遇到
-    /// 持续读事务会退化成无限循环；到上限仍未完成就正常收尾并打警告，不报错、不卡死、不重试到卡死。
+    /// 留下的尾巴长期累积就是 WAL 缓慢膨胀。**必须有界**，否则遇到持续读事务会退化成无限循环；
+    /// 到上限仍未完成就正常收尾并打警告，不报错、不卡死。
     ///
-    /// 为什么要额外 TRUNCATE（真机实测 2026-09-23）：观察到的状态是 PASSIVE **一次就能** log==checkpointed
-    /// （共 1 次、约 15s），但 WAL **文件**仍不收敛（连跑 3 次：321.9 → 429.2 → 536.8MB，每次追加一个
-    /// 会话的帧量）——因为文件截断只在「日志被 reset」时发生，而 reset 需要独占全部读者槽位，App 侧并发读
-    /// 会让写方/回写方都拿不到，`journal_size_limit` 因此也没机会生效。改用 `TRUNCATE`（独占 + 截断为 0）
-    /// 才能真正让文件收敛；它遇活跃读者/写者返回 `busy=1`（本连接无 busy_timeout → 立即失败、绝不阻塞）→ 交给下一轮重试。
+    /// 为什么要额外 TRUNCATE（真机实测 2026-09-23）：PASSIVE **一轮就能** `log==checkpointed`（回写本身
+    /// 一次成功），但 WAL **文件**不收敛——文件缩小只在「日志被 reset」时发生，而 reset 要独占读者/写者
+    /// 槽位，App 侧并发读会让写方与回写方都拿不到，`journal_size_limit` 因此也没机会生效。改用 `TRUNCATE`
+    /// 才能真截断。它遇活跃读者/写者返回 `busy=1`；**本连接绝不设 busy_timeout**（设了会等锁 → 让下一轮
+    /// 会话的 `BEGIN IMMEDIATE` 直接报 `database is locked`，实测打断过流水线），一律「立即失败 + 有界重试」。
+    ///
+    /// 有界策略（两段，全部非阻塞）：
+    /// 1) **主循环**：最多 30 次 / 总预算 60s / 间隔 2s。实测提交后 60s 窗口几乎全程与「App 热刷新
+    ///    3611 行连续读」重叠（25/25 次 TRUNCATE 全 busy=1），所以再加第二段；
+    /// 2) **延迟段**：仅当「回写已完成、只差截断」时触发，等 60s 后再最多 3 次（间隔 20s）。
+    /// 两段合计最多 33 次尝试、总时长 ≤ 约 160s（几乎全是后台 sleep），仍然**严格有界**。
     private func deferredWALCheckpoint() {
         let dbPath = DatabaseManager.writableDBPath
-        // 有界策略参数（明确写死，便于从日志一眼看出是否在膨胀）
-        // 间隔 2s + 上限 30 次 → 实际由 `budgetSec`（60s）收敛，把重试窗口拉到能覆盖「提交后 App 侧
-        // 3611 行热刷新（约 15~20s 的连续短读）」这个窗口。
-        // ⚠️ **绝不能给这条连接设 busy_timeout**：实测（2026-09-23）把 busy_timeout 设成 15s 后，
-        // 等待中的 TRUNCATE 会让**下一轮会话的 `BEGIN IMMEDIATE` 立刻报 `database is locked`**
-        // （会话连接 busy_timeout=0 → 拿不到写锁立即失败），直接打断流水线（第 3 连跑 begin 失败）。
-        // 故一律用「立即失败 + 有界重试」，宁可这次不截断，也绝不阻塞同步链路。
         let maxAttempts = 30
         let budgetSec: Double = 60
         let intervalSec: Double = 2.0
+        // 延迟段参数（只在「已回写未截断」时用；给热刷新留出结束时间）
+        let delayedWaitSec: Double = 60
+        let delayedAttempts = 3
+        let delayedIntervalSec: Double = 20
         // journal_size_limit = 64MB：**连接级**设置（本地实测新连接读回 -1，不随库文件持久化）。
         // 兜底作用：万一某次日志复位不经 TRUNCATE 路径，文件也会被裁到 ≤64MB。取 64MB 的理由：它
         // **不限制事务期间的 WAL 增长**（只在日志复位时裁剪），故不会拖慢 COMMIT；同时明显小于观测到的
-        // 峰值（107~537MB），又留出余量避免下轮会话刚写入就要重新扩展文件而多付一次分配/IO。
+        // 峰值（107~858MB），又留出余量避免下轮会话刚写入就要重新扩展文件而多付一次分配/IO。
         let journalSizeLimit = 64 * 1024 * 1024
         DispatchQueue.global(qos: .utility).async {
             var handle: OpaquePointer?
@@ -905,7 +908,6 @@ final class KlineHTTPServer {
             var attempt = 0
             var logBytes = 0
             var ckptBytes = 0
-            var truncateBusy = -1
             var backfilled = false
             var finished = false
             var stopReason = "尝试次数用尽(\(maxAttempts)次)"
@@ -916,11 +918,11 @@ final class KlineHTTPServer {
                 ckptBytes = passive.ckptBytes
                 var line = "[Patch] 延迟回写 第\(attempt)次: log=\(logBytes) checkpointed=\(ckptBytes)"
                     + " rc=\(passive.rc)"
-                backfilled = logBytes <= ckptBytes          // 已全部回写（日志已复位时为 0==0）
+                // log/checkpointed 为负 = pragma 返回 (-1,-1)（checkpoint 连 CKPT 锁都没拿到）→ 不算已回写
+                backfilled = logBytes >= 0 && logBytes <= ckptBytes
                 if backfilled {
                     // 全部回写到位 → 再尝试真正截断 WAL 文件（并复位日志，使下轮写从帧 1 开始）
                     let trunc = walCheckpoint(db: db, mode: "TRUNCATE")
-                    truncateBusy = trunc.busy
                     line += " · TRUNCATE: busy=\(trunc.busy) log=\(trunc.logBytes)"
                         + " checkpointed=\(trunc.ckptBytes) rc=\(trunc.rc)"
                     finished = trunc.busy == 0 && trunc.logBytes == 0
@@ -935,15 +937,35 @@ final class KlineHTTPServer {
                 Thread.sleep(forTimeInterval: intervalSec)
             }
             let costSec = Double(elapsedMsSince(t0)) / 1000.0
-            let walNowMB = fileSizeMB(dbPath + "-wal")
+            var walNowMB = fileSizeMB(dbPath + "-wal")
             if finished {
                 DebugLogger.shared.log("[Patch] 延迟回写完成（共\(attempt)次，耗时 "
                     + "\(String(format: "%.1f", costSec))s，WAL "
                     + "\(String(format: "%.1f", walBeforeMB))MB → \(String(format: "%.1f", walNowMB))MB）")
             } else if backfilled {
                 DebugLogger.shared.log("[Patch] 延迟回写已回写未截断（共\(attempt)/\(maxAttempts)次，"
-                    + "log=\(logBytes) checkpointed=\(ckptBytes) TRUNCATE busy=\(truncateBusy)，WAL "
-                    + "\(String(format: "%.1f", walNowMB))MB，\(stopReason)）")
+                    + "\(stopReason)）→ 等 \(Int(delayedWaitSec))s 后再试最多 \(delayedAttempts) 次（延迟段）")
+                // ---- 延迟段：等热刷新结束，再补几次「立即失败」的截断尝试（仍然绝不等锁/绝不走 dbQueue）----
+                Thread.sleep(forTimeInterval: delayedWaitSec)
+                for i in 1...delayedAttempts {
+                    let trunc = walCheckpoint(db: db, mode: "TRUNCATE")
+                    walNowMB = fileSizeMB(dbPath + "-wal")
+                    DebugLogger.shared.log("[Patch] 延迟回写·延迟段 第\(i)次: busy=\(trunc.busy)"
+                        + " log=\(trunc.logBytes) checkpointed=\(trunc.ckptBytes) rc=\(trunc.rc)"
+                        + " · WAL=\(String(format: "%.1f", walNowMB))MB")
+                    if trunc.busy == 0 && trunc.logBytes == 0 { finished = true; break }
+                    if i < delayedAttempts { Thread.sleep(forTimeInterval: delayedIntervalSec) }
+                }
+                if finished {
+                    DebugLogger.shared.log("[Patch] 延迟回写完成于延迟段（主循环 \(attempt) 次 + 延迟段，"
+                        + "总耗时 \(String(format: "%.1f", Double(elapsedMsSince(t0)) / 1000.0))s，WAL "
+                        + "\(String(format: "%.1f", walBeforeMB))MB → "
+                        + "\(String(format: "%.1f", walNowMB))MB）")
+                } else {
+                    DebugLogger.shared.log("[Patch] 延迟回写结束仍未截断（主循环 \(attempt) 次 + 延迟段 "
+                        + "\(delayedAttempts) 次，WAL \(String(format: "%.1f", walNowMB))MB；"
+                        + "回写已完成，仅文件未裁剪，下轮会话/App 重启会再收敛）")
+                }
             } else {
                 DebugLogger.shared.log("[Patch] 延迟回写未完成（共\(attempt)/\(maxAttempts)次，"
                     + "log=\(logBytes) checkpointed=\(ckptBytes)，WAL "
