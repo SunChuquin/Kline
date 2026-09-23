@@ -267,5 +267,5 @@ struct FloatingAccessoryPanel: View {
                 // 把面板钉在容器底边（与 bottomSheet 同一处理）
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea(edges: .bottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
