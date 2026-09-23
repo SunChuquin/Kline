@@ -90,14 +90,24 @@ struct NotchSideSafeArea: ViewModifier {
             // ① 刘海侧：保留系统 inset，再减一个中文字宽（内容探入 12pt，安全区 48→36）；
             // ② 另一侧：原贴物理边缘，改为留一个中文字宽（内容离边缘 12pt），
             //    两侧合计留白不变，界面整体更均衡；交互元素仍在可点击区域内
-            .padding(.leading, notchOnLeading ? -hanziWidth : -hInsets.trailing + hanziWidth)
-            .padding(.trailing, notchOnLeading ? -hInsets.leading + hanziWidth : -hanziWidth)
+            //
+            // ⚠️ 无横向 inset 的设备（iPad / Home 键机型 / 竖屏）必须零偏移：
+            // 此时上面两条公式算出的 ±hanziWidth 只会把整屏内容整体平移 hanziWidth，
+            // 一侧越过物理边缘（被窗口裁掉）、另一侧露出窗口底色（白底）= 屏幕边缘一条白边。
+            // 实测 iPad mini 5（1024×768）：未加此判断时根内容 frame.x=4（应为 0），
+            // K 线设置面板遮罩/面板同步 x=4、宽 1024，左边缘 4pt 露出窗口白底。
+            .padding(.leading, hasHorizontalSafeInset ? (notchOnLeading ? -hanziWidth : -hInsets.trailing + hanziWidth) : 0)
+            .padding(.trailing, hasHorizontalSafeInset ? (notchOnLeading ? -hInsets.leading + hanziWidth : -hanziWidth) : 0)
             .onPreferenceChange(HostInsetsKey.self) { hInsets = $0 }
             .onAppear { updateNotchSide() }
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
                 updateNotchSide()
             }
     }
+
+    /// 是否存在横向安全区（刘海屏横屏时系统给左右 inset，如 iPhone 11 各 48pt）。
+    /// iPad / Home 键机型 / 竖屏均为 0，此时不做任何偏移（见上方 ⚠️ 说明）。
+    private var hasHorizontalSafeInset: Bool { hInsets.leading > 0 || hInsets.trailing > 0 }
 
     private func updateNotchSide() {
         let orient = UIApplication.shared.connectedScenes

@@ -650,6 +650,7 @@ struct KlineDetailView: View {
                     .frame(width: normW, height: btnH)
                     .contentShape(Rectangle())
             }
+            .accessibilityIdentifier("kline.settingsButton")
         }
         .padding(.leading, hPad)
         .padding(.trailing, hPad)

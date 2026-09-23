@@ -165,6 +165,62 @@ final class KlineUITests: XCTestCase {
         // 图表数据是否真的重载由 debug_log.txt 的 CONFIG_CHANGE loadData / 图表出现 周期判定
     }
 
+    // MARK: - 用例 93：K 线设置面板贴满屏宽（屏幕边缘白边回归）
+    // 背景：根布局 NotchSideSafeArea 曾对「无横向安全区」设备也套用 ±hanziWidth 偏移，
+    // 使整屏内容平移 4pt → 面板遮罩在最外侧留出 4pt 缝隙，露出窗口白底（用户反馈的白边）。
+    // 此处断言面板左右内边距对称，保证偏移为 0。
+
+    func test93_SettingsPanelFullWidthEdges() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let marketTab = app.buttons["tab.market"]
+        XCTAssertTrue(marketTab.waitForExistence(timeout: 15), "底部菜单未出现")
+        marketTab.tap()
+
+        let marketTop = app.buttons["market.topMenu.市场"].firstMatch
+        XCTAssertTrue(marketTop.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
+        let etf = app.staticTexts["ETF指数"].firstMatch
+        if !etf.exists { marketTop.tap() }
+        XCTAssertTrue(etf.waitForExistence(timeout: 8), "二级菜单未展开「ETF指数」")
+        etf.tap()
+
+        let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "行情行未出现")
+        row.tap()
+        let back = app.buttons["kline.backButton"]
+        XCTAssertTrue(back.waitForExistence(timeout: 15), "K线页未打开")
+
+        // 打开 K 线设置面板
+        let gear = app.buttons["kline.settingsButton"].firstMatch
+        XCTAssertTrue(gear.waitForExistence(timeout: 8), "未找到 K线设置按钮")
+        gear.tap()
+        Thread.sleep(forTimeInterval: 2)
+
+        let title = app.staticTexts["K线设置"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 8), "设置面板未出现")
+        let done = app.buttons["完成"].firstMatch
+        snap(app, "settings.panel")
+
+        // 面板必须整幅铺满屏幕宽（根内容零横向偏移）。
+        // 判据用「标题左内边距 == 完成右内边距」这一设计不变式（顶部栏左右各 18pt），
+        // 只验对称、不硬编码具体数值：面板若整体平移 hanziWidth（4pt），两侧内边距会差 8pt。
+        // 轮询而非一次性取值：设备正在旋转时窗口尺寸与 App 布局会短暂错位（过渡态），
+        // 稳定后仍不对称才算真回归。
+        var leftInset: CGFloat = 0
+        var rightInset: CGFloat = 0
+        let deadline = Date().addingTimeInterval(6)
+        repeat {
+            let screen = app.frame
+            leftInset = title.frame.minX - screen.minX
+            rightInset = screen.maxX - done.frame.maxX
+            if abs(leftInset - rightInset) <= 1 { break }
+            usleep(200_000)
+        } while Date() < deadline
+        XCTAssertEqual(leftInset, rightInset, accuracy: 1,
+                       "设置面板未铺满屏宽：左内边距=\(leftInset) 右内边距=\(rightInset)（面板相对屏幕存在偏移）")
+    }
+
     // MARK: - 用例 92：刘海屏（异形屏）横屏安全区验证——元素坐标断言 + 内嵌截图
 
     /// 刘海/灵动岛 iPhone 横屏：左右安全区各约 44pt（刘海侧+指示条侧）。
