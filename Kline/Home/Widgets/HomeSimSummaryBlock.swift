@@ -14,6 +14,8 @@ import SwiftUI
 /// 整块可点 → 切模拟页（由容器把 `onTap` 接到 `onSelectTab(3)`）。
 struct HomeSimSummaryBlock: View {
     @ObservedObject var model: HomePageModel
+    /// 统计账户：nil / 失效 / 全部账户 id = 全部账户汇总（由 HomePageModel 归一）
+    var accountIDString: String? = nil
     let compact: Bool
     let onTap: () -> Void
 
@@ -21,7 +23,8 @@ struct HomeSimSummaryBlock: View {
     @ObservedObject private var rowCache = MarketRowCache.shared
 
     var body: some View {
-        let summary = model.simSummary
+        let summary = model.simSummary(accountIDString: accountIDString)
+        let positions = model.topPositions(accountIDString: accountIDString)
         VStack(alignment: .leading, spacing: compact ? 8 : 10) {
             // 总资产（大字）
             VStack(alignment: .leading, spacing: 2) {
@@ -44,14 +47,14 @@ struct HomeSimSummaryBlock: View {
             }
 
             // 持仓 Top N（行高与自选块一致）
-            if model.simTopPositions.isEmpty {
+            if positions.isEmpty {
                 Text("暂无持仓")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: compact ? 44 : 48, alignment: .leading)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(model.simTopPositions) { p in
+                    ForEach(positions) { p in
                         positionRow(p)
                     }
                 }

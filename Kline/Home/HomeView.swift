@@ -49,14 +49,20 @@ struct HomeView: View {
                 case .b:
                     HomeLayoutBView(model: model, onSelectTab: onSelectTab, onSearch: onSearch,
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,
+                                    onOpenAlertRecords: onOpenAlertRecords,
+                                    onOpenLayoutEditor: onOpenLayoutEditor,
                                     onProfile: onProfile)
                 case .c:
                     HomeLayoutCView(model: model, onSelectTab: onSelectTab, onSearch: onSearch,
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,
+                                    onOpenAlertRecords: onOpenAlertRecords,
+                                    onOpenLayoutEditor: onOpenLayoutEditor,
                                     onProfile: onProfile)
                 case .d:
                     HomeLayoutDView(model: model, onSelectTab: onSelectTab, onSearch: onSearch,
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,
+                                    onOpenAlertRecords: onOpenAlertRecords,
+                                    onOpenLayoutEditor: onOpenLayoutEditor,
                                     onProfile: onProfile)
                 }
             }
@@ -95,6 +101,8 @@ struct HomeView: View {
             if let fk = kind.formulaKind { onOpenFormula(fk) }
         case .condOrder: onOpenCondOrder()
         case .profile: onProfile()
+        case .alertRecords: onOpenAlertRecords()
+        case .layoutEditor: onOpenLayoutEditor()
         }
     }
 
@@ -112,6 +120,14 @@ struct HomeView: View {
 
     private func onOpenCondOrder() {
         overlayTarget = .condOrder
+    }
+
+    private func onOpenAlertRecords() {
+        overlayTarget = .alertRecords
+    }
+
+    private func onOpenLayoutEditor() {
+        overlayTarget = .layoutEditor
     }
 
     private func onProfile() {

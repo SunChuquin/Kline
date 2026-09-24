@@ -26,6 +26,10 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     case strategy
     case condOrder
     case profile
+    /// 触发记录（条件单触发历史，AlertRecordView）
+    case alertRecords
+    /// 布局编辑器（PageLayoutEditorView）
+    case layoutEditor
 
     var id: String { rawValue }
 
@@ -38,6 +42,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .strategy: return "交易策略"
         case .condOrder: return "条件单"
         case .profile: return "个人中心"
+        case .alertRecords: return "触发记录"
+        case .layoutEditor: return "布局编辑"
         }
     }
 
@@ -50,6 +56,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .strategy: return "策略与历史回测"
         case .condOrder: return "监控与触发下单"
         case .profile: return "主题与页面布局"
+        case .alertRecords: return "条件单触发历史"
+        case .layoutEditor: return "自定义四档页面布局"
         }
     }
 
@@ -62,6 +70,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .strategy: return "chart.xyaxis.line"
         case .condOrder: return "bell.badge"
         case .profile: return "person.circle"
+        case .alertRecords: return "clock.arrow.circlepath"
+        case .layoutEditor: return "square.grid.3x3"
         }
     }
 
@@ -74,6 +84,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .strategy: return .teal
         case .condOrder: return .red
         case .profile: return .blue
+        case .alertRecords: return .pink
+        case .layoutEditor: return .indigo
         }
     }
 
@@ -83,7 +95,7 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .tech: return .tech
         case .picker: return .picker
         case .strategy: return .strategy
-        case .search, .condOrder, .profile: return nil
+        case .search, .condOrder, .profile, .alertRecords, .layoutEditor: return nil
         }
     }
 }
@@ -95,11 +107,15 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
 enum HomeOverlayTarget: Identifiable, Equatable {
     case formula(FormulaKind)
     case condOrder
+    case alertRecords
+    case layoutEditor
 
     var id: String {
         switch self {
         case .formula(let kind): return "formula.\(kind.rawValue)"
         case .condOrder: return "condOrder"
+        case .alertRecords: return "alertRecords"
+        case .layoutEditor: return "layoutEditor"
         }
     }
 }
@@ -121,6 +137,10 @@ struct HomeOverlays: ViewModifier {
                                 .id(t.id)
                         case .condOrder:
                             SimCondListView(accountID: nil, onClose: { target = nil })
+                        case .alertRecords:
+                            AlertRecordView(onClose: { target = nil })
+                        case .layoutEditor:
+                            PageLayoutEditorView(onClose: { target = nil })
                         }
                     }
                     .transition(.opacity)

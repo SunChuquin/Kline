@@ -89,6 +89,10 @@ struct LayoutNodeTreeList: View {
         .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { editor.select(node) }
+        // UI 测试锚点：控件节点按控件名（默认布局中每种控件唯一），其余按节点类型
+        .accessibilityIdentifier(node.type == "widget"
+                                 ? "layout.tree.widget.\(node.name ?? "")"
+                                 : "layout.tree.\(node.type)")
     }
 
     // MARK: - 底部工具条

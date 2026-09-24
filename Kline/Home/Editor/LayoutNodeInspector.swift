@@ -209,6 +209,14 @@ struct LayoutNodeInspector: View {
                     menuLabel(node.params?.string(param.key, default: defaultValue) ?? defaultValue)
                 }
             }
+
+        case .orderedList(let source, let maxCount, let note):
+            OrderedListParamRow(editor: editor, param: param, node: node,
+                                source: source, maxCount: maxCount, note: note)
+
+        case .dynamicOptions(let source, let note):
+            DynamicOptionsParamRow(editor: editor, param: param, node: node,
+                                   source: source, note: note)
         }
     }
 
@@ -356,5 +364,366 @@ struct LayoutNodeInspector: View {
             return HomeWidgetEditorSchema.descriptor(for: node.name ?? "")?.title ?? "控件"
         }
         return HomeWidgetEditorSchema.nodeTypeTitles[node.type] ?? node.type
+    }
+}
+
+// MARK: - 动态单选参数行
+
+/// 动态单选：候选运行时解析（分组 / 账户等）；键缺失 = 首项（默认项）
+private struct DynamicOptionsParamRow: View {
+    @ObservedObject var editor: PageLayoutEditorModel
+    let param: WidgetParamDescriptor
+    let node: PageLayoutNode
+    let source: WidgetParamCandidates
+    let note: String?
+
+    var body: some View {
+        DynamicCandidatesReader(source: source) { candidates in
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Text(param.title).font(.system(size: 15))
+                    Spacer(minLength: 12)
+                    Menu {
+                        ForEach(candidates) { candidate in
+                            Button {
+                                editor.setString(param.key, candidate.id, on: node)
+                            } label: {
+                                if isEffective(candidate.id, candidates: candidates) {
+                                    Label(candidate.title, systemImage: "checkmark")
+                                } else {
+                                    Text(candidate.title)
+                                }
+                            }
+                            .accessibilityIdentifier("layout.param.\(param.key).option.\(candidate.id)")
+                        }
+                    } label: {
+                        InspectorMenuLabel(title: currentTitle(candidates))
+                    }
+                    .accessibilityIdentifier("layout.param.\(param.key).menu")
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+
+                if let note {
+                    Text(note)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                }
+                Divider()
+            }
+        }
+    }
+
+    /// 当前生效的候选 id：键缺失（或已失效）→ 首项（默认项）
+    private func effectiveID(_ candidates: [ParamCandidate]) -> String? {
+        let stored = node.params?.string(param.key, default: "")
+        if let stored, !stored.isEmpty, candidates.contains(where: { $0.id == stored }) {
+            return stored
+        }
+        return candidates.first?.id
+    }
+
+    private func isEffective(_ id: String, candidates: [ParamCandidate]) -> Bool {
+        effectiveID(candidates) == id
+    }
+
+    private func currentTitle(_ candidates: [ParamCandidate]) -> String {
+        guard let id = effectiveID(candidates) else { return "—" }
+        return candidates.first(where: { $0.id == id })?.title ?? "—"
+    }
+}
+
+// MARK: - 有序多选参数行
+
+/// 有序多选：可展开区域内维护「已选（排序/删除）+ 可添加」；
+/// 键缺失 = 默认（全部候选）；显式空数组 = 清空（与缺省语义不同，模型层保留空数组）
+private struct OrderedListParamRow: View {
+    @ObservedObject var editor: PageLayoutEditorModel
+    let param: WidgetParamDescriptor
+    let node: PageLayoutNode
+    let source: WidgetParamCandidates
+    let maxCount: Int?
+    let note: String?
+
+    @State private var expanded = false
+
+    private var selectedIDs: [String]? { node.params?.strings(param.key) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(param.title)
+                        .font(.system(size: 15))
+                        .foregroundColor(.primary)
+                    Spacer(minLength: 8)
+                    Text(summaryText)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layout.param.\(param.key)")
+
+            Divider()
+
+            if expanded {
+                DynamicCandidatesReader(source: source) { candidates in
+                    expandedContent(candidates)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func expandedContent(_ candidates: [ParamCandidate]) -> some View {
+        if let note {
+            sectionNote(note)
+        }
+
+        // 生效序列：键缺失时展示默认序列（所见即所得）；首次移除 / 排序时自动落地为自定义序列
+        let effective = selectedIDs ?? WidgetParamCandidateProvider.defaultOrder(for: source)
+
+        if selectedIDs == nil {
+            infoLine("当前为默认：\(WidgetParamCandidateProvider.defaultTitle(source))。直接移除或排序即开始自定义。")
+        } else if effective.isEmpty {
+            infoLine("未选择任何项目：该控件将不显示内容")
+        }
+        sectionHeader("已选 · \(effective.count)\(maxCount.map { "/\($0)" } ?? "")")
+        ForEach(Array(effective.enumerated()), id: \.element) { index, id in
+            selectedRow(id: id, index: index, total: effective.count, candidates: candidates)
+        }
+
+        sectionHeader("可添加")
+        let addable = candidates.filter { !effective.contains($0.id) }
+        let atMax = maxCount.map { effective.count >= $0 } ?? false
+        if addable.isEmpty {
+            infoLine("已全部添加")
+        } else {
+            ForEach(addable) { candidate in
+                candidateRow(candidate, disabled: atMax)
+            }
+            if atMax {
+                infoLine("已达上限\(maxCount.map { "（\($0) 项）" } ?? "")，先移除再添加")
+            }
+        }
+
+        if selectedIDs != nil {
+            Button {
+                editor.removeParam(param.key, on: node)
+            } label: {
+                Text("恢复默认")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("layout.param.\(param.key).reset")
+            Divider()
+        }
+    }
+
+    private func selectedRow(id: String, index: Int, total: Int, candidates: [ParamCandidate]) -> some View {
+        let candidate = candidates.first(where: { $0.id == id })
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: candidate?.iconName ?? "questionmark.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(candidate == nil ? .secondary : .blue)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(candidate?.title ?? "失效项")
+                        .font(.system(size: 14))
+                        .foregroundColor(candidate == nil ? .secondary : .primary)
+                    if let subtitle = candidate?.subtitle {
+                        Text(subtitle).font(.system(size: 10)).foregroundColor(.secondary)
+                    } else if candidate == nil {
+                        Text(id).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                Button {
+                    step(index: index, up: true)
+                } label: {
+                    Image(systemName: "chevron.up").font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+                .accessibilityIdentifier("layout.param.\(param.key).selected.\(id).up")
+                Button {
+                    step(index: index, up: false)
+                } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= total - 1)
+                .accessibilityIdentifier("layout.param.\(param.key).selected.\(id).down")
+                Button {
+                    removeID(id)
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("layout.param.\(param.key).selected.\(id).remove")
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 16)
+            .frame(minHeight: 40)
+            Divider().padding(.leading, 20)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("layout.param.\(param.key).selected.\(id)")
+    }
+
+    private func candidateRow(_ candidate: ParamCandidate, disabled: Bool) -> some View {
+        VStack(spacing: 0) {
+            Button {
+                editor.listAppend(param.key, id: candidate.id, maxCount: maxCount, on: node)
+            } label: {
+                HStack(spacing: 10) {
+                    if let icon = candidate.iconName {
+                        Image(systemName: icon).font(.system(size: 14)).foregroundColor(.blue).frame(width: 22)
+                    } else {
+                        Image(systemName: "plus.circle").font(.system(size: 14)).foregroundColor(.blue).frame(width: 22)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(candidate.title).font(.system(size: 14))
+                        if let subtitle = candidate.subtitle {
+                            Text(subtitle).font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 15))
+                        .foregroundColor(disabled ? .secondary : .blue)
+                }
+                .padding(.leading, 20)
+                .padding(.trailing, 16)
+                .frame(minHeight: 40)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            // 锚点挂 Button（测试按 .buttons 查询并校验 isEnabled），不挂外层 VStack
+            .accessibilityIdentifier("layout.param.\(param.key).candidate.\(candidate.id)")
+            Divider().padding(.leading, 20)
+        }
+    }
+
+    private func step(index: Int, up: Bool) {
+        // 与 Array.move(fromOffsets:toOffset:) 同口径：向下移动目标下标 = index + 2
+        let target = up ? index - 1 : index + 2
+        if selectedIDs != nil {
+            editor.listMove(param.key,
+                            fromOffsets: IndexSet(integer: index),
+                            toOffset: target,
+                            on: node)
+            return
+        }
+        // 缺省态首次排序：先把默认序列落地为自定义值，再应用同口径移动
+        var seeded = WidgetParamCandidateProvider.defaultOrder(for: source)
+        guard index >= 0, index < seeded.count else { return }
+        let element = seeded.remove(at: index)
+        let destination = target > index ? target - 1 : target
+        seeded.insert(element, at: max(0, min(destination, seeded.count)))
+        editor.setStrings(param.key, seeded, on: node)
+    }
+
+    /// 删除已选项：缺省态先把默认序列落地（删除动作本身即「开始自定义」）
+    private func removeID(_ id: String) {
+        if selectedIDs != nil {
+            editor.listRemove(param.key, id: id, on: node)
+        } else {
+            let seeded = WidgetParamCandidateProvider.defaultOrder(for: source).filter { $0 != id }
+            editor.setStrings(param.key, seeded, on: node)
+        }
+    }
+
+    private var summaryText: String {
+        guard let selectedIDs else { return "默认" }
+        if selectedIDs.isEmpty { return "空" }
+        return "\(selectedIDs.count) 项\(maxCount.map { "/\($0)" } ?? "")"
+    }
+
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(Color(.secondarySystemBackground))
+    }
+
+    private func sectionNote(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+    }
+
+    private func infoLine(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+    }
+}
+
+// MARK: - 动态候选读取
+
+/// 订阅候选相关数据单例，候选变化（指数加载 / 分组增删 / 账户增删）时自动刷新
+private struct DynamicCandidatesReader<Content: View>: View {
+    let source: WidgetParamCandidates
+    @ViewBuilder let content: ([ParamCandidate]) -> Content
+    @State private var candidates: [ParamCandidate] = []
+
+    var body: some View {
+        content(candidates)
+            .onAppear(perform: reload)
+            .onReceive(DatabaseManager.shared.$metaList) { _ in reload() }
+            .onReceive(FavoritesStore.shared.$groups) { _ in reload() }
+            .onReceive(SimStore.shared.$accounts) { _ in reload() }
+    }
+
+    private func reload() {
+        candidates = WidgetParamCandidateProvider.candidates(source)
+    }
+}
+
+// MARK: - 共享小件
+
+private struct InspectorMenuLabel: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title).font(.system(size: 15)).foregroundColor(.blue)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }

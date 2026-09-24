@@ -338,6 +338,63 @@ final class PageLayoutEditorModel: ObservableObject {
         touchDraft()
     }
 
+    /// 删除一个参数键（回落缺省）；用于有序列表 / 动态单选的「恢复默认」
+    func removeParam(_ key: String, on node: PageLayoutNode) {
+        node.params?.values.removeValue(forKey: key)
+        touchDraft()
+    }
+
+    // MARK: - 参数改写：有序字符串数组
+
+    /// 整体写入有序 id 数组（空数组也保留：显式清空与键缺失的缺省语义不同）
+    func setStrings(_ key: String, _ value: [String], on node: PageLayoutNode) {
+        ensureParams(node)
+        node.params?.values[key] = .strings(value)
+        touchDraft()
+    }
+
+    /// 有序列表追加一个 id；已存在视为成功（幂等）；超过 maxCount 拒绝并给提示
+    @discardableResult
+    func listAppend(_ key: String, id value: String, maxCount: Int?, on node: PageLayoutNode) -> Bool {
+        ensureParams(node)
+        var list = node.params?.strings(key) ?? []
+        if list.contains(value) { return true }
+        if let maxCount, list.count >= maxCount {
+            banner = "最多选择 \(maxCount) 项"
+            return false
+        }
+        list.append(value)
+        node.params?.values[key] = .strings(list)
+        banner = nil
+        touchDraft()
+        return true
+    }
+
+    /// 有序列表移除一个 id；不存在不改动。移除后键仍保留（可为空数组）
+    func listRemove(_ key: String, id value: String, on node: PageLayoutNode) {
+        ensureParams(node)
+        var list = node.params?.strings(key) ?? []
+        guard let index = list.firstIndex(of: value) else { return }
+        list.remove(at: index)
+        node.params?.values[key] = .strings(list)
+        touchDraft()
+    }
+
+    /// 已选列表内重排（下标口径同 SwiftUI List 的 onMove：先删后插）。
+    /// 不直接用 `Array.move`：那是 SwiftUI 的扩展，本模型只依赖 Foundation/Combine
+    func listMove(_ key: String, fromOffsets: IndexSet, toOffset: Int, on node: PageLayoutNode) {
+        ensureParams(node)
+        var list = node.params?.strings(key) ?? []
+        guard let from = fromOffsets.first, from >= 0, from < list.count else { return }
+        let element = list.remove(at: from)
+        // onMove 的 toOffset 是「删除前」坐标：向下移动时删后插入点要 -1
+        let destination = toOffset > from ? toOffset - 1 : toOffset
+        let clamped = max(0, min(destination, list.count))
+        list.insert(element, at: clamped)
+        node.params?.values[key] = .strings(list)
+        touchDraft()
+    }
+
     /// 换控件名并清空旧 params（避免残留无关键）；
     /// 同名重复选择直接返回，避免误清用户已调好的参数
     func setWidgetName(_ name: String, on node: PageLayoutNode) {

@@ -96,3 +96,57 @@
 - [x] 三个阶段各自独立可编译：run=35621629404（阶段一）、run=35624017142（阶段二）、run=35625454063（阶段三，编译通过）
 - [ ] ⏳ 三个阶段各自可真机演示（构建产物已就绪，待设备解锁后在设备上安装验收）
 - [x] 每个阶段交付说明了 build 号、改动与理由、真机验证路径与回归点
+
+---
+
+# 第二轮：控件内容可配置
+
+## 阶段五：参数引擎扩展
+
+- [ ] `WidgetParamValue` 含 `strings([String])` case；解码顺序为先 `[String]` 后 Int→Double→Bool→String，数组与四类标量互不误读
+- [ ] `WidgetParams.strings(_:)` 返回可选：缺键/类型不符 = nil；键存在为 `[]` 时返回空数组（两语义可区分）
+- [ ] `"entries": ["search","tech"]` 经 Codec 解码→再编码后内容与顺序一致；`canonicalText` 输出含数组且 sortedKeys 下稳定
+- [ ] 仅含 `"entries": []` 的参数表不会因 isEmpty 被整表省略（空数组是有效配置）
+- [ ] 旧版兼容推演：旧 App 读数组参数时 WidgetParams `try?` 兜底空表、不崩溃
+- [ ] `Kind.orderedList(source:maxCount:note:)` 与 `Kind.dynamicOptions(source:note:)` 定义齐备；`ParamCandidate` 只含基础类型不引 SwiftUI
+- [ ] WidgetParamCandidateProvider 四源正确：entries=HomeEntryKind 全量；indices=沪深京指数（约 119、按名称排序）；groups 首项「全部」(固定 allGroupID)；accounts 首项「全部账户」(固定 allAccountID)
+- [ ] `setStrings` / `listAppend` / `listRemove` / `listMove`：去重、maxCount 拦截与边界提示正确，全部触发 touchDraft，同值不写
+- [ ] OrderedListParamRow：行高 44、命中区 ≥ 44pt、上移/下移/删除可用、「+ 添加」只列未选项、达上限禁用并说明、空选有引导
+- [ ] DynamicOptionsParamRow：首项「默认（全部）」= 删键；选中项名称实时显示
+- [ ] 检查器观察 FavoritesStore / SimStore，分组/账户增删后候选即时变化
+- [ ] 阶段五后首页四档默认呈现零变化（编译通过、无视觉 diff）
+
+## 阶段六：快捷入口自由装配
+
+- [ ] HomeEntryKind 新 case `alertRecords` / `layoutEditor` 的 title/subtitle/icon/tint/formulaKind 齐备，rawValue 不再变更
+- [ ] HomeOverlayTarget 两新 case 与 HomeOverlays 两全屏分支呈现正确（opacity + zIndex 1000，页内返回关闭）
+- [ ] HomeView.perform 两新分支可达；从「布局编辑器」入口再次打开编辑器时，返回只关最上层叠层
+- [ ] B/C/D 回退视图 switch 全部补全编译通过，新闭包由 HomeView 注入；回退视图快捷行仍为默认全部入口
+- [ ] HomeQuickEntryRow 收 kinds 入参：缺省 8 项顺序正确；显式集合保序/去重/过滤未知 rawValue；空数组零高度（无内边距空白残留）
+- [ ] schema 中 quickEntryRow 的 `entries` 描述（orderedList/.entries/无上限/note）与渲染读取键一致
+- [ ] 新锚点 `home.entry.alertRecords` / `home.entry.layoutEditor` 存在；既有 6 锚点不变
+- [ ] 编辑器内增删移入口时页内预览即时变化；全屏预览点击入口不生效（标注维持）
+
+## 阶段七：四个内容控件数据源选择
+
+- [ ] indexRows：nil/空→前 4；显式 id 保序解析、失效过滤；0 个有效 id→回落前 4；指数点击仍开对应 K 线
+- [ ] indices 参数 maxCount = 4，编辑器选满后无法继续添加
+- [ ] favoriteRows(groupID:limit:)：全部固定 id/实体分组/非法 id 三路径正确；limit 0=前 5、1…20 生效；空分组显示既有空态、空态点击切自选页
+- [ ] simSummary/simTopPositions 按 accountID 字符串解析：非法/缺省=全部；具体账户下总资产、盈亏、持仓均只含该账户
+- [ ] topGainers(board:)：mainBoard=`["沪深主板"]`、etfIndex=`["沪深京指数","扩展行情指数"]`，两套 Top5 在 250ms 防抖任务内一次预算；breadth 始终主板口径
+- [ ] 注册表四个 builder 的参数键（indices/group/account/board）与 schema 描述、model 方法三处一致
+- [ ] favorites 的 limit 描述 note 已改为「0 = 默认前 5」
+- [ ] homeLayoutDefaultsJSON 与默认配置文件不新增任何参数键（diff 为空）；「恢复默认」回到第一轮完全一致的呈现
+- [ ] JSON 原文页签：数组与单选取值可生成、可应用；写坏元素类型有可读错误且草稿不变；坏 id 不阻断解析
+
+## 阶段八：测试与验收
+
+- [ ] test96_QuickEntriesConfigurable 在 iPad mini 5 模拟器通过：检查器入口编辑→预览变化→保存→首页锚点集合与顺序→恢复默认回齐
+- [ ] test97_MarketOverviewIndicesConfigurable 通过：候选非空、选 2 只预览 2 格、选满 4 个禁用添加
+- [ ] 既有 UI 测试（test01/02/03/91/92/93/95 等）全部不回归
+- [ ] 构建以非沙箱 xcodebuild 在 iPad mini 5 模拟器完成；模拟器经 `open -a Simulator` GUI 可见，未无头后台运行
+- [ ] 真机/模拟器目视验收：8 默认入口；入口增删移/清空；触发记录与布局编辑器两入口开合；四控件参数切换；保存生效；恢复默认；A/B/C/D 四档配置相互独立
+- [ ] 沙盒 `Documents/Layouts/home.json` 实际内容与编辑器操作一致；失效 id 与删除分组/账户场景无崩溃日志
+- [ ] 回归目视：四档布局、点行开 K 线、搜索、公式中心三分段、条件单、个人中心、悬浮按钮延迟 1 秒显示正常
+- [ ] 第二轮独立只读核验代理逐条核验通过；临时诊断标识（如有）已移除；git 工作区干净
+- [ ] 变更已按版本管理规范提交并 push

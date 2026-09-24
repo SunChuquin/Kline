@@ -16,6 +16,8 @@ struct HomeLayoutCView: View {
     let onSearch: () -> Void
     let onOpenFormula: (FormulaKind) -> Void
     let onOpenCondOrder: () -> Void
+    let onOpenAlertRecords: () -> Void
+    let onOpenLayoutEditor: () -> Void
     let onProfile: () -> Void
 
     var body: some View {
@@ -63,6 +65,8 @@ struct HomeLayoutCView: View {
             if let fk = kind.formulaKind { onOpenFormula(fk) }
         case .condOrder: onOpenCondOrder()
         case .profile: onProfile()
+        case .alertRecords: onOpenAlertRecords()
+        case .layoutEditor: onOpenLayoutEditor()
         }
     }
 
@@ -74,5 +78,6 @@ struct HomeLayoutCView: View {
 
 #Preview {
     HomeLayoutCView(model: HomePageModel(), onSelectTab: { _ in }, onSearch: {},
-                    onOpenFormula: { _ in }, onOpenCondOrder: {}, onProfile: {})
+                    onOpenFormula: { _ in }, onOpenCondOrder: {},
+                    onOpenAlertRecords: {}, onOpenLayoutEditor: {}, onProfile: {})
 }

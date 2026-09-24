@@ -81,11 +81,13 @@ struct PageLayoutEditorView: View {
                 .background(Color.gray.opacity(0.12)).cornerRadius(8)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("layoutEditor.back")
             .padding(.leading, 16)
 
             Spacer(minLength: 8)
 
             Text("布局编辑器")
+                .accessibilityIdentifier("layoutEditor.title")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.primary)
 
@@ -149,7 +151,9 @@ struct PageLayoutEditorView: View {
             Spacer(minLength: 8)
 
             pillButton("保存") { editor.save() }
+                .accessibilityIdentifier("layoutEditor.save")
             pillButton("恢复默认") { showResetConfirm = true }
+                .accessibilityIdentifier("layoutEditor.resetDefault")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)

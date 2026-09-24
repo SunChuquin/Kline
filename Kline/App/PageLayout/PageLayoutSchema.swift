@@ -471,10 +471,32 @@ struct WidgetParams: Codable, Equatable {
         default: return value
         }
     }
+
+    /// 取可选 string；缺键或类型不符返回 nil（动态单选「缺省 = 默认项」语义用）
+    func optionalString(_ key: String) -> String? {
+        guard let v = values[key] else { return nil }
+        switch v {
+        case .string(let s): return s
+        default: return nil
+        }
+    }
+
+    /// 取有序字符串数组；只接受 .strings。
+    /// - 返回 nil：键缺失或类型不符（调用方回落默认）
+    /// - 返回 `[]`：用户显式配置了空数组（语义不同于缺省，如快捷入口「清空全部入口」）
+    func strings(_ key: String) -> [String]? {
+        guard let v = values[key] else { return nil }
+        switch v {
+        case .strings(let arr): return arr
+        default: return nil
+        }
+    }
 }
 
-/// 控件参数值（四型标量）。
-/// 解码顺序固定为 **Int → Double → Bool → String**：Darwin 的 `JSONDecoder` 以 `NSNumber` 兜底，
+/// 控件参数值（四型标量 + 有序字符串数组）。
+/// 解码顺序固定为 **[String] → Int → Double → Bool → String**：数组与标量互不兼容
+/// （`[String]` 解码标量必失败、标量解码数组也必失败），数组先试不影响既有标量优先级。
+/// 标量之间仍保持数字优先：Darwin 的 `JSONDecoder` 以 `NSNumber` 兜底，
 /// 若先试 `Bool` 会把数字 `0/1` 读成布尔（`"limit": 1` 就取不到值），故数字优先。
 /// `Int` 对 `2.5` 会抛「does not fit in Int」而落到 `Double`，对 `true/false` 会抛而落到 `Bool`；
 /// 布尔值经 `WidgetParams.bool(_:default:)` 亦可从 `.int(0/1)` 读回，语义不丢。
@@ -483,16 +505,19 @@ enum WidgetParamValue: Codable, Equatable {
     case int(Int)
     case double(Double)
     case string(String)
+    /// 有序字符串数组（如快捷入口的 id 有序列表）
+    case strings([String])
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
+        if let arr = try? container.decode([String].self) { self = .strings(arr); return }
         if let i = try? container.decode(Int.self) { self = .int(i); return }
         if let d = try? container.decode(Double.self) { self = .double(d); return }
         if let b = try? container.decode(Bool.self) { self = .bool(b); return }
         if let s = try? container.decode(String.self) { self = .string(s); return }
         throw DecodingError.dataCorruptedError(
             in: container,
-            debugDescription: "不支持的控件参数类型（仅支持 bool / int / double / string）"
+            debugDescription: "不支持的控件参数类型（仅支持 bool / int / double / string / [string]）"
         )
     }
 
@@ -503,6 +528,7 @@ enum WidgetParamValue: Codable, Equatable {
         case .int(let v): try container.encode(v)
         case .double(let v): try container.encode(v)
         case .string(let v): try container.encode(v)
+        case .strings(let v): try container.encode(v)
         }
     }
 }

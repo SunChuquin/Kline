@@ -49,8 +49,12 @@ final class HomePageModel: ObservableObject {
     @Published private(set) var favoriteRows: [MarketRow] = []
     /// 沪深主板涨幅榜 Top 5（按涨跌幅降序）
     @Published private(set) var topGainers: [MarketRow] = []
+    /// ETF指数（沪深京指数 + 扩展行情指数）涨幅榜 Top 5
+    @Published private(set) var etfTopGainers: [MarketRow] = []
     /// 是否已有可用的主板聚合（决定内容区「加载中」占位）
     @Published private(set) var isMarketReady: Bool = false
+    /// 是否已有可用的 ETF指数聚合
+    @Published private(set) var isEtfReady: Bool = false
 
     // MARK: 内部
     /// 行数据到位后的防抖重算任务（合并高频 rows 回写）
@@ -59,7 +63,9 @@ final class HomePageModel: ObservableObject {
 
     /// meta.type 口径（与行情页 / 启动预热一致）
     private static let indexType = "沪深京指数"
-    private static let boardType = "沪深主板"
+    /// 板块 → meta.type 集合（与 MarketPageModel.selectedTypes 同口径）
+    private static let mainBoardTypes: Set<String> = ["沪深主板"]
+    private static let etfIndexTypes: Set<String> = ["沪深京指数", "扩展行情指数"]
 
     init() {
         // 行数据陆续到位（启动预热 / 自选预取）→ 250ms 合并重算，避免逐行到位都做一次全表聚合
@@ -139,30 +145,43 @@ final class HomePageModel: ObservableObject {
 
     // MARK: - 沪深主板聚合（涨跌家数 + 涨幅榜）
 
-    /// 只对「已就绪（hasBars）且涨跌幅非 nil」的主板行算一次：
-    /// 涨 / 跌 / 平 = pct > 0 / < 0 / == 0；涨停 >= 9.8、跌停 <= -9.8（主板 10% 口径）；
+    /// 主板与 ETF指数两套口径在同一次行缓存遍历预算内各算一次（多遍历一遍 ETF 集合的成本可忽略）：
+    /// 涨 / 跌 / 平 = pct > 0 / < 0 / == 0；涨停 >= 9.8、跌停 <= -9.8（主板 10% 口径，仅主板统计）；
     /// 涨幅榜按 `number(.changePct)` 降序、过滤 nil 后取前 5。
     private func refreshMarketAggregates() {
-        var next = HomeBreadth()
+        let main = boardAggregate(types: Self.mainBoardTypes, includesBreadth: true)
+        let etf = boardAggregate(types: Self.etfIndexTypes, includesBreadth: false)
+
+        // 尚无有效聚合 → breadth 保持 nil（内容区显示「加载中」），不伪造数值
+        if breadth != main.breadth { breadth = main.breadth }
+        if isMarketReady != main.ready { isMarketReady = main.ready }
+        if main.top.map({ $0.meta.id }) != topGainers.map({ $0.meta.id }) {
+            topGainers = main.top
+        }
+        if isEtfReady != etf.ready { isEtfReady = etf.ready }
+        if etf.top.map({ $0.meta.id }) != etfTopGainers.map({ $0.meta.id }) {
+            etfTopGainers = etf.top
+        }
+    }
+
+    /// 单个板块口径聚合：有效行（hasBars 且 changePct 非 nil）涨跌家数 + 涨幅榜 Top 5
+    private func boardAggregate(types: Set<String>, includesBreadth: Bool)
+        -> (breadth: HomeBreadth?, top: [MarketRow], ready: Bool) {
+        var breadth = HomeBreadth()
         var ranked: [(row: MarketRow, pct: Double)] = []
-        for row in rowCache.rows.values where row.meta.type == Self.boardType && row.hasBars {
+        for row in rowCache.rows.values where types.contains(row.meta.type) && row.hasBars {
             guard let pct = row.number(.changePct) else { continue }
-            next.validCount += 1
-            if pct > 0 { next.up += 1 } else if pct < 0 { next.down += 1 } else { next.flat += 1 }
-            if pct >= 9.8 { next.limitUp += 1 }
-            if pct <= -9.8 { next.limitDown += 1 }
+            if includesBreadth {
+                breadth.validCount += 1
+                if pct > 0 { breadth.up += 1 } else if pct < 0 { breadth.down += 1 } else { breadth.flat += 1 }
+                if pct >= 9.8 { breadth.limitUp += 1 }
+                if pct <= -9.8 { breadth.limitDown += 1 }
+            }
             ranked.append((row, pct))
         }
-        // 尚无有效聚合 → 保持 nil（内容区显示「加载中」），不伪造数值
-        let ready = next.validCount > 0
-        let nextBreadth: HomeBreadth? = ready ? next : nil
-        if breadth != nextBreadth { breadth = nextBreadth }
-        if isMarketReady != ready { isMarketReady = ready }
-
-        let top = ready ? ranked.sorted(by: { $0.pct > $1.pct }).prefix(5).map(\.row) : []
-        if top.map({ $0.meta.id }) != topGainers.map({ $0.meta.id }) {
-            topGainers = top
-        }
+        let ready = !ranked.isEmpty
+        let top = ranked.sorted(by: { $0.pct > $1.pct }).prefix(5).map(\.row)
+        return (includesBreadth && ready ? breadth : nil, top, ready)
     }
 
     // MARK: - 模拟账户（只读转发；金额口径由 SimStore 负责，模型不缓存）
@@ -175,4 +194,92 @@ final class HomePageModel: ObservableObject {
 
     /// 单笔持仓快照（现价 / 市值 / 盈亏）
     func simSnapshot(for p: SimPosition) -> SimStore.SimPositionSnapshot { sim.snapshot(for: p) }
+
+    // MARK: - 布局控件参数化取数（编辑器配置 → 数据；nil/失效一律回落默认口径）
+
+    /// 大盘概览指数行：
+    /// - selectedIDs 缺省（nil）= 默认前 4 只「沪深京指数」；
+    /// - 显式选择：按配置顺序返回，未知 / 非指数 id 过滤，防御性上限 4（编辑器已限）。
+    func indexRows(selectedIDs: [String]?) -> [MarketRow] {
+        guard let selectedIDs else { return indexQuotes }
+        var lookup: [Int: MetaItem] = [:]
+        for meta in db.metaList where meta.type == Self.indexType { lookup[meta.id] = meta }
+        let metas = Array(selectedIDs
+            .compactMap(Int.init)
+            .compactMap { lookup[$0] }
+            .prefix(4))
+        // 指数 bars 归启动预热统一管，这里不触发预取
+        return rowsReadyOnly(metas, prefetch: false)
+    }
+
+    /// 我的自选行：
+    /// - groupIDString 缺省 / 失效 = 「全部」虚拟分组（所有手动分组去重并集）；
+    /// - limit <= 0 = 默认前 5。
+    func favoriteRows(groupIDString: String?, limit: Int) -> [MarketRow] {
+        let groupID = resolveFavoriteGroupID(groupIDString)
+        let items = fav.resolveMetaItems(groupID: groupID, allMeta: db.metaList)
+        let cap = limit > 0 ? limit : 5
+        return rowsReadyOnly(Array(items.prefix(cap)), prefetch: true)
+    }
+
+    /// body 周期内安全取行：注册表 builder 在 SwiftUI body 求值时调用本模型，
+    /// 而 `MarketRowCache.rows` 是 @Published——同步插壳会触发「view 更新期发布」紫警。
+    /// 故此处只读已注册行；未注册的先给临时壳，随后异步注册 / 预取并发一次 objectWillChange，
+    /// 下一轮渲染即换成缓存内的稳定行（行视图本身观察行缓存，bars 到位照常刷新）。
+    private func rowsReadyOnly(_ metas: [MetaItem], prefetch: Bool) -> [MarketRow] {
+        guard !metas.isEmpty else { return [] }
+        var result: [MarketRow] = []
+        var missing: [MetaItem] = []
+        for meta in metas {
+            if let cached = rowCache.rows[meta.id] {
+                result.append(cached)
+            } else {
+                result.append(MarketRow(meta: meta))
+                missing.append(meta)
+            }
+        }
+        if !missing.isEmpty {
+            let toRegister = missing
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                _ = self.rowCache.rows(for: toRegister, prefetch: prefetch)
+                self.objectWillChange.send()
+            }
+        }
+        return result
+    }
+
+    private func resolveFavoriteGroupID(_ raw: String?) -> UUID {
+        if let raw, let uuid = UUID(uuidString: raw),
+           uuid == FavoritesStore.allGroupID || fav.groups.contains(where: { $0.id == uuid }) {
+            return uuid
+        }
+        return FavoritesStore.allGroupID
+    }
+
+    /// 模拟账户汇总：accountIDString 缺省 / 失效 / 全部账户 id → 全部账户汇总
+    func simSummary(accountIDString: String?) -> SimStore.SimAccountSummary {
+        sim.summary(accountID: resolveSimAccountID(accountIDString))
+    }
+
+    /// 指定账户持仓前 5（缺省 / 全部 = 全部持仓前 5）
+    func topPositions(accountIDString: String?) -> [SimPosition] {
+        Array(sim.positions(accountID: resolveSimAccountID(accountIDString)).prefix(5))
+    }
+
+    private func resolveSimAccountID(_ raw: String?) -> UUID? {
+        guard let raw, let uuid = UUID(uuidString: raw),
+              uuid != SimStore.allAccountID, sim.account(id: uuid) != nil else { return nil }
+        return uuid
+    }
+
+    /// 涨幅榜行：board == "etfIndex" → ETF指数口径；其他 / 缺省 → 沪深主板
+    func gainersRows(board: String?) -> [MarketRow] {
+        board == "etfIndex" ? etfTopGainers : topGainers
+    }
+
+    /// 涨幅榜对应板块的聚合就绪态
+    func gainersReady(board: String?) -> Bool {
+        board == "etfIndex" ? isEtfReady : isMarketReady
+    }
 }

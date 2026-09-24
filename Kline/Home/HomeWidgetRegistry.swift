@@ -23,8 +23,15 @@ struct HomeWidgetRegistry {
             AnyView(HomeHeaderBar(onProfile: ctx.onProfile))
         }
 
-        r.register("home.quickEntryRow") { ctx, _ in
-            AnyView(HomeQuickEntryRow(onTap: ctx.onEntry))
+        r.register("home.quickEntryRow") { ctx, p in
+            // entries 缺省 = 全量入口；空数组 = 零高度；未知 id 过滤，保持配置顺序
+            let kinds: [HomeEntryKind]
+            if let rawIDs = p.strings("entries") {
+                kinds = rawIDs.compactMap { HomeEntryKind(rawValue: $0) }
+            } else {
+                kinds = HomeEntryKind.allCases
+            }
+            return AnyView(HomeQuickEntryRow(kinds: kinds, onTap: ctx.onEntry))
         }
 
         r.register("home.placeholder") { _, _ in
@@ -32,15 +39,16 @@ struct HomeWidgetRegistry {
         }
 
         r.register("home.marketOverview") { ctx, p in
-            AnyView(HomeMarketOverviewStrip(rows: ctx.model.indexQuotes,
+            // indices 缺省 = 默认前 4；breadth 固定主板口径（概览条只展示一套涨跌家数）
+            AnyView(HomeMarketOverviewStrip(rows: ctx.model.indexRows(selectedIDs: p.strings("indices")),
                                             breadth: ctx.model.breadth,
                                             compact: p.bool("compact", default: false)))
         }
 
         r.register("home.favorites") { ctx, p in
-            let limit = p.int("limit", default: 0)
-            let rows = limit > 0 ? Array(ctx.model.favoriteRows.prefix(limit))
-                                 : ctx.model.favoriteRows
+            // group 缺省 / 失效 = 「全部」虚拟分组；limit 0 = 默认前 5（口径在模型内归一）
+            let rows = ctx.model.favoriteRows(groupIDString: p.optionalString("group"),
+                                              limit: p.int("limit", default: 0))
             return AnyView(HomeFavoritesBlock(rows: rows,
                                               compact: p.bool("compact", default: false),
                                               showsSparkline: p.bool("showsSparkline", default: false),
@@ -50,6 +58,7 @@ struct HomeWidgetRegistry {
 
         r.register("home.simSummary") { ctx, p in
             AnyView(HomeSimSummaryBlock(model: ctx.model,
+                                        accountIDString: p.optionalString("account"),
                                         compact: p.bool("compact", default: false),
                                         onTap: { ctx.onSelectTab(3) }))
         }
@@ -57,10 +66,11 @@ struct HomeWidgetRegistry {
         r.register("home.topGainers") { ctx, p in
             let style: HomeTopGainersBlock.Style =
                 p.string("style", default: "list") == "chips" ? .chips : .list
-            return AnyView(HomeTopGainersBlock(rows: ctx.model.topGainers,
+            let board = p.string("board", default: "mainBoard")
+            return AnyView(HomeTopGainersBlock(rows: ctx.model.gainersRows(board: board),
                                                style: style,
                                                compact: p.bool("compact", default: false),
-                                               isReady: ctx.model.isMarketReady,
+                                               isReady: ctx.model.gainersReady(board: board),
                                                onOpen: HomeWidgetRegistry.openDetail))
         }
 

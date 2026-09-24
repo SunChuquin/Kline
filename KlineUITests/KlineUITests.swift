@@ -449,4 +449,238 @@ final class KlineUITests: XCTestCase {
         XCTAssertTrue(waitHittable(marketTab, timeout: 10), "返回后未回到行情页")
         snap(app, "notch.market.back")
     }
+
+    // MARK: - 用例 98：快捷入口内容可配置（移除 / 排序 / 持久化 / 恢复默认）
+    // 覆盖第二轮「控件内容配置化」主链路：布局编辑器 → 选中 quickEntryRow →
+    // 展开 entries 有序多选 → 删除入口、上下移动 → 保存 → 首页即时生效 → 杀进程重启配置仍在 →
+    // 重新进编辑器「恢复默认」→ 首页还原。
+
+    /// 横滑首页快捷入口行，把指定 id 的 chip 滚到屏内（XCUITest 对自定义横滑 ScrollView
+    /// 不会自动滚到可见，且屏外元素 isHittable 会直接报 activation point invalid）
+    @discardableResult
+    private func scrollHomeEntryIntoView(_ app: XCUIApplication, identifier: String) -> XCUIElement {
+        let entry = app.buttons[identifier].firstMatch
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), "首页缺少入口 \(identifier)")
+
+        // 用任意一个当前屏内可见 chip 的纵向中点作为滑动 y（不假设具体哪几项可见）
+        func visibleMidY() -> CGFloat? {
+            let chips = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.entry."))
+            for chip in chips.allElementsBoundByIndex {
+                let f = chip.frame
+                if f.width > 0, f.minX >= app.frame.minX, f.maxX <= app.frame.maxX {
+                    return f.midY
+                }
+            }
+            return nil
+        }
+
+        for _ in 0..<6 {
+            let f = entry.frame
+            let screen = app.frame
+            if f.width > 0, f.minX >= screen.minX + 2, f.maxX <= screen.maxX - 2 { break }
+            guard let midY = visibleMidY() else {
+                Thread.sleep(forTimeInterval: 0.3)
+                continue
+            }
+            let dy = midY / screen.height
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: Double(dy)))
+                .press(forDuration: 0.1,
+                       thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: Double(dy))))
+            Thread.sleep(forTimeInterval: 0.35)
+        }
+        return entry
+    }
+
+    /// 进首页并通过快捷入口行打开布局编辑器（入口 chip 位于横滑行末尾，需先横滑）
+    private func openLayoutEditorFromHome(_ app: XCUIApplication) {
+        app.buttons["tab.home"].tap()
+        XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10), "首页未显示")
+        let entry = scrollHomeEntryIntoView(app, identifier: "home.entry.layoutEditor")
+        XCTAssertTrue(waitHittable(entry, timeout: 5), "横滑后「布局编辑」入口仍不可点")
+        entry.tap()
+        XCTAssertTrue(app.buttons["layoutEditor.save"].waitForExistence(timeout: 8),
+                      "布局编辑器未打开")
+    }
+
+    /// 在编辑器树列表选中某控件节点，并展开指定参数的有序多选 / 折叠行。
+    /// 树是懒加载 List（约 5 屏），目标控件未渲染时要先在 320pt 树面板内上滑。
+    private func selectWidgetParam(_ app: XCUIApplication, widget: String, paramKey: String) {
+        let treeRow = app.descendants(matching: .any)["layout.tree.widget.\(widget)"].firstMatch
+        if !treeRow.waitForExistence(timeout: 3) {
+            // 树面板可视区约 y 146...364（1024×768 横屏）：在面板纵向范围内反复短上滑
+            for _ in 0..<14 {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.45))
+                    .press(forDuration: 0.08,
+                           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.21)))
+                if treeRow.waitForExistence(timeout: 1) { break }
+            }
+        }
+        XCTAssertTrue(treeRow.waitForExistence(timeout: 5), "树列表未找到控件节点 \(widget)")
+        // 懒加载行可能刚渲染、帧尚未就绪
+        Thread.sleep(forTimeInterval: 0.3)
+        treeRow.tap()
+        let paramRow = app.buttons["layout.param.\(paramKey)"].firstMatch
+        XCTAssertTrue(paramRow.waitForExistence(timeout: 5), "检查器未找到参数行 \(paramKey)")
+        // 已是展开态时点第二下会收起：用展开区才有的「可添加」小标题判定
+        if !app.staticTexts["可添加"].waitForExistence(timeout: 1) {
+            paramRow.tap()
+        }
+        XCTAssertTrue(app.staticTexts["可添加"].waitForExistence(timeout: 5),
+                      "参数行 \(paramKey) 未展开")
+    }
+
+    /// 保存并退出编辑器（保存后无脏标记，返回直接关闭）
+    private func saveAndCloseEditor(_ app: XCUIApplication) {
+        app.buttons["layoutEditor.save"].tap()
+        Thread.sleep(forTimeInterval: 0.5)
+        app.buttons["layoutEditor.back"].tap()
+        // 全屏覆盖层关闭：保存按钮应消失
+        XCTAssertFalse(app.buttons["layoutEditor.save"].waitForExistence(timeout: 3),
+                       "布局编辑器未关闭")
+    }
+
+    /// 前置：把当前档位（整页）恢复为内置默认，保证用例起点干净（立即落盘，无需保存）
+    private func ensureLayoutIsDefault(_ app: XCUIApplication) {
+        openLayoutEditorFromHome(app)
+        app.buttons["layoutEditor.resetDefault"].tap()
+        let confirm = app.alerts.buttons["恢复默认"].firstMatch
+        if confirm.waitForExistence(timeout: 3) {
+            confirm.tap()
+        }
+        Thread.sleep(forTimeInterval: 0.8)
+        app.buttons["layoutEditor.back"].tap()
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    func test98_Home_QuickEntriesConfigurable() throws {
+        let app = XCUIApplication()
+        app.launch()
+        ensureLayoutIsDefault(app)
+        openLayoutEditorFromHome(app)
+
+        // 1. 选中「快捷入口行」控件并展开「入口项」
+        selectWidgetParam(app, widget: "home.quickEntryRow", paramKey: "entries")
+
+        // 默认 = 全部 8 项：search 在已选区、可删除按钮在
+        let removeSearch = app.buttons["layout.param.entries.selected.search.remove"].firstMatch
+        XCTAssertTrue(removeSearch.waitForExistence(timeout: 5), "默认已选区缺少 search")
+
+        // 2. 删除 search：已选区消失、候选区出现 search
+        removeSearch.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["layout.param.entries.selected.search"].exists,
+                       "删除后 search 不应留在已选区")
+        XCTAssertTrue(app.buttons["layout.param.entries.candidate.search"].waitForExistence(timeout: 3),
+                      "删除后 search 应出现在可添加候选区")
+
+        // 3. 排序：把已选区第一项 tech 下移一格（tech → picker 之后）
+        app.buttons["layout.param.entries.selected.tech.down"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 0.3)
+
+        // 4. 保存并退出 → 首页即时生效
+        saveAndCloseEditor(app)
+
+        let searchChip = app.buttons["home.entry.search"].firstMatch
+        let techChip = app.buttons["home.entry.tech"].firstMatch
+        let pickerChip = app.buttons["home.entry.picker"].firstMatch
+        XCTAssertFalse(searchChip.exists, "保存后首页不应再出现搜索入口")
+        XCTAssertTrue(pickerChip.waitForExistence(timeout: 5), "首页缺少选股指标入口")
+        XCTAssertTrue(techChip.exists, "首页缺少技术指标入口")
+        // 横滑行中 picker 应排在 tech 左边（下移生效）
+        XCTAssertLessThan(pickerChip.frame.minX, techChip.frame.minX,
+                          "tech 下移后 picker 应位于 tech 左侧")
+
+        // 5. 杀进程重启：配置来自沙盒 home.json，仍应生效
+        app.terminate()
+        app.launch()
+        app.buttons["tab.home"].tap()
+        XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10), "重启后首页未显示")
+        XCTAssertFalse(app.buttons["home.entry.search"].exists,
+                       "重启后搜索入口不应恢复（配置未持久化）")
+        XCTAssertTrue(app.buttons["home.entry.picker"].firstMatch.frame.minX
+                      < app.buttons["home.entry.tech"].firstMatch.frame.minX,
+                      "重启后入口顺序未保持")
+
+        // 6. 恢复默认：重新进编辑器 → 恢复默认 → 保存
+        openLayoutEditorFromHome(app)
+        selectWidgetParam(app, widget: "home.quickEntryRow", paramKey: "entries")
+        let reset = app.buttons["layout.param.entries.reset"].firstMatch
+        XCTAssertTrue(reset.waitForExistence(timeout: 5), "自定义后应显示「恢复默认」")
+        reset.tap()
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(app.buttons["layout.param.entries.selected.search.remove"].waitForExistence(timeout: 3),
+                      "恢复默认后 search 应回到已选区")
+        saveAndCloseEditor(app)
+
+        XCTAssertTrue(app.buttons["home.entry.search"].waitForExistence(timeout: 5),
+                      "恢复默认后搜索入口应回来")
+    }
+
+    // MARK: - 用例 99：大盘概览指数可配置（删除 / 上限 4 禁用 / 持久化 / 恢复默认）
+
+    func test99_Home_MarketOverviewIndicesConfigurable() throws {
+        let app = XCUIApplication()
+        app.launch()
+        ensureLayoutIsDefault(app)
+        openLayoutEditorFromHome(app)
+
+        // 1. 选中「大盘概览」并展开「展示指数」
+        selectWidgetParam(app, widget: "home.marketOverview", paramKey: "indices")
+
+        // 默认前 4 只指数：已选删除按钮若干（id 为 metaID 数字，测试不硬编码）
+        let selectedRemoves = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
+            "layout.param.indices.selected.", ".remove"))
+        XCTAssertTrue(selectedRemoves.firstMatch.waitForExistence(timeout: 8),
+                      "默认已选指数区为空（指数候选尚未加载？）")
+        XCTAssertEqual(selectedRemoves.count, 4, "默认应选中 4 只指数")
+
+        // 2. 删除第一只：解析其 metaID（identifier 段：layout.param.indices.selected.<id>.remove）
+        let firstRemove = selectedRemoves.allElementsBoundByIndex[0]
+        let segments = firstRemove.identifier.split(separator: ".")
+        XCTAssertEqual(segments.count, 6, "已选删除按钮锚点格式异常：\(firstRemove.identifier)")
+        let metaID = String(segments[4])
+        firstRemove.tap()
+
+        let addBack = app.buttons["layout.param.indices.candidate.\(metaID)"].firstMatch
+        XCTAssertTrue(addBack.waitForExistence(timeout: 5),
+                      "删除的指数应出现在候选区（metaID=\(metaID)）")
+        XCTAssertTrue(addBack.isEnabled, "未达上限（3/4）时候选应可点")
+
+        // 3. 重新加回（追加到末尾）→ 回到 4/4 → 其余候选全部置灰
+        addBack.tap()
+        Thread.sleep(forTimeInterval: 0.3)
+        let candidates = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "layout.param.indices.candidate."))
+        XCTAssertTrue(candidates.firstMatch.waitForExistence(timeout: 3), "候选区为空")
+        XCTAssertGreaterThanOrEqual(candidates.count, 1, "应还有未选指数候选")
+        for candidate in candidates.allElementsBoundByIndex {
+            XCTAssertFalse(candidate.isEnabled,
+                           "已选 4 只达上限，候选应禁用：\(candidate.identifier)")
+        }
+
+        // 4. 再次删除该指数（让末尾不是它也行，仅为制造非默认配置）并保存：验证持久化
+        app.buttons["layout.param.indices.selected.\(metaID).remove"].firstMatch.tap()
+        saveAndCloseEditor(app)
+
+        app.terminate()
+        app.launch()
+        openLayoutEditorFromHome(app)
+        selectWidgetParam(app, widget: "home.marketOverview", paramKey: "indices")
+        let removedStillSelected = app.descendants(matching: .any)["layout.param.indices.selected.\(metaID)"].firstMatch
+        XCTAssertFalse(removedStillSelected.exists, "重启后被删指数不应回到已选区")
+        XCTAssertTrue(app.buttons["layout.param.indices.candidate.\(metaID)"]
+            .waitForExistence(timeout: 8),
+                      "重启后被删指数应在候选区")
+
+        // 5. 恢复默认并保存（沙盒 home.json 不写 indices 键，零默认 diff）
+        let resetIndices = app.buttons["layout.param.indices.reset"].firstMatch
+        XCTAssertTrue(resetIndices.waitForExistence(timeout: 5), "自定义后应显示「恢复默认」")
+        resetIndices.tap()
+        Thread.sleep(forTimeInterval: 0.3)
+        let restoredRemoves = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
+            "layout.param.indices.selected.", ".remove"))
+        XCTAssertEqual(restoredRemoves.count, 4, "恢复默认后应回到 4 只指数")
+        saveAndCloseEditor(app)
+    }
 }
