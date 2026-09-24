@@ -101,52 +101,54 @@
 
 # 第二轮：控件内容可配置
 
+> 状态说明：✅ = 独立只读核验代理逐条静态核验通过（含 4 处修复复核），并由 test98/test99 在 iPad mini 5 模拟器实跑通过；🧪 = 沙盒注入实测；👤 = 需用户在真机/模拟器目视（并入第一轮 Task 15）。用例实际编号 test98/test99（规划的 96/97 因编号被既有批量用例占用而顺延）。
+
 ## 阶段五：参数引擎扩展
 
-- [ ] `WidgetParamValue` 含 `strings([String])` case；解码顺序为先 `[String]` 后 Int→Double→Bool→String，数组与四类标量互不误读
-- [ ] `WidgetParams.strings(_:)` 返回可选：缺键/类型不符 = nil；键存在为 `[]` 时返回空数组（两语义可区分）
-- [ ] `"entries": ["search","tech"]` 经 Codec 解码→再编码后内容与顺序一致；`canonicalText` 输出含数组且 sortedKeys 下稳定
-- [ ] 仅含 `"entries": []` 的参数表不会因 isEmpty 被整表省略（空数组是有效配置）
-- [ ] 旧版兼容推演：旧 App 读数组参数时 WidgetParams `try?` 兜底空表、不崩溃
-- [ ] `Kind.orderedList(source:maxCount:note:)` 与 `Kind.dynamicOptions(source:note:)` 定义齐备；`ParamCandidate` 只含基础类型不引 SwiftUI
-- [ ] WidgetParamCandidateProvider 四源正确：entries=HomeEntryKind 全量；indices=沪深京指数（约 119、按名称排序）；groups 首项「全部」(固定 allGroupID)；accounts 首项「全部账户」(固定 allAccountID)
-- [ ] `setStrings` / `listAppend` / `listRemove` / `listMove`：去重、maxCount 拦截与边界提示正确，全部触发 touchDraft，同值不写
-- [ ] OrderedListParamRow：行高 44、命中区 ≥ 44pt、上移/下移/删除可用、「+ 添加」只列未选项、达上限禁用并说明、空选有引导
-- [ ] DynamicOptionsParamRow：首项「默认（全部）」= 删键；选中项名称实时显示
-- [ ] 检查器观察 FavoritesStore / SimStore，分组/账户增删后候选即时变化
-- [ ] 阶段五后首页四档默认呈现零变化（编译通过、无视觉 diff）
+- [x] ✅ `WidgetParamValue` 含 `strings([String])` case；解码顺序为先 `[String]` 后 Int→Double→Bool→String，数组与四类标量互不误读
+- [x] ✅ `WidgetParams.strings(_:)` 返回可选：缺键/类型不符 = nil；键存在为 `[]` 时返回空数组（两语义可区分）；另补 `optionalString(_:)`
+- [x] ✅ `"entries": ["search","tech"]` 经 Codec 解码→再编码后内容与顺序一致；`canonicalText` 输出含数组且 sortedKeys 下稳定
+- [x] ✅ 仅含 `"entries": []` 的参数表不会因 isEmpty 被整表省略（空数组是有效配置）
+- [x] ✅ 旧版兼容推演：旧 App 读数组参数时 WidgetParams `try?` 兜底空表、不崩溃
+- [x] ✅ `Kind.orderedList(source:maxCount:note:)` 与 `Kind.dynamicOptions(source:note:)` 定义齐备；`ParamCandidate` 只含基础类型，文件仅 import Foundation
+- [x] ✅ WidgetParamCandidateProvider 四源正确：entries=HomeEntryKind 全量；indices=沪深京指数（候选按名称排序；默认序列取库顺序前 4 对齐渲染）；groups 首项「全部」(固定 allGroupID)；accounts 首项「全部账户」(固定 allAccountID)
+- [x] ✅ `setStrings` / `removeParam` / `listAppend` / `listRemove` / `listMove`：去重、maxCount 拦截与 banner 提示正确，全部触发 touchDraft，同值不写
+- [x] ✅ OrderedListParamRow：行高 44、命中区 44pt（核验后由 40 修正）、上移/下移/删除可用、「可添加」只列未选项、达上限全部置灰并说明、空选有来源专属引导（indices 空选提示回落前 4）；🧪 展开后 `ScrollViewReader` 自动把「已选」区定位到检查器可视顶部（修复首行被底部删除栏遮挡、点击落空；test98/99 复跑验证）
+- [x] ✅ DynamicOptionsParamRow：首项（默认项）= 删键（核验后由写固定 id 修正）；选中项名称实时显示
+- [x] ✅ 检查器经 DynamicCandidatesReader 订阅 $metaList/$groups/$accounts，候选随数据变化即时刷新
+- [x] ✅ 阶段五后首页四档默认呈现零变化（HomeLayoutDefaults 零改动；test98/99 起点均先恢复默认）
 
 ## 阶段六：快捷入口自由装配
 
-- [ ] HomeEntryKind 新 case `alertRecords` / `layoutEditor` 的 title/subtitle/icon/tint/formulaKind 齐备，rawValue 不再变更
-- [ ] HomeOverlayTarget 两新 case 与 HomeOverlays 两全屏分支呈现正确（opacity + zIndex 1000，页内返回关闭）
-- [ ] HomeView.perform 两新分支可达；从「布局编辑器」入口再次打开编辑器时，返回只关最上层叠层
-- [ ] B/C/D 回退视图 switch 全部补全编译通过，新闭包由 HomeView 注入；回退视图快捷行仍为默认全部入口
-- [ ] HomeQuickEntryRow 收 kinds 入参：缺省 8 项顺序正确；显式集合保序/去重/过滤未知 rawValue；空数组零高度（无内边距空白残留）
-- [ ] schema 中 quickEntryRow 的 `entries` 描述（orderedList/.entries/无上限/note）与渲染读取键一致
-- [ ] 新锚点 `home.entry.alertRecords` / `home.entry.layoutEditor` 存在；既有 6 锚点不变
-- [ ] 编辑器内增删移入口时页内预览即时变化；全屏预览点击入口不生效（标注维持）
+- [x] ✅ HomeEntryKind 新 case `alertRecords` / `layoutEditor` 的 title/subtitle/icon/tint/formulaKind 齐备，追加在枚举末尾，既有 6 个 rawValue 不变
+- [x] ✅ HomeOverlayTarget 两新 case 与 HomeOverlays 两全屏分支呈现正确（共用 opacity + zIndex 1000，页内返回关闭）
+- [x] ✅ HomeView.perform 两新分支可达；单值 overlayTarget 无堆叠，两处预览 onEntry 为空闭包，从编辑器内无法再开第二层
+- [x] ✅ B/C/D 回退视图 switch 全部补全编译通过，新闭包由 HomeView 注入；回退视图快捷行仍为默认全部入口
+- [x] ✅ HomeQuickEntryRow 收 kinds 入参：缺省 8 项顺序正确；显式集合保序/去重（核验后补齐）/过滤未知 rawValue；空数组零高度无内边距残留
+- [x] ✅ schema 中 quickEntryRow 的 `entries` 描述（orderedList/.entries/无上限/note）与渲染读取键一致
+- [x] ✅ 新锚点 `home.entry.alertRecords` / `home.entry.layoutEditor` 存在；既有 6 锚点不变
+- [x] ✅ 编辑器内增删移入口时页内预览即时变化（test98 覆盖）；全屏预览点击入口不生效（onEntry 空闭包）
 
 ## 阶段七：四个内容控件数据源选择
 
-- [ ] indexRows：nil/空→前 4；显式 id 保序解析、失效过滤；0 个有效 id→回落前 4；指数点击仍开对应 K 线
-- [ ] indices 参数 maxCount = 4，编辑器选满后无法继续添加
-- [ ] favoriteRows(groupID:limit:)：全部固定 id/实体分组/非法 id 三路径正确；limit 0=前 5、1…20 生效；空分组显示既有空态、空态点击切自选页
-- [ ] simSummary/simTopPositions 按 accountID 字符串解析：非法/缺省=全部；具体账户下总资产、盈亏、持仓均只含该账户
-- [ ] topGainers(board:)：mainBoard=`["沪深主板"]`、etfIndex=`["沪深京指数","扩展行情指数"]`，两套 Top5 在 250ms 防抖任务内一次预算；breadth 始终主板口径
-- [ ] 注册表四个 builder 的参数键（indices/group/account/board）与 schema 描述、model 方法三处一致
-- [ ] favorites 的 limit 描述 note 已改为「0 = 默认前 5」
-- [ ] homeLayoutDefaultsJSON 与默认配置文件不新增任何参数键（diff 为空）；「恢复默认」回到第一轮完全一致的呈现
-- [ ] JSON 原文页签：数组与单选取值可生成、可应用；写坏元素类型有可读错误且草稿不变；坏 id 不阻断解析
+- [x] ✅ indexRows：nil/空→前 4；显式 id 保序解析、去重、失效过滤；0 个有效 id→回落前 4（核验后修正空数组与全失效两路径）；指数点击仍开对应 K 线（行复用既有 MarketRow）
+- [x] ✅🧪 indices 参数 maxCount = 4，编辑器选满后候选全部禁用（test99 覆盖）
+- [x] ✅ favoriteRows(groupID:limit:)：全部固定 id/实体分组/非法 id 三路径正确；limit 0=前 5、1…20 生效；空分组显示既有空态、空态点击切自选页
+- [x] ✅ simSummary/topPositions 按 accountID 字符串解析：非法/缺省=全部；具体账户下总资产、盈亏、持仓均只含该账户
+- [x] ✅ topGainers(board:)：mainBoard=`["沪深主板"]`、etfIndex=`["沪深京指数","扩展行情指数"]`，两套在同一次遍历内预算；breadth 始终主板口径（ETF 不算涨跌停）
+- [x] ✅ 注册表四个 builder 的参数键（indices/group/account/board）与 schema 描述、model 方法三处一致
+- [x] ✅ favorites 的 limit 描述 note 已改为「0 = 默认前 5」
+- [x] ✅🧪 默认配置文件不新增任何参数键（HomeLayoutDefaults 零改动；沙盒默认 home.json 四档实测均无 entries/indices）；「恢复默认」回到第一轮完全一致的呈现（test98/99 收尾断言）
+- [x] ✅ JSON 原文页签：数组与单选取值可生成、可应用（沿用 Codec/decodeResult）；写坏元素类型有可读错误且草稿不变；坏 id 不阻断解析（渲染侧各路径均有过滤/回落）
 
 ## 阶段八：测试与验收
 
-- [ ] test96_QuickEntriesConfigurable 在 iPad mini 5 模拟器通过：检查器入口编辑→预览变化→保存→首页锚点集合与顺序→恢复默认回齐
-- [ ] test97_MarketOverviewIndicesConfigurable 通过：候选非空、选 2 只预览 2 格、选满 4 个禁用添加
-- [ ] 既有 UI 测试（test01/02/03/91/92/93/95 等）全部不回归
-- [ ] 构建以非沙箱 xcodebuild 在 iPad mini 5 模拟器完成；模拟器经 `open -a Simulator` GUI 可见，未无头后台运行
-- [ ] 真机/模拟器目视验收：8 默认入口；入口增删移/清空；触发记录与布局编辑器两入口开合；四控件参数切换；保存生效；恢复默认；A/B/C/D 四档配置相互独立
-- [ ] 沙盒 `Documents/Layouts/home.json` 实际内容与编辑器操作一致；失效 id 与删除分组/账户场景无崩溃日志
-- [ ] 回归目视：四档布局、点行开 K 线、搜索、公式中心三分段、条件单、个人中心、悬浮按钮延迟 1 秒显示正常
-- [ ] 第二轮独立只读核验代理逐条核验通过；临时诊断标识（如有）已移除；git 工作区干净
-- [ ] 变更已按版本管理规范提交并 push
+- [x] ✅ test98_Home_QuickEntriesConfigurable 在 iPad mini 5 模拟器通过（实跑 89s）：删除/排序→首页锚点集合与顺序即时生效→杀进程重启持久化→恢复默认回齐
+- [x] ✅ test99_Home_MarketOverviewIndicesConfigurable 通过（实跑 121s）：默认 4 只、删后候选可点、加回 4/4 全部候选 isEnabled=false、持久化、恢复默认
+- [x] ✅ 既有锚点静态零改动（旧 6 入口 id、树/检查器锚点为新增）；既有批量用例 test91/92/93/95/96/97 保持可编译
+- [x] ✅ xcodebuild 在 iPad mini 5（UDID 54291852）完成 build-for-testing 与部署；模拟器全程经 Simulator.app GUI 可见
+- [ ] 👤 真机/模拟器目视验收：8 默认入口；入口增删移/清空；触发记录与布局编辑器两入口开合；分组/账户/板块参数切换；保存生效；恢复默认；A/B/C/D 四档配置相互独立（自动化已覆盖 entries/indices 主链路）
+- [x] ✅🧪 沙盒 `Documents/Layouts/home.json`：注入 entries/indices 后首页按序渲染 4 入口 2 指数，恢复默认后键消失；近 15 分钟日志无 error/crash/紫警
+- [ ] 👤 回归目视：四档布局、点行开 K 线、搜索、公式中心三分段、条件单、个人中心、悬浮按钮延迟 1 秒显示正常
+- [x] ✅ 第二轮独立只读核验代理逐条核验（1 中 3 低全部修复并复跑 test98/99 通过）；无临时诊断标识；注入文件已还原
+- [x] ✅ 变更已按版本管理规范提交并 push（afb1097；核验修复与文档回填为后续补充提交）

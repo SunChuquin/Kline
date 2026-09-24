@@ -198,16 +198,21 @@ final class HomePageModel: ObservableObject {
     // MARK: - 布局控件参数化取数（编辑器配置 → 数据；nil/失效一律回落默认口径）
 
     /// 大盘概览指数行：
-    /// - selectedIDs 缺省（nil）= 默认前 4 只「沪深京指数」；
-    /// - 显式选择：按配置顺序返回，未知 / 非指数 id 过滤，防御性上限 4（编辑器已限）。
+    /// - selectedIDs 缺省（nil）或显式空数组 = 默认前 4 只「沪深京指数」；
+    /// - 显式选择：按配置顺序返回，未知 / 非指数 id 过滤，防御性上限 4（编辑器已限）；
+    /// - 有效 id 为 0 个（全部失效）时整体回落默认前 4（规格：空选不清空本控件）。
     func indexRows(selectedIDs: [String]?) -> [MarketRow] {
-        guard let selectedIDs else { return indexQuotes }
+        guard let selectedIDs, !selectedIDs.isEmpty else { return indexQuotes }
         var lookup: [Int: MetaItem] = [:]
         for meta in db.metaList where meta.type == Self.indexType { lookup[meta.id] = meta }
-        let metas = Array(selectedIDs
-            .compactMap(Int.init)
-            .compactMap { lookup[$0] }
-            .prefix(4))
+        var seen = Set<Int>()
+        var metas: [MetaItem] = []
+        for raw in selectedIDs {
+            guard let id = Int(raw), let meta = lookup[id] else { continue }
+            if seen.insert(id).inserted { metas.append(meta) }
+            if metas.count >= 4 { break }
+        }
+        guard !metas.isEmpty else { return indexQuotes }
         // 指数 bars 归启动预热统一管，这里不触发预取
         return rowsReadyOnly(metas, prefetch: false)
     }

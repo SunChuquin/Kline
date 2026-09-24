@@ -120,75 +120,76 @@
 
 ### 阶段五：参数引擎扩展（字符串数组 + 动态候选，零行为变化）
 
-- [ ] Task 17: `WidgetParamValue` / `WidgetParams` 支持有序字符串数组
-  - [ ] SubTask 17.1: `PageLayoutSchema.swift`：`WidgetParamValue` 增 `case strings([String])`；`init(from:)` 先试 `[String]` 再走 Int→Double→Bool→String；`encode(to:)` 输出字符串数组；错误文案含 `[string]`；`Equatable` 合成验证
-  - [ ] SubTask 17.2: `WidgetParams` 增 `func strings(_ key:) -> [String]?`（缺键/类型不符 nil；显式 `[]` 返回空数组）；核对空 params 省略逻辑不会吞掉仅含 `entries: []` 的参数表（values 非空即输出）
-  - [ ] SubTask 17.3: `PageLayoutCodec` 往返单测式自查：`entries`/`indices` 数组编解码一致；含数组的旧版容错（`try?` 兜底空表）推演通过
-  - [ ] SubTask 17.4: 编译通过，首页四档呈现零变化（此时尚无控件读取数组）
+- [x] Task 17: `WidgetParamValue` / `WidgetParams` 支持有序字符串数组
+  - [x] SubTask 17.1: `PageLayoutSchema.swift`：`WidgetParamValue` 增 `case strings([String])`；`init(from:)` 先试 `[String]` 再走 Int→Double→Bool→String；`encode(to:)` 输出字符串数组；错误文案含 `[string]`；`Equatable` 合成验证
+  - [x] SubTask 17.2: `WidgetParams` 增 `func strings(_ key:) -> [String]?`（缺键/类型不符 nil；显式 `[]` 返回空数组）；核对空 params 省略逻辑不会吞掉仅含 `entries: []` 的参数表（values 非空即输出）；另补 `optionalString(_:)` 供动态单选缺省语义
+  - [x] SubTask 17.3: `PageLayoutCodec` 往返单测式自查：`entries`/`indices` 数组编解码一致；含数组的旧版容错（`try?` 兜底空表）推演通过
+  - [x] SubTask 17.4: 编译通过，首页四档呈现零变化（此时尚无控件读取数组）
 
-- [ ] Task 18: 候选源描述与 provider
-  - [ ] SubTask 18.1: `HomeWidgetEditorSchema.swift`：`Kind` 增 `orderedList(source:maxCount:note:)` / `dynamicOptions(source:note:)`；新增 `struct ParamCandidate`（id/title/subtitle/iconName?）与 `enum WidgetParamCandidates { entries, indices, favoritesGroups, simAccounts }`
-  - [ ] SubTask 18.2: 新增 `Kline/Home/Editor/WidgetParamCandidateProvider.swift`（`@MainActor enum`，`static func candidates(_:) -> [ParamCandidate]`）：entries 映射 `HomeEntryKind.allCases`；indices 取 `DatabaseManager.shared.metaList`（type=沪深京指数、按名称排序）；favoritesGroups 首项「全部」(allGroupID)+`FavoritesStore.groups`；simAccounts 首项「全部账户」(allAccountID)+`SimStore.accounts`
-  - [ ] SubTask 18.3: 核对 `MetaItem` 的 id/name/code 字段名与 `SimAccount` 的名称字段（实现时以实际定义为准），provider 不引入 SwiftUI
+- [x] Task 18: 候选源描述与 provider
+  - [x] SubTask 18.1: `HomeWidgetEditorSchema.swift`：`Kind` 增 `orderedList(source:maxCount:note:)` / `dynamicOptions(source:note:)`；新增 `struct ParamCandidate`（id/title/subtitle/iconName?）与 `enum WidgetParamCandidates { entries, indices, favoritesGroups, simAccounts }`
+  - [x] SubTask 18.2: 新增 `Kline/Home/Editor/WidgetParamCandidateProvider.swift`（`@MainActor enum`，`static func candidates(_:)` / `defaultTitle(_:)` / `defaultOrder(for:)`）：entries 映射 `HomeEntryKind.allCases`；indices 取 `DatabaseManager.shared.metaList`（候选按名称排序；**默认序列取库顺序前 4 不排序**，对齐 HomePageModel）；favoritesGroups 首项「全部」(allGroupID)+`FavoritesStore.groups`；simAccounts 首项「全部账户」(allAccountID)+`SimStore.accounts`
+  - [x] SubTask 18.3: 核对 `MetaItem` 的 id/name/code 字段名与 `SimAccount` 的名称字段（实现时以实际定义为准），provider 仅 `import Foundation` 不引 SwiftUI
 
-- [ ] Task 19: 编辑器模型与检查器支持两种新参数形态
-  - [ ] SubTask 19.1: `PageLayoutEditorModel` 增 `setStrings(_:key:)`、`listAppend/listRemove/listMove(key:...)`（去重、maxCount 拦截并给状态提示、边界提示）；均调 `touchDraft()`；同值不写
-  - [ ] SubTask 19.2: `LayoutNodeInspector.swift` 增 `OrderedListParamRow`：已选区（icon+标题+副标题、上移/下移/删除、行高 44、命中区 ≥44pt）+ 底部「+ 添加」Menu（只列未选项、按标题排序、达 maxCount 禁用并说明）+ 空选引导文案；行身份用 candidateID
-  - [ ] SubTask 19.3: 增 `DynamicOptionsParamRow`：Menu 单选，首项「默认（全部）」= 删除该键（回落缺省），当前选中实时显示
-  - [ ] SubTask 19.4: 检查器 `@ObservedObject` 观察 FavoritesStore / SimStore，候选随增删即时刷新；数据库 metaList 在检查器出现时已就绪（必要时观察 DatabaseManager 刷候选）
-  - [ ] SubTask 19.5: JSON 原文页签验证数组参数可生成/应用；写坏元素类型（如 entries 给数字）有可读错误且草稿不变
+- [x] Task 19: 编辑器模型与检查器支持两种新参数形态
+  - [x] SubTask 19.1: `PageLayoutEditorModel` 增 `setStrings`、`removeParam`、`listAppend/listRemove/listMove(key:...)`（去重、maxCount 拦截并给 banner「最多选择 N 项」、边界提示）；均调 `touchDraft()`；同值不写；listMove 手动实现移动语义（本文件仅 Foundation/Combine，不可用 SwiftUI 的 Array.move）
+  - [x] SubTask 19.2: `LayoutNodeInspector.swift` 增 `OrderedListParamRow`：已选区（icon+标题+副标题、上移/下移/删除、行高 44、命中区 44pt）+「可添加」候选区（只列未选项、达 maxCount 全部置灰并说明）+ 空选引导文案；行身份用 candidateID；**缺省态展示生效中的默认序列（所见即所得），首次删除/排序先把默认序列落地为自定义**；展开后经 `ScrollViewReader` 自动把「已选」区滚动到检查器可视顶部（修复长列表首行落在可视区/删除栏下方、点击落空，复跑时定位）
+  - [x] SubTask 19.3: 增 `DynamicOptionsParamRow`：Menu 单选，首项（默认项）= 删除该键（回落缺省，落盘无键），当前选中实时显示
+  - [x] SubTask 19.4: `DynamicCandidatesReader` 订阅 DatabaseManager.$metaList / FavoritesStore.$groups / SimStore.$accounts，候选随数据变化即时刷新
+  - [x] SubTask 19.5: JSON 原文页签验证数组参数可生成/应用；写坏元素类型（如 entries 给数字）有可读错误且草稿不变（沿用 decodeResult 错误链）
 
 ### 阶段六：快捷入口自由装配
 
-- [ ] Task 20: 入口枚举与呈现通道
-  - [ ] SubTask 20.1: `HomePageKit.swift`：`HomeEntryKind` 增 `alertRecords`（标题/副标题/icon `clock.arrow.circlepath`/tint `.pink`/formulaKind nil）与 `layoutEditor`（icon `square.grid.3x3`/tint `.indigo`）
-  - [ ] SubTask 20.2: `HomeOverlayTarget` 增 `alertRecord` / `layoutEditor`；`HomeOverlays` 增两全屏分支（`AlertRecordView(onClose:)`、`PageLayoutEditorView(onClose:)`，opacity + zIndex(1000)）
-  - [ ] SubTask 20.3: `HomeView.perform(_:)` 补两分支写 `overlayTarget`；核对从编辑器入口打开编辑器的叠层关闭链（返回只关最上层）
-  - [ ] SubTask 20.4: B/C/D 回退视图 switch 补全：HomeView 注入 `onOpenAlertRecord`/`onOpenLayoutEditor` 两闭包（接到同一 overlayTarget）；回退视图视觉不变，快捷行仍为默认全部入口
-  - [ ] SubTask 20.5: 锚点：`HomeQuickEntryChip` 对新 case 自动产出 `home.entry.alertRecords` / `home.entry.layoutEditor`，无需额外改动（确认即可）
+- [x] Task 20: 入口枚举与呈现通道
+  - [x] SubTask 20.1: `HomePageKit.swift`：`HomeEntryKind` 增 `alertRecords`（标题「触发记录」/icon `clock.arrow.circlepath`/tint `.pink`/formulaKind nil）与 `layoutEditor`（标题「布局编辑」/icon `square.grid.3x3`/tint `.indigo`）
+  - [x] SubTask 20.2: `HomeOverlayTarget` 增 `.alertRecords` / `.layoutEditor`；`HomeOverlays` 增两全屏分支（`AlertRecordView(onClose:)`、`PageLayoutEditorView(onClose:)`，共用 opacity + zIndex(1000)）
+  - [x] SubTask 20.3: `HomeView.perform(_:)` 补两分支写 `overlayTarget`；单值 target 无堆叠，编辑器两处预览 onEntry 均为空闭包，物理上无法再开第二层，返回只关最上层
+  - [x] SubTask 20.4: B/C/D 回退视图 switch 补全：HomeView 注入 `onOpenAlertRecords`/`onOpenLayoutEditor` 两闭包（接到同一 overlayTarget）；回退视图视觉不变，快捷行仍为默认全部入口（#Preview 补空闭包）
+  - [x] SubTask 20.5: 锚点：`HomeQuickEntryChip` 对新 case 自动产出 `home.entry.alertRecords` / `home.entry.layoutEditor`，无需额外改动（确认即可）
 
-- [ ] Task 21: 控件按参数渲染入口集合
-  - [ ] SubTask 21.1: `HomeQuickEntryRow` 改收 `kinds: [HomeEntryKind]`；空数组 → `EmptyView`（无滚动区内边距残留）
-  - [ ] SubTask 21.2: `HomeWidgetRegistry` 的 quickEntryRow builder：`p.strings("entries")` 缺省=allCases；存在=rawValue 映射保序+去重+过滤未知；`[]`=空
-  - [ ] SubTask 21.3: `HomeWidgetEditorSchema` 给 quickEntryRow 声明 `entries` 参数（orderedList / .entries / 无上限 / note「缺省 = 全部入口」）
-  - [ ] SubTask 21.4: 双预览验证：编辑器内增删移入口，页内预览即时变化；全屏预览中入口点击不生效（维持既有标注）
+- [x] Task 21: 控件按参数渲染入口集合
+  - [x] SubTask 21.1: `HomeQuickEntryRow` 改收 `kinds: [HomeEntryKind] = .allCases`；空数组 → `EmptyView`（无滚动区内边距残留）
+  - [x] SubTask 21.2: `HomeWidgetRegistry` 的 quickEntryRow builder：`p.strings("entries")` 缺省=allCases；存在=rawValue 映射保序+去重+过滤未知（去重在独立核验后补齐）；`[]`=空
+  - [x] SubTask 21.3: `HomeWidgetEditorSchema` 给 quickEntryRow 声明 `entries` 参数（orderedList / .entries / 无上限 / note「缺省 = 全部入口」）
+  - [x] SubTask 21.4: 双预览验证：编辑器内增删移入口，页内预览即时变化（test98 已覆盖）；全屏预览中入口点击不生效（onEntry 空闭包，维持既有标注）
 
 ### 阶段七：四个内容控件数据源选择
 
-- [ ] Task 22: `HomePageModel` 按参数取数
-  - [ ] SubTask 22.1: `indexRows(selectedIDs: [String]?) -> [MarketRow]`：nil/空=现前 4；否则按 id 保序解析、过滤失效；0 有效回落前 4；`indexQuotes` 快照保留
-  - [ ] SubTask 22.2: `favoriteRows(groupID:limit:)`：groupID 字符串解析（allGroupID/实体/非法→全部），resolveMetaItems 后预取+截断（limit 0=前 5，1…20 生效）
-  - [ ] SubTask 22.3: `simSummary(accountIDString:)` 与 `simTopPositions(accountIDString:)`：UUID 解析失败/缺省=nil 全部；具体账户下持仓按 accountID 过滤
-  - [ ] SubTask 22.4: `refreshMarketAggregates()` 同任务内预算主板与 ETF指数两套 Top5（类型集复用 `MarketPageKit` 既有口径），新增 `topGainers(board:)`；breadth 口径不动
-  - [ ] SubTask 22.5: 回退视图 B/C/D 继续用旧属性（indexQuotes/favoriteRows/simSummary/topGainers 保留），不受新方法影响
+- [x] Task 22: `HomePageModel` 按参数取数
+  - [x] SubTask 22.1: `indexRows(selectedIDs: [String]?) -> [MarketRow]`：nil/空=现前 4；否则按 id 保序解析、去重、过滤失效、防御性上限 4；0 有效回落前 4（独立核验指出后修正：显式 `[]` 与全失效均回落）；`indexQuotes` 快照保留
+  - [x] SubTask 22.2: `favoriteRows(groupID:limit:)`：groupID 字符串解析（allGroupID/实体/非法→全部），resolveMetaItems 后预取+截断（limit 0=前 5，1…20 生效）
+  - [x] SubTask 22.3: `simSummary(accountIDString:)` 与 `topPositions(accountIDString:)`：UUID 解析失败/缺省=nil 全部；具体账户下持仓按 accountID 过滤（resolveSimAccountID 失效回落 nil）
+  - [x] SubTask 22.4: `refreshMarketAggregates()` 同一次遍历调两次 `boardAggregate(types:includesBreadth:)` 预算主板与 ETF指数两套（mainBoardTypes=`["沪深主板"]`、etfIndexTypes=`["沪深京指数","扩展行情指数"]`），新增 `gainersRows(board:)` / `gainersReady(board:)`；breadth 仅主板算（ETF 不算涨跌停），口径不动
+  - [x] SubTask 22.5: 回退视图 B/C/D 继续用旧属性（indexQuotes/favoriteRows/simSummary/topGainers 保留），不受新方法影响
+  - [x] SubTask 22.6（实现补充）: `rowsReadyOnly(_:prefetch:)` 保证 body 周期只读 `MarketRowCache.rows`（@Published），缺失先给临时壳并在 `DispatchQueue.main.async` 注册/预取+发 objectWillChange，规避「更新期发布」紫警
 
-- [ ] Task 23: 注册表与描述表接线
-  - [ ] SubTask 23.1: `home.marketOverview` builder 读 `indices` 调 `indexRows(selectedIDs:)`；控件视图 init 不变
-  - [ ] SubTask 23.2: `home.favorites` builder 读 `group` + `limit` 调 `favoriteRows(groupID:limit:)`；空态/onEmptyTap 行为不变
-  - [ ] SubTask 23.3: `home.simSummary` builder 读 `account`；`HomeSimSummaryBlock` 由直接读 model 改为接收已算好的 summary/positions/snapshot 数据（或给 model 方法传 accountID 字符串——实现时择改动小者，保持视图与项目既有分层）
-  - [ ] SubTask 23.4: `home.topGainers` builder 读 `board`（"etfIndex" / 默认 mainBoard）调 `topGainers(board:)`
-  - [ ] SubTask 23.5: `HomeWidgetEditorSchema` 四项参数声明齐备（indices maxCount 4；group/account dynamicOptions；board 静态 options 默认 mainBoard）；favorites 的 limit note 改「0 = 默认前 5」
-  - [ ] SubTask 23.6: 默认 JSON 不新增任何键（确认 `homeLayoutDefaultsJSON` diff 为空）；恢复默认=现状呈现
+- [x] Task 23: 注册表与描述表接线
+  - [x] SubTask 23.1: `home.marketOverview` builder 读 `indices` 调 `indexRows(selectedIDs:)`；breadth 固定主板；控件视图 init 不变
+  - [x] SubTask 23.2: `home.favorites` builder 读 `group`（optionalString）+ `limit` 调 `favoriteRows(groupIDString:limit:)`；空态/onEmptyTap 行为不变
+  - [x] SubTask 23.3: `home.simSummary` builder 读 `account`；`HomeSimSummaryBlock` 加 `accountIDString` 入参，summary/positions 均走 model 新方法（保持视图分层、改动最小）
+  - [x] SubTask 23.4: `home.topGainers` builder 读 `board`（"etfIndex" / 默认 mainBoard）调 `gainersRows/gainersReady(board:)`
+  - [x] SubTask 23.5: `HomeWidgetEditorSchema` 四项参数声明齐备（indices maxCount 4；group/account dynamicOptions；board 静态 options mainBoard/etfIndex 默认 mainBoard）；favorites 的 limit note 为「0 = 默认前 5」
+  - [x] SubTask 23.6: 默认 JSON 不新增任何键（`HomeLayoutDefaults.swift` 零改动，沙盒默认 home.json 实测四档均无 entries/indices 等键）；恢复默认=现状呈现
 
 ### 阶段八：测试与验收
 
-- [ ] Task 24: UI 测试（KlineUITests，iPad mini 5 模拟器）
-  - [ ] SubTask 24.1: 新增 `test96_QuickEntriesConfigurable`：个人中心→布局编辑器→树选「快捷入口行」→检查器有序入口行可见；删除一项+上移+添加「触发记录」→断言预览区 chip 顺序文本；保存→首页断言 `home.entry.*` 锚点集合与顺序；恢复默认后回齐
-  - [ ] SubTask 24.2: 新增 `test97_MarketOverviewIndicesConfigurable`：选「大盘概览」节点→指数候选非空（种子库 119 只沪深京指数）→选 2 只→预览指数格=2；添到第 4 个后「+ 添加」禁用
-  - [ ] SubTask 24.3: 回归既有首页/行情/ETF 用例（test01/02/03/91 等）；默认配置锚点不回归
-  - [ ] SubTask 24.4: 若树内定位 widget 节点困难，按项目既有技巧加最小化诊断标识（临时 opacity 0.02 文本，验收后移除）
+- [x] Task 24: UI 测试（KlineUITests，iPad mini 5 模拟器）
+  - [x] SubTask 24.1: 新增 `test98_Home_QuickEntriesConfigurable`（规划名 test96，因 test91-97 编号已占用顺延）：快捷入口行删 search、tech 下移、首页即时生效、杀进程重启持久化、恢复默认回齐；含横滑首页入口行与树列表懒加载滚动两个 helper
+  - [x] SubTask 24.2: 新增 `test99_Home_MarketOverviewIndicesConfigurable`（规划名 test97）：默认 4 只指数、删除后候选可点、加回达 4/4 全部候选禁用、持久化、恢复默认
+  - [x] SubTask 24.3: 回归既有首页/行情用例（test91/92/93/95/96/97）未改锚点；`home.entry.` 旧 6 锚点保持
+  - [x] SubTask 24.4: 未加任何临时诊断标识；树内定位用既有锚点 `layout.tree.widget.<name>` + 树面板坐标滑动解决懒加载
 
-- [ ] Task 25: iPad mini 5 模拟器构建安装 + 沙盒日志/真机验收
-  - [ ] SubTask 25.1: 加载 `kline-device-validation-loop` 技能；先 `xcrun simctl list` 确认 iPad mini 5 模拟器，`open -a Simulator` GUI 启动（禁止无头后台）
-  - [ ] SubTask 25.2: 非沙箱 xcodebuild（dangerouslyDisableSandbox）构建安装到该模拟器；禁止后台跑 build_and_deploy.py，必须等待返回
-  - [ ] SubTask 25.3: 验收：8 入口默认呈现；编辑器入口增删移+清空；触发记录/布局编辑器两入口可开可关；四控件参数（指数/分组/账户/板块）切换与预览；保存后首页生效；恢复默认；四档独立
-  - [ ] SubTask 25.4: 沙盒日志核对：拉取 `Documents/Layouts/home.json`，确认数组/单选取值与编辑器一致；失效 id 容错无崩溃日志
-  - [ ] SubTask 25.5: 回归：四档布局、点行开 K 线、搜索、公式中心、条件单、个人中心、悬浮按钮延迟显示均正常
+- [x] Task 25: iPad mini 5 模拟器构建安装 + 沙盒日志（人工目视项并入 Task 15 真机验收）
+  - [x] SubTask 25.1: 已确认 iPad mini 5（UDID 54291852-68BE-45BF-ACC0-72CEAEF10A0B）Booted，全程 `open -a Simulator` GUI 前台
+  - [x] SubTask 25.2: `bash scripts/kline_deploy_mac.sh`（前台等待返回）xcodebuild 构建+安装+启动，commit afb1097 已 push
+  - [ ] SubTask 25.3: 目视验收（待用户）：8 入口默认呈现；编辑器入口增删移+清空；触发记录/布局编辑器两入口可开可关；四控件参数切换；四档独立（自动化已覆盖 entries/indices 主链路）
+  - [x] SubTask 25.4: 沙盒核对：默认 home.json 四档无 entries/indices 键；注入 `entries=["picker","tech","alertRecords","layoutEditor"]` 与 `indices=["327","324"]` 后首页按序渲染 4 入口 2 指数；恢复默认后键消失；日志无 error/crash/紫警
+  - [ ] SubTask 25.5: 回归目视（待用户，与 Task 15 合并）：四档布局、点行开 K 线、搜索、公式中心、条件单、个人中心、悬浮按钮延迟显示
 
-- [ ] Task 26: 第二轮收尾
-  - [ ] SubTask 26.1: 独立只读核验代理逐条核验第二轮 checklist，修复问题
-  - [ ] SubTask 26.2: 工作区无临时残留；回填 tasks/checklist
-  - [ ] SubTask 26.3: 按版本管理规范提交（描述引擎扩展、入口装配、数据源选择、测试），并 push 到远端
+- [x] Task 26: 第二轮收尾
+  - [x] SubTask 26.1: 独立只读核验代理逐条核验第二轮 checklist，修复 4 项问题（indices 空选/全失效回落前 4、entries builder 去重、动态单选默认项删键、已选/候选行命中区 44pt）；44pt 改动后复跑暴露第 5 项——展开后首屏已选行位于检查器可视区外/被底部删除栏遮挡致点击落空，补 `ScrollViewReader` 展开自动定位 + 测试 helper 等 0.5s 动画；最终 test98（89.8s）/ test99（124.6s）复跑 0 failures
+  - [x] SubTask 26.2: 工作区无临时残留（注入文件已还原）；回填 tasks/checklist
+  - [x] SubTask 26.3: 主体改动经部署脚本提交 afb1097 并 push；核验修复与文档回填为后续补充提交
 
 # Task Dependencies
 

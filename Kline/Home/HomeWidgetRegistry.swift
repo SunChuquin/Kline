@@ -24,10 +24,14 @@ struct HomeWidgetRegistry {
         }
 
         r.register("home.quickEntryRow") { ctx, p in
-            // entries 缺省 = 全量入口；空数组 = 零高度；未知 id 过滤，保持配置顺序
+            // entries 缺省 = 全量入口；空数组 = 零高度；未知 id 过滤；去重并保持配置顺序
             let kinds: [HomeEntryKind]
             if let rawIDs = p.strings("entries") {
-                kinds = rawIDs.compactMap { HomeEntryKind(rawValue: $0) }
+                var seen = Set<String>()
+                kinds = rawIDs.compactMap { raw in
+                    guard let kind = HomeEntryKind(rawValue: raw), seen.insert(raw).inserted else { return nil }
+                    return kind
+                }
             } else {
                 kinds = HomeEntryKind.allCases
             }

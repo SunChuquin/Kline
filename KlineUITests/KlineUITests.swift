@@ -527,6 +527,8 @@ final class KlineUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["可添加"].waitForExistence(timeout: 5),
                       "参数行 \(paramKey) 未展开")
+        // 展开后检查器会自动滚动定位已选区（动画约 0.25s），等待其稳定后再操作行内按钮
+        Thread.sleep(forTimeInterval: 0.5)
     }
 
     /// 保存并退出编辑器（保存后无脏标记，返回直接关闭）

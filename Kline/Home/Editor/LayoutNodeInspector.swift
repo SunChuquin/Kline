@@ -33,28 +33,30 @@ struct LayoutNodeInspector: View {
     // MARK: - 主体
 
     private func inspector(for node: PageLayoutNode) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                headerRow(node)
-                Divider()
-                switch node.type {
-                case "vstack", "hstack", "zstack":
-                    stackFields(node)
-                case "scroll":
-                    scrollFields(node)
-                case "card":
-                    cardFields(node)
-                case "frame":
-                    frameFields(node)
-                case "widget":
-                    widgetFields(node)
-                default:
-                    noFieldsRow("该节点无可调字段")
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    headerRow(node)
+                    Divider()
+                    switch node.type {
+                    case "vstack", "hstack", "zstack":
+                        stackFields(node)
+                    case "scroll":
+                        scrollFields(node)
+                    case "card":
+                        cardFields(node)
+                    case "frame":
+                        frameFields(node)
+                    case "widget":
+                        widgetFields(node, scrollProxy: proxy)
+                    default:
+                        noFieldsRow("该节点无可调字段")
+                    }
                 }
             }
+            .safeAreaInset(edge: .bottom) { deleteBar }
+            .background(Color(.systemBackground))
         }
-        .safeAreaInset(edge: .bottom) { deleteBar }
-        .background(Color(.systemBackground))
     }
 
     private func headerRow(_ node: PageLayoutNode) -> some View {
@@ -151,7 +153,7 @@ struct LayoutNodeInspector: View {
     // MARK: - 控件字段
 
     @ViewBuilder
-    private func widgetFields(_ node: PageLayoutNode) -> some View {
+    private func widgetFields(_ node: PageLayoutNode, scrollProxy: ScrollViewProxy) -> some View {
         row("控件") {
             Menu {
                 ForEach(HomeWidgetEditorSchema.all, id: \.name) { descriptor in
@@ -164,7 +166,7 @@ struct LayoutNodeInspector: View {
 
         if let descriptor = HomeWidgetEditorSchema.descriptor(for: node.name ?? ""), !descriptor.params.isEmpty {
             ForEach(descriptor.params, id: \.key) { param in
-                paramRow(param, node: node)
+                paramRow(param, node: node, scrollProxy: scrollProxy)
             }
         } else {
             noFieldsRow("该控件无可调参数")
@@ -172,7 +174,7 @@ struct LayoutNodeInspector: View {
     }
 
     @ViewBuilder
-    private func paramRow(_ param: WidgetParamDescriptor, node: PageLayoutNode) -> some View {
+    private func paramRow(_ param: WidgetParamDescriptor, node: PageLayoutNode, scrollProxy: ScrollViewProxy) -> some View {
         switch param.kind {
         case .toggle(let defaultValue):
             row(param.title) {
@@ -212,7 +214,8 @@ struct LayoutNodeInspector: View {
 
         case .orderedList(let source, let maxCount, let note):
             OrderedListParamRow(editor: editor, param: param, node: node,
-                                source: source, maxCount: maxCount, note: note)
+                                source: source, maxCount: maxCount, note: note,
+                                scrollProxy: scrollProxy)
 
         case .dynamicOptions(let source, let note):
             DynamicOptionsParamRow(editor: editor, param: param, node: node,
@@ -386,7 +389,12 @@ private struct DynamicOptionsParamRow: View {
                     Menu {
                         ForEach(candidates) { candidate in
                             Button {
-                                editor.setString(param.key, candidate.id, on: node)
+                                // 首项 = 缺省项（全部 / 全部账户）：选择它即删除该键，保持「缺省 = 键缺失」
+                                if candidate.id == candidates.first?.id {
+                                    editor.removeParam(param.key, on: node)
+                                } else {
+                                    editor.setString(param.key, candidate.id, on: node)
+                                }
                             } label: {
                                 if isEffective(candidate.id, candidates: candidates) {
                                     Label(candidate.title, systemImage: "checkmark")
@@ -447,15 +455,28 @@ private struct OrderedListParamRow: View {
     let source: WidgetParamCandidates
     let maxCount: Int?
     let note: String?
+    let scrollProxy: ScrollViewProxy
 
     @State private var expanded = false
+
+    /// 已选区锚点：展开后自动滚动到该位置，避免长列表初始行落在检查器可视区之外
+    private var topAnchor: String { "orderedListTop.\(param.key)" }
 
     private var selectedIDs: [String]? { node.params?.strings(param.key) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                let willExpand = !expanded
                 withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                if willExpand {
+                    // 展开动画 + 候选异步加载后再定位，确保首行可见可点
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            scrollProxy.scrollTo(topAnchor, anchor: .top)
+                        }
+                    }
+                }
             } label: {
                 HStack(spacing: 8) {
                     Text(param.title)
@@ -499,9 +520,13 @@ private struct OrderedListParamRow: View {
         if selectedIDs == nil {
             infoLine("当前为默认：\(WidgetParamCandidateProvider.defaultTitle(source))。直接移除或排序即开始自定义。")
         } else if effective.isEmpty {
-            infoLine("未选择任何项目：该控件将不显示内容")
+            // indices 源规格约定：空选 / 全失效回落默认前 4（HomePageModel.indexRows）
+            infoLine(source == .indices
+                     ? "未选择任何项目：将显示默认前 4 只指数"
+                     : "未选择任何项目：该控件将不显示内容")
         }
         sectionHeader("已选 · \(effective.count)\(maxCount.map { "/\($0)" } ?? "")")
+            .id(topAnchor)
         ForEach(Array(effective.enumerated()), id: \.element) { index, id in
             selectedRow(id: id, index: index, total: effective.count, candidates: candidates)
         }
@@ -560,6 +585,8 @@ private struct OrderedListParamRow: View {
                     step(index: index, up: true)
                 } label: {
                     Image(systemName: "chevron.up").font(.system(size: 13))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(index == 0)
@@ -568,6 +595,8 @@ private struct OrderedListParamRow: View {
                     step(index: index, up: false)
                 } label: {
                     Image(systemName: "chevron.down").font(.system(size: 13))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(index >= total - 1)
@@ -578,13 +607,15 @@ private struct OrderedListParamRow: View {
                     Image(systemName: "minus.circle.fill")
                         .font(.system(size: 16))
                         .foregroundColor(.red)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("layout.param.\(param.key).selected.\(id).remove")
             }
             .padding(.leading, 20)
-            .padding(.trailing, 16)
-            .frame(minHeight: 40)
+            .padding(.trailing, 4)
+            .frame(minHeight: 44)
             Divider().padding(.leading, 20)
         }
         .accessibilityElement(children: .contain)
@@ -615,7 +646,7 @@ private struct OrderedListParamRow: View {
                 }
                 .padding(.leading, 20)
                 .padding(.trailing, 16)
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
