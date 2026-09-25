@@ -104,18 +104,18 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
 
 /// 首页浮层的单一呈现目标：公式管理中心（按分段）/ 条件单管理页。
 /// 用单一 target 枚举而非多个 Bool：类型上保证同时只呈现一个，切换时自然替换。
+/// 注：布局编辑器不在其中——它要盖住底部导航栏，由 `ContentView` 根层用
+/// `HomeLayoutEditorRouter` 呈现（见 PageLayoutEditorView.swift）。
 enum HomeOverlayTarget: Identifiable, Equatable {
     case formula(FormulaKind)
     case condOrder
     case alertRecords
-    case layoutEditor
 
     var id: String {
         switch self {
         case .formula(let kind): return "formula.\(kind.rawValue)"
         case .condOrder: return "condOrder"
         case .alertRecords: return "alertRecords"
-        case .layoutEditor: return "layoutEditor"
         }
     }
 }
@@ -139,8 +139,6 @@ struct HomeOverlays: ViewModifier {
                             SimCondListView(accountID: nil, onClose: { target = nil })
                         case .alertRecords:
                             AlertRecordView(onClose: { target = nil })
-                        case .layoutEditor:
-                            PageLayoutEditorView(onClose: { target = nil })
                         }
                     }
                     .transition(.opacity)

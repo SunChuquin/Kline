@@ -127,7 +127,8 @@ struct HomeView: View {
     }
 
     private func onOpenLayoutEditor() {
-        overlayTarget = .layoutEditor
+        // 编辑器要盖住底部导航栏 → 走根层路由呈现（页面内 overlay 盖不住底栏）
+        HomeLayoutEditorRouter.shared.isPresented = true
     }
 
     private func onProfile() {

@@ -239,3 +239,15 @@
 - Task 28 depends on Task 27（模型先有跨级拖入 API，视图才有落点可调）
 - Task 29 depends on Task 28
 - Task 30 depends on Task 29
+
+## 阶段十一：编辑器全屏化与页面瘦身（第四轮，2026-09-25）
+
+- [x] Task 31: 编辑器全屏 + 去页内预览 + 四档并入标题行
+  - [x] SubTask 31.1: 新增 `HomeLayoutEditorRouter`（`PageLayoutEditorView.swift`，`@Published isPresented`）；`ContentView` 根 ZStack 新增全屏呈现分支（并列于 K线详情页之后）→ 盖住底部导航栏
+  - [x] SubTask 31.2: `HomeView.onOpenLayoutEditor()` 改为置位 router；`HomeOverlayTarget` 删除 `.layoutEditor`（case / id / `HomeOverlays` switch 臂）；个人中心入口不动（其覆盖层本就全屏）
+  - [x] SubTask 31.3: 删除 `HomeLayoutPreviewPane.swift` 并从 `PageLayoutEditorView.body` 移除该视图与两条分隔线；「全屏预览」胶囊保留 + 锚点 `layoutEditor.fullPreview`
+  - [x] SubTask 31.4: 删除无引用的 `PageLayoutEditorModel.styleTitle`；四档分段并入 `header` 单行（返回 / 标题 / 分段 / Spacer / 全屏预览），新增锚点 `layoutEditor.stylePicker`，删除原「档位行」
+  - [x] SubTask 31.5: 编译通过 + 编辑器相关 5 个用例实跑通过（test98/99/100/101/102）
+  - [ ] SubTask 31.6: 用户设备验收（铺满整屏 / 无页内预览 / 四档在标题行 / 内容区更高）
+  - [ ] SubTask 31.7: 闭环命令部署并 push
+- Task 31 depends on Task 30

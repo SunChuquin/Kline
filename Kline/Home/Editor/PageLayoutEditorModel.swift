@@ -66,11 +66,6 @@ final class PageLayoutEditorModel: ObservableObject {
         file?.layouts[styleID]?.root
     }
 
-    /// 当前档位标题
-    var styleTitle: String {
-        file?.layouts[styleID]?.title ?? styleID
-    }
-
     /// 是否有未保存改动（规范化文本比较）
     var isDirty: Bool {
         let now = file.flatMap { PageLayoutCodec.canonicalText($0) } ?? ""

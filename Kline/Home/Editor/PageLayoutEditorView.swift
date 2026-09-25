@@ -3,19 +3,29 @@
 //  Kline
 //
 //  布局编辑器 - 全屏页面。
-//  自上而下：顶部栏（返回 / 标题 / 全屏预览）→ 档位行 → 页签行（表单 / JSON 原文 + 保存 / 恢复默认）
-//  → 上半编辑区（树列表 + 检查器，或 JSON 通栏编辑器）→ 下半常驻只读预览 → 底部状态条。
+//  自上而下：顶部单行（返回 / 标题 / 四档切换 / 全屏预览）→ 页签行（表单 / JSON 原文 + 保存 / 恢复默认）
+//  → 编辑区（树列表 + 检查器，或 JSON 通栏编辑器，占满剩余高度）→ 底部状态条。
 //  浮层：HomeLayoutFullPreviewView（全屏预览）。
-//  呈现方式沿用 FormulaCenterView 的容器层 overlay 惯例（页面自带「返回」，不设遮罩）。
+//  呈现方式：编辑器要盖住底部导航栏，故由 `ContentView` 根 ZStack 用
+//  `HomeLayoutEditorRouter` 呈现（与 K线详情页 DetailRouter 同做法）；页面自带「返回」，不设遮罩。
+//  页内**不再**放常驻预览（预览只在全屏预览页看），把纵向空间全部留给编辑区。
 //
 
+import Combine
 import SwiftUI
+
+/// 布局编辑器呈现路由器：编辑器是全屏页面（必须盖住底部导航栏），
+/// 挂在 `ContentView` 根 ZStack 上呈现；首页入口与个人中心入口都只置位此开关。
+final class HomeLayoutEditorRouter: ObservableObject {
+    static let shared = HomeLayoutEditorRouter()
+    @Published var isPresented = false
+}
 
 struct PageLayoutEditorView: View {
     let onClose: () -> Void
 
     @StateObject private var editor = PageLayoutEditorModel()
-    /// 两处预览共用同一份真实数据
+    /// 全屏预览用真实数据
     @StateObject private var previewModel = HomePageModel()
     @State private var showFullPreview = false
     @State private var showResetConfirm = false
@@ -25,18 +35,10 @@ struct PageLayoutEditorView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            styleRow
             tabRow
             Divider()
 
             editArea
-                .frame(maxHeight: .infinity)
-
-            Divider()
-
-            HomeLayoutPreviewPane(editor: editor,
-                                  model: previewModel,
-                                  onExpand: { showFullPreview = true })
                 .frame(maxHeight: .infinity)
 
             Divider()
@@ -61,10 +63,11 @@ struct PageLayoutEditorView: View {
         }
     }
 
-    // MARK: - 顶部栏（对齐 FormulaCenterView.header 的胶囊样式）
+    // MARK: - 顶部单行（返回 / 标题 / 四档切换 / 全屏预览）
+    // 四档切换原为独立一行，现并入标题行：省下一整行高度给编辑区
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Button {
                 if editor.isDirty {
                     showDirtyAlert = true
@@ -82,14 +85,22 @@ struct PageLayoutEditorView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("layoutEditor.back")
-            .padding(.leading, 16)
-
-            Spacer(minLength: 8)
 
             Text("布局编辑器")
                 .accessibilityIdentifier("layoutEditor.title")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.primary)
+                .fixedSize()
+
+            Picker("", selection: $editor.styleID) {
+                ForEach(HomeLayoutStyle.allCases) { style in
+                    Text(style.rawValue).tag(style.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 220)
+            .accessibilityIdentifier("layoutEditor.stylePicker")
 
             Spacer(minLength: 8)
 
@@ -106,34 +117,11 @@ struct PageLayoutEditorView: View {
                 .background(Color.gray.opacity(0.12)).cornerRadius(8)
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 16)
-        }
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground))
-    }
-
-    // MARK: - 档位行
-
-    private var styleRow: some View {
-        HStack(spacing: 12) {
-            Picker("", selection: $editor.styleID) {
-                ForEach(HomeLayoutStyle.allCases) { style in
-                    Text(style.rawValue).tag(style.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 240)
-
-            Text(editor.styleTitle)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
+            .accessibilityIdentifier("layoutEditor.fullPreview")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground))
     }
 
     // MARK: - 页签行

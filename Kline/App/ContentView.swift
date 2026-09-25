@@ -21,6 +21,8 @@ struct ContentView: View {
     /// 想点「首页 / 模拟」切换时容易误触到按钮（它比 Tab 更靠上、命中区 56/128.8pt 也更大）
     @State private var bottomBarHeight: CGFloat = 0
     @ObservedObject private var detailRouter = DetailRouter.shared
+    /// 全屏布局编辑器（首页/个人中心入口都置位它，见 PageLayoutEditorView.swift）
+    @ObservedObject private var layoutEditorRouter = HomeLayoutEditorRouter.shared
     @ObservedObject private var accessoryCoordinator = FloatingAccessoryCoordinator.shared
     /// 全 App 显示主题（个人中心可切换：日间 / 夜间 / 跟随系统）
     @ObservedObject private var themeStore = KlineThemeStore.shared
@@ -74,6 +76,16 @@ struct ContentView: View {
             if let item = detailItem {
                 KlineDetailView(item: item) {
                     DetailRouter.shared.item = nil
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+            }
+
+            // 全屏布局编辑器（覆盖整个屏幕，含底部栏）：
+            // 挂在根 ZStack 而非首页内部——首页在 VStack 里只占底栏以上的区域，
+            // 页面内 overlay 永远盖不住底部导航栏（用户要求编辑器全屏）
+            if layoutEditorRouter.isPresented {
+                PageLayoutEditorView {
+                    layoutEditorRouter.isPresented = false
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }

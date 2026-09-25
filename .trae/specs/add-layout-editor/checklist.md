@@ -179,3 +179,15 @@
 - [x] 沙盒 `Documents/Layouts/home.json` 核对：可解析、schemaVersion/四档结构完整、B 档根子节点顺序为默认（`header → divider → quickEntryRow → scroll(card 大盘概览 / hstack(frame,frame) / card 涨幅榜)`，即用例末尾「恢复默认」已落盘）；`Documents/debug_log.txt` 无 error/fatal/crash，无残留诊断日志
 - [x] 相对已批准草案的实现偏差已在 spec.md 记录（去 `List`、**删除「排序」开关改统一落点分区**、叶子落点无系统禁止光标、行分隔线自绘、新增 `DropRejection.crossLevel` 与按兄弟重排 API）
 - [ ] 变更已按版本管理规范提交并 push
+
+## 阶段十：编辑器全屏化与页面瘦身（第四轮，2026-09-25）
+
+- [x] 编辑器由「首页内部 overlay」改为「`ContentView` 根 ZStack 呈现」（新增 `HomeLayoutEditorRouter`，与 `DetailRouter` 同做法）→ 铺满整屏、**底部导航栏被完全盖住**
+- [x] `HomeOverlayTarget` 删除 `.layoutEditor` 分支（case / id / `HomeOverlays` switch 臂），无死代码残留；`HomeView.onOpenLayoutEditor()` 改为置位 router
+- [x] 个人中心入口不改（`ProfileDetailView` 本身即根层全屏覆盖层，其内编辑器本就铺满整屏）
+- [x] 页内常驻预览删除：`HomeLayoutPreviewPane.swift` 文件删除（同步组自动移出 target）、`PageLayoutEditorView` 移除该视图与两条分隔线、「全屏预览」胶囊保留（锚点 `layoutEditor.fullPreview`）
+- [x] `PageLayoutEditorModel.styleTitle` 无引用后删除
+- [x] 四档切换（A/B/C/D 分段）由独立「档位行」并入 `header` 单行：返回 / 标题 / 分段 / ←Spacer→ 全屏预览；新增锚点 `layoutEditor.stylePicker`
+- [x] 编译通过；编辑器相关 5 个用例实跑通过：test98（72.2s）、test99（101.3s）、test100（80.6s）、test101（69.6s）、test102（73.1s）
+- [ ] 用户设备验收：编辑器铺满整屏（底栏不可见）、无页内预览、四档切换在标题行、内容区明显变高
+- [ ] 变更已按版本管理规范提交并 push

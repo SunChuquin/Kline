@@ -658,3 +658,70 @@
 ## REMOVED Requirements（第三轮）
 
 无。
+
+---
+
+## Why（第四轮，2026-09-25）
+
+用户原话：**「让布局编辑器全屏吧，它现在还显示了底部导航栏，然后把布局编辑器的预览去掉，只需要留下全局预览功能，4个布局方案的切换按钮也尽量跟标题栏整合为一行，让布局编辑器真正的内容可以显示的更多」**
+
+三个问题，三条改动理由：
+1. **底部导航栏还在**：编辑器此前由首页用 `HomeOverlays(target: .layoutEditor)` 在**首页视图内部**呈现，而首页在 `ContentView` 的 VStack 里只占底栏以上区域 —— 页面内 overlay 结构上不可能盖住底栏。
+2. **页内常驻预览吃掉了下半屏**：本轮起预览只在全屏预览页看，页内预览整块删除（`HomeLayoutPreviewPane.swift` 文件删除）。
+3. **四档切换独占一行**：并入标题行，省下一整行高度。
+
+## What Changes（第四轮）
+
+### 一、全屏呈现：编辑器提到 `ContentView` 根层（PageLayoutEditorView.swift / ContentView.swift / HomeView.swift / HomePageKit.swift）
+
+- 新增 `HomeLayoutEditorRouter`（`ObservableObject` 单例，`@Published var isPresented`），与 K线详情页的 `DetailRouter` 同做法，定义在 `PageLayoutEditorView.swift`。
+- `ContentView` 根 ZStack 里新增一支「若 `isPresented` 则全屏呈现 `PageLayoutEditorView`」（并列于 K线详情页之后），根层 ZStack 铺满整屏 → 自然盖住底部导航栏。
+- `HomeView.onOpenLayoutEditor()` 由「置 `overlayTarget = .layoutEditor`」改为「置位 router」；`HomeOverlayTarget` 的 `.layoutEditor` 分支（case / id / HomeOverlays switch 臂）整体删除（无引用，避免死代码）。
+- 个人中心入口（`ProfileDetailView`）**不改**：`ProfileDetailView` 本身已是根层全屏覆盖层，其内部呈现的编辑器本来就铺满整屏（含底栏），无需改动。
+
+### 二、去掉页内常驻预览
+
+- `PageLayoutEditorView.body` 移除 `HomeLayoutPreviewPane(...)` 与其上下两条分隔线；`editArea` 占满除标题行 / 页签行 / 状态条外的全部高度。
+- 删除文件 `Kline/Home/Editor/HomeLayoutPreviewPane.swift`（工程用 `PBXFileSystemSynchronizedRootGroup`，删文件即从 target 移除，无需改 pbxproj）。
+- 「全屏预览」胶囊按钮保留并加锚点 `layoutEditor.fullPreview`；`previewModel`（真实 `HomePageModel`）保留，仅供全屏预览使用。
+- `PageLayoutEditorModel.styleTitle` 随之无引用，删除（档位说明改由分段控件自身表达）。
+
+### 三、四档切换并入标题行
+
+- 原「档位行」（分段 A/B/C/D + `styleTitle` 文本，独占一行约 44pt）删除，分段控件移入 `header`。
+- `header` 由「返回 / ←Spacer→ 标题 ←Spacer→ 全屏预览」改为单行「返回 / 标题 / 分段 A|B|C|D / ←Spacer→ 全屏预览」，左右内边距 16、上下 8。
+- 新增锚点 `layoutEditor.stylePicker`。
+
+### 四、非目标（第四轮不做）
+
+- 不改编辑器内部编辑能力（树 / 检查器 / JSON 页签 / 拖拽）；
+- 不做可拖拽分栏宽度、不做预览与编辑并排；
+- 不动个人中心入口的呈现方式。
+
+### 五、BREAKING
+
+无。锚点 `layoutEditor.back/title/save/resetDefault/treeList` 全部保留（测试 98/99/100/101/102 实跑通过）。
+
+## MODIFIED Requirements（第四轮）
+
+### Requirement: 实时预览
+
+预览**只有全屏预览一种**：页内常驻预览已删除（`HomeLayoutPreviewPane.swift` 移除）。编辑器页面本身不再占用纵向空间做预览，编辑区独占剩余高度；草稿改动仍经 `touchDraft()` 即时反映到全屏预览页。
+
+#### Scenario: 全屏预览
+- **WHEN** 点顶部「全屏预览」（锚点 `layoutEditor.fullPreview`）
+- **THEN** 铺满打开预览页，渲染当前草稿档位并允许真实交互（点行情行可打开 K 线详情）；顶部标注「预览模式 · 入口与 Tab 切换不生效」
+
+### Requirement: 布局编辑器入口
+
+编辑器是**全屏页面**：由 `HomeLayoutEditorRouter.shared.isPresented` 触发、在 `ContentView` 根 ZStack 呈现，铺满整屏**含底部导航栏**；关闭走页内「返回」（有未保存改动先弹确认）。
+
+#### Scenario: 从首页入口打开
+- **WHEN** 点首页快捷入口「布局编辑」（锚点 `home.entry.layoutEditor`）或个人中心「布局编辑」行
+- **THEN** 全屏打开编辑器，底部导航栏被完全盖住（不可见、不可点），页面自带「返回」
+
+## REMOVED Requirements（第四轮）
+
+### Requirement: 页内常驻预览
+
+原「编辑器下半常驻只读预览（`HomeLayoutPreviewPane`，1:1 不缩放、`allowsHitTesting(false)`）」**删除**：预览统一走全屏预览页。
