@@ -2,12 +2,12 @@
 //  CommonLayoutWidgets.swift
 //  Kline
 //
-//  通用 JSON 布局引擎 - **页面无关**的通用控件（横滑卡片 / 列表卡片 / 占位块）。
+//  通用 JSON 布局引擎 - **页面无关**的通用控件（横滑卡片 / 列表卡片）。
 //
 //  与首页控件（home.* 前缀）的区别：这几个控件**只读 WidgetParams**，
 //  不依赖任何页面的上下文（不读 HomeLayoutContext、不碰页面状态），
 //  因此任何页面的注册表都能用 `registerCommonLayoutWidgets(into:)` 把这一组合并进去。
-//  视觉规格逐项对齐「测试页面」（ProfileView）里的 HorizontalScrollCard / ListCard / 灰色占位矩形。
+//  视觉规格逐项对齐「测试页面」（ProfileView）里的 HorizontalScrollCard / ListCard。
 //
 //  控件名、本文件的注册名、CommonLayoutWidgetSchema 的描述、JSON 里的 widget.name 四处必须一致。
 //
@@ -22,8 +22,6 @@ enum CommonWidgetName {
     static let hscrollCard = "common.hscrollCard"
     /// 列表卡片：标题栏 + 竖向编号列表（对齐 ProfileView 的 ListCard）
     static let listCard = "common.listCard"
-    /// 占位块：固定高度的浅灰圆角块（对齐 ProfileView 的占位 Rectangle）
-    static let placeholder = "common.placeholder"
 }
 
 // MARK: - 注册
@@ -44,15 +42,11 @@ func registerCommonLayoutWidgets<Context>(into registry: inout PageWidgetRegistr
                                updateTime: p.optionalString("updateTime"),
                                showsMore: p.bool("showsMore", default: false)))
     }
-
-    registry.register(CommonWidgetName.placeholder) { _, p in
-        AnyView(CommonPlaceholderBlock(height: CGFloat(p.int("height", default: 150))))
-    }
 }
 
 // MARK: - 控制台：可编辑参数描述
 
-/// 通用控件的「可编辑参数」描述（与 `registerCommonLayoutWidgets` 注册的三个控件一一对应）
+/// 通用控件的「可编辑参数」描述（与 `registerCommonLayoutWidgets` 注册的两个控件一一对应）
 enum CommonLayoutWidgetSchema {
     static let all: [WidgetDescriptor] = [
         WidgetDescriptor(name: CommonWidgetName.hscrollCard,
@@ -91,15 +85,6 @@ enum CommonLayoutWidgetSchema {
                             WidgetParamDescriptor(key: "showsMore",
                                                   title: "显示「更多」",
                                                   kind: .toggle(default: false))
-                         ]),
-
-        WidgetDescriptor(name: CommonWidgetName.placeholder,
-                         title: "占位块",
-                         params: [
-                            WidgetParamDescriptor(key: "height",
-                                                  title: "高度",
-                                                  kind: .stepper(default: 150, range: 40...600,
-                                                                 note: "浅灰圆角块，用于预留空间"))
                          ])
     ]
 }
@@ -231,20 +216,6 @@ struct CommonListCard: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - 占位块
-
-/// 占位块：固定高度的浅灰圆角块（用于预留空间 / 占位）
-struct CommonPlaceholderBlock: View {
-    let height: CGFloat
-
-    var body: some View {
-        Rectangle()
-            .fill(Color(.systemGray5))
-            .frame(height: height)
-            .cornerRadius(12)
     }
 }
 

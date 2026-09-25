@@ -79,7 +79,7 @@ struct HomeWidgetRegistry {
                                                onOpen: HomeWidgetRegistry.openDetail))
         }
 
-        // 页面无关的通用控件（横滑卡片 / 列表卡片 / 占位块）：
+        // 页面无关的通用控件（横滑卡片 / 列表卡片）：
         // 只吃 WidgetParams、不读 HomeLayoutContext，未来其它页面的注册表可直接复用同一组
         registerCommonLayoutWidgets(into: &r)
 
