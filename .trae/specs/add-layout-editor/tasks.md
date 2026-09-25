@@ -276,6 +276,7 @@
   - [x] SubTask 33.5: `LayoutNodeInspector.paramRow` 新增 `.text`（右对齐 `TextField` + 说明）与 `.textList`（`TextListParamRow`：头行「＋添加一条」/ 每行序号 + `TextField` + 红色删除 / 空态提示 / 说明）两分支
   - [x] SubTask 33.6: 两处接入——`HomeWidgetEditorSchema.all` 末尾 `] + CommonLayoutWidgetSchema.all`；`HomeWidgetRegistry.init` 末尾 `registerCommonLayoutWidgets(into: &r)`
   - [x] SubTask 33.7: 闭环命令部署：`** BUILD SUCCEEDED **` → 安装启动 `com.sunck.Kline: 23621` → commit `a9e07fc`（4 files changed, 390 insertions(+), 4 deletions(-)）→ push `311b196..a9e07fc main`
-  - [ ] SubTask 33.8: 用户设备验收（添加控件菜单出现「横滑卡片 / 列表卡片 / 占位块」；检查器出现文本框与逐行条目编辑；填条目→全屏预览即时生效；保存后重启保持）
-  - [ ] SubTask 33.9: 回归点（既有 7 个 `home.*` 控件、四档呈现、`home.json` 解码与既有锚点行为不变）
+  - [x] SubTask 33.10（用户反馈）: **删除灰色占位块**——`common.placeholder` 无任何配置引用，且与既有 `home.placeholder`（A 档欢迎块，被 `HomeLayoutDefaults` 引用、带 `home.welcome` 锚点）在「添加控件」菜单里重名。删除 `CommonPlaceholderBlock` 视图、注册块、schema 项与全部相关注释；`home.placeholder` 保持不动。通用控件组定为**两个**（横滑卡片 / 列表卡片）。部署：`** BUILD SUCCEEDED **` → commit `56be331`（3 files changed, 6 insertions(+), 35 deletions(-)）→ push `02fe5e6..56be331 main`
+  - [ ] SubTask 33.8: 用户设备验收（添加控件菜单出现「横滑卡片 / 列表卡片」，且不再有重名的两个「占位块」；检查器出现文本框与逐行条目编辑；填条目→全屏预览即时生效；保存后重启保持）
+  - [ ] SubTask 33.9: 回归点（既有 7 个 `home.*` 控件含 A 档欢迎块、四档呈现、`home.json` 解码与既有锚点行为不变）
 - Task 33 depends on Task 32（缺口清单为其输入）；与 Task 31 无依赖

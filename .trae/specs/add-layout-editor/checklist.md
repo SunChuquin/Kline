@@ -216,9 +216,10 @@
 - [x] 新文件 `Kline/App/PageLayout/CommonLayoutWidgets.swift`（页面无关引擎目录）：`CommonWidgetName`（`common.hscrollCard` / `common.listCard` / `common.placeholder`）
 - [x] `registerCommonLayoutWidgets<Context>(into:)` 为**泛型函数且构建器忽略 Context**（只读 `WidgetParams`）→ 任何页面注册表可直接复用（「让绝大多数页面通用」的结构保证，非约定）
 - [x] 三个视图视觉对齐测试页：卡片 `padding(16)` + `cornerRadius(12)` + `shadow(black 0.05, r4, y2)`；横滑卡右上角 `chevron.right`、列表卡右上角「更多」；列表序号前 3 条红色；条目为空渲染**可诊断提示**（不静默空白）
-- [x] `CommonLayoutWidgetSchema` 描述三项控件参数（`title` / `items` / `updateTime` / `showsMore` / `height`）
+- [x] `CommonLayoutWidgetSchema` 描述通用控件参数（`title` / `items` / `updateTime` / `showsMore`；`height` 已随占位块删除）
 - [x] 接入两行增量：`HomeWidgetRegistry.init` 末尾 `registerCommonLayoutWidgets(into: &r)`；`HomeWidgetEditorSchema.all` 末尾 `+ CommonLayoutWidgetSchema.all`
 - [x] 编译通过 + 安装启动成功（`kline_deploy_mac.sh`，iPad mini 5 模拟器 54291852，**BUILD SUCCEEDED**、`com.sunck.Kline: 23621`）
 - [x] 代码变更已提交并 push（commit a9e07fc）
-- [ ] 用户设备验收：编辑器「添加控件」里出现「横滑卡片 / 列表卡片 / 占位块」；选中后检查器出现新参数；填条目 → 全屏预览即时生效；重启后配置保持
-- [ ] 回归点：既有 7 个 `home.*` 控件、四档呈现、`home.json` 解码与既有锚点行为不变
+- [x] **删除灰色占位块**（用户反馈「两个占位块有什么用？没用删掉吧」）：`common.placeholder` 无任何配置引用，且与既有的 `home.placeholder`（A 档欢迎块，`HomeLayoutDefaults` 引用、`home.welcome` 锚点）在「添加控件」菜单里**重名**。删 `CommonPlaceholderBlock` 视图 + 注册 + schema 三项 + 相关注释；`home.placeholder` **不动**（删它会破坏 A 档默认布局与 UI 测试锚点）；编译部署通过（commit 56be331）
+- [ ] 用户设备验收：编辑器「添加控件」里出现「横滑卡片 / 列表卡片」（不再有重名的两个「占位块」）；选中后检查器出现新参数；填条目 → 全屏预览即时生效；重启后配置保持
+- [ ] 回归点：既有 7 个 `home.*` 控件（含 A 档欢迎块 `home.placeholder`）、四档呈现、`home.json` 解码与既有锚点行为不变

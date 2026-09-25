@@ -937,7 +937,9 @@
 
 ### Requirement: 页面无关的通用控件
 
-布局编辑器提供一个**页面无关**的控件组：横滑卡片（`common.hscrollCard`）、列表卡片（`common.listCard`）、占位块（`common.placeholder`）。它们**只读 `WidgetParams`**、不依赖任何页面上下文，任何页面的控件注册表都能用 `registerCommonLayoutWidgets(into:)` 合并这一组。
+布局编辑器提供一个**页面无关**的控件组：横滑卡片（`common.hscrollCard`）、列表卡片（`common.listCard`）。它们**只读 `WidgetParams`**、不依赖任何页面上下文，任何页面的控件注册表都能用 `registerCommonLayoutWidgets(into:)` 合并这一组。
+
+> 落地后修订（2026-09-25，用户反馈）：原先一并做的「灰色占位块」（`common.placeholder`）**已删除**——它无任何配置引用、且与既有的 `home.placeholder`（A 档欢迎块）在「添加控件」菜单里重名，用户判定无用。通用控件组因此是**两个**。既有 `home.placeholder` 保持不变（A 档默认布局引用、`home.welcome` 锚点）。
 
 #### Scenario: 在首页编辑器里添加通用控件
 - **WHEN** 打开布局编辑器 → 「添加控件」→ 选「横滑卡片」
