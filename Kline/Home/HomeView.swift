@@ -13,9 +13,9 @@ import SwiftUI
 
 // MARK: - 主页面（JSON 配置优先分发的容器）
 
-/// 首页容器：搜索态统一走 `HomeSearchModeView`（四档共用）；
+/// 首页容器：搜索态统一走 `HomeSearchModeView`（各档共用）；
 /// 非搜索态「JSON 配置优先」——按 `PageLayoutStore.homeLayout` 取 `PageLayoutConfigStore` 中该档位的节点树渲染，
-/// 配置不可用时回落 A/B/C/D 硬编码布局视图（保底）。
+/// 配置不可用时回落 B/C/D 硬编码布局视图（保底）。
 /// 入口动作（切底部 Tab / 进入搜索 / 公式管理中心分段 / 条件单 / 个人中心）全部由容器注入的闭包承担，
 /// 各档入口控件只回调、不持状态；数据由 `HomePageModel` 统一持有并下发给各档与内容区。
 struct HomeView: View {
@@ -44,8 +44,6 @@ struct HomeView: View {
             } else {
                 // 配置不可用 → 回落硬编码布局视图（保底）
                 switch layoutStore.homeLayout {
-                case .a:
-                    HomeLayoutAView(onProfile: onProfile)
                 case .b:
                     HomeLayoutBView(model: model, onSelectTab: onSelectTab, onSearch: onSearch,
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,

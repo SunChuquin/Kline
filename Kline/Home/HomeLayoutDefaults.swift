@@ -5,7 +5,7 @@
 //  首页内置默认布局配置（JSON 文本）。
 //  首启由 PageLayoutConfigStore 种入沙盒 Documents/Layouts/home.json；
 //  把沙盒删掉后会重新种回这份内容。
-//  内容等价搬迁现行 HomeLayoutA/B/C/DView 四档（行为零变化）。
+//  内容等价搬迁现行 HomeLayoutB/C/DView 三档（行为零变化）。A 档已删除（2026-09-25）。
 //
 
 let homeLayoutDefaultsJSON = """
@@ -14,18 +14,6 @@ let homeLayoutDefaultsJSON = """
   "page": "home",
   "default": "B",
   "layouts": {
-    "A": {
-      "title": "A · 现有首页（保留）",
-      "shortTitle": "A",
-      "root": {
-        "type": "vstack", "spacing": 0,
-        "children": [
-          { "type": "widget", "name": "home.header" },
-          { "type": "divider" },
-          { "type": "widget", "name": "home.placeholder" }
-        ]
-      }
-    },
     "B": {
       "title": "B · 横滑入口 + 卡片网格（默认）",
       "shortTitle": "B",

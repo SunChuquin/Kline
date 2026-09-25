@@ -97,11 +97,6 @@ enum HomeWidgetEditorSchema {
                                                                      note: "缺省 = 全部入口，可清空"))
                          ]),
 
-        // home.placeholder：无参数
-        WidgetDescriptor(name: "home.placeholder",
-                         title: "占位块",
-                         params: []),
-
         // home.marketOverview：indices（沪深京指数，上限 4）/ compact
         WidgetDescriptor(name: "home.marketOverview",
                          title: "大盘概览",

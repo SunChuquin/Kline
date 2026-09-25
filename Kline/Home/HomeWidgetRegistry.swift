@@ -3,7 +3,7 @@
 //  Kline
 //
 //  首页控件注册表：把 JSON 配置里的控件名映射到具体视图。
-//  7 个 home.* 控件名与内置默认配置（HomeLayoutDefaults.swift）中的 name 一一对应；
+//  6 个 home.* 控件名与内置默认配置（HomeLayoutDefaults.swift）中的 name 一一对应；
 //  末尾另并入页面无关的通用控件（common.*，见 CommonLayoutWidgets.swift）；
 //  未注册的控件名由 PageLayoutRenderer 渲染可诊断占位（不崩溃、不静默空白）。
 //
@@ -37,10 +37,6 @@ struct HomeWidgetRegistry {
                 kinds = HomeEntryKind.allCases
             }
             return AnyView(HomeQuickEntryRow(kinds: kinds, onTap: ctx.onEntry))
-        }
-
-        r.register("home.placeholder") { _, _ in
-            AnyView(HomePlaceholderBlock())
         }
 
         r.register("home.marketOverview") { ctx, p in

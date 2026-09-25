@@ -63,9 +63,8 @@ enum MarketLayoutStyle: String, CaseIterable, Identifiable {
 
 // MARK: - 首页布局方案
 
-/// 首页布局方案（A = 现有实现，B/C/D 为重设计方案）
+/// 首页布局方案（B/C/D 三档；A 档「现有首页」已于 2026-09-25 按用户要求删除）
 enum HomeLayoutStyle: String, CaseIterable, Identifiable {
-    case a = "A"
     case b = "B"
     case c = "C"
     case d = "D"
@@ -75,7 +74,6 @@ enum HomeLayoutStyle: String, CaseIterable, Identifiable {
     /// 设置面板中的完整方案名
     var title: String {
         switch self {
-        case .a: return "A · 现有首页（保留）"
         case .b: return "B · 横滑入口 + 卡片网格（默认）"
         case .c: return "C · 横滑入口 + 分区列表"
         case .d: return "D · 横滑入口 + 工作台混排"
