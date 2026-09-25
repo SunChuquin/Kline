@@ -204,3 +204,21 @@
 - [x] 缺口登记 7 项（`page` 键硬编码 `"home"`、配置仓库无 page→文件映射、`HomeWidgetRegistry` 未注册本页卡片、数据源为编译期常量不可枚举、`PageLayoutRenderer` context 是首页专用、**本页零无障碍锚点**、本页为纯 mock 演示页）
 - [x] 关键结构结论：本页是首页的简化镜像，左右**双列各自独立滚动**为独有结构；`scroll` 词表已支持 `axis/spacing/padding/showsIndicators`，骨架可由现有节点树完整表达
 - [x] 本轮未触任何 `.swift` 文件（`git status` 仅 spec 文档变更）
+
+## 阶段十二：把测试页面的控件吸收为「通用控件」（第五轮，2026-09-25）
+
+> 方向修订：**不**把 ProfileView 做成可编辑页；附录 A 转为「控件/容器词表缺口清单」，把测试页有、编辑器没有的类型抽成**页面无关的通用控件**（当前仍只编辑首页）。
+
+- [x] 词表缺口核对完成：需补 3 项（横滑卡片 / 列表卡片 / 灰色占位块）；`scroll` / `hstack` / `vstack` / `divider` 与「左右双列各自滚动」已具备，容器词表**不改**
+- [x] 参数引擎补自由文本能力：`WidgetParamDescriptor.Kind` 新增 `.text(placeholder:note:)` 与 `.textList(placeholder:note:)`（原有 5 种形态无法表达卡片标题 / 条目文案）
+- [x] `LayoutNodeInspector.paramRow` 新增两分支：`.text` = `row` + 右对齐 `TextField`（对齐 `card` 标题字段写法）；`.textList` = 新 `TextListParamRow`（每行「序号 + 输入框 + 删除」+ 标题行右侧「添加一条」）
+- [x] 存储复用既有 `WidgetParamValue.strings([String])` 与 `PageLayoutEditorModel.setStrings`，**JSON 结构不变**（无编解码改动）
+- [x] 新文件 `Kline/App/PageLayout/CommonLayoutWidgets.swift`（页面无关引擎目录）：`CommonWidgetName`（`common.hscrollCard` / `common.listCard` / `common.placeholder`）
+- [x] `registerCommonLayoutWidgets<Context>(into:)` 为**泛型函数且构建器忽略 Context**（只读 `WidgetParams`）→ 任何页面注册表可直接复用（「让绝大多数页面通用」的结构保证，非约定）
+- [x] 三个视图视觉对齐测试页：卡片 `padding(16)` + `cornerRadius(12)` + `shadow(black 0.05, r4, y2)`；横滑卡右上角 `chevron.right`、列表卡右上角「更多」；列表序号前 3 条红色；条目为空渲染**可诊断提示**（不静默空白）
+- [x] `CommonLayoutWidgetSchema` 描述三项控件参数（`title` / `items` / `updateTime` / `showsMore` / `height`）
+- [x] 接入两行增量：`HomeWidgetRegistry.init` 末尾 `registerCommonLayoutWidgets(into: &r)`；`HomeWidgetEditorSchema.all` 末尾 `+ CommonLayoutWidgetSchema.all`
+- [x] 编译通过 + 安装启动成功（`kline_deploy_mac.sh`，iPad mini 5 模拟器 54291852，**BUILD SUCCEEDED**、`com.sunck.Kline: 23621`）
+- [x] 代码变更已提交并 push（commit a9e07fc）
+- [ ] 用户设备验收：编辑器「添加控件」里出现「横滑卡片 / 列表卡片 / 占位块」；选中后检查器出现新参数；填条目 → 全屏预览即时生效；重启后配置保持
+- [ ] 回归点：既有 7 个 `home.*` 控件、四档呈现、`home.json` 解码与既有锚点行为不变

@@ -262,3 +262,20 @@
   - [x] SubTask 32.5: 可编辑候选界定（2 个候选 widget + 7 个数据源候选；明确排除项）与缺口登记 7 项
   - [x] SubTask 32.6: checklist.md 追加「阶段十一」；spec.md 附录 A 定稿（git 仅文档变更，无需构建）
 - Task 32 与 Task 31 无依赖（纯盘点）；若后续启动「布局编辑器第二页面（ProfileView）」则以其为前置输入
+
+## 阶段十三：把测试页面的控件吸收为「通用控件」（第五轮，2026-09-25）
+
+> 方向修订：**不**把 ProfileView 做成可编辑页；而是把「测试页面用到、而编辑器词表没有」的控件类型抽成**页面无关的通用控件**补进编辑器。
+> 当前仍只编辑首页（`PageLayoutEditorModel.page == "home"`）。
+
+- [x] Task 33: 词表缺口核对 + 通用控件落地
+  - [x] SubTask 33.1: 核对附录 A 缺口清单——推翻「缺口 5（渲染器 context 首页专用）」：`PageLayoutRenderer` / `PageWidgetRegistry` 本就泛型，与页面无关；缺口 1/2 亦比预想轻（`PageLayoutConfigStore` 已按 page 索引）。据新方向不再实施附录 A 第五、六节（page 化 / `profile.json` / 本页锚点）
+  - [x] SubTask 33.2: 识别真正的拦路项＝**参数引擎缺自由文本能力**，故先在 `WidgetParamDescriptor.Kind` 补两种形态：`.text(placeholder:note:)`（JSON 字符串）与 `.textList(placeholder:note:)`（JSON `[String]`，空=空数组）；存储复用既有 `.strings` / `setStrings`，**JSON 结构零改动**
+  - [x] SubTask 33.3: 新增 `Kline/App/PageLayout/CommonLayoutWidgets.swift`：`CommonWidgetName`（`common.hscrollCard` / `common.listCard` / `common.placeholder`）+ `CommonCardChrome`（标题栏：标题／右上角时间／「更多」）、`CommonEmptyHint` + 三个公开视图 `CommonHScrollCard` / `CommonListCard`（前 3 条序号红色）/ `CommonPlaceholderBlock`（浅灰圆角固定高度）
+  - [x] SubTask 33.4: `registerCommonLayoutWidgets<Context>(into:)` 泛型注册函数——构建器刻意忽略 `Context`（只吃 `WidgetParams`），**结构上保证**「绝大多数页面通用」（除 K 线页单图/多图）；`CommonLayoutWidgetSchema.all` 与注册函数同文件
+  - [x] SubTask 33.5: `LayoutNodeInspector.paramRow` 新增 `.text`（右对齐 `TextField` + 说明）与 `.textList`（`TextListParamRow`：头行「＋添加一条」/ 每行序号 + `TextField` + 红色删除 / 空态提示 / 说明）两分支
+  - [x] SubTask 33.6: 两处接入——`HomeWidgetEditorSchema.all` 末尾 `] + CommonLayoutWidgetSchema.all`；`HomeWidgetRegistry.init` 末尾 `registerCommonLayoutWidgets(into: &r)`
+  - [x] SubTask 33.7: 闭环命令部署：`** BUILD SUCCEEDED **` → 安装启动 `com.sunck.Kline: 23621` → commit `a9e07fc`（4 files changed, 390 insertions(+), 4 deletions(-)）→ push `311b196..a9e07fc main`
+  - [ ] SubTask 33.8: 用户设备验收（添加控件菜单出现「横滑卡片 / 列表卡片 / 占位块」；检查器出现文本框与逐行条目编辑；填条目→全屏预览即时生效；保存后重启保持）
+  - [ ] SubTask 33.9: 回归点（既有 7 个 `home.*` 控件、四档呈现、`home.json` 解码与既有锚点行为不变）
+- Task 33 depends on Task 32（缺口清单为其输入）；与 Task 31 无依赖

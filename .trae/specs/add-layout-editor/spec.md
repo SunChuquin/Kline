@@ -732,7 +732,11 @@
 
 用户原话：**「请你详细梳理 `/Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift` 中的所有控件和容器，给 `/Volumes/home/repositories/Kline2/.trae/specs/add-layout-editor` 做补充」**
 
-本轮**只做盘点，不改任何代码**。用途：为「将来把布局编辑器从首页扩展到本页」界定候选池与列出缺口，格式对齐第二轮「独立页面可达性盘点（候选池界定依据）」。盘点范围包含本页直接引用的三个组件文件 [HorizontalScrollCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/HorizontalScrollCard.swift)、[ListCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ListCard.swift)、[DetailPage.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/DetailPage.swift) 与数据源 [MockData.swift](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift)。
+本轮**只做盘点，不改任何代码**。用途：为「将来把布局编辑器从首页扩展到本页」界定候选池与列出缺口，格式对齐第二轮「独立页面可达性盘点（候选池界定依据）」。
+
+> ⚠️ **方向修订（2026-09-25，见第五轮）**：用户核对本附录后明确 —— **不**把 ProfileView 做成可编辑页；本附录的产出改为「**控件/容器词表缺口清单**」，用于把测试页面有、编辑器没有的类型抽成**页面无关的通用控件**补进编辑器（当前仍只编辑首页）。概念、层级、控件与数据那张四节仍然是准确的事实记录；第五、六节的「page 化 / profile.json / 本页锚点」**不再实施**。
+
+盘点范围包含本页直接引用的三个组件文件 [HorizontalScrollCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/HorizontalScrollCard.swift)、[ListCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ListCard.swift)、[DetailPage.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/DetailPage.swift) 与数据源 [MockData.swift](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift)。
 
 ### 一、页面定位与呈现层级（与首页的关键差异）
 
@@ -872,3 +876,85 @@
 - 本页结构是**首页的简化镜像**：`vstack[ 导航栏, divider, vstack[ 卡片, hstack[ scroll[vstack[卡片…]], scroll[vstack[卡片…]] ] ] ]`，只用得上 `vstack / hstack / scroll / divider` 四种节点词，**不涉及 `zstack / card / frame`**；左右双列独立滚动是本页独有结构。
 - 现有节点词表**足以表达本页骨架**（分栏 / 滚动轴 / 间距 / 边距均可表态），真正的工作量在**两种卡片 widget 的注册 + 数据源从常量改为可枚举表 + page 键与配置仓库的 page 化**（缺口 1–5）。
 - 候选池规模：**卡片 9 实例 → 2 个 widget 类型 + 7 个数据源候选**；占位 `Rectangle` 3 个不建议进树；导航栏与 `DetailPage` 明确排除。
+
+---
+
+## Why（第五轮，2026-09-25）：把测试页面的控件吸收为「通用控件」
+
+用户核对附录 A 后明确方向（原话）：**「不需要编辑测试页面啊，我是让你把测试页面里有的而现有布局编辑器里没有的给整合进布局编辑器，未来布局编辑器的控件和容器我希望是绝大多数页面都能使用的（除了K线页面的单图和多图），暂时你只需要让我编辑首页就行了」**
+
+即：附录 A 的产出**不是**让 ProfileView 变成可编辑页，而是当作**控件/容器词表缺口清单**用 —— 把测试页面用到、而编辑器词表没有的类型，抽成**页面无关的通用控件**补进编辑器；当前仍然只编辑首页。
+
+### 一、词表缺口结论（对照附录 A 二/三节）
+
+| 测试页面用到 | 编辑器原有词表 | 结论 |
+|---|---|---|
+| 横滑卡片（`HorizontalScrollCard`） | 无 | **补** → `common.hscrollCard` |
+| 列表卡片（`ListCard`） | 无 | **补** → `common.listCard` |
+| 灰色占位矩形（`Rectangle` 高 150/200/180） | 无（`home.placeholder` 是首页欢迎块，语义不同） | **补** → `common.placeholder`（高度可调） |
+| 竖向滚动区 / 水平堆栈 / 竖向堆栈 / 分隔线 | `scroll` / `hstack` / `vstack` / `divider` | 已具备，不补 |
+| 左右双列各自滚动 | `hstack` + 2×`scroll` | 已具备（可表达式化），不补 |
+| 顶部导航栏 / 二级详情页 | `home.header`（首页专属）/ 无 | 不进词表（页面壳与跳转目标） |
+
+### 二、参数引擎补「自由文本」能力（此前是真正的拦路项）
+
+原有 5 种参数形态（bool / 数字步进 / 静态单选 / 候选多选 / 动态单选）**都无法表达「卡片标题」「条目文案」这类自由文本**，故本轮先补参数类型：
+
+- `WidgetParamDescriptor.Kind` 新增 `.text(placeholder:note:)` 与 `.textList(placeholder:note:)`
+- `LayoutNodeInspector.paramRow` 新增两分支：`.text` 走 `row` + 右对齐 `TextField`（写法对齐 `card` 的标题字段）；`.textList` 走新 `TextListParamRow`（每行「序号 + 输入框 + 删除」，标题行右侧「添加一条」）
+- 存储**复用既有** `WidgetParamValue.strings([String])`（第二轮已支持）与 `PageLayoutEditorModel.setStrings`，`home.json` 结构不变
+
+### 三、通用控件实现（新文件 `Kline/App/PageLayout/CommonLayoutWidgets.swift`）
+
+放在**页面无关的引擎目录**（与 `PageLayoutRenderer` / `PageWidgetRegistry` 同级），文件内含四部分：
+
+1. `enum CommonWidgetName`：`common.hscrollCard` / `common.listCard` / `common.placeholder`
+2. `registerCommonLayoutWidgets<Context>(into:)`：**泛型函数，构建器忽略 `Context`**（只读 `WidgetParams`）——任何页面的注册表都能合并这一组，这是「绝大多数页面通用」的**结构保证**（不是约定）
+3. 三个视图：
+   - `CommonHScrollCard`：标题栏 + 横向滚动灰底 chip（条目文字来自参数）
+   - `CommonListCard`：标题栏 + 竖向列表（序号自动生成、前 3 条红色）
+   - `CommonPlaceholderBlock`：固定高度浅灰圆角块
+   - 视觉逐项对齐测试页：卡片 `padding(16)` + `cornerRadius(12)` + `shadow(black 0.05, r4, y2)`；横滑卡右上角 `chevron.right`、列表卡右上角「更多」文字（与测试页两种卡片的差异一致）；条目为空时渲染**可诊断提示**而非静默空白
+4. `CommonLayoutWidgetSchema`：三个控件的可编辑参数描述（`title` / `items` / `updateTime` / `showsMore` / `height`）
+
+### 四、接入点（两行增量）
+
+- `HomeWidgetRegistry.init` 末尾：`registerCommonLayoutWidgets(into: &r)`
+- `HomeWidgetEditorSchema.all` 末尾：`+ CommonLayoutWidgetSchema.all` → 三个新控件立刻出现在「添加控件」菜单与检查器参数表单
+
+### 五、非目标（第五轮不做）
+
+- **不做** ProfileView 的可编辑化（`page` 参数化 / `profile.json` / 本页锚点 / renderer 驱动本页，一律不做）
+- **不抽取**跨页共享注册表（当前只有首页可编辑；复用口已由 `registerCommonLayoutWidgets` 留好）
+- **不改**容器词表（现有 9 种节点类型已覆盖测试页所需）
+- **不接**真实数据源（通用控件的条目文案由配置给定，不绑 MockData / DB）
+
+### 六、BREAKING
+
+无。`home.*` 七个控件、`home.json` 结构与既有无障碍锚点全部不变；新控件与两种新参数类型都是**纯增量**，旧配置解码不受影响。
+
+## ADDED Requirements（第五轮）
+
+### Requirement: 页面无关的通用控件
+
+布局编辑器提供一个**页面无关**的控件组：横滑卡片（`common.hscrollCard`）、列表卡片（`common.listCard`）、占位块（`common.placeholder`）。它们**只读 `WidgetParams`**、不依赖任何页面上下文，任何页面的控件注册表都能用 `registerCommonLayoutWidgets(into:)` 合并这一组。
+
+#### Scenario: 在首页编辑器里添加通用控件
+- **WHEN** 打开布局编辑器 → 「添加控件」→ 选「横滑卡片」
+- **THEN** 树里新增该控件节点，检查器出现「卡片标题 / 条目 / 右上角时间 / 显示更多图标」四项参数
+
+#### Scenario: 条目为空时的可诊断呈现
+- **WHEN** 通用卡片控件的「条目」为空
+- **THEN** 卡片内显示一行灰字提示（说明在检查器填写条目），**不出现静默空白**
+
+#### Scenario: 条目文本编辑即时生效
+- **WHEN** 在检查器里点「添加一条」/ 修改某行文本 / 点行尾删除
+- **THEN** 参数以 `[String]` 写入节点 `params`、草稿置脏，全屏预览即时反映
+
+### Requirement: 自由文本参数类型
+
+参数描述表新增两种形态：`.text`（字符串）与 `.textList`（字符串数组，每行一条）。存储沿用既有 `WidgetParamValue.string` / `.strings`，JSON 结构不变。
+
+#### Scenario: 旧配置兼容
+- **WHEN** 加载不存在这两种参数键的既有 `home.json`
+- **THEN** 解码、渲染、编辑行为与改动前完全一致
