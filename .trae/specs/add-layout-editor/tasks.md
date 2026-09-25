@@ -213,7 +213,7 @@
 - [x] Task 30: 设备验证与收尾
   - [x] SubTask 30.1: iPad mini 5（UDID 54291852-68BE-45BF-ACC0-72CEAEF10A0B）前台跑 `xcodebuild test`（模拟器带 GUI，禁后台）：test100/101/102 + 回归 test96/97/98/99 全通过
   - [x] SubTask 30.2: 沙盒 `Documents/Layouts/home.json` 结构核对（可解析、四档结构完整、B 档根子节点为默认顺序＝用例末尾「恢复默认」已落盘）+ `debug_log.txt` 无 error/crash/残留诊断日志
-  - [ ] SubTask 30.3: `KLINE_DEVICE_ID=<udid> bash scripts/kline_deploy_mac.sh "<描述>"` 前台部署并 push
+  - [x] SubTask 30.3: `KLINE_DEVICE_ID=<udid> bash scripts/kline_deploy_mac.sh "<描述>"` 前台部署并 push（commit 1ed441f，已推到 `main`）
   - [x] SubTask 30.4: 独立只读核验代理逐条核验第三轮 checklist，修复后复跑并回填
 
 
