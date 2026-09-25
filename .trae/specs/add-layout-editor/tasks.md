@@ -191,6 +191,32 @@
   - [x] SubTask 26.2: 工作区无临时残留（注入文件已还原）；回填 tasks/checklist
   - [x] SubTask 26.3: 主体改动经部署脚本提交 afb1097 并 push；核验修复与文档回填为后续补充提交
 
+### 阶段九：拖拽装配（跨级拖入容器）——第三轮
+
+- [x] Task 27: 模型层跨级拖入 API（PageLayoutEditorModel.swift）
+  - [x] SubTask 27.1: 新增 `enum DropRejection { targetMissing, notContainer, intoSelfOrDescendant }`（本轮补 `crossLevel`）与 `validateDrop(_ draggingUUID:into targetUUID:) -> DropRejection?`；自环判定用「目标是否落在被拖节点子树内（含自身）」
+  - [x] SubTask 27.2: 新增 `moveInto(_ draggingUUID:container targetUUID:) -> Bool`：校验不过 → banner + false（不 touchDraft）；原父==目标且已在末尾 → 视作无操作（banner「该节点已在此容器末尾」，不 touchDraft）；否则原父 `removeChild` → 目标 `appendChild`（`.child` 非空 banner「该容器仅容纳一个子节点，已替换」，`.children` banner「已移入：<容器名>」）→ 展开目标容器 + `select(被拖节点)` + `touchDraft()`；另加 `reportDropRejected` 供松手后被拒时写 banner（同句不重复发布）
+  - [x] SubTask 27.3: 跨级拖入 API 放在新增 `// MARK: - 树操作：跨级拖入` 段内；既有 `move(fromOffsets:toOffset:)` / `moveSelectedUp/Down` / `canMoveSelected` 零改动
+- [x] Task 28: 树列表拖拽交互与落点反馈（LayoutNodeTreeList.swift）
+  - [x] SubTask 28.1: 非根行 `.onDrag { NSItemProvider(object: node.uuid.uuidString as NSString) }`（根行只作落点，不可拖）
+  - [x] SubTask 28.2: 所有行 `.onDrop(of: [.text], delegate:)` + `NodeDropDelegate: DropDelegate`；`performDrop` 用 `loadObject` 异步取 uuid 串 → `Task { @MainActor in }` 调模型
+  - [x] SubTask 28.3: **路线 A（实测后定稿）**：节点树由 `List` 改为 `ScrollView + LazyVStack`（`List` 吞掉自身行发起的拖拽会话，行内/List 层/外层三处 `.onDrop` 全零回调）；叶子落点改红色高亮（不用系统 `.forbidden`，避免松手拿不到 `performDrop`）；落点行蓝/红高亮与选中蓝底区分（本条中的「排序」开关与 `layoutEditor.sortingToggle` 锚点已由 SubTask 28.6 删除）
+  - [x] SubTask 28.4: 复核点击选中、折叠展开、滚动、行高 44、既有锚点（`layout.tree.<type>` / `layout.tree.widget.<name>`）未被拖拽手势破坏；拖拽悬停不写 banner；编译错误修复（`rowHeight` 私有可见性 → fileprivate）
+  - [x] SubTask 28.5: **只读核验发现的缺陷修复**：排序模式下半区原先用 `targetIndex + 1` 当锚点，而扁平行是 DFS 先序（容器行的下一行是它的第一个子节点），拖到容器行下半区会被模型判成跨级、报「已忽略跨级拖动」；改为 `indexAfterTargetRow` 跳过后代行取下一个同级/更浅的行；改后 `build-for-testing` 再次通过
+  - [x] SubTask 28.6（用户新需求）：**拖拽即排序，删除模式开关**——一次拖拽内按落点分区自动判定意图（容器行 上边缘 12pt=前插 / 中 20pt=拖入 / 下边缘 12pt=后插；叶子行 上半=前插 / 下半=后插），删除工具条「排序」开关与锚点 `layoutEditor.sortingToggle`；视图侧 `LayoutDropResolution`（into / insertBefore / insertAfter / reject）统一驱动悬停反馈与松手动作，`LayoutDragSession` 透传拖拽源（非 `@State`，避免打断拖拽会话）；模型侧新增 `DropRejection.crossLevel` 与按兄弟定位的 `move(beforeSibling:)/move(afterSibling:)`（彻底取代吃扁平行下标的 `indexAfterTargetRow` 方案）；悬停三态反馈（前插/后插行顶/行底 2pt 蓝线、拖入蓝底蓝框、非法红底红框）；`build` 与 `build-for-testing` 均通过
+- [x] Task 29: UI 测试（KlineUITests，iPad mini 5 模拟器）
+  - [x] SubTask 29.1: `test100_Home_EditorDragNodeIntoStack`：确保默认 → 打开编辑器 → 拖「快捷入口行」（行中心）到「滚动区」行**中间区** → 读 JSON 原文断言缩进 **+4 空格**（节点深度 +1 = JSON 结构层 +4）且排在 `home.topGainers` 之后 → 保存 → 杀进程重启仍保持 → 恢复默认（实跑 84.5s 通过）
+  - [x] SubTask 29.2: `test101_Home_EditorDragInvalidTarget`：① 把「滚动区」拖到其子孙「卡片」行中间区 → 断言 banner「不能把节点拖入它自己或它的子节点」且结构不变；② 跨级插入：把「大盘概览」控件行（行中心）拖到**相邻**的「大盘概览卡片」行**上边缘区** → 断言 banner「跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘」且结构不变（实跑 92.8s 通过）
+  - [x] SubTask 29.4: `test102_Home_EditorDragReorderSibling`：拖「快捷入口行」到 `home.header` 行**上边缘区** → 断言缩进不变、顺序变为排在 `home.header` 之前 → 保存 → 杀进程重启仍保持 → 恢复默认（实跑 75.6s 通过）
+  - [x] SubTask 29.5（测试基建）：落点几何统一为 helper——app 侧树列表加锚点 `layoutEditor.treeList`；测试侧 `treeViewport`（真实可视区）+ `treeRowRect`（同行元素并集 + 纵向居中补余量，避开「叶子行 firstMatch 只是标题 → 行顶算高 7pt → 落点跑到上一行」与「同一标识匹配多行」两坑）+ `TreeDropZone.before/.into/.after`；可见性改为「行 rect 完整落在可视区」（`isHittable` 对懒加载裁掉的行不判假，曾致长按打到工具栏按钮弹出 Menu 吃掉手势）
+  - [x] SubTask 29.3: 回归复跑（编辑器/树交互相关）`test96/97/98/99` 全部通过；`test91`（ETF 种子库二级菜单）、`test92`（刘海机型横向安全区）为 iPad mini 5 上的既有环境性失败
+- [x] Task 30: 设备验证与收尾
+  - [x] SubTask 30.1: iPad mini 5（UDID 54291852-68BE-45BF-ACC0-72CEAEF10A0B）前台跑 `xcodebuild test`（模拟器带 GUI，禁后台）：test100/101/102 + 回归 test96/97/98/99 全通过
+  - [x] SubTask 30.2: 沙盒 `Documents/Layouts/home.json` 结构核对（可解析、四档结构完整、B 档根子节点为默认顺序＝用例末尾「恢复默认」已落盘）+ `debug_log.txt` 无 error/crash/残留诊断日志
+  - [ ] SubTask 30.3: `KLINE_DEVICE_ID=<udid> bash scripts/kline_deploy_mac.sh "<描述>"` 前台部署并 push
+  - [x] SubTask 30.4: 独立只读核验代理逐条核验第三轮 checklist，修复后复跑并回填
+
+
 # Task Dependencies
 
 - Task 2 depends on Task 1（`Encodable` 在 Task 1 建立）
@@ -210,3 +236,6 @@
 - Task 24 depends on Task 21、Task 23
 - Task 25 depends on Task 24
 - Task 26 depends on Task 25
+- Task 28 depends on Task 27（模型先有跨级拖入 API，视图才有落点可调）
+- Task 29 depends on Task 28
+- Task 30 depends on Task 29

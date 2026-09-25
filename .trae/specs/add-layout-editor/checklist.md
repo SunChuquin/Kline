@@ -152,3 +152,30 @@
 - [ ] 👤 回归目视：四档布局、点行开 K 线、搜索、公式中心三分段、条件单、个人中心、悬浮按钮延迟 1 秒显示正常
 - [x] ✅ 第二轮独立只读核验代理逐条核验（1 中 3 低全部修复并复跑 test98/99 通过）；无临时诊断标识；注入文件已还原
 - [x] ✅ 变更已按版本管理规范提交并 push（afb1097；核验修复与文档回填为后续补充提交）
+
+## 阶段九：拖拽装配（跨级拖入容器）——第三轮
+
+- [ ] 接收方与 `containerKey` 判定严格一致：`vstack/hstack/zstack/scroll`（`children`）与 `card/frame`（`child`）接收（拖到行中间区）；`widget/divider/spacer` 无中间区（上/下半区 = 同级前后插）
+- [ ] 拖拽源 = 除根节点外的所有行；根行不注册 `.onDrag`，但可接收拖入（四档根为 `vstack`）
+- [ ] 折叠态容器行同样接收，且拖入后该容器自动展开
+- [ ] 单槽容器（card/frame）非空替换有 banner「该容器仅容纳一个子节点，已替换」明确告知
+- [ ] 拖回原处（原父 == 目标 且 已在末尾）为无操作：不写草稿、不置脏，仅给提示
+- [ ] 自环防护生效：拖入自身或子孙（中间区）**红底红框** + 松手后被拒 + banner，杜绝 `children` 成环导致的 `encode` 无限递归（**不得出现崩溃**）
+- [ ] 拖拽取消 / 拖出列表外：落点高亮消失、拖拽状态完全复位，草稿不变
+- [ ] 拖入成功走 `touchDraft()` → 预览即时刷新；`select(被拖节点)` 生效；落点高亮（蓝/红）与选中蓝底视觉可区分
+- [ ] 拖拽悬停不写 `banner`（避免刷掉真实提示）；仅松手后被拒时由模型写 banner
+- [ ] 既有 `moveSelectedUp/Down` / `canMoveSelected` 零改动（上移/下移按钮行为与之前完全一致）；新增的是 `move(beforeSibling:)/move(afterSibling:)`。`move(fromOffsets:toOffset:)` 随 `List.onMove` 一起退出使用（去 `List` 后已无调用方，方法本体保留未改）
+- [ ] **无需任何开关**：一次拖拽按落点分区自动判定意图——容器行 上边缘 12pt=前插 / 中 20pt=拖入 / 下边缘 12pt=后插；叶子行 上半=前插 / 下半=后插（原「排序」开关与锚点 `layoutEditor.sortingToggle` 已删除）
+- [ ] 同级前插/后插走 `move(beforeSibling:)/move(afterSibling:)`（按父容器 `childList` 兄弟定位，不再吃扁平行下标）→ 拖到「有子节点的容器行」下边缘区能正确插到该容器之后，不再被误判跨级
+- [ ] 不同父的插入判 `.crossLevel` 拒绝并给 banner「跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘」
+- [ ] 悬停反馈三态齐备：前插/后插 = 行顶/行底 2pt 蓝线（`insertionLine`）；拖入 = 蓝底 + 蓝框；非法 = 红底 + 红框
+- [x] 节点树改为 `ScrollView + LazyVStack` 后：点击选中、折叠展开、滚动、行高 44 与既有锚点（`layout.tree.<type>` / `layout.tree.widget.<name>`）均正常；树列表 `ScrollView` 新增测试锚点 `layoutEditor.treeList`（供测试读真实可视区）
+- [x] `PageLayoutSchema.swift` 与 `HomeLayoutDefaults.swift` 零改动；配置 JSON 格式与既有键语义不变
+- [x] test100_Home_EditorDragNodeIntoStack 在 iPad mini 5 模拟器实跑通过（84.5s）：拖到滚动区行**中间区**，JSON 行缩进 **+4 空格**（节点深度 +1，JSON 结构层差 4）、位于目标容器子节点末尾、保存后杀进程重启仍保持、恢复默认正常
+- [x] test101_Home_EditorDragInvalidTarget 实跑通过（92.8s）：① 拖滚动区到其子孙卡片行中间区 → banner「不能把节点拖入它自己或它的子节点」且结构不变；② 跨级插入（大盘概览行中心 → 相邻的卡片行上边缘区）→ banner「跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘」且结构不变
+- [x] test102_Home_EditorDragReorderSibling 实跑通过（75.6s）：拖快捷入口行到 `home.header` 行**上边缘区** → 缩进不变、顺序变为排在 `home.header` 之前、保存后杀进程重启仍保持、恢复默认正常
+- [x] 测试落点几何：`treeViewport`（`layoutEditor.treeList`）+ `treeRowRect`（同行元素并集 + 纵向居中补余量）+ `TreeDropZone` 三态；可见性按「行 rect 完整落在可视区」判定，不用 `isHittable`（`ScrollView + LazyVStack` 会把屏外行也报进无障碍树且 `isHittable` 仍为 true，直接按 frame 算落点会打到工具栏按钮弹 Menu 吃掉手势）
+- [x] 回归：test96/97/98/99 复跑通过（25.4s / 23.8s / 73.8s / 108.6s）；test91（ETF 种子库二级菜单）、test92（刘海机型横向安全区）在 iPad mini 5 上属既有环境性失败
+- [x] 沙盒 `Documents/Layouts/home.json` 核对：可解析、schemaVersion/四档结构完整、B 档根子节点顺序为默认（`header → divider → quickEntryRow → scroll(card 大盘概览 / hstack(frame,frame) / card 涨幅榜)`，即用例末尾「恢复默认」已落盘）；`Documents/debug_log.txt` 无 error/fatal/crash，无残留诊断日志
+- [x] 相对已批准草案的实现偏差已在 spec.md 记录（去 `List`、**删除「排序」开关改统一落点分区**、叶子落点无系统禁止光标、行分隔线自绘、新增 `DropRejection.crossLevel` 与按兄弟重排 API）
+- [ ] 变更已按版本管理规范提交并 push

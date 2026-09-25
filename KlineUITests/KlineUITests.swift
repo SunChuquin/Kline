@@ -462,30 +462,42 @@ final class KlineUITests: XCTestCase {
         let entry = app.buttons[identifier].firstMatch
         XCTAssertTrue(entry.waitForExistence(timeout: 10), "首页缺少入口 \(identifier)")
 
-        // 用任意一个当前屏内可见 chip 的纵向中点作为滑动 y（不假设具体哪几项可见）
-        func visibleMidY() -> CGFloat? {
-            let chips = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.entry."))
-            for chip in chips.allElementsBoundByIndex {
-                let f = chip.frame
-                if f.width > 0, f.minX >= app.frame.minX, f.maxX <= app.frame.maxX {
-                    return f.midY
-                }
-            }
-            return nil
+        let screen = app.frame
+        // 入口行（chip 行）中可用于横滑的 y：行与「安全带」（上避状态栏 30、下避底部菜单栏 30）
+        // 的交集中点；交集不足 16pt 视为行不在视口内。
+        // 只判横向不够：入口行可能被纵向滚出视口（布局可被改动），此时算出的滑动 y 会落到屏幕外，
+        // 横滑手势直接无效 → chip 永远滚不进来（曾导致 test100/101/102 卡在打开编辑器）
+        func rowMidYInScreen() -> CGFloat? {
+            let f = entry.frame
+            guard f.width > 0 else { return nil }
+            let top = max(f.minY, screen.minY + 30)
+            let bottom = min(f.maxY, screen.maxY - 30)
+            guard bottom - top >= 16 else { return nil }
+            return (top + bottom) / 2
         }
 
+        // 0. 入口行不在视口内时先在首页纵向滚动把它带进来（恢复默认前布局可能已被改动）
+        if rowMidYInScreen() == nil {
+            for _ in 0..<8 {
+                let below = entry.frame.midY >= screen.midY
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.75 : 0.35))
+                    .press(forDuration: 0.05,
+                           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.4 : 0.7)))
+                Thread.sleep(forTimeInterval: 0.3)
+                if rowMidYInScreen() != nil { break }
+            }
+        }
+
+        // 1. 横滑入口行，把目标 chip 从左端外滚进屏内（行内各 chip 同一纵向位置）
+        guard let rowMidY = rowMidYInScreen() else { return entry }
         for _ in 0..<6 {
             let f = entry.frame
-            let screen = app.frame
             if f.width > 0, f.minX >= screen.minX + 2, f.maxX <= screen.maxX - 2 { break }
-            guard let midY = visibleMidY() else {
-                Thread.sleep(forTimeInterval: 0.3)
-                continue
-            }
-            let dy = midY / screen.height
+            let dy = rowMidY / screen.height
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: Double(dy)))
                 .press(forDuration: 0.1,
-                       thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: Double(dy))))
+                       thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: Double(dy))),
+                       withVelocity: .slow, thenHoldForDuration: 0.1)
             Thread.sleep(forTimeInterval: 0.35)
         }
         return entry
@@ -503,7 +515,7 @@ final class KlineUITests: XCTestCase {
     }
 
     /// 在编辑器树列表选中某控件节点，并展开指定参数的有序多选 / 折叠行。
-    /// 树是懒加载 List（约 5 屏），目标控件未渲染时要先在 320pt 树面板内上滑。
+    /// 树是懒加载 `ScrollView + LazyVStack`（约 5 屏），目标控件未渲染时要先在 320pt 树面板内上滑。
     private func selectWidgetParam(_ app: XCUIApplication, widget: String, paramKey: String) {
         let treeRow = app.descendants(matching: .any)["layout.tree.widget.\(widget)"].firstMatch
         if !treeRow.waitForExistence(timeout: 3) {
@@ -684,5 +696,347 @@ final class KlineUITests: XCTestCase {
             "layout.param.indices.selected.", ".remove"))
         XCTAssertEqual(restoredRemoves.count, 4, "恢复默认后应回到 4 只指数")
         saveAndCloseEditor(app)
+    }
+
+    // MARK: - 用例 100/101 共用：结构断言与树面板滚动
+
+    /// 切到「JSON 原文」页签，读出「由当前树生成」的规范 JSON 文本，再切回「表单」。
+    /// 结构断言走 JSON 文本（不用中文文本查询：下半预览里会出现同名文案）
+    private func readTreeJSON(_ app: XCUIApplication) -> String {
+        let jsonTab = app.buttons["JSON 原文"].firstMatch
+        XCTAssertTrue(jsonTab.waitForExistence(timeout: 8), "未找到「JSON 原文」页签")
+        jsonTab.tap()
+        let textView = app.textViews.firstMatch
+        XCTAssertTrue(textView.waitForExistence(timeout: 8), "JSON 原文编辑器未出现")
+        Thread.sleep(forTimeInterval: 0.3)
+        let text = (textView.value as? String) ?? ""
+        app.buttons["表单"].firstMatch.tap()
+        return text
+    }
+
+    /// 反复读 JSON 直到满足条件（拖拽落库链路是异步的：loadObject → 主线程 moveInto）
+    private func waitTreeJSON(_ app: XCUIApplication,
+                              timeout: TimeInterval = 8,
+                              until predicate: (String) -> Bool) -> String {
+        var text = readTreeJSON(app)
+        let deadline = Date().addingTimeInterval(timeout)
+        while !predicate(text) && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.5)
+            text = readTreeJSON(app)
+        }
+        return text
+    }
+
+    /// JSON 文本里第一个包含 `needle` 的行的缩进空格数。
+    /// 注意 JSON 结构本身每层 2 空格，但节点树的一层深度隔了 `layouts.<档位>.root.children[{}]`
+    /// 的 4 个结构层，故「节点深度 +1」= 缩进 +4 空格（实测：根的直接子节点 12、拖入容器后 16）。
+    private func jsonIndent(of needle: String, in text: String) -> Int? {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) where line.contains(needle) {
+            return line.prefix { $0 == " " }.count
+        }
+        return nil
+    }
+
+    // MARK: - 树列表几何 / 可见性 / 滚动
+    //
+    // ⚠️ 为什么要按几何判定可见性而不是 `isHittable`（实测结论，2026-09-25）：
+    // 树是 `ScrollView + LazyVStack`，**被视口裁掉的行照样进无障碍树**，且这些行
+    // `isHittable` 仍返回 true（可视区 y 146...364，屏外行也被报出）。若按 `element.frame`
+    // 直接算落点，长按会打到视口之外的其它控件上——实测落到工具栏「添加节点」按钮，
+    // 弹出 Menu 吃掉了整个手势，app 侧连 `onDrag` 都没有。故一切落点/点击都必须先确认
+    // 行**完整落在树列表可视区内**，可视区 rect 由 app 侧 `layoutEditor.treeList` 锚点提供。
+
+    /// 行高（与 `LayoutNodeTreeList.rowHeight` 一致）
+    private static let treeRowHeight: CGFloat = 44
+
+    /// 树列表的真实可视区（屏幕坐标）
+    private func treeViewport(_ app: XCUIApplication) -> CGRect {
+        app.scrollViews["layoutEditor.treeList"].firstMatch.frame
+    }
+
+    /// 行的真实屏幕 rect（行内元素并集 + 纵向居中补余量），无匹配元素返回 `.null`。
+    ///
+    /// ⚠️ 两个已验证的坑（2026-09-25）：
+    /// ① 标识会传播到行内**每个**元素（容器行 = 折叠按钮 + 标题 + 摘要，叶子行 = 标题 + 摘要），
+    ///    不能只取 firstMatch：叶子行首个匹配是标题（高 17、位于行内容顶部，行内上下各留 6.25pt），
+    ///    只按它居中反推会把行顶算高约 7pt → 上边缘落点落到上一行、被当跨级拒绝，
+    ///    同级排序静默失败（test102 实测失败即此因）。
+    /// ② 同一标识可能匹配多行（默认布局里就有两个 `layout.tree.card`），故并集必须按「同一行」
+    ///    过滤（与首个匹配元素行顶差 < 行高），否则会把两行并成一个大 rect。
+    private func treeRowRect(_ app: XCUIApplication, _ identifier: String) -> CGRect {
+        let matches = app.descendants(matching: .any).matching(identifier: identifier)
+            .allElementsBoundByIndex
+            .filter { $0.exists && $0.frame.height > 0 }
+        guard let anchor = matches.first else { return .null }
+        let base = anchor.frame
+        var union = base
+        for element in matches.dropFirst() where abs(element.frame.minY - base.minY) < Self.treeRowHeight {
+            union = union.union(element.frame)
+        }
+        let slack = max(0, (Self.treeRowHeight - union.height) / 2)
+        return CGRect(x: union.minX, y: union.minY - slack,
+                      width: union.width, height: union.height + slack * 2)
+    }
+
+    /// 行是否完整落在可视区内（留 2pt 余量，保证落点/长按不会溢出到面板外）
+    private func isRowFullyVisible(_ app: XCUIApplication, _ identifier: String, in viewport: CGRect) -> Bool {
+        guard viewport.height > 0 else { return false }
+        let r = treeRowRect(app, identifier)
+        return !r.isNull && r.height > 0 && r.minY >= viewport.minY + 2 && r.maxY <= viewport.maxY - 2
+    }
+
+    /// 断言给定行都完整可见（拖拽用例的前置条件）
+    private func assertTreeRowsVisible(_ app: XCUIApplication,
+                                       _ identifiers: [String],
+                                       file: StaticString = #filePath,
+                                       line: UInt = #line) {
+        let viewport = treeViewport(app)
+        for id in identifiers {
+            XCTAssertTrue(isRowFullyVisible(app, id, in: viewport),
+                          "行未完整滚入树列表可视区：row=\(treeRowRect(app, id)) viewport=\(viewport)",
+                          file: file, line: line)
+        }
+    }
+
+    /// 在树面板内小步慢速滚动，直到给定行都完整可见（判定见 `isRowFullyVisible`）。
+    /// 落点全程限制在可视区内，避免误触面板外的控件。
+    private func revealTreeRows(_ app: XCUIApplication,
+                                _ identifiers: [String],
+                                maxSwipes: Int = 10) {
+        for _ in 0..<maxSwipes {
+            let viewport = treeViewport(app)
+            guard viewport.height > 0 else { return }
+            guard let pending = identifiers.first(where: { !isRowFullyVisible(app, $0, in: viewport) }) else { return }
+            // 目标行在视口偏下 → 手指由下往上拖（内容上移）；反之向下
+            let contentUp = treeRowRect(app, pending).midY > viewport.midY
+            let x = viewport.midX
+            let fromY = contentUp ? viewport.maxY - 10 : viewport.minY + 10
+            let toY = contentUp ? fromY - 60 : fromY + 60
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: x, dy: fromY))
+                .press(forDuration: 0.1,
+                       thenDragTo: app.coordinate(withNormalizedOffset: .zero)
+                           .withOffset(CGVector(dx: x, dy: toY)),
+                       withVelocity: .slow, thenHoldForDuration: 0.05)
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+    }
+
+    /// 行内落点分区（与 app 侧 `NodeDropDelegate.resolution(forY:)` 一致）
+    private enum TreeDropZone {
+        /// 行上边缘 12pt：插到该行之前
+        case before
+        /// 容器行中间区：拖入该容器
+        case into
+        /// 行下边缘 12pt / 叶子行下半区：插到该行之后
+        case after
+    }
+
+    /// 某行中心点的屏幕坐标（拖拽起点）
+    private func treeRowCenter(_ app: XCUIApplication, _ identifier: String) -> XCUICoordinate {
+        let r = treeRowRect(app, identifier)
+        return app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: r.midX, dy: r.midY))
+    }
+
+    /// 某行指定分区代表点的屏幕坐标（拖拽落点）
+    private func treeDropPoint(_ app: XCUIApplication,
+                               _ identifier: String,
+                               _ zone: TreeDropZone) -> XCUICoordinate {
+        let r = treeRowRect(app, identifier)
+        let y: CGFloat
+        switch zone {
+        case .before: y = r.minY + 6   // 上边缘区内侧（<12）
+        case .into:   y = r.midY       // 容器行中间区
+        case .after:  y = r.maxY - 6   // 下边缘区内侧（>32）
+        }
+        return app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: r.midX, dy: y))
+    }
+
+    /// 长按源行拖动到目标行的指定分区松手（`.slow` + 落点保持 1.2s 才可靠交付 `performDrop`）
+    private func dragTreeRow(_ app: XCUIApplication,
+                             from source: String,
+                             to target: String,
+                             zone: TreeDropZone) {
+        treeRowCenter(app, source)
+            .press(forDuration: 1.2,
+                   thenDragTo: treeDropPoint(app, target, zone),
+                   withVelocity: .slow, thenHoldForDuration: 1.2)
+    }
+
+    /// 整份 JSON 里某个档位段的文本（键形如 `"B" : {`）；找不到返回 nil
+    private func jsonSection(_ style: String, in text: String) -> String {
+        guard let start = text.range(of: "\"\(style)\" : {")?.lowerBound else { return text }
+        var end = text.endIndex
+        for other in ["A", "B", "C", "D"] where other != style {
+            if let r = text.range(of: "\"\(other)\" : {", range: start..<text.endIndex),
+               r.lowerBound > start, r.lowerBound < end {
+                end = r.lowerBound
+            }
+        }
+        return String(text[start..<end])
+    }
+
+    // MARK: - 用例 100：把控件行拖入容器行（跨级装配 + 持久化 + 恢复默认）
+
+    func test100_Home_EditorDragNodeIntoStack() throws {
+        let app = XCUIApplication()
+        app.launch()
+        ensureLayoutIsDefault(app)
+        openLayoutEditorFromHome(app)
+
+        // 0. 前置：默认 B 档；quickEntryRow 是根容器直接子节点，排在 home.topGainers 之前
+        let before = jsonSection("B", in: readTreeJSON(app))
+        guard let indentBefore = jsonIndent(of: "home.quickEntryRow", in: before) else {
+            return XCTFail("拖拽前 JSON 未找到 home.quickEntryRow 行")
+        }
+        guard let rowIdx = before.range(of: "\"home.quickEntryRow\"")?.lowerBound,
+              let gainersIdx = before.range(of: "\"home.topGainers\"")?.lowerBound else {
+            return XCTFail("拖拽前 JSON 缺少对比片段")
+        }
+        XCTAssertLessThan(rowIdx, gainersIdx, "前置：quickEntryRow 应排在 home.topGainers 之前")
+
+        // 1. 长按控件行，拖到「滚动区」容器行的**中间区**（行中心 = 拖入意图）松手
+        let sourceID = "layout.tree.widget.home.quickEntryRow"
+        let targetID = "layout.tree.scroll"
+        revealTreeRows(app, [sourceID, targetID])
+        assertTreeRowsVisible(app, [sourceID, targetID])
+        dragTreeRow(app, from: sourceID, to: targetID, zone: .into)
+
+        // 2. 落库后：quickEntryRow 成为滚动区最后一个子节点 → 缩进 +4，排在 home.topGainers 之后
+        //    注意：canonical JSON 每深一层多 4 空格（数组元素行 `{` + 其键行各 2 空格），不是 2
+        let after = waitTreeJSON(app) { text in
+            let section = self.jsonSection("B", in: text)
+            guard let indent = self.jsonIndent(of: "home.quickEntryRow", in: section),
+                  let idx = section.range(of: "\"home.quickEntryRow\"")?.lowerBound,
+                  let tail = section.range(of: "\"home.topGainers\"")?.lowerBound else { return false }
+            return indent > indentBefore && idx > tail
+        }
+        let afterSection = jsonSection("B", in: after)
+        XCTAssertEqual(jsonIndent(of: "home.quickEntryRow", in: afterSection), indentBefore + 4,
+                       "拖入后 quickEntryRow 层级未加深一层（canonical JSON 每层 4 空格）")
+        XCTAssertGreaterThan(afterSection.range(of: "\"home.quickEntryRow\"")!.lowerBound,
+                             afterSection.range(of: "\"home.topGainers\"")!.lowerBound,
+                             "拖入后 quickEntryRow 应位于滚动区子节点末尾")
+
+        // 3. 保存 → 杀进程重启 → 结构保持
+        saveAndCloseEditor(app)
+        app.terminate()
+        app.launch()
+        openLayoutEditorFromHome(app)
+        let restarted = jsonSection("B", in: readTreeJSON(app))
+        XCTAssertEqual(jsonIndent(of: "home.quickEntryRow", in: restarted), indentBefore + 4,
+                       "重启后拖入结构丢失")
+
+        // 4. 恢复默认：quickEntryRow 回到根容器
+        app.buttons["layoutEditor.resetDefault"].tap()
+        let confirm = app.alerts.buttons["恢复默认"].firstMatch
+        if confirm.waitForExistence(timeout: 3) { confirm.tap() }
+        Thread.sleep(forTimeInterval: 0.8)
+        let restored = waitTreeJSON(app) { text in
+            self.jsonIndent(of: "home.quickEntryRow", in: self.jsonSection("B", in: text)) == indentBefore
+        }
+        XCTAssertEqual(jsonIndent(of: "home.quickEntryRow", in: jsonSection("B", in: restored)), indentBefore,
+                       "恢复默认后 quickEntryRow 未回到根容器")
+    }
+
+    // MARK: - 用例 101：非法落点被拒且结构不变
+    // 一次手势内部按落点分区判定意图：容器行中间区 = 拖入、上下边缘区 = 同级前后插、
+    // 叶子行上下半区 = 同级前后插。故非法只剩两类：拖入自身/子孙（成环）、跨级插到不同父。
+
+    func test101_Home_EditorDragInvalidTarget() throws {
+        let app = XCUIApplication()
+        app.launch()
+        ensureLayoutIsDefault(app)
+        openLayoutEditorFromHome(app)
+
+        let before = readTreeJSON(app)
+        let cardID = "layout.tree.card"
+
+        // 1. 把容器（滚动区）拖到它自己的子孙容器（卡片）中间区 → 说明文案 + 结构不变（防成环）
+        let scrollID = "layout.tree.scroll"
+        revealTreeRows(app, [scrollID, cardID])
+        assertTreeRowsVisible(app, [scrollID, cardID])
+        dragTreeRow(app, from: scrollID, to: cardID, zone: .into)
+        XCTAssertTrue(app.staticTexts["不能把节点拖入它自己或它的子节点"].waitForExistence(timeout: 5),
+                      "自身/子孙落点未给出说明")
+        XCTAssertEqual(readTreeJSON(app), before, "子孙落点不应改变结构")
+        XCTAssertTrue(app.descendants(matching: .any)["layout.tree.widget.home.marketOverview"].exists,
+                      "卡片唯一子节点不应被替换")
+
+        // 2. 跨级插入：把「大盘概览」控件拖到**上一行**的「大盘概览卡片」上边缘（两者相邻，保证同一视口内可点）
+        //    → 前插意图，但源（卡片内）与目标（滚动区内）不同父 → 跨级拒绝 + 说明文案 + 结构不变
+        let overviewID = "layout.tree.widget.home.marketOverview"
+        revealTreeRows(app, [overviewID, cardID])
+        assertTreeRowsVisible(app, [overviewID, cardID])
+        dragTreeRow(app, from: overviewID, to: cardID, zone: .before)
+        XCTAssertTrue(app.staticTexts["跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘"]
+                        .waitForExistence(timeout: 5),
+                      "跨级插入未给出说明")
+        XCTAssertEqual(readTreeJSON(app), before, "跨级落点不应改变结构")
+    }
+
+    // MARK: - 用例 102：拖拽同级排序（不再需要先点「排序」开关）+ 持久化 + 恢复默认
+
+    func test102_Home_EditorDragReorderSibling() throws {
+        let app = XCUIApplication()
+        app.launch()
+        ensureLayoutIsDefault(app)
+        openLayoutEditorFromHome(app)
+
+        // 0. 前置：默认 B 档；quickEntryRow 在 home.header 之后（都是根容器直接子节点）
+        let before = jsonSection("B", in: readTreeJSON(app))
+        guard let indentBefore = jsonIndent(of: "home.quickEntryRow", in: before),
+              let rowIdx = before.range(of: "\"home.quickEntryRow\"")?.lowerBound,
+              let headerIdx = before.range(of: "\"home.header\"")?.lowerBound else {
+            return XCTFail("拖拽前 JSON 缺少对比片段")
+        }
+        XCTAssertGreaterThan(rowIdx, headerIdx, "前置：quickEntryRow 应排在 home.header 之后")
+
+        // 1. 长按控件行，拖到「首页头部控件」行的**上边缘区**（插到该行之前）松手
+        let sourceID = "layout.tree.widget.home.quickEntryRow"
+        let headerID = "layout.tree.widget.home.header"
+        revealTreeRows(app, [sourceID, headerID])
+        assertTreeRowsVisible(app, [sourceID, headerID])
+        dragTreeRow(app, from: sourceID, to: headerID, zone: .before)
+
+        // 2. 同级重排：层级不变（仍为根容器直接子节点），顺序改为排在 home.header 之前
+        let after = waitTreeJSON(app) { text in
+            let section = self.jsonSection("B", in: text)
+            guard let idx = section.range(of: "\"home.quickEntryRow\"")?.lowerBound,
+                  let header = section.range(of: "\"home.header\"")?.lowerBound else { return false }
+            return idx < header
+        }
+        let afterSection = jsonSection("B", in: after)
+        XCTAssertEqual(jsonIndent(of: "home.quickEntryRow", in: afterSection), indentBefore,
+                       "同级排序不应改变层级")
+        XCTAssertLessThan(afterSection.range(of: "\"home.quickEntryRow\"")!.lowerBound,
+                          afterSection.range(of: "\"home.header\"")!.lowerBound,
+                          "排序后 quickEntryRow 应排在 home.header 之前")
+
+        // 3. 保存 → 杀进程重启 → 顺序保持
+        saveAndCloseEditor(app)
+        app.terminate()
+        app.launch()
+        openLayoutEditorFromHome(app)
+        let restarted = jsonSection("B", in: readTreeJSON(app))
+        XCTAssertLessThan(restarted.range(of: "\"home.quickEntryRow\"")!.lowerBound,
+                          restarted.range(of: "\"home.header\"")!.lowerBound,
+                          "重启后同级排序结果丢失")
+
+        // 4. 恢复默认：quickEntryRow 回到 home.header 之后
+        app.buttons["layoutEditor.resetDefault"].tap()
+        let confirm = app.alerts.buttons["恢复默认"].firstMatch
+        if confirm.waitForExistence(timeout: 3) { confirm.tap() }
+        Thread.sleep(forTimeInterval: 0.8)
+        let restored = waitTreeJSON(app) { text in
+            let section = self.jsonSection("B", in: text)
+            guard let idx = section.range(of: "\"home.quickEntryRow\"")?.lowerBound,
+                  let header = section.range(of: "\"home.header\"")?.lowerBound else { return false }
+            return idx > header
+        }
+        XCTAssertGreaterThan(jsonSection("B", in: restored).range(of: "\"home.quickEntryRow\"")!.lowerBound,
+                             jsonSection("B", in: restored).range(of: "\"home.header\"")!.lowerBound,
+                             "恢复默认后 quickEntryRow 未回到 home.header 之后")
     }
 }

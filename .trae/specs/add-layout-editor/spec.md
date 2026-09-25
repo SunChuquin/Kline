@@ -1,6 +1,6 @@
 # 布局编辑器（个人中心入口 + 独立全屏页 + 实时预览）Spec
 
-> **两轮规划**：第一轮（节点树结构编辑，已交付待真机验收）见下文全部既有章节；**第二轮「控件内容可配置」（快捷入口自由装配 + 四个内容控件数据源选择，2026-09-24 用户确认范围）见文末「第二轮深化」**。
+> **三轮规划**：第一轮（节点树结构编辑，已交付待真机验收）见下文全部既有章节；第二轮「控件内容可配置」（快捷入口自由装配 + 四个内容控件数据源选择，2026-09-24 用户确认范围）见「第二轮深化」；**第三轮「节点拖拽装配」（把节点/控件拖入容器，2026-09-24 用户提出）见文末「第三轮深化」**。
 
 ## Why（第一轮）
 
@@ -472,5 +472,189 @@
 第一轮中 `home.quickEntryRow` 为「无参数」；第二轮起其声明 `entries`（orderedList / .entries）。`home.marketOverview` 增加 `indices`（orderedList / .indices / maxCount 4），`home.favorites` 增加 `group`（dynamicOptions / .favoritesGroups）且 `limit` 备注更正为「0 = 默认前 5」，`home.simSummary` 增加 `account`（dynamicOptions / .simAccounts），`home.topGainers` 增加 `board`（静态 options：mainBoard / etfIndex）。`home.header` / `home.placeholder` 仍无参数。
 
 ## REMOVED Requirements（第二轮）
+
+无。
+
+---
+
+# 第三轮深化：节点拖拽装配（把节点/控件拖入容器）
+
+## Why（第三轮）
+
+表单页签左侧节点树当前只支持**同级重排**：`List.onMove` → `PageLayoutEditorModel.move(fromOffsets:toOffset:)`（[PageLayoutEditorModel.swift](file:///Volumes/home/repositories/Kline2/Kline/Home/Editor/PageLayoutEditorModel.swift#L169-L228)），跨级拖动被**显式拒绝**（banner「已忽略跨级拖动：仅支持同级重排」）。用户要把已有节点/控件搬到另一个容器（例如把某控件拖进「垂直堆栈」）时，只能「先选中目标容器 → 点添加节点」，且只能追加到末尾，无法搬运已有节点。本轮补齐拖拽的**接收方**：容器行成为合法落点。
+
+## 接收方盘点（本轮核心结论）
+
+判定依据是现成的容器语义 [PageLayoutSchema.swift](file:///Volumes/home/repositories/Kline2/Kline/App/PageLayout/PageLayoutSchema.swift#L229-L252) 的 `PageLayoutNode.containerKey`：**凡 `containerKey != nil` 的节点都应接收拖入，叶子一律不接收**。
+
+| type | 中文名 | 子节点承载 | 可作拖拽源 | 接收拖入 | 落点语义 |
+|---|---|---|---|---|---|
+| `vstack` | 垂直堆栈 | `children[]` | ✅（非根行） | ✅ | 成为该容器最后一个子节点 |
+| `hstack` | 水平堆栈 | `children[]` | ✅ | ✅ | 同上 |
+| `zstack` | 层叠堆栈 | `children[]` | ✅ | ✅ | 同上（列表顺序 = 层级，后追加者在上） |
+| `scroll` | 滚动区 | `children[]` | ✅ | ✅ | 同上 |
+| `card` | 卡片 | `child`（单槽） | ✅ | ⚠️ 接收（单槽） | 空槽放入；非空替换原唯一子节点（banner 告知） |
+| `frame` | 尺寸框 | `child`（单槽） | ✅ | ⚠️ 接收（单槽） | 同上 |
+| `widget` | 控件 | 无 | ✅ | ❌ | 悬停时该行**红色高亮**（区别于可放的蓝色）+ 松手后 banner 说明，草稿不变 |
+| `divider` | 分隔线 | 无 | ✅ | ❌ | 同上 |
+| `spacer` | 占位 | 无 | ✅ | ❌ | 同上 |
+| 根节点 | 四档根均为 `vstack` | 同其 type | ❌ 不可拖 | ✅ | 等价于追加到根末尾 |
+
+补充规则：
+- **折叠态容器同样接收**；拖入后自动展开该容器，便于立刻看到结果
+- 单槽容器（card/frame）被替换掉的原唯一子节点（含整棵子树）随引用丢弃、无撤销，**必须 banner 明确告知**
+- 拖拽源 = 除根节点外的所有行；根节点不可拖（与既有「根节点不可移动」一致）
+- 节点树容器由 `List` 改为 `ScrollView + LazyVStack`（见下「实现取舍」）；**一次拖拽内部按落点分区自动判定意图**，不需要先切模式——容器行上/下边缘区 = 同级前插/后插，中间区 = 拖入该容器；叶子行上/下半区 = 前插/后插（详见下「落点分区」）
+
+### 落点分区（2026-09-25 用户要求：拖拽即排序，不再依赖按钮/开关）
+
+用户诉求原话：「我想拖拽时不只是处理容器接不接收，也要支持拖拽排序，现在排序只能点击排序相关按钮」。即**去掉「必须先打开排序开关」这一前置条件**，一次拖拽按落点位置自动判定三种意图：
+
+| 目标行 | 落点位置 | 判定 |
+|---|---|---|
+| 容器行（`containerKey != nil`） | 上边缘区（`y < 12`） | 同级前插：插到该行**之前** |
+| 容器行 | 中间区（`12 ≤ y ≤ 32`） | 拖入该容器（成为其子节点，跨级装配） |
+| 容器行 | 下边缘区（`y > 32`） | 同级后插：插到该行**之后** |
+| 叶子行（widget/divider/spacer） | 上半区（`y < 22`） | 同级前插 |
+| 叶子行 | 下半区（`y ≥ 22`） | 同级后插 |
+
+- 行高 44pt：容器行 12 / 20 / 12，叶子行 22 / 22（叶子没有子槽位，中间无「拖入」语义）
+- 同级插入的合法性：目标行必须有父容器（根行没有），且与被拖节点**同父**；否则判 `.crossLevel` 拒绝并给出「跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘」
+- 拖到自己所在行 = 无操作（不置脏、不写 banner）
+- 悬停反馈三态：前插/后插 = 行顶/行底 **2pt 蓝线**（`insertionLine`）；拖入 = 整行蓝底 + 蓝框；非法 = 整行红底 + 红框（`accent = .red`）
+
+### 实现取舍（相对已批准草案的偏差，2026-09-25 实测后定稿）
+
+`List`（集合视图承载）会**吞掉由它自身行发起的拖拽会话**：`.onDrag` 有回调，但行内 / List 层 / 外层容器三处 `.onDrop` 全部零回调（三轮探针日志 0 命中；改为 `ScrollView + LazyVStack` 后同一次拖拽立刻有 `validateDrop` / `dropUpdated`）。即「保留 `List.onMove`」与「跨级拖入容器」在 iOS 26 不可兼得，用户选定路线 A：
+
+1. 节点树改普通滚动视图，行分隔线自绘 `Divider()`，行高仍固定 44pt
+2. 同级重排改由拖拽落点驱动（落点分区，无需开关），不再依赖 `List.onMove`
+3. 叶子落点**不**使用系统 `.forbidden`：系统对 `.forbidden` 的落点不交付 `performDrop`，松手时拿不到回调、无法解释「为什么没反应」。故叶子行也报 `.move`（保证松手能进 `performDrop`），悬停时用**红色高亮**兜住「不可放」的视觉，松手后由模型 `moveInto` 统一写 banner
+4. 拖拽悬停**不写 banner**（只做行高亮），banner 只在松手后被拒时写——避免拖拽过程中反复刷新视图
+
+## What Changes（第三轮）
+
+### 一、模型层：跨级拖入 API + 同级按兄弟重排 API（PageLayoutEditorModel.swift）
+- 新增 `// MARK: - 树操作：跨级拖入`
+- `enum DropRejection: Equatable { case targetMissing, notContainer, intoSelfOrDescendant, crossLevel }`（`crossLevel` 为本轮新增，用于「同级前插/后插但源与目标不同父」）
+- `static func dropRejectionMessage(_:) -> String` 给出各拒绝原因的可读文案
+- `func validateDrop(_ draggingUUID: UUID, into targetUUID: UUID) -> DropRejection?`：目标不存在 → `.targetMissing`；目标 `containerKey == nil` → `.notContainer`；目标落在被拖节点子树内（含自身）→ `.intoSelfOrDescendant`；否则 nil = 可投放
+- `func reportDropRejected(_ rejection:)`：把拒绝原因写成 banner（悬停期间不写，仅松手后被拒时写）
+- `@discardableResult func moveInto(_ draggingUUID: UUID, container targetUUID: UUID) -> Bool`：
+  1. `validateDrop` 不过 → 写 banner + 返回 false（不 `touchDraft`）
+  2. 原父 == 目标 且 被拖节点已是目标末尾 → 无操作（banner「该节点已在此容器末尾」，不 `touchDraft`）
+  3. 原父 `removeChild(uuid:)` → 目标 `appendChild`：`.child` 非空时 banner「该容器仅容纳一个子节点，已替换」（沿用既有 `insert` 文案）；`.children` 时 banner「已移入：<容器名>」
+  4. `collapsed.remove(目标 uuid)`、`select(被拖节点)`、`touchDraft()`
+- **硬防护**：`.intoSelfOrDescendant` 必须拦死，否则 `children` 成环，`encode(to:)` 无限递归 → 栈溢出崩溃
+- 新增同级按兄弟重排 API（放在既有 `move(fromOffsets:toOffset:)` 之后，**不改它**）：
+  - `@discardableResult func move(_ draggingUUID: UUID, beforeSibling targetUUID: UUID) -> Bool`
+  - `@discardableResult func move(_ draggingUUID: UUID, afterSibling targetUUID: UUID) -> Bool`
+  - 两者转发到私有 `move(_:relativeToSibling:placeAfter:)`：直接在被拖节点的父容器 `childList` 上定位（先 `removeChild` 再按目标的新下标 `insert`），**彻底绕开「扁平行下标」的所有边界问题**——此前用 `targetIndex + 1` 当锚点，在 DFS 先序（容器行的下一行是其第一个子节点）下会把「拖到有子节点的容器行下半区」误判成跨级；改用兄弟定位后该缺陷不存在
+  - 同父校验不过 → `reportDropRejected(.crossLevel)`；父容器是 `.child`（单槽）→ banner「该容器仅容纳一个子节点，不支持重排」
+- 既有 `move(fromOffsets:toOffset:)` / `moveSelectedUp/Down` / `canMoveSelected` 零改动（检查器仍在用 `move(fromOffsets:toOffset:)`）
+
+### 二、视图层：拖拽手势与落点反馈（LayoutNodeTreeList.swift）
+- 工程 `IPHONEOS_DEPLOYMENT_TARGET = 15.0`，`.draggable/.dropDestination`（iOS 16+）不可用 → 用 `.onDrag` + `.onDrop(of:delegate:)`（iOS 13+）
+- 列表容器：`ScrollView { LazyVStack(spacing: 0) { ...行 + Divider() } }` + 底部工具条（不用 `List`，理由见上「实现取舍」）
+- 行修饰器 `NodeRowDragModifier`：非根行挂 `.onDrag { ... }`（payload = 节点 uuid 串，只需节点身份，不传整棵树；同时把 uuid 写进**不发布变化**的引用对象 `LayoutDragSession.sourceUUID` 供落点判定用——`@State` 写在 `.onDrag` 闭包里会触发重渲染、有打断拖拽会话的风险）；**所有行**（含根行）挂 `.onDrop(of: [.text], delegate:)`
+- `NodeDropDelegate: DropDelegate`（非隔离协议 → 代理里不能同步读 `@MainActor` 模型，`rows` 快照 / `session` / `editor` 由修饰器透传）：
+  - `validateDrop` = payload 是否为本树 uuid 串（`.text`）
+  - `dropEntered/dropUpdated` 调**同一个** `resolution(forY: info.location.y)`（行局部坐标）得到落点解析结果，写进 `dropTargetUUID` + `dropResolution`，返回 `.move`；`dropExited/performDrop` 复位
+  - `resolution(forY:)` 返回私有 `enum LayoutDropResolution: Equatable { case into, insertBefore, insertAfter, reject(DropRejection) }`，分区规则见上「落点分区」；同级插入走 `siblingInsertion(_:)`（校验目标行有父且与源同父，否则 `.reject(.crossLevel)`）
+  - `performDrop`：先用**同一套** `resolution(forY:)` 复算一次（局部命名 `outcome`，避免与同名方法混淆）→ `loadObject(ofClass: NSString.self)` 取回 uuid 串 → `Task { @MainActor in ... }` 分发：`.into` → `editor.moveInto(uuid, container:)`、`.insertBefore` → `editor.move(uuid, beforeSibling:)`、`.insertAfter` → `editor.move(uuid, afterSibling:)`、`.reject(reason)` → `editor.reportDropRejected(reason)`
+- 落点视觉：选中 = `Color.blue.opacity(0.12)`；前插/后插 = 行顶/行底 **2pt 蓝线**（`insertionLine`，`allowsHitTesting(false)`）；拖入 = 底色 `accent.opacity(0.2)` + `RoundedRectangle` 描边 2pt；非法 = 红底 + 红框（`accent = .red`）
+- 底部工具条：**已删除原「排序/完成」开关**（拖拽落点分区后不再需要模式切换，锚点 `layoutEditor.sortingToggle` 一并移除）；保留「上移 / 下移」精确重排与「添加节点」/「添加控件」两个 Menu
+- 拖拽悬停**不写 banner**（避免刷掉真实提示），仅在松手后被拒时由模型写 banner
+- 原生 `onDrag` 需长按约 0.5s 才抬起，正常点击选中与滚动不受影响
+
+### 三、测试（KlineUITests）
+- 新增 `test100_Home_EditorDragNodeIntoStack`、`test101_Home_EditorDragInvalidTarget`、`test102_Home_EditorDragReorderSibling`（91/92/93/95/96/97/98/99 已占用）
+- 结构断言口径：切「JSON 原文」页签读 `app.textViews.firstMatch.value`，比较 `home.quickEntryRow` 在 prettyPrinted JSON 里的**行缩进空格数**与前后顺序；断言限定在 B 档段内（避免与下半预览/其它档位同名文案混淆）。⚠️ JS​ON 结构每层缩进 2 空格，但节点树的一层深度隔了 `layouts.<档位>.root.children[{}]` 的 4 个结构层，故**节点深度每 +1 = 缩进 +4 空格**（实测：根的直接子节点 12 空格、拖入容器后 16 空格），断言必须按 +4 写
+- 拖拽驱动：`XCUICoordinate.press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`（**两端都必须是坐标**，`XCUIElement` 版本不接受坐标作目标；必须带 `.slow` + 1.2s 落点保持，否则松手过快系统不交付 `performDrop`，表现为模型零回调）；源码为节点 uuid 串（`NSItemProvider(object:)` → 代理里 `loadObject(ofClass: NSString.self)`）
+- 落点统一由 helper 按「行真实 rect + 命名分区」算出屏幕坐标，不再用 `dy` 归一化值：
+  - `treeViewport`＝`app.scrollViews["layoutEditor.treeList"]` 的 frame（app 侧新加锚点），即树列表**真实可视区**
+  - `treeRowRect`＝「与首个匹配元素同一行（行顶差 < 行高）的元素并集」再按「内容纵向居中于 44pt 行内」补回上下余量。⚠️ 两个已踩的坑：① 标识会传播到行内每个元素，只取 `firstMatch` 时叶子行命中的是**标题**（高 17、位于行内容顶部），只按它居中反推会把行顶算高约 7pt → 上边缘落点落到上一行、被当跨级拒绝、**同级排序静默失败**（test102 实测）；② 同一标识可能匹配多行（默认布局就有两个 `layout.tree.card`），并集必须按行高过滤
+  - `TreeDropZone.before/.into/.after` → 行 rect 内代表点（`minY+6` / `midY` / `maxY-6`），与 app 侧 `resolution(forY:)` 分区一一对应
+- 可见性判定不能用 `isHittable`：`ScrollView + LazyVStack` 会把**被视口裁掉的行**也报进无障碍树，且这些行 `isHittable` 仍返回 true。若按 `element.frame` 直接算落点，长按会打到视口外的控件上——实测落到工具栏「添加节点」按钮、弹出 Menu 吃掉整个手势（app 侧连 `onDrag` 都没有）。故 `revealTreeRows` 改为「按 `treeViewport` + `isRowFullyVisible`（行 rect 完整落在可视区内，留 2pt 余量）小步慢速滚动（60pt/步，方向按目标行在视口中线的上下决定）」，拖拽前用 `assertTreeRowsVisible` 断言完整可见
+- 辅助：`waitTreeJSON` 轮询读 JSON（落库链路异步：`loadObject` → 主线程模型方法）
+- test100：默认 → 打开编辑器 → 拖「快捷入口行」控件到「滚动区」行**中间区** → 断言缩进 **+4 空格**（节点深度 +1）且排在 `home.topGainers` 之后 → 保存 → 杀进程重启仍保持 → 恢复默认
+- test101：①「滚动区」→ 其子孙「卡片」行中间区 → banner「不能把节点拖入它自己或它的子节点」且结构不变（`layout.tree.widget.home.marketOverview` 仍存在）；② 跨级插入：「大盘概览」控件行中心 → **上一行**「大盘概览卡片」行**上边缘区**（两者相邻保证同视口可点）→ 前插意图但不同父 → banner「跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘」且结构不变
+- test102：拖「快捷入口行」到 `home.header` 行的**上边缘区** → 断言缩进不变（`jsonIndent` 相同）、顺序变为排在 `home.header` 之前 → 保存 → 杀进程重启仍保持 → 恢复默认
+- 实跑结果（iPad mini 5 模拟器，2026-09-25）：test100/101/102 全通过（84.5s / 92.8s / 75.6s）；回归 test96/97/98/99 通过（25.4s / 23.8s / 73.8s / 108.6s）
+- 回归：`test91/92/93/95/96/97` 必须复跑通过（test91 依赖 ETF 种子库二级菜单、test92 依赖刘海机型横向安全区，在 iPad mini 5 上属既有环境性失败，与本轮改动无关）
+- 首页入口 helper 加固：`scrollHomeEntryIntoView` 原来只判 chip 是否横向在屏内就用它的 midY 做横滑 y——布局被改动后入口行可能被纵向滚出视口（如拖到滚动区末尾后 y≈776 > 屏高），算出的滑动 y 落到屏幕外使横滑手势完全无效，chip 永远滚不进来（曾致 test100/101/102 连环卡在「打开编辑器」前置）。现在先按「行 frame 与安全带（上避状态栏 30 / 下避底部菜单栏 30）的交集 ≥ 16pt」判定行是否在视口内，不在则先纵向滚动把它带进来（按行在屏中线上下决定上滑/下滑），再用交集中点作为横滑 y
+
+### 四、非目标（第三轮不做）
+- 预览区拖拽（预览 `allowsHitTesting(false)`）、从「添加节点/添加控件」菜单拖入（调色板拖拽）
+- 撤销/重做；跨档位、跨页面拖拽；自定义拖拽浮层预览（用系统的）
+- 系统 `.forbidden` 落点光标（改为红色高亮，理由见上「实现取舍」）、拖拽自动滚动（拖到滚动区边缘不自动滚屏）
+
+### 五、BREAKING
+无。`.onDrag/.onDrop` 是新增手势；默认布局、配置结构、JSON 格式、既有无障碍锚点均不变。
+
+**交互/外观差异（非 BREAKING，需知悉）**：
+1. 节点树去掉 `List` 后行分隔线为自绘，行内边距与滚动位置与之前略有差异
+2. **底部工具条的「排序/完成」开关已删除**——拖拽落点分区后不再需要在两个模式间切换；同级重排仍可用「上移 / 下移」按钮做精确调整
+3. 悬停反馈新增「前插/后插蓝线」形态（原只有蓝底描边）
+
+## Impact（第三轮）
+- Affected specs：布局编辑器（第一轮「结构化编辑节点树」Requirement 的能力扩展）
+- Affected code：[PageLayoutEditorModel.swift](file:///Volumes/home/repositories/Kline2/Kline/Home/Editor/PageLayoutEditorModel.swift)（+跨级拖入 API `moveInto/validateDrop/reportDropRejected` 与同级按兄弟重排 `move(beforeSibling:)/move(afterSibling:)`、`DropRejection.crossLevel`）、[LayoutNodeTreeList.swift](file:///Volumes/home/repositories/Kline2/Kline/Home/Editor/LayoutNodeTreeList.swift)（+onDrag/onDrop/DropDelegate/落点三分区/三态反馈，-「排序」开关）、`KlineUITests/KlineUITests.swift`（+3 用例：test100/101/102）；`PageLayoutSchema.swift` 与 `HomeLayoutDefaults.swift` 零改动
+
+## ADDED Requirements（第三轮）
+
+### Requirement: 拖拽节点/控件到容器
+
+系统 SHALL 允许在表单页签的节点树中把任意非根节点拖到「容器行」上，使其成为该容器的子节点；拖到非容器行则拒绝且不改变草稿。
+
+#### Scenario: 拖入数组容器
+- **WHEN** 用户长按拖动某控件行，松手在「垂直堆栈」行的**中间区**
+- **THEN** 该控件成为该堆栈最后一个子节点，树缩进层级 +1、预览即时刷新、草稿置脏；保存后 JSON 结构正确（目标容器 `children` 末尾含该节点，原父不再含）
+
+#### Scenario: 拖入单槽容器
+- **WHEN** 用户把某节点拖到「卡片」行的中间区，而卡片已有子节点
+- **THEN** 该节点成为卡片唯一子节点、原子节点被替换，状态栏提示「该容器仅容纳一个子节点，已替换」
+
+#### Scenario: 拖入折叠容器
+- **WHEN** 用户把节点拖到已折叠的容器行中间区
+- **THEN** 拖入成功且该容器自动展开，用户可立即看到结果
+
+#### Scenario: 悬停落点分区反馈
+- **WHEN** 拖拽悬停在容器行的上边缘区 / 中间区 / 下边缘区
+- **THEN** 分别显示：行顶 2pt 蓝线（前插）/ 整行蓝底 + 蓝框（拖入）/ 行底 2pt 蓝线（后插）
+- **WHEN** 拖拽悬停在叶子行的上半区 / 下半区
+- **THEN** 分别显示行顶 / 行底 2pt 蓝线
+
+#### Scenario: 非法落点（自身或后代）
+- **WHEN** 用户把一个容器拖到它自己的子孙容器行**中间区**
+- **THEN** 拖拽中该行显示**红底红框**，松手后被拒绝并给出说明，节点树与草稿保持不变（禁止成环）
+
+#### Scenario: 非法落点（跨级前插/后插）
+- **WHEN** 用户把某节点拖到**不同父**的某行上/下边缘区（例如拖到上一级容器行的下边缘区）
+- **THEN** 拖拽中该行显示**红底红框**，松手后状态栏提示「跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘」，节点树与草稿保持不变
+
+#### Scenario: 拖回原处与取消
+- **WHEN** 用户把某节点拖到它当前父容器行上、且它已是该容器最后一个子节点
+- **THEN** 视为无操作：草稿不变、不置脏
+- **WHEN** 拖拽中途取消（松手在树外 / 空白区）
+- **THEN** 落点高亮消失、拖拽状态完全复位
+
+#### Scenario: 持久化
+- **WHEN** 拖入后保存并杀进程重启
+- **THEN** 新的父子关系与顺序保持不变
+
+#### Scenario: 同级重排（拖拽落点，无需开关）
+- **WHEN** 用户把某节点拖到同级某行的**上边缘区 / 上半区**（容器行 y<12）或**下边缘区 / 下半区**（容器行 y>32）
+- **THEN** 该节点插到目标行**之前** / **之后**，缩进层级不变，顺序即时更新、草稿置脏；无需事先打开任何排序开关
+- **WHEN** 用户使用上移 / 下移按钮
+- **THEN** 与某个同级兄弟交换位置，行为与本轮之前完全一致
+
+## MODIFIED Requirements（第三轮）
+
+### Requirement: 结构化编辑节点树
+
+第一轮能力为「增 / 删 / 改 / 同级重排 + 折叠 + 选中」；第三轮起增加**跨级拖入容器**（`onDrag` + `onDrop`，接收方 = `containerKey != nil` 的 6 种容器 + 根节点）。节点树容器由 `List` 改为 `ScrollView + LazyVStack`（`List` 会吞掉自身行发起的拖拽会话），故同级重排也改由**一次拖拽内的落点分区**驱动（容器行 上边缘 12 / 中 20 / 下边缘 12，叶子行上/下半区 22/22），模型侧新增按兄弟定位的 `move(beforeSibling:)/move(afterSibling:)`（不再吃扁平行下标，规避 DFS 先序边界缺陷）；其限制（`.child` 单槽容器不可重排、不同父的插入判 `.crossLevel` 拒绝）保持不变；底部工具条的「排序/完成」开关**已删除**，上移/下移按钮保留。行高 44pt、点击选中、折叠展开、无障碍锚点（`layout.tree.<type>` / `layout.tree.widget.<name>`）全部保持。
+
+## REMOVED Requirements（第三轮）
 
 无。

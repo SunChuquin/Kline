@@ -227,6 +227,58 @@ final class PageLayoutEditorModel: ObservableObject {
         touchDraft()
     }
 
+    /// 同级重排（按兄弟定位）：把 `draggingUUID` 插到 `targetUUID` 之前 / 之后。
+    /// 与 `move(fromOffsets:toOffset:)`（吃扁平行下标）的区别：这里直接在父容器的 childList 上定位，
+    /// 不受「目标是其父容器末子」等扁平行 DFS 先序边界影响。返回是否发生了改动。
+    @discardableResult
+    func move(_ draggingUUID: UUID, beforeSibling targetUUID: UUID) -> Bool {
+        move(draggingUUID, relativeToSibling: targetUUID, placeAfter: false)
+    }
+
+    @discardableResult
+    func move(_ draggingUUID: UUID, afterSibling targetUUID: UUID) -> Bool {
+        move(draggingUUID, relativeToSibling: targetUUID, placeAfter: true)
+    }
+
+    private func move(_ draggingUUID: UUID, relativeToSibling targetUUID: UUID, placeAfter: Bool) -> Bool {
+        // 拖到自己所在行 = 无操作
+        guard draggingUUID != targetUUID else { return false }
+        guard let root = layoutRoot,
+              let dragging = root.firstNode(uuid: draggingUUID),
+              let draggingInfo = root.firstParent(of: draggingUUID),
+              let targetInfo = root.firstParent(of: targetUUID) else {
+            reportDropRejected(.targetMissing)
+            return false
+        }
+        // 同级判定：目标必须与被拖节点同父（否则用 moveInto 跨级装配）
+        guard draggingInfo.parent.uuid == targetInfo.parent.uuid else {
+            reportDropRejected(.crossLevel)
+            return false
+        }
+        // `.child` 容器只有一个子槽位，没有同级可插
+        guard draggingInfo.parent.containerKey == .children else {
+            banner = "该容器仅容纳一个子节点，不支持重排"
+            return false
+        }
+
+        let parent = draggingInfo.parent
+        guard parent.removeChild(uuid: draggingUUID) else { return false }
+        var children = parent.children ?? []
+        // 目标在移除被拖节点之后的新下标（同一数组内先删后插，向上/向下都对）
+        guard let targetIndex = children.firstIndex(where: { $0.uuid == targetUUID }) else {
+            parent.appendChild(dragging) // 兜底：放回原位，不留半成品
+            reportDropRejected(.targetMissing)
+            return false
+        }
+        let insertIndex = min(placeAfter ? targetIndex + 1 : targetIndex, children.count)
+        children.insert(dragging, at: insertIndex)
+        parent.children = children
+
+        banner = nil
+        touchDraft()
+        return true
+    }
+
     /// 是否可对选中节点做同级重排：选中存在、不是根节点、父容器是 `.children`（非 `.child`）
     var canMoveSelected: Bool {
         guard let uuid = selectedUUID, let root = layoutRoot, uuid != root.uuid else { return false }
@@ -281,6 +333,108 @@ final class PageLayoutEditorModel: ObservableObject {
             return nil
         }
         return (info.parent, info.index)
+    }
+
+    // MARK: - 树操作：跨级拖入
+
+    /// 拖拽落点被拒的原因
+    enum DropRejection: Equatable {
+        /// 目标（或拖拽源）节点不存在
+        case targetMissing
+        /// 目标不是容器（widget / divider / spacer）
+        case notContainer
+        /// 目标落在被拖节点的子树内（含自身）：会让 children 成环
+        case intoSelfOrDescendant
+        /// 想插到某行前后，但目标与被拖节点不同父（跨级）：应改拖到容器行中间区做装配
+        case crossLevel
+    }
+
+    /// 非法落点的说明文案
+    static func dropRejectionMessage(_ rejection: DropRejection) -> String {
+        switch rejection {
+        case .targetMissing: return "无法定位目标容器"
+        case .notContainer: return "该节点不是容器，无法接收"
+        case .intoSelfOrDescendant: return "不能把节点拖入它自己或它的子节点"
+        case .crossLevel: return "跨级移动请拖到容器行中间区，同级排序请拖到同级行上/下边缘"
+        }
+    }
+
+    /// 能否把 `draggingUUID` 拖入 `targetUUID` 容器：nil = 可投放
+    func validateDrop(_ draggingUUID: UUID, into targetUUID: UUID) -> DropRejection? {
+        guard let root = layoutRoot, let target = root.firstNode(uuid: targetUUID) else {
+            return .targetMissing
+        }
+        guard let dragging = root.firstNode(uuid: draggingUUID) else { return .targetMissing }
+        guard target.containerKey != nil else { return .notContainer }
+        // 自环防护：**目标落在被拖节点子树内（含自身）** → children 成环 → encode 无限递归栈溢出。
+        // 判定方向必须是「拖拽源的子树里有没有目标」；写成「目标的子树里有没有拖拽源」会反过来
+        // （放行成环、误拒合法的上移），此坑由 test101 实测暴露。
+        guard dragging.firstNode(uuid: targetUUID) == nil else { return .intoSelfOrDescendant }
+        return nil
+    }
+
+    /// 悬停到非法落点时写说明文案。
+    /// 必须在这里写：系统对 `.forbidden` 的落点不交付 performDrop，松手时拿不到回调。
+    /// 同一句提示不重复发布，避免拖拽过程中反复刷新视图。
+    func reportDropRejected(_ rejection: DropRejection) {
+        let message = Self.dropRejectionMessage(rejection)
+        guard banner != message else { return }
+        banner = message
+    }
+
+    /// 把 `draggingUUID` 移入 `targetUUID` 容器（跨级装配）；返回是否发生了改动。
+    /// 被拒 / 无操作时不写草稿（不 touchDraft，不置脏）。
+    @discardableResult
+    func moveInto(_ draggingUUID: UUID, container targetUUID: UUID) -> Bool {
+        if let rejection = validateDrop(draggingUUID, into: targetUUID) {
+            reportDropRejected(rejection)
+            return false
+        }
+        guard let root = layoutRoot,
+              let dragging = root.firstNode(uuid: draggingUUID),
+              let target = root.firstNode(uuid: targetUUID),
+              let origin = root.firstParent(of: draggingUUID) else {
+            reportDropRejected(.targetMissing)
+            return false
+        }
+
+        // 原父 == 目标 且 已在末尾 → 视为无操作
+        if origin.parent.uuid == targetUUID {
+            let alreadyLast: Bool
+            switch target.containerKey {
+            case .children: alreadyLast = (target.children?.last?.uuid == draggingUUID)
+            case .child: alreadyLast = (target.child?.uuid == draggingUUID)
+            case nil: alreadyLast = false
+            }
+            if alreadyLast {
+                banner = "该节点已在此容器末尾"
+                return false
+            }
+        }
+
+        guard origin.parent.removeChild(uuid: draggingUUID) else {
+            reportDropRejected(.targetMissing)
+            return false
+        }
+        let replaced = (target.containerKey == .child && target.child != nil)
+        guard target.appendChild(dragging) else {
+            // 理论上被 validateDrop 拦住；兜底放回原处，不留半成品
+            origin.parent.appendChild(dragging)
+            reportDropRejected(.notContainer)
+            return false
+        }
+
+        // 拖入后自动展开目标容器，便于立刻看到结果
+        collapsed.remove(targetUUID)
+        select(dragging)
+        if replaced {
+            banner = "该容器仅容纳一个子节点，已替换"
+        } else {
+            let name = HomeWidgetEditorSchema.nodeTypeTitles[target.type] ?? target.type
+            banner = "已移入：\(name)"
+        }
+        touchDraft()
+        return true
     }
 
     // MARK: - 树操作：增 / 删
