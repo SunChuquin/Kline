@@ -222,4 +222,23 @@
 - [x] 代码变更已提交并 push（commit a9e07fc）
 - [x] **删除灰色占位块**（用户反馈「两个占位块有什么用？没用删掉吧」）：`common.placeholder` 无任何配置引用，且与既有的 `home.placeholder`（A 档欢迎块，`HomeLayoutDefaults` 引用、`home.welcome` 锚点）在「添加控件」菜单里**重名**。删 `CommonPlaceholderBlock` 视图 + 注册 + schema 三项 + 相关注释；`home.placeholder` **不动**（删它会破坏 A 档默认布局与 UI 测试锚点）；编译部署通过（commit 56be331）
 - [ ] 用户设备验收：编辑器「添加控件」里出现「横滑卡片 / 列表卡片」（不再有重名的两个「占位块」）；选中后检查器出现新参数；填条目 → 全屏预览即时生效；重启后配置保持
-- [ ] 回归点：既有 7 个 `home.*` 控件（含 A 档欢迎块 `home.placeholder`）、四档呈现、`home.json` 解码与既有锚点行为不变
+- [ ] 回归点：既有 6 个 `home.*` 控件、B/C/D 三档呈现、`home.json` 解码与既有锚点行为不变
+
+## 阶段十三：删除首页 A 档布局方案（第六轮，2026-09-25）
+
+> 用户诉求：「布局编辑器里不需要存在占位块，把首页的A布局方案也删掉吧」。占位块本就是 A 档专属内容，故与 A 档一并删除。
+
+- [x] `HomeLayoutStyle` 删除 `.a` case 与 `"A · 现有首页（保留）"` title 分支 → 枚举收敛为 **B/C/D 三档**
+- [x] `HomeLayoutDefaults.swift` 内置 JSON 删除 `"A"` 整段（`default` 本就是 `"B"`，未动）；文件头注释改为三档
+- [x] `HomeView.swift` 删除 `case .a: HomeLayoutAView(onProfile:)` 保底分支 + 文件头注释改「四档共用 → 各档共用」「A/B/C/D → B/C/D」
+- [x] 删除 `Kline/Home/HomeLayoutAView.swift`（A 档硬编码视图）
+- [x] `HomeWidgetRegistry` 删除 `home.placeholder` 注册 + 注释改「7 个 → 6 个 home.* 控件」
+- [x] `HomeWidgetEditorSchema` 删除 `home.placeholder` 描述 → 编辑器「添加控件」不再出现占位块
+- [x] 删除 `Kline/Home/Widgets/HomePlaceholderBlock.swift`（已无引用）
+- [x] **档位 id 不重编号**（保持 B/C/D）：`home.json` 的 `layouts` 键、UserDefaults `kline.homeLayout`、UI 测试 `jsonSection("B")` 三处共用该标识
+- [x] 旧偏好兼容核对：`HomeLayoutStyle(rawValue: "A")` → nil → `?? .b` 回退 B 档，无崩溃路径
+- [x] 旧配置兼容核对：`layouts` 是字典，多余 `"A"` 键解码保留但不被渲染；「恢复默认」写回新内置 JSON 即清除
+- [x] 全仓引用清查：`HomeLayoutAView` / `HomePlaceholderBlock` / `home.placeholder` 零残留；`HomeHeaderBar` 仍被 B/C/D 使用故保留
+- [x] 编译通过 + 安装启动（iPad mini 5，**BUILD SUCCEEDED**）+ 编辑器回归 `test98/99/100` 实跑 **TEST SUCCEEDED**
+- [x] 代码变更已提交并 push（commit 7f43ab2，7 files changed, 5 insertions(+), 83 deletions(-)）
+- [ ] 用户设备验收：首页布局设置里只剩 B/C/D 三档；编辑器「添加控件」无占位块；B/C/D 三档呈现与编辑器功能正常

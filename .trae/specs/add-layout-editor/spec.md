@@ -960,3 +960,47 @@
 #### Scenario: 旧配置兼容
 - **WHEN** 加载不存在这两种参数键的既有 `home.json`
 - **THEN** 解码、渲染、编辑行为与改动前完全一致
+
+## Why（第六轮，2026-09-25）
+
+用户诉求原话：「布局编辑器里不需要存在占位块，把首页的A布局方案也删掉吧」。
+
+承接第五轮：占位块（`home.placeholder`）本就是 A 档专属的「首页 / 欢迎来到首页」块，A 档存在的唯一理由就是它。既然编辑器不该出现占位块，A 档也就没有存在意义——**两件事合并为一件事：删掉 A 档**。
+
+### 一、删除范围
+
+| 项 | 处理 |
+|---|---|
+| `HomeLayoutStyle.a` 枚举 case + `title` 分支 | 删除（枚举收敛为 B/C/D） |
+| `HomeLayoutDefaults.swift` 内置 JSON 的 `"A"` 段 | 删除（`default` 本就是 `"B"`） |
+| `HomeView.swift` 配置不可用时的 `case .a: HomeLayoutAView(...)` 保底分支 | 删除 |
+| `HomeLayoutAView.swift` | 删除文件（仅被上面两处引用） |
+| `HomeWidgetRegistry` 的 `home.placeholder` 注册 | 删除（6 个 `home.*` 控件） |
+| `HomeWidgetEditorSchema` 的 `home.placeholder` 描述 | 删除（编辑器「添加控件」不再出现占位块） |
+| `HomePlaceholderBlock.swift` | 删除文件（仅被 A 档视图与 `home.placeholder` 注册引用） |
+
+**不改**：`HomeHeaderBar` / `HomeQuickEntryRow` / `HomeContentBlocks` 等共享件（B/C/D 三档仍用）；`FavoritesLayoutStyle` / `MarketLayoutStyle`（无关）。
+
+### 二、档位命名保持 B/C/D（不重编号）
+
+删 A 后仍是 **B/C/D 三档、id 不变**。理由：档位 id 是 `PageLayoutStore`（UserDefaults）、`home.json`（`layouts` 键）、UI 测试（`jsonSection("B")`）三处共用的持久化标识，重编号会让用户已保存的档位与配置整体错位；空出的 A 不造成任何歧义。
+
+### 三、旧配置与旧偏好兼容（无需迁移代码）
+
+- 旧 `home.json` 里的 `"A"` 段：解码时 `PageLayoutFile.layouts` 是 `[String: PageLayoutDefinition]`，多余键**自然保留但不被渲染**；用户点一次「恢复默认」即写回无 A 段的新内置 JSON（`resetToBuiltIn`）。UI 测试的 `ensureLayoutIsDefault` 前置正是点「恢复默认」，故实跑一次即完成沙盒对齐。
+- 旧偏好 `kline.homeLayout == "A"`：`HomeLayoutStyle(rawValue: "A")` 返回 nil → `?? .b` 回退 B 档，不崩溃。
+
+### 四、非目标
+
+不新增档位、不重命名档位、不做 schemaVersion 迁移机制（A 段残留无害且一键可清）。
+
+### 五、BREAKING
+
+对**已保存过 A 档偏好**的用户：下次进首页显示 B 档（原 A 档内容「首页欢迎块」不再存在）。其余档位、控件、配置结构不变。
+
+## REMOVED Requirements（第六轮）
+
+### Requirement: 首页 A 档布局方案
+
+**Reason**：A 档内容仅为「标题栏 + 分隔线 + 欢迎占位块」，与 B/C/D 三档的能力差距过大，且其专属占位块控件已按用户要求从编辑器移除。
+**Migration**：档位偏好自动回退 B；旧 `home.json` 的 `"A"` 段不影响渲染，点「恢复默认」即清除。

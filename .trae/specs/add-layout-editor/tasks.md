@@ -280,3 +280,17 @@
   - [ ] SubTask 33.8: 用户设备验收（添加控件菜单出现「横滑卡片 / 列表卡片」，且不再有重名的两个「占位块」；检查器出现文本框与逐行条目编辑；填条目→全屏预览即时生效；保存后重启保持）
   - [ ] SubTask 33.9: 回归点（既有 7 个 `home.*` 控件含 A 档欢迎块、四档呈现、`home.json` 解码与既有锚点行为不变）
 - Task 33 depends on Task 32（缺口清单为其输入）；与 Task 31 无依赖
+
+## 阶段十四：删除首页 A 档布局方案（第六轮，2026-09-25）
+
+> 用户诉求：「布局编辑器里不需要存在占位块，把首页的A布局方案也删掉吧」。
+> 占位块（`home.placeholder`）本就是 A 档专属内容 → 与 A 档一并删除。
+
+- [x] Task 34: 删除 A 档 + 占位块控件
+  - [x] SubTask 34.1: `HomeLayoutStyle` 删 `.a` case 与 `"A · 现有首页（保留）"` title → 收敛为 B/C/D 三档；`HomeView` 删 `case .a: HomeLayoutAView(...)` 保底分支；`HomeLayoutDefaults` 内置 JSON 删 `"A"` 整段（`default` 本就是 `"B"`）
+  - [x] SubTask 34.2: `HomeWidgetRegistry` 删 `home.placeholder` 注册（注释「7 个 → 6 个 home.*」）；`HomeWidgetEditorSchema` 删 `home.placeholder` 描述 → 编辑器「添加控件」不再出现占位块
+  - [x] SubTask 34.3: 删除已无引用的两个文件 `HomeLayoutAView.swift` / `Widgets/HomePlaceholderBlock.swift`；全仓 grep 确认零残留（`HomeHeaderBar` 仍被 B/C/D 使用故保留；`ProfileDetailView` / 编辑器风格选择走 `HomeLayoutStyle.allCases` 自动变三档，无需改）
+  - [x] SubTask 34.4: 兼容性核对——档位 id **不重编号**（`home.json` layouts 键 / UserDefaults `kline.homeLayout` / UI 测试 `jsonSection("B")` 三处共用）；旧偏好 `"A"` → `HomeLayoutStyle(rawValue:)` nil → `?? .b` 回退；旧 JSON 多余 `"A"` 键解码保留但不渲染，「恢复默认」即清除。**不做** schemaVersion 迁移机制
+  - [x] SubTask 34.5: 闭环部署 + 回归：`kline_deploy_mac.sh` → `** BUILD SUCCEEDED **` → commit `7f43ab2`（7 files changed, 5 insertions(+), 83 deletions(-)）→ push `cef1ad6..7f43ab2 main`；编辑器相关 UI 用例 `test98/99/100` 在 iPad mini 5 前台实跑 `** TEST SUCCEEDED **`（`ensureLayoutIsDefault` 内的「恢复默认」顺带把沙盒 `home.json` 刷成无 A 段的新内置）
+  - [ ] SubTask 34.6: 用户设备验收（布局设置只剩 B/C/D；编辑器「添加控件」无占位块；B/C/D 三档呈现正常）
+- Task 34 depends on Task 33（占位块归属 A 档，先确认其无引用再删档）；与 Task 31 无依赖
