@@ -3,8 +3,9 @@
 //  Kline
 //
 //  首页控件「可编辑参数」描述表：给布局编辑器提供数据源。
-//  与 HomeWidgetRegistry 注册的 7 个控件一一对应，声明每个控件的显示名与可编辑参数
+//  与 HomeWidgetRegistry 注册的控件一一对应，声明每个控件的显示名与可编辑参数
 //  （键、标题、类型、默认值、取值范围 / 可选项）。
+//  末尾另并入页面无关的通用控件描述（CommonLayoutWidgetSchema，横滑卡片 / 列表卡片 / 占位块）。
 //  参数键必须与 JSON 里的键、控件读取时用的键完全一致，否则表单改不到实处。
 //  本文件只描述数据，不依赖 SwiftUI。
 //
@@ -30,6 +31,10 @@ struct WidgetParamDescriptor {
         case orderedList(source: WidgetParamCandidates, maxCount: Int?, note: String?)
         /// 单选（动态候选，候选运行时从数据层解析）：JSON 里是字符串；缺省（不写键）= 默认项
         case dynamicOptions(source: WidgetParamCandidates, note: String?)
+        /// 自由文本：JSON 里是字符串（留空 = 写空串，控件按空串语义处理）
+        case text(placeholder: String, note: String?)
+        /// 自由文本列表：JSON 里是 [String]，编辑器里每行一条、可增删
+        case textList(placeholder: String, note: String?)
     }
 }
 
@@ -73,7 +78,8 @@ struct WidgetDescriptor {
 }
 
 enum HomeWidgetEditorSchema {
-    /// 全部控件（顺序与 HomeWidgetRegistry 的注册顺序一致）
+    /// 全部控件（首页控件的顺序与 HomeWidgetRegistry 的注册顺序一致，
+    /// 末尾为页面无关的通用控件；两处顺序都等于「添加控件」菜单的展示顺序）
     static let all: [WidgetDescriptor] = [
         // home.header：无参数
         WidgetDescriptor(name: "home.header",
@@ -159,6 +165,8 @@ enum HomeWidgetEditorSchema {
                                                   kind: .toggle(default: false))
                          ])
     ]
+        // 页面无关的通用控件（横滑卡片 / 列表卡片 / 占位块），由 CommonLayoutWidgets.swift 提供
+        + CommonLayoutWidgetSchema.all
 
     /// 按控件名取描述；未登记返回 nil
     static func descriptor(for name: String) -> WidgetDescriptor? {

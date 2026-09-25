@@ -220,6 +220,25 @@ struct LayoutNodeInspector: View {
         case .dynamicOptions(let source, let note):
             DynamicOptionsParamRow(editor: editor, param: param, node: node,
                                    source: source, note: note)
+
+        case .text(let placeholder, let note):
+            row(param.title) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    TextField(placeholder, text: Binding(
+                        get: { node.params?.string(param.key, default: "") ?? "" },
+                        set: { editor.setString(param.key, $0, on: node) }))
+                        .font(.system(size: 15))
+                        .multilineTextAlignment(.trailing)
+                        .disableAutocorrection(true)
+                    if let note = note {
+                        Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+                    }
+                }
+            }
+
+        case .textList(let placeholder, let note):
+            TextListParamRow(editor: editor, param: param, node: node,
+                             placeholder: placeholder, note: note)
         }
     }
 
@@ -718,6 +737,95 @@ private struct OrderedListParamRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+    }
+}
+
+// MARK: - 自由文本列表参数行
+
+/// 自由文本列表参数行：每行一条、可增可删；写入 JSON 的 `[String]`。
+/// 与「有序多选」的区别：候选项不是预置 id，而是用户直接输入的文本（通用控件用）。
+private struct TextListParamRow: View {
+    @ObservedObject var editor: PageLayoutEditorModel
+    let param: WidgetParamDescriptor
+    let node: PageLayoutNode
+    let placeholder: String
+    let note: String?
+
+    /// 当前条目；键缺失视为空列表（与 `WidgetParams.strings(_:)` 的 nil 语义一致）
+    private var items: [String] { node.params?.strings(param.key) ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            if items.isEmpty {
+                Text("暂无条目，点「添加一条」新增")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(items.indices, id: \.self) { index in
+                    itemRow(index)
+                }
+            }
+            if let note = note {
+                Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        Divider()
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text(param.title)
+                .font(.system(size: 15))
+            Spacer(minLength: 12)
+            Button {
+                var list = items
+                list.append("")
+                editor.setStrings(param.key, list, on: node)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.circle").font(.system(size: 13))
+                    Text("添加一条").font(.system(size: 13))
+                }
+                .foregroundColor(.blue)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 单条：序号 + 文本输入 + 删除。下标越界时（并发删改）按空串回落，不崩
+    private func itemRow(_ index: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("\(index + 1)")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .frame(width: 18, alignment: .trailing)
+
+            TextField(placeholder, text: Binding(
+                get: { index < items.count ? items[index] : "" },
+                set: { newValue in
+                    var list = items
+                    guard index < list.count else { return }
+                    list[index] = newValue
+                    editor.setStrings(param.key, list, on: node)
+                }))
+                .font(.system(size: 14))
+                .disableAutocorrection(true)
+
+            Button {
+                var list = items
+                guard index < list.count else { return }
+                list.remove(at: index)
+                editor.setStrings(param.key, list, on: node)
+            } label: {
+                Image(systemName: "minus.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 

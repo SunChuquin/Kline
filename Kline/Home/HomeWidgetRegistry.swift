@@ -2,8 +2,9 @@
 //  HomeWidgetRegistry.swift
 //  Kline
 //
-//  首页控件注册表：把 JSON 配置里的 7 个控件名映射到具体视图。
-//  控件名与内置默认配置（HomeLayoutDefaults.swift）中的 name 一一对应；
+//  首页控件注册表：把 JSON 配置里的控件名映射到具体视图。
+//  7 个 home.* 控件名与内置默认配置（HomeLayoutDefaults.swift）中的 name 一一对应；
+//  末尾另并入页面无关的通用控件（common.*，见 CommonLayoutWidgets.swift）；
 //  未注册的控件名由 PageLayoutRenderer 渲染可诊断占位（不崩溃、不静默空白）。
 //
 
@@ -77,6 +78,10 @@ struct HomeWidgetRegistry {
                                                isReady: ctx.model.gainersReady(board: board),
                                                onOpen: HomeWidgetRegistry.openDetail))
         }
+
+        // 页面无关的通用控件（横滑卡片 / 列表卡片 / 占位块）：
+        // 只吃 WidgetParams、不读 HomeLayoutContext，未来其它页面的注册表可直接复用同一组
+        registerCommonLayoutWidgets(into: &r)
 
         registry = r
     }
