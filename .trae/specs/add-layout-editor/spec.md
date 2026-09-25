@@ -725,3 +725,150 @@
 ### Requirement: 页内常驻预览
 
 原「编辑器下半常驻只读预览（`HomeLayoutPreviewPane`，1:1 不缩放、`allowsHitTesting(false)`）」**删除**：预览统一走全屏预览页。
+
+---
+
+## 附录 A：ProfileView（「测试页面」）控件 / 容器盘点（第五轮前置侦察，2026-09-25）
+
+用户原话：**「请你详细梳理 `/Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift` 中的所有控件和容器，给 `/Volumes/home/repositories/Kline2/.trae/specs/add-layout-editor` 做补充」**
+
+本轮**只做盘点，不改任何代码**。用途：为「将来把布局编辑器从首页扩展到本页」界定候选池与列出缺口，格式对齐第二轮「独立页面可达性盘点（候选池界定依据）」。盘点范围包含本页直接引用的三个组件文件 [HorizontalScrollCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/HorizontalScrollCard.swift)、[ListCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ListCard.swift)、[DetailPage.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/DetailPage.swift) 与数据源 [MockData.swift](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift)。
+
+### 一、页面定位与呈现层级（与首页的关键差异）
+
+| 项 | ProfileView 事实 | 与首页（`HomeView`）对比 |
+|---|---|---|
+| 入口 | `ContentView.handleTabTap`：**已在模拟页时再点一次底部「模拟」（index 3）** → `isTestPresented = true`（[ContentView.swift](file:///Volumes/home/repositories/Kline2/Kline/App/ContentView.swift#L223-L230)）。无工具栏入口、无公式/条件单类入口 | 首页是默认 Tab，另有 8 项快捷入口 |
+| 呈现层 | `ContentView` 主体 ZStack 的 `.overlay`（[ContentView.swift](file:///Volumes/home/repositories/Kline2/Kline/App/ContentView.swift#L110-L122)）——**在根 ZStack 之外**，故铺满整屏**含底部导航栏** | 首页在 VStack 内只占底栏以上区域；第四轮编辑器为盖住底栏专门提到根层 router |
+| 页面壳 | `VStack(spacing:0){ 导航栏; Divider; 主内容 }` + 背景 `ignoresSafeArea()` + `ignoresSafeArea(.container, edges:.bottom)`（[ProfileView.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L136-L138)） | 壳形态一致（同款贴底三件套），可直接复用「页面壳 → 容器 → widget」渲染思路 |
+| 数据来源 | 全部是 `MockData.swift` 的**编译期全局常量**（7 个），无 ViewModel、无网络/DB | 首页由 `HomePageModel` 驱动，运行期真数据 |
+| 无障碍锚点 | **本页与三个组件文件均无任何 `accessibilityIdentifier`**（已全目录 grep 确认） | 首页有 `home.entry.*`、`home.card.*` 等；本页扩展为可编辑页前必须先补锚点 |
+| 状态 | 两个 `@State`：`selectedItemTitle: String?`、`isDetailPresented`（[ProfileView.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L13-L14)），仅服务于卡片项点击 → 二级页 | 首页状态在 `HomePageModel` + `ChartConfigStore` 等 |
+
+### 二、容器清单（对照节点词表 `vstack/hstack/zstack/scroll/card/frame`）
+
+节点类型白名单与容器语义见 [PageLayoutSchema.swift](file:///Volumes/home/repositories/Kline2/Kline/App/PageLayout/PageLayoutSchema.swift#L75-L75)（9 种 type）与 [containerKey](file:///Volumes/home/repositories/Kline2/Kline/App/PageLayout/PageLayoutSchema.swift#L237-L240)（`vstack/hstack/zstack/scroll → .children`，`card/frame → .child`）。
+
+| # | 容器 | 对映节点类型 | 位置 | 关键参数 |
+|---|---|---|---|---|
+| 1 | 根 `VStack(spacing: 0)` | `vstack` | [L17](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L17-L17) | spacing 0；3 个子节点（导航栏 / Divider / 主内容） |
+| 2 | 顶部导航栏 `HStack` | `hstack` | [L19-L35](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L19-L38) | 默认 spacing 8；`.frame(height: 56)` + `.padding(.top, -5)` + 白底 |
+| 3 | 主内容 `VStack(spacing: 16)` | `vstack` | [L44-L134](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L44-L134) | spacing 16、`.padding(16)`；2 个子节点（顶部固定卡片 / 左右分栏） |
+| 4 | 左右分栏 `HStack(spacing: 16)` | `hstack` | [L52-L132](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L52-L132) | spacing 16；2 个子节点（两个纵向滚动区） |
+| 5 | 左列 `ScrollView(.vertical, showsIndicators: false)` | `scroll` | [L54-L88](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L54-L88) | axis=vertical；`.frame(maxWidth: .infinity)` 等分宽度 |
+| 6 | 左列内 `VStack(spacing: 16)` | `vstack` | [L55-L86](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L55-L86) | spacing 16、`.padding(.trailing, 8)`；5 个子节点 |
+| 7 | 右列 `ScrollView(.vertical, showsIndicators: false)` | `scroll` | [L91-L131](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L91-L131) | 同上，`.frame(maxWidth: .infinity)` |
+| 8 | 右列内 `VStack(spacing: 16)` | `vstack` | [L92-L129](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L92-L129) | spacing 16、`.padding(.leading, 8)`；6 个子节点 |
+
+补充事实：
+
+- **未使用** `zstack` / `card` / `frame` 三种节点类型；宽度等分靠修饰符 `.frame(maxWidth: .infinity)` 而非 `frame` 容器节点（节点词表的 `frame` 支持 `maxWidth/minHeight/alignment`，理论上可表达式化）。
+- `scroll` 词表已支持 `axis / spacing / padding / showsIndicators`（见 [make(type:)](file:///Volumes/home/repositories/Kline2/Kline/App/PageLayout/PageLayoutSchema.swift#L202-L208)），**左右分栏整体可用节点树表达**：`vstack(16)[ card, hstack(16)[ scroll(vertical, padding.trailing=8)[vstack(16)[…]], scroll(vertical, padding.leading=8)[vstack(16)[…]] ] ]`。
+- 两列**各自独立纵向滚动**（同屏两组滚动视图），这是本页与首页（单层 `scroll`）最显著的结构差异。
+
+### 三、控件清单（叶子与复合卡片）
+
+#### 3.1 本页直接书写的叶子控件
+
+| 控件 | 位置 | 样式要点 | 可交互 |
+|---|---|---|---|
+| 返回 `Button` | [L21-L27](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L21-L27) | `Image(systemName: "chevron.left")` 24pt + `.padding(.leading, 16)` | 置 `isPresented = false` |
+| 标题 `Text("测试页面")` | [L30-L32](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L30-L32) | `.font(.title)` + `.bold`；因前有返回钮、后有 `Spacer()` 而**左对齐**（非居中，与编辑器标题栏风格不同） | 否 |
+| `Spacer()` | [L34](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L34-L34) | 撑开标题行 | 否 |
+| `Divider()` | [L41](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L41-L41) | 导航栏与内容分隔 | 否 |
+| 占位 `Rectangle` ×3 | [L81-L84](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L81-L84) / [L118-L121](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L118-L121) / [L124-L127](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L124-L127) | `fill(systemGray5/4)`、高 150 / 200 / 180、`.cornerRadius(12)` | 否（纯撑高占位，注释即「额外的占位卡片」） |
+
+#### 3.2 复合卡片：`HorizontalScrollCard`（横滑卡，本页 6 个实例）
+
+组件 [HorizontalScrollCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/HorizontalScrollCard.swift#L11-L53)：
+
+- 外框：`VStack(alignment:.leading, spacing:12)` → `.padding(16)` → `.background(systemBackground)` → `.cornerRadius(12)` → `.shadow(black 0.05, radius 4, y 2)`
+- 标题栏 `HStack`：`Text(data.title)`（`.headline` + `.bold`）+ `Spacer()` + **二选一**：`updateTime` 非空 → `Text(time)`（`.subheadline`、灰）；否则 `showMore == true` → `Image("chevron.right")` 16pt 灰
+- 主体：`ScrollView(.horizontal, showsIndicators:false)` + `HStack(spacing:16)` + `ForEach(items){ Button { onItemTap?(item.title) } label: { HorizontalCardItemView(item:) } }` → **每个 item 都是一个 Button（可点）**
+
+条目视图 [HorizontalCardItemView](file:///Volumes/home/repositories/Kline2/Kline/Profile/HorizontalScrollCard.swift#L56-L87) 有**两支**，由 `item.icon` 是否为 nil 决定：
+
+| 分支 | 结构 | 关键样式 |
+|---|---|---|
+| 图标型（`icon != nil`） | `VStack(spacing:8){ Image(systemName: icon); Text(title) }` | 图标 `showBackground ? 28 : 24` pt、色 = `item.color`、`showBackground` 时 `frame(56×56)` + `systemGray5` 底 + `cornerRadius(12)`；文字 12pt |
+| 文字型（`icon == nil`，仅行业数据） | `VStack(spacing:8){ Text(title); Text(subtitle) }` | 标题 14pt；副标题 13pt、色 = `item.color`（涨红跌绿由构造函数决定）；`padding(12,20,12,20)` + `systemGray5` 底 + `cornerRadius(8)` |
+
+#### 3.3 复合卡片：`ListCard`（列表卡，本页 3 个实例）
+
+组件 [ListCard.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ListCard.swift#L11-L76)：
+
+- 外框与 `HorizontalScrollCard` 完全一致（padding 16 / radius 12 / shadow 同参）
+- 标题栏 `HStack`：`Text(data.title)`（`.headline` + `.bold`）+ `Spacer()` + **二选一**：`updateTime` → 灰 `.subheadline` 文本；否则 `showMore == true` → `Text("更多")`（灰 `.subheadline`，与横滑卡的 `chevron.right` **不同**）
+- 主体：`VStack(spacing:12)` + `ForEach(items){ Button { onItemTap?(item.title) } label: { HStack(spacing:12){ … } } }`，行内四段（后两段可选）：
+  1. `rank` 非空 → `Text(String(rank))` 14pt bold、`rank <= 3 ? .red : .gray`、`frame(width:24, alignment:.center)`
+  2. `Text(title)` 14pt + `.lineLimit(1)`
+  3. `Spacer()`
+  4. `badge` 非空 → `Text(badge)` 12pt 白字 + `padding(2,6,2,6)` + `background(item.badgeColor)` + `cornerRadius(4)`
+- 注：`ListCardItem.subtitle` 字段存在但**本组件未渲染**（[MockData.swift](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L64-L80) 定义，`ListCard` 未使用）——扩展为 widget 参数时不要把它当已支持项。
+
+#### 3.4 二级页：`DetailPage`（overlay，非本页内容）
+
+由卡片项点击触发：`selectedItemTitle = title; isDetailPresented = true` → `.overlay { if isDetailPresented, let title = selectedItemTitle { DetailPage(isPresented: $isDetailPresented, title: title).transition(.opacity) } }`（[ProfileView.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L139-L146)）
+
+[DetailPage.swift](file:///Volumes/home/repositories/Kline2/Kline/Profile/DetailPage.swift#L10-L58) 结构：`VStack(spacing:0){ 导航栏 HStack(返回 chevron.left 24pt + `padding(.leading,16)` + `Text(title)` `.title` bold + Spacer，`frame(height:56)` + `padding(.top,-5)` + 白底); Divider(); 内容 VStack(spacing:24){ Image("info.circle") 64pt blue; Text(title) `.title` bold; Text("这是「\(title)」的详情页面。…") `.body` 灰、居中、`padding(.horizontal,32)` }.frame(maxHeight:.infinity) }`。
+
+- 其导航栏与 `ProfileView` 顶部导航栏是**逐参重复的同一形态**（56pt / `-5` top / chevron 24pt / `.title` bold），仅缺 `accessibilityIdentifier`。
+- **9 个卡片实例的点击全部汇聚到这一个 `DetailPage`**，差异只在传入的 `title`。
+
+### 四、数据来源与复用关系（用于候选池去重）
+
+全部取自 [MockData.swift](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift) 的全局 `let` 常量，**7 个常量被 9 个卡片实例使用，其中 2 个被复用两次**：
+
+| 常量 | 结构 | 标题 | items 数 | 条目形态 | 使用位置 | 次数 |
+|---|---|---|---|---|---|---|
+| `industryData` | `HorizontalCardData` | 热门行业 | 6 | 文字型（含涨跌幅 `subtitle`） | [L46](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L46-L49) 顶部固定 | 1 |
+| `appRecommendData` | `HorizontalCardData` | 应用推荐 | 8 | 图标型 | [L57](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L57-L60) 左、[L112](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L112-L115) 右 | **2** |
+| `hotNewsData` | `ListCardData` | 今日热点 | 5 | rank + badge，`updateTime` 有值 | [L63](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L63-L66) 左 | 1 |
+| `leftExtraData` | `HorizontalCardData` | 市场动态 | 6 | 图标型，`updateTime` = 刚刚更新 | [L69](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L69-L72) 左 | 1 |
+| `moreHotNewsData` | `ListCardData` | 财经要闻 | 8 | rank + badge | [L75](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L75-L78) 左、[L106](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L106-L109) 右 | **2** |
+| `dataCenterData` | `HorizontalCardData` | 数据中心 | 4 | 图标型（`showBackground: false`） | [L94](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L94-L97) 右 | 1 |
+| `rightExtraData` | `HorizontalCardData` | 工具中心 | 5 | 图标型 | [L100](file:///Volumes/home/repositories/Kline2/Kline/Profile/ProfileView.swift#L100-L103) 右 | 1 |
+
+- 结构体定义：[HorizontalCardItem](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L11-L36)（两个便捷构造：图标型 / 文字型，文字型 `isUp` 决定红绿）、[HorizontalCardData](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L39-L44)、[ListCardItem](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L64-L80)、[ListCardData](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L83-L88)。
+- 两个 `HorizontalCardItem`/`ListCardItem` 都含 `let id = UUID()`（[L12](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L12-L12)、[L65](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L65-L65)）——**每次构造 id 都不同**，若将来把这套数据接进节点树/缓存，需按业务字段比较，避免 UUID 击穿（与 `KlineItem` 同类坑）。
+- 左右两栏复用同一常量，**证明节点树无需去重**：同一 widget 可在同一棵树里出现多次。
+
+### 五、可编辑候选界定（若把布局编辑器扩展到本页）
+
+**可直接映射为现有节点词的**：
+
+| 现状控件 | 建议节点表达 | 可编辑参数（建议） |
+|---|---|---|
+| 两个纵向 `ScrollView` + 内部 `VStack` | `scroll(vertical)` + `vstack(spacing:16)` | 已支持：`axis / spacing / padding / showsIndicators` |
+| 左右分栏 `HStack` | `hstack(spacing:16)` | 已支持：`spacing / alignment`；宽度等分由 `frame(maxWidth:.infinity)` 承载 |
+| `Divider()` | `divider` 叶子 | 已支持（无参数） |
+| 三个占位 `Rectangle` | 建议**不进节点树**；若要进树需 `spacer`（但 `spacer` 词表**无高度参数**，150/200/180 硬编码无法表达 → 需扩参或新增占位 widget） | — |
+
+**建议新增为本页专属 widget 的（需注册进 `HomeWidgetRegistry` 同类注册表）**：
+
+1. `profile.hscrollCard`（横滑卡）：参数 = **数据源 id（7 选 1）**、`showMore` 覆盖、`updateTime` 覆盖；渲染即 `HorizontalScrollCard`
+2. `profile.listCard`（列表卡）：参数 = 数据源 id（仅 `hotNewsData` / `moreHotNewsData` 两个 `ListCardData` 常量）
+
+**明确不适合进节点树的**：
+
+- 顶部导航栏（返回 + 标题）——页面固定壳，与首页一样由页面自身维护（首页 `home.header` 走 widget 是个例外，本页标题是硬编码「测试页面」）
+- 左右分栏本身作为「整块布局」时可进树（见上表），但**卡片内 padding（16）/ 卡间距（16）/ 列 padding（trailing|leading 8）目前是硬编码**，节点词表的 `scroll.padding` 只能表达滚动区边距，卡片内外边距若要可编辑需扩参
+- `DetailPage` overlay —— 点击卡片项触发的二级页，属跳转目标而非页面内容，与首页 K线详情页同类，不进树
+
+### 六、扩展到本页必须先补的缺口（本轮不动，仅登记）
+
+| # | 缺口 | 位置 / 证据 |
+|---|---|---|
+| 1 | 编辑器的页面键**硬编码 `"home"`** | `PageLayoutEditorModel.page = "home"`（[PageLayoutEditorModel.swift](file:///Volumes/home/repositories/Kline2/Kline/Home/Editor/PageLayoutEditorModel.swift#L36-L36)）→ 需改为可切换/带参数 |
+| 2 | 配置仓库只有 `home.json`，无 page → 文件名映射 | `PageLayoutConfigStore.save(_:page:)` / `resetToBuiltIn(page:)` / `builtInText(page:)` 已带 page 形参，但内置默认文本与沙盒路径需为 `profile` 增一套（参考 [HomeLayoutDefaults.swift](file:///Volumes/home/repositories/Kline2/Kline/Home/HomeLayoutDefaults.swift)） |
+| 3 | `HomeWidgetRegistry` 只注册首页 widget | 需为本页两种卡片注册 widget 类型与数据源候选 |
+| 4 | 数据源是**编译期常量**（`let` 全局），不能按 id 动态枚举/校验 | [MockData.swift](file:///Volumes/home/repositories/Kline2/Kline/Data/MockData.swift#L46-L176) 的 7 个常量需改为「可枚举表（id → 数据）」才能做参数候选与失效回退（对比首页的 `HomeWidgetRegistry` 动态候选机制） |
+| 5 | 本页 body 需由 `PageLayoutRenderer` 驱动 | `PageLayoutRenderer<HomeLayoutContext>` 目前泛型上下文是首页专用；需为本页提供 context 或抽象出通用 context |
+| 6 | **零无障碍锚点** | 三个组件文件与本页均无 `accessibilityIdentifier`（已 grep 确认）→ 扩展后 UI 测试需补锚点，建议沿用首页命名习惯 `profile.card.<name>` |
+| 7 | 本页是「演示/测试页」，数据全 mock | 编辑配置的收益是**布局演示**而非真实业务；若目标是真业务页面，应优先考虑其他 Tab 页 |
+
+### 七、结论
+
+- 本页结构是**首页的简化镜像**：`vstack[ 导航栏, divider, vstack[ 卡片, hstack[ scroll[vstack[卡片…]], scroll[vstack[卡片…]] ] ] ]`，只用得上 `vstack / hstack / scroll / divider` 四种节点词，**不涉及 `zstack / card / frame`**；左右双列独立滚动是本页独有结构。
+- 现有节点词表**足以表达本页骨架**（分栏 / 滚动轴 / 间距 / 边距均可表态），真正的工作量在**两种卡片 widget 的注册 + 数据源从常量改为可枚举表 + page 键与配置仓库的 page 化**（缺口 1–5）。
+- 候选池规模：**卡片 9 实例 → 2 个 widget 类型 + 7 个数据源候选**；占位 `Rectangle` 3 个不建议进树；导航栏与 `DetailPage` 明确排除。

@@ -249,5 +249,16 @@
   - [x] SubTask 31.4: 删除无引用的 `PageLayoutEditorModel.styleTitle`；四档分段并入 `header` 单行（返回 / 标题 / 分段 / Spacer / 全屏预览），新增锚点 `layoutEditor.stylePicker`，删除原「档位行」
   - [x] SubTask 31.5: 编译通过 + 编辑器相关 5 个用例实跑通过（test98/99/100/101/102）
   - [ ] SubTask 31.6: 用户设备验收（铺满整屏 / 无页内预览 / 四档在标题行 / 内容区更高）
-  - [ ] SubTask 31.7: 闭环命令部署并 push
+  - [x] SubTask 31.7: 闭环命令部署并 push（commit 0117a56，已推到 `main`）
 - Task 31 depends on Task 30
+
+## 阶段十二：ProfileView 控件 / 容器盘点（文档补充，第五轮前置侦察，2026-09-25）
+
+- [x] Task 32: 梳理 `Kline/Profile/ProfileView.swift` 全部控件与容器，结论写入 spec.md「附录 A」（**纯文档，零代码改动**）
+  - [x] SubTask 32.1: 读全 `ProfileView.swift`（152 行）+ 三个被引用组件（`HorizontalScrollCard.swift` / `ListCard.swift` / `DetailPage.swift`）+ 数据源 `MockData.swift`（7 个常量 + 4 个结构体）
+  - [x] SubTask 32.2: 容器清单（8 项）对映节点词表 `vstack/hstack/zstack/scroll/card/frame`，标注「本页不使用 zstack/card/frame」
+  - [x] SubTask 32.3: 控件清单（叶子 4 类 + 复合卡片 9 实例 + 占位 3 个 + `DetailPage` overlay），逐项标注样式参数与可交互性
+  - [x] SubTask 32.4: 数据来源与复用关系表（7 常量 → 9 实例，2 个复用两次）+ UUID 击穿风险登记
+  - [x] SubTask 32.5: 可编辑候选界定（2 个候选 widget + 7 个数据源候选；明确排除项）与缺口登记 7 项
+  - [x] SubTask 32.6: checklist.md 追加「阶段十一」；spec.md 附录 A 定稿（git 仅文档变更，无需构建）
+- Task 32 与 Task 31 无依赖（纯盘点）；若后续启动「布局编辑器第二页面（ProfileView）」则以其为前置输入

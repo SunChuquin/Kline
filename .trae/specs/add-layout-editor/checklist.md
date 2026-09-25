@@ -190,4 +190,17 @@
 - [x] 四档切换（A/B/C/D 分段）由独立「档位行」并入 `header` 单行：返回 / 标题 / 分段 / ←Spacer→ 全屏预览；新增锚点 `layoutEditor.stylePicker`
 - [x] 编译通过；编辑器相关 5 个用例实跑通过：test98（72.2s）、test99（101.3s）、test100（80.6s）、test101（69.6s）、test102（73.1s）
 - [ ] 用户设备验收：编辑器铺满整屏（底栏不可见）、无页内预览、四档切换在标题行、内容区明显变高
-- [ ] 变更已按版本管理规范提交并 push
+- [x] 变更已按版本管理规范提交并 push（commit 0117a56，已推到 `main`）
+
+## 阶段十一：ProfileView 控件 / 容器盘点（文档补充，第五轮前置侦察，2026-09-25）
+
+> 用户原话：「请你详细梳理 `Kline/Profile/ProfileView.swift` 中的所有控件和容器，给 `.trae/specs/add-layout-editor` 做补充」。本轮**零代码改动**，结论落在 spec.md「附录 A」。
+
+- [x] 盘点范围覆盖 `ProfileView.swift` 全文 + 三个被引用组件（`HorizontalScrollCard.swift` / `ListCard.swift` / `DetailPage.swift`）+ 数据源 `MockData.swift`
+- [x] 容器清单 8 项逐项对映节点词表：根 `vstack` / 导航栏 `hstack` / 主内容 `vstack` / 左右分栏 `hstack` / 左右两个 `scroll` / 左右两个内层 `vstack`；确认本页**不使用** `zstack` / `card` / `frame`
+- [x] 控件清单：返回 `Button` ×1、标题 `Text` ×1、`Spacer` ×1、`Divider` ×1、占位 `Rectangle` ×3、`HorizontalScrollCard` ×6（含 `HorizontalCardItemView` 图标型 / 文字型两支）、`ListCard` ×3、`DetailPage` overlay ×1
+- [x] 数据来源与复用：`MockData` 7 个常量 → 9 个卡片实例（`appRecommendData`、`moreHotNewsData` 各用两次）；登记 `let id = UUID()` 的 UUID 击穿风险与「同一 widget 可重复出现、节点树无需去重」结论
+- [x] 候选池界定：2 个候选 widget（`profile.hscrollCard` / `profile.listCard`，参数 = 数据源 id）+ 7 个数据源候选；3 个占位 `Rectangle`、顶部导航栏、`DetailPage` 明确排除
+- [x] 缺口登记 7 项（`page` 键硬编码 `"home"`、配置仓库无 page→文件映射、`HomeWidgetRegistry` 未注册本页卡片、数据源为编译期常量不可枚举、`PageLayoutRenderer` context 是首页专用、**本页零无障碍锚点**、本页为纯 mock 演示页）
+- [x] 关键结构结论：本页是首页的简化镜像，左右**双列各自独立滚动**为独有结构；`scroll` 词表已支持 `axis/spacing/padding/showsIndicators`，骨架可由现有节点树完整表达
+- [x] 本轮未触任何 `.swift` 文件（`git status` 仅 spec 文档变更）
