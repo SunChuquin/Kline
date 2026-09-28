@@ -420,6 +420,11 @@ final class TrainingStore: ObservableObject {
             sqlite3_close(opened)
             return false
         }
+        // 旧库首开也要补列：CREATE TABLE IF NOT EXISTS 不会给已存在的 train_trade 加新列
+        guard _ensureTradeColumnsLocked(opened) else {
+            sqlite3_close(opened)
+            return false
+        }
         db = opened
         DebugLogger.shared.log("[Training] 训练库就绪 path=\(path)")
         return true
