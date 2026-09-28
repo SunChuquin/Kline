@@ -346,6 +346,12 @@ private struct QuickTrainingPanelView: View {
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
                 .lineLimit(1)
+            Text(training.settlementRule.title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color(.secondaryLabel))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(Color(.tertiarySystemFill)))
             Text("训练日 \(TrainSessionRecord.dateText(training.trainingDate))")
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
@@ -366,7 +372,7 @@ private struct QuickTrainingPanelView: View {
         .frame(height: 30)
     }
 
-    /// 训练持仓行：持仓 / 均价 / 浮盈，无持仓显示「空仓」
+    /// 训练持仓行：持仓 / 均价 / 浮盈 + 交收规则下的可卖数量，无持仓显示「空仓」
     private var positionRow: some View {
         HStack(spacing: 8) {
             if training.positionQty > 0 {
@@ -374,13 +380,20 @@ private struct QuickTrainingPanelView: View {
                     .font(.system(size: 11))
                     .foregroundColor(Color(.secondaryLabel))
                     .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(training.lockedQty > 0
+                     ? "可卖 \(SimFormat.shares(training.sellableQty))（锁定 \(SimFormat.shares(training.lockedQty))）"
+                     : "可卖 \(SimFormat.shares(training.sellableQty))")
+                    .font(.system(size: 11))
+                    .foregroundColor(training.lockedQty > 0 ? Color(.systemOrange) : Color(.secondaryLabel))
+                    .lineLimit(1)
             } else {
                 Text("空仓")
                     .font(.system(size: 11))
                     .foregroundColor(Color(.secondaryLabel))
                     .lineLimit(1)
+                Spacer(minLength: 8)
             }
-            Spacer(minLength: 8)
         }
         .padding(.horizontal, 16)
         .frame(height: 26)

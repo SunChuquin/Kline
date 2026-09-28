@@ -53,6 +53,8 @@ final class TrainingSessionController: ObservableObject {
     /// 训练持仓数量 / 均价：随 begin / placeTrade / close 就地维护，避免每次 body 求值遍历 trades
     private var positionQtyValue = 0
     private var avgCostValue: Double = 0
+    /// 当日买入锁定量（T+1 标的当日不可卖部分）；推进训练日 / 重开 / 关闭时清零
+    private var lockedQtyValue = 0
 
     private init() {}
 
@@ -68,6 +70,17 @@ final class TrainingSessionController: ObservableObject {
     /// 训练持仓数量
     var positionQty: Int { positionQtyValue }
 
+    /// 本标的的交收规则（沪深主板 / 沪深京指数 = T+1；扩展行情指数 = T+0）
+    var settlementRule: TrainSettlementRule { TrainSettlementRule.resolve(for: meta) }
+
+    /// 可卖数量：T+1 标的要扣掉「当日买入尚不可卖」的锁定量；T+0 标的全部可卖
+    var sellableQty: Int {
+        settlementRule.allowsSameDaySell ? positionQtyValue : max(0, positionQtyValue - lockedQtyValue)
+    }
+
+    /// 当日买入锁定量（T+1 标的；T+0 恒为 0，仅用于展示）
+    var lockedQty: Int { settlementRule.allowsSameDaySell ? 0 : lockedQtyValue }
+
     /// 训练持仓均价（无持仓 0）
     var avgCost: Double { avgCostValue }
 
@@ -82,12 +95,12 @@ final class TrainingSessionController: ObservableObject {
         conditions.map(\.order).filter { $0.status == .monitoring }
     }
 
-    /// 训练持仓的「可卖」快照（训练无 T+1，持仓即可卖）；无持仓返回 nil
+    /// 训练持仓的「可卖」快照（T+1 标的已扣除当日买入锁定部分）；无持仓返回 nil
     var trainingPositionSnapshot: SimPosition? {
         guard positionQtyValue > 0, let meta = meta else { return nil }
         return SimPosition(id: Self.trainingAccountID, accountID: Self.trainingAccountID,
                            metaID: meta.id, code: meta.code, name: meta.name,
-                           qty: positionQtyValue, availableQty: positionQtyValue,
+                           qty: positionQtyValue, availableQty: sellableQty,
                            costPrice: avgCostValue, openedAt: Date())
     }
 
@@ -129,6 +142,7 @@ final class TrainingSessionController: ObservableObject {
         self.alerts = []
         positionQtyValue = 0
         avgCostValue = 0
+        lockedQtyValue = 0
         sessionID = TrainingStore.shared.createSession(metaID: meta.id, code: meta.code,
                                                        name: meta.name, startDate: anchor)
         // 起始日即最新日：一开始就到位，直接判定结束并落库
@@ -148,6 +162,8 @@ final class TrainingSessionController: ObservableObject {
         let next = i + 1
         guard next < bars.count else { return }
         trainingDate = bars[next].date
+        // 进入新训练日：T+1 标的昨日买入的份额当日解锁
+        lockedQtyValue = 0
 
         sweepConditions(reason: "ADVANCE")
 
@@ -174,6 +190,7 @@ final class TrainingSessionController: ObservableObject {
         latestDate = 0
         positionQtyValue = 0
         avgCostValue = 0
+        lockedQtyValue = 0
     }
 
     // MARK: - 下单
@@ -191,9 +208,12 @@ final class TrainingSessionController: ObservableObject {
         if qty <= 0 || qty % lot != 0 {
             return "委托数量需为 \(lot) 股的整数倍且大于 0"
         }
-        // 训练不支持做空
-        if direction == .sell, qty > positionQtyValue {
-            return "训练持仓不足：当前可卖 \(positionQtyValue) 股"
+        // 训练不支持做空；可卖上限按标的交收规则（T+1 扣当日买入锁定、T+0 全可卖）
+        if direction == .sell, qty > sellableQty {
+            if settlementRule == .tPlus1, lockedQtyValue > 0 {
+                return "\(settlementRule.title) 标的当日买入不可卖：当前可卖 \(sellableQty) 股（今日买入 \(lockedQtyValue) 股锁定中）"
+            }
+            return "训练持仓不足：当前可卖 \(sellableQty) 股"
         }
 
         let amount = price * Double(qty)
@@ -213,11 +233,17 @@ final class TrainingSessionController: ObservableObject {
             let q = q0 + qty
             avgCostValue = q > 0 ? (avgCostValue * Double(q0) + price * Double(qty)) / Double(q) : 0
             positionQtyValue = q
+            // 当日买入份额在 T+1 标的当日不可卖 → 计入锁定量（T+0 标的该量不参与可卖计算）
+            lockedQtyValue += qty
         } else {
             positionQtyValue -= qty
             if positionQtyValue <= 0 {
                 positionQtyValue = 0
                 avgCostValue = 0
+                lockedQtyValue = 0
+            } else {
+                // 卖出只消耗可卖（未锁定）部分，锁定量不得超过剩余持仓
+                lockedQtyValue = min(lockedQtyValue, positionQtyValue)
             }
         }
 

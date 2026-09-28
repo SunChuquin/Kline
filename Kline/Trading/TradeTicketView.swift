@@ -467,9 +467,7 @@ struct TradeTicketView: View {
     /// 元信息行：左侧整手 / 可买可卖股数，右侧预计金额（三种形态共用）
     private func metaRow(padding: CGFloat) -> some View {
         HStack(spacing: 8) {
-            Text(direction.isBuy
-                 ? "\(rules.lotSize) 股整数倍 · 可买 \(SimFormat.shares(buyAvail)) 股"
-                 : "可卖 \(SimFormat.shares(sellAvail)) 股")
+            Text(metaText)
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
                 .lineLimit(1)
@@ -481,6 +479,24 @@ struct TradeTicketView: View {
         }
         .padding(.horizontal, padding)
         .padding(.vertical, 4)
+    }
+
+    /// 元信息文案：训练态额外标注本标的交收规则（T+1 且当日有买入时提示锁定数量）
+    private var metaText: String {
+        let lotText = "\(rules.lotSize) 股整数倍"
+        guard training.isActive else {
+            return direction.isBuy
+                ? "\(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
+                : "可卖 \(SimFormat.shares(sellAvail)) 股"
+        }
+        let rule = training.settlementRule.title
+        if direction.isBuy {
+            return "\(rule) · \(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
+        }
+        let locked = training.lockedQty
+        return locked > 0
+            ? "\(rule) · 可卖 \(SimFormat.shares(sellAvail)) 股（今日买入锁定 \(SimFormat.shares(locked)) 股）"
+            : "\(rule) · 可卖 \(SimFormat.shares(sellAvail)) 股"
     }
 
     /// 拒绝原因（红色小字，展示在提交按钮下方；不用 alert，避免与面板遮罩冲突）
@@ -559,9 +575,9 @@ struct TradeTicketView: View {
     private var position: SimPosition? { store.position(accountID: accountID, metaID: metaID) }
     private var holdQty: Int { position?.qty ?? 0 }
     private var buyAvail: Int { rules.affordableQty(cash: account?.cash ?? 0, price: effectivePrice) }
-    /// 可卖上限：训练态用训练持仓，不用模拟账户持仓
+    /// 可卖上限：训练态用训练持仓（并按标的交收规则扣减当日买入锁定），不用模拟账户持仓
     private var sellAvail: Int {
-        training.isActive ? training.positionQty : rules.sellableQty(position: position)
+        training.isActive ? training.sellableQty : rules.sellableQty(position: position)
     }
     private var availQty: Int { direction.isBuy ? buyAvail : sellAvail }
     private var amount: Double { effectivePrice * Double(qty) }

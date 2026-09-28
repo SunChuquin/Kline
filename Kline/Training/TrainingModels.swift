@@ -50,6 +50,31 @@ enum TrainTradeTrigger: String {
     var title: String { self == .manual ? "手动" : "条件单" }
 }
 
+// MARK: - 交易规则（按标的类别）
+
+/// 交收规则：T+1 = 当日买入的份额下一训练日才可卖；T+0 = 当日买入当日即可卖。
+/// 口径按 `MetaItem.type` 分类（工程内 meta.type 仅三种取值，见 src/data/universe.txt）：
+///   - 沪深主板     → T+1
+///   - 沪深京指数   → T+1（沪深交易所的 ETF / 指数）
+///   - 扩展行情指数 → T+0（非大陆品种：港股通 / 恒生系列等）
+enum TrainSettlementRule: String {
+    case tPlus1 = "T+1"
+    case tPlus0 = "T+0"
+
+    var title: String { rawValue }
+
+    /// 当日买入是否当日可卖
+    var allowsSameDaySell: Bool { self == .tPlus0 }
+
+    /// 由标的类别判定交收规则；未知类别按沪深规则（T+1）兜底
+    static func resolve(for meta: MetaItem?) -> TrainSettlementRule {
+        switch meta?.type {
+        case "扩展行情指数": return .tPlus0
+        default:            return .tPlus1
+        }
+    }
+}
+
 /// 主图信号标记种类：B 买入 / S 卖出 / T 做 T（同一训练日既有买入又有卖出）
 enum TrainTradeMark: String {
     case buy = "B"
