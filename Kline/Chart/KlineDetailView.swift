@@ -989,6 +989,8 @@ struct KlineDetailView: View {
                         sharedLinkSync: linkSync,
                         // 训练态：各格右缘同样钳制到「日期 ≤ 训练日」的最后一根
                         trainingMaxDate: trainingMaxDateValue,
+                        // 训练态：各格主图同样绘制 B/S/T 信号标记（图表内部按本格周期做区间聚合）
+                        trainingSignalMarks: trainingActive ? trainer.signalMarks : [:],
                         showCustomEditor: $showCustomEditor,
                         showSystemEditor: $showSystemEditor,
                         editorOwnerIndex: $editorOwnerIndex,

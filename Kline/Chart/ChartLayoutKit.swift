@@ -99,8 +99,39 @@ extension KlineChartView {
                         gaps: mainMirrored ? mirroredGaps : computation.gaps, sliceStart: startIndex,
                         latest: mirroredLatest,
                         syntheticBar: syntheticBar, dimFromIndex: dimFromLocal,
-                        signalMarks: trainingSignalMarks)
+                        signalMarks: periodSignalMarks)
             .equatable()
+    }
+
+    /// 训练信号按「当前周期」聚合后的标记表（key = 本周期 K 线的 date）。
+    /// 训练标记本身是日频（训练日 YYYYMMDD），单图/联动的周、月、季、年线 bar.date 与交易日不相等，
+    /// 直接按日频 key 查会全部落空 → 这里把落在某根 K 线日期区间内的训练日全部合并到该 K 线上：
+    /// 同区间内既有买又有卖 → T；只要含条件单触发 → 空心圆（isConditional）。
+    /// 日线是恒等映射，直接返回原表，零额外开销。
+    private var periodSignalMarks: [Int: TrainSignalMark] {
+        guard !trainingSignalMarks.isEmpty else { return [:] }
+        guard period != .daily else { return trainingSignalMarks }
+        var result: [Int: TrainSignalMark] = [:]
+        for bar in slice {
+            let (start, end) = KlinePeriod.periodDateRange(period, date: bar.date)
+            var hasBuy = false
+            var hasSell = false
+            var conditional = false
+            var hit = false
+            for (day, mark) in trainingSignalMarks where day >= start && day <= end {
+                hit = true
+                switch mark.mark {
+                case .buy:      hasBuy = true
+                case .sell:     hasSell = true
+                case .dayTrade: hasBuy = true; hasSell = true
+                }
+                if mark.isConditional { conditional = true }
+            }
+            guard hit else { continue }
+            let merged: TrainTradeMark = (hasBuy && hasSell) ? .dayTrade : (hasBuy ? .buy : .sell)
+            result[bar.date] = TrainSignalMark(mark: merged, isConditional: conditional)
+        }
+        return result
     }
 
     // MARK: - 副图

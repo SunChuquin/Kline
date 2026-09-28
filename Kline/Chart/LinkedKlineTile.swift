@@ -34,6 +34,9 @@ struct LinkedKlineTile: View {
     let sharedLinkSync: DualLinkSync
     /// 训练态右边界日期（YYYYMMDD；nil = 正常模式）：透传给内部 K 线图，把右缘锁到「日期 ≤ 训练日」的最后一根
     var trainingMaxDate: Int? = nil
+    /// 训练态买卖信号标记（key = 训练日 YYYYMMDD）：透传给内部 K 线图，
+    /// 由图表按本格自身周期做区间聚合后绘制 B/S/T，保证多图各周期视图同样可见
+    var trainingSignalMarks: [Int: TrainSignalMark] = [:]
 
     @Binding var showCustomEditor: Bool
     @Binding var showSystemEditor: Bool
@@ -301,6 +304,8 @@ struct LinkedKlineTile: View {
                        hideQuoteTurnover: true,
                        // 训练态右边界：本格按其自身周期取「日期 ≤ 训练日」的最后一根作为右缘上界
                        trainingMaxDate: trainingMaxDate,
+                       // 训练态买卖信号：本格按自身周期做区间聚合后绘制 B/S/T
+                       trainingSignalMarks: trainingSignalMarks,
                        onPeriodSwitch: { newPeriod in
                            // 副图二切周期（联动态）：只改本视图周期，持久化到 owner
                            pinReservedHelper()
