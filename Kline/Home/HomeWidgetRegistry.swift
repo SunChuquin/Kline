@@ -53,7 +53,9 @@ struct HomeWidgetRegistry {
             return AnyView(HomeFavoritesBlock(rows: rows,
                                               compact: p.bool("compact", default: false),
                                               showsSparkline: p.bool("showsSparkline", default: false),
-                                              onOpen: HomeWidgetRegistry.openDetail,
+                                              onOpen: { meta, context in
+                                                  HomeWidgetRegistry.openDetail(meta, in: context)
+                                              },
                                               onEmptyTap: { ctx.onSelectTab(1) }))
         }
 
@@ -72,7 +74,9 @@ struct HomeWidgetRegistry {
                                                style: style,
                                                compact: p.bool("compact", default: false),
                                                isReady: ctx.model.gainersReady(board: board),
-                                               onOpen: HomeWidgetRegistry.openDetail))
+                                               onOpen: { meta, context in
+                                                   HomeWidgetRegistry.openDetail(meta, in: context)
+                                               }))
         }
 
         // 页面无关的通用控件（横滑卡片 / 列表卡片）：

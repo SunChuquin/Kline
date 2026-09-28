@@ -21,6 +21,12 @@ struct ContentView: View {
     /// 想点「首页 / 模拟」切换时容易误触到按钮（它比 Tab 更靠上、命中区 56/128.8pt 也更大）
     @State private var bottomBarHeight: CGFloat = 0
     @ObservedObject private var detailRouter = DetailRouter.shared
+    /// 「K 线单人训练」运行控制器：`meta` 非 nil 即训练态，根层呈现全屏训练 K 线页
+    @ObservedObject private var trainer = TrainingSessionController.shared
+    /// 训练设置窗（自绘居中浮层，要盖住底部导航栏，故由根层承载）
+    @ObservedObject private var trainingSetupRouter = TrainingSetupRouter.shared
+    /// 训练条件单 / 预警记录页（训练态浮层，同样盖住底部导航栏）
+    @ObservedObject private var trainingCondRouter = TrainingCondRouter.shared
     /// 全屏布局编辑器（首页/个人中心入口都置位它，见 PageLayoutEditorView.swift）
     @ObservedObject private var layoutEditorRouter = HomeLayoutEditorRouter.shared
     @ObservedObject private var accessoryCoordinator = FloatingAccessoryCoordinator.shared
@@ -45,7 +51,8 @@ struct ContentView: View {
     /// + K 线详情页首屏已加载完成（加载中不显示，避免页面还在转圈时按钮先露面）。
     /// 联动多图光标自动移动另有 hidesDuringCursorAutoMove() modifier 处理，不在此聚合
     private var isButtonVisible: Bool {
-        !isAccessoryPanelPresented && !accessoryCoordinator.isDetailViewPopupActive
+        !isAccessoryPanelPresented && !trainingCondRouter.isPresented
+            && !accessoryCoordinator.isDetailViewPopupActive
             && accessoryCoordinator.isDetailViewLoaded
     }
 
@@ -89,6 +96,13 @@ struct ContentView: View {
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
+
+            // 全屏训练 K 线页（覆盖整个屏幕，含底部栏）：压在同层最后，保证在最上层；
+            // trainer.close() 会置 meta = nil，页面随之消失
+            if let meta = trainer.meta {
+                KlineDetailView(item: meta, isTraining: true, onClose: { trainer.close() })
+                    .transition(.opacity)
+            }
         }
         .onAppear {
             // App 启动即实例化行情行缓存，触发行情数值预热（无需等行情页首次打开）
@@ -102,6 +116,10 @@ struct ContentView: View {
         // 底栏高度实测值回填（0 是首帧的占位值，不覆盖）
         .onPreferenceChange(BottomBarHeightKey.self) { h in
             if h > 0 { bottomBarHeight = h }
+        }
+        // 训练激活即清掉普通详情页，避免两个全屏页叠加
+        .onChange(of: trainer.meta) { newValue in
+            if newValue != nil { DetailRouter.shared.item = nil }
         }
         // 全局禁用键盘避让：键盘弹出/缩小/收起全程不参与本页布局，
         // 导航栏与页面位置恒定；搜索栏均锚定在页面顶部无需腾空间；
@@ -129,7 +147,7 @@ struct ContentView: View {
         // 联动多图光标自动移动期间同样自动隐藏（hidesDuringCursorAutoMove）
         .overlay(
             Group {
-                if detailItem != nil {
+                if detailItem != nil || trainer.meta != nil {
                     FloatingAccessoryButton(action: {
                         withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
                     }, bottomClearance: bottomBarHeight)
@@ -164,6 +182,10 @@ struct ContentView: View {
         // 主题：nil = 跟随系统；.light/.dark = 强制该外观。挂在根视图上，
         // 主内容区、底部栏、K 线全屏页、个人中心等所有覆盖层一并实时跟随
         .preferredColorScheme(themeStore.theme.colorScheme)
+        // 训练设置窗浮层（居中卡片 + 遮罩）：挂在根层最上方，可盖住底部导航栏
+        .trainingSetupSheet(isPresented: $trainingSetupRouter.isPresented)
+        // 训练条件单 / 预警记录页（训练态浮层）：挂在最上层，盖住底部导航栏
+        .trainingCondSheet(isPresented: $trainingCondRouter.isPresented)
     }
 
     // MARK: - 底部导航栏（VStack 底部固定段）

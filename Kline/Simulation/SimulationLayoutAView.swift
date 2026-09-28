@@ -22,6 +22,8 @@ struct SimulationLayoutAView: View {
     @State private var condPresentation: SimCondEntryRequest? = nil
     /// 公式管理中心（「交易策略」段）开合：由工具栏「策略公式」入口触发
     @State private var showStrategyFormulas = false
+    /// 「训练记录」管理页开合：由工具栏「训练记录」入口触发
+    @State private var showTrainingRecords = false
     /// 新建账户
     @State private var showCreateAccount = false
     @State private var newAccountName = ""
@@ -79,6 +81,8 @@ struct SimulationLayoutAView: View {
             }
         }
         .simFullScreenTicket($ticketRequest)
+        // 「训练记录」管理页：独立宿主，与全屏下单页分开挂，避免同视图多 cover 压制
+        .simTrainingRecordPresentation($showTrainingRecords)
     }
 
     // MARK: - 左栏：账户侧栏
@@ -303,6 +307,8 @@ struct SimulationLayoutAView: View {
             condEntryButton
             // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 44pt 行高
             SimStrategyFormulaEntryButton { showStrategyFormulas = true }
+            // 「训练记录」入口：与上述入口同令牌，打开单人训练记录管理页
+            SimTrainingRecordEntryButton { showTrainingRecords = true }
             if module == .log {
                 logToolbar
             } else {

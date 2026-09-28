@@ -86,7 +86,8 @@ extension KlineChartView {
                     .disabled(atLatest)
                 }
                 // 副图2：最右侧 🔍 搜索按钮（联动态显示；点击由外层接管覆盖式搜索栏）
-                if m === subBottom && showSubTwoSearchButton {
+                // 训练态：切换标的入口屏蔽，🔍 不显示（trainingMaxDate != nil 即训练态）
+                if m === subBottom && showSubTwoSearchButton && trainingMaxDate == nil {
                     Button {
                         onSubTwoSearch?()
                     } label: {

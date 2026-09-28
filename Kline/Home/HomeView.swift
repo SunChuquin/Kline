@@ -100,6 +100,7 @@ struct HomeView: View {
         case .condOrder: onOpenCondOrder()
         case .profile: onProfile()
         case .alertRecords: onOpenAlertRecords()
+        case .training: TrainingSetupRouter.shared.isPresented = true
         case .layoutEditor: onOpenLayoutEditor()
         }
     }

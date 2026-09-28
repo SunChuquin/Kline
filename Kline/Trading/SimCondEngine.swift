@@ -241,7 +241,8 @@ extension SimStore {
     }
 
     /// 预警文案：形如「预警：现价 1512.30 上穿 1500.00」（仅入记录 / 运行时，不做 App 内弹窗）
-    private func alertMessage(order: SimCondOrder, triggerPrice: Double) -> String {
+    /// （训练态复用：放宽为 internal，纯计算无副作用）
+    func alertMessage(order: SimCondOrder, triggerPrice: Double) -> String {
         let priceText = SimFormat.price(triggerPrice)
         let p = order.params
         switch order.kind {
@@ -305,7 +306,8 @@ extension SimStore {
     // MARK: - 触发辅助
 
     /// 触发方向：网格按「相对上一次触发价下移买入 / 上移卖出」双向推进，其余类型用用户设定方向
-    private func fireDirection(order: SimCondOrder, triggerPrice: Double) -> SimOrderDirection {
+    /// （训练态复用：放宽为 internal，纯计算无副作用）
+    func fireDirection(order: SimCondOrder, triggerPrice: Double) -> SimOrderDirection {
         guard order.kind == .grid else { return order.directive.direction }
         let base = order.runtime.gridLastPrice ?? order.params.gridBase ?? triggerPrice
         return triggerPrice < base ? .buy : .sell
@@ -319,7 +321,8 @@ extension SimStore {
     }
 
     /// 多触发类型的档位 / 批次推进（网格记档位与本次触发价，分批记笔数）
-    private func advanceRepeatable(order: SimCondOrder, triggerPrice: Double) -> SimCondRuntime {
+    /// （训练态复用：放宽为 internal，纯计算无副作用）
+    func advanceRepeatable(order: SimCondOrder, triggerPrice: Double) -> SimCondRuntime {
         var runtime = order.runtime
         switch order.kind {
         case .grid:
@@ -334,7 +337,8 @@ extension SimStore {
     }
 
     /// 多触发类型是否已走完全部档位 / 批次
-    private func repeatableFinished(order: SimCondOrder) -> Bool {
+    /// （训练态复用：放宽为 internal，纯计算无副作用）
+    func repeatableFinished(order: SimCondOrder) -> Bool {
         switch order.kind {
         case .grid:
             return (order.runtime.gridLevel ?? 0) >= SimCondRule.gridLevelCount(order: order)

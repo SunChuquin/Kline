@@ -15,7 +15,8 @@ import Foundation
 // MARK: - 枚举
 
 /// 条件单类型（8 种，进阶版）
-enum SimCondKind: String, Codable, CaseIterable, Hashable {
+/// nonisolated：纯枚举，需在后台线程（历史回测 / 条件单批量生成）读取
+nonisolated enum SimCondKind: String, Codable, CaseIterable, Hashable {
     case price          // 价格条件
     case stopLoss       // 止盈止损（OCO）
     case trailing       // 回落卖出 / 反弹买入
@@ -137,7 +138,8 @@ nonisolated struct SimCondDirective: Codable, Hashable {
     }
 }
 
-extension SimCondDirective {
+/// nonisolated：纯数据 + 编解码，需在后台线程（历史回测 / 条件单批量生成）装配
+nonisolated extension SimCondDirective {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         direction = (try? c.decode(SimOrderDirection.self, forKey: .direction)) ?? .sell
@@ -201,7 +203,8 @@ nonisolated struct SimCondParams: Codable, Hashable {
     }
 }
 
-extension SimCondParams {
+/// nonisolated：纯数据 + 编解码，需在后台线程（历史回测 / 条件单批量生成）装配
+nonisolated extension SimCondParams {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         compareUp = try? c.decodeIfPresent(Bool.self, forKey: .compareUp)
@@ -234,7 +237,8 @@ extension SimCondParams {
 // MARK: - 运行时进度
 
 /// 运行时进度（极值追踪 / 网格档位 / 分批笔数等，随每次评估推进）
-struct SimCondRuntime: Codable, Hashable {
+/// nonisolated：纯数据 + 编解码，随 SimCondOrder 在后台线程装配（历史回测 / 条件单批量生成）
+nonisolated struct SimCondRuntime: Codable, Hashable {
     var extreme: Double? = nil              // 回落 / 反弹的极值（最高价 / 最低价）
     var lastPrice: Double? = nil            // 上次评估时的最新价
     var gridLevel: Int? = nil               // 网格已触发档位数
@@ -250,7 +254,8 @@ struct SimCondRuntime: Codable, Hashable {
     }
 }
 
-extension SimCondRuntime {
+/// nonisolated：纯数据 + 编解码，随 SimCondOrder 在后台线程装配（历史回测 / 条件单批量生成）
+nonisolated extension SimCondRuntime {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         extreme = try? c.decodeIfPresent(Double.self, forKey: .extreme)
@@ -295,7 +300,8 @@ nonisolated struct SimCondOrder: Identifiable, Codable, Hashable {
     }
 }
 
-extension SimCondOrder {
+/// nonisolated：纯数据 + 编解码，需在后台线程（历史回测 / 条件单批量生成）装配
+nonisolated extension SimCondOrder {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()

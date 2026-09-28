@@ -235,7 +235,8 @@ nonisolated enum SimCondRule {
     /// 注意：不复用 SimTradingRules.validate（那是为「立即成交」设计的），
     /// 仅复用其 lotSize 与 sellableQty(position:)。
     static func validateCreate(order: SimCondOrder, account: SimAccount,
-                               position: SimPosition?, snapshot: SimCondSnapshot) -> SimCondRejection? {
+                               position: SimPosition?, snapshot: SimCondSnapshot,
+                               now: Date = Date()) -> SimCondRejection? {
         if account.isArchived || account.id != order.accountID { return .accountUnavailable }
 
         let rules = SimTradingRules.default
@@ -292,7 +293,7 @@ nonisolated enum SimCondRule {
 
         case .time:
             guard let fireDate = p.fireDate else { return .missingParam("触发时间") }
-            if fireDate <= Date() { return .invalidFireDate }
+            if fireDate <= now { return .invalidFireDate }
 
         case .changePct:
             guard let threshold = p.changeThreshold, threshold != 0 else {

@@ -575,7 +575,8 @@ final class TdxSyncManager: ObservableObject {
         }
     }
 
-    private static func logReload(_ summary: LiveReloadSummary) {
+    /// nonisolated：作为 `reloadAsync` 的完成回调在后台线程调用，只写线程安全日志
+    nonisolated private static func logReload(_ summary: LiveReloadSummary) {
         DebugLogger.shared.log("[TdxSync] 热刷新完成 可用=\(summary.isAvailable) 覆盖=\(summary.metaCountAfter)只 最新=\(summary.latestDateAfter) 内容变化=\(summary.contentChanged)")
     }
 

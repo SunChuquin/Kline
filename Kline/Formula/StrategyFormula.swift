@@ -22,7 +22,7 @@ import Foundation
 /// - `maCross`   → `SimCondKind.maCross`   均线条件
 /// - `grid`      → `SimCondKind.grid`      网格交易
 /// - `batch`     → `SimCondKind.batch`     分批建仓 / 分批卖出
-enum StrategyRuleKind: String, CaseIterable, Identifiable {
+nonisolated enum StrategyRuleKind: String, CaseIterable, Identifiable {
     case price = "PRICE"            // 价格条件          → SimCondKind.price
     case stopLoss = "STOP_LOSS"     // 止盈止损（OCO）    → SimCondKind.stopLoss
     case trailing = "TRAILING"      // 回落卖出 / 反弹买入 → SimCondKind.trailing

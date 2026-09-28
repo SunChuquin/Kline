@@ -32,6 +32,8 @@ struct LinkedKlineTile: View {
     let mainLegendPortal: MainLegendPortal
     /// 多视图共享的 DualLinkSync 联动同步对象：所有 tile 共用同一个，光标 publish/apply 才能真正互通
     let sharedLinkSync: DualLinkSync
+    /// 训练态右边界日期（YYYYMMDD；nil = 正常模式）：透传给内部 K 线图，把右缘锁到「日期 ≤ 训练日」的最后一根
+    var trainingMaxDate: Int? = nil
 
     @Binding var showCustomEditor: Bool
     @Binding var showSystemEditor: Bool
@@ -297,6 +299,8 @@ struct LinkedKlineTile: View {
                        linkedMetaID: view.metaID,
                        // 联动：时间轴上一行 + 时间轴 pinned 覆盖 都不显示"额"（成交额）
                        hideQuoteTurnover: true,
+                       // 训练态右边界：本格按其自身周期取「日期 ≤ 训练日」的最后一根作为右缘上界
+                       trainingMaxDate: trainingMaxDate,
                        onPeriodSwitch: { newPeriod in
                            // 副图二切周期（联动态）：只改本视图周期，持久化到 owner
                            pinReservedHelper()
@@ -350,7 +354,8 @@ struct LinkedKlineTile: View {
                        onHasCursorChange: onCursorChange,
                        suppressCrosshair: suppressCrosshair,
                        swapSubSwipeRoles: false,
-                       showSubTwoSearchButton: true,
+                       // 训练态：切换标的入口屏蔽，副图二 🔍 不显示
+                       showSubTwoSearchButton: trainingMaxDate == nil,
                        onSubTwoSearch: {
                            showSearch = true
                            // 打开搜索栏时弹起系统键盘

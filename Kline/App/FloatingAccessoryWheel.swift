@@ -154,7 +154,13 @@ struct FloatingAccessoryWheel: View {
                                     // 最后把光标放在平移后的最右侧可见 K 线上。果冻只是反馈，不延后动作
                                     dragDelta = .zero
                                     playJelly()
-                                    FloatingAccessoryCoordinator.shared.nudgeWindow(by: 1)
+                                    // 训练态：单击中心圆改为推进一个训练日（不再发 windowNudge，
+                                    // 否则各 K 线图会各自移窗，且训练日不会被推进）
+                                    if TrainingSessionController.shared.isActive {
+                                        TrainingSessionController.shared.advanceOneBar()
+                                    } else {
+                                        FloatingAccessoryCoordinator.shared.nudgeWindow(by: 1)
+                                    }
                                 } else {
                                     let raw = FloatingAccessoryPlacement.clamped(CGPoint(x: base.x + t.width, y: base.y + t.height), in: bounds)
                                     // 吸附到更近的一侧边缘（纵向保持）；两按钮同侧互斥属后续阶段，这里只做单钮吸附

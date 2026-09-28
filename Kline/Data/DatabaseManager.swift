@@ -9,7 +9,9 @@ import Foundation
 import SQLite3
 import Combine
 
-let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+/// SQLite 生命周期标记常量（不可变，等价于 C 的 SQLITE_TRANSIENT 宏）
+/// nonisolated：数据库操作在各自串行队列上执行，需在非主线程上下文引用
+nonisolated let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 class DatabaseManager: ObservableObject {
     static let shared = DatabaseManager()

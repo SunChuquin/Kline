@@ -52,8 +52,6 @@ extension KlineChartView {
     /// 标签始终跟随各自竖线居中显示，不做互相避让）。
     /// secondary=true：联动小周期范围框视图里的纯本地「第二个十字光标」——蓝色竖线、
     /// 只保留顶部日期标签（无底部距今标签，无对比统计）。
-    @ViewBuilder
-
     func mainCanvas(width: CGFloat, candleSpacing: CGFloat, height: CGFloat) -> some View {
         // 注意：K线空实心/类型直接读取 config.chartStyle —— config 已被 @ObservedObject 观察，
         // 这样「K线设置-显示组-类型」修改（含启动时从 UserDefaults 恢复）都会立即驱动主图重绘实心/空心，
@@ -100,7 +98,8 @@ extension KlineChartView {
                         gapDisappearAfterFill: displaySettings.gapDisappearAfterFill,
                         gaps: mainMirrored ? mirroredGaps : computation.gaps, sliceStart: startIndex,
                         latest: mirroredLatest,
-                        syntheticBar: syntheticBar, dimFromIndex: dimFromLocal)
+                        syntheticBar: syntheticBar, dimFromIndex: dimFromLocal,
+                        signalMarks: trainingSignalMarks)
             .equatable()
     }
 

@@ -30,6 +30,20 @@ private enum CondNumKey: String, Hashable {
     var id: String { rawValue }
 }
 
+// MARK: - 训练态后端
+
+/// 训练态条件单后端：非 nil 时编辑器改用训练会话取数 / 落库，
+/// 与模拟账户（SimStore）、实时行情（SimQuoteCenter / MarketRowCache）完全隔离。
+/// - account / position：训练态占位账户与实时训练持仓（供校验用）
+/// - snapshot：按训练日 K 线收盘价生成行情快照（替代 SimCondSnapshotCenter）
+/// - save：写训练库（train_cond）并立即结算一次
+struct TrainingCondBackend {
+    let account: SimAccount
+    let position: () -> SimPosition?
+    let snapshot: (SimCondOrder) -> SimCondSnapshot
+    let save: (SimCondOrder) -> Void
+}
+
 // MARK: - 编辑器
 
 struct SimCondEditorView: View {
@@ -42,6 +56,8 @@ struct SimCondEditorView: View {
     var initialQty: Int = 100
     var initialPrice: Double? = nil
     var editing: SimCondOrder? = nil
+    /// 训练态后端（nil = 模拟交易条件单）
+    var trainingBackend: TrainingCondBackend? = nil
     let onFinish: () -> Void
 
     @ObservedObject private var store = SimStore.shared
@@ -78,6 +94,7 @@ struct SimCondEditorView: View {
          initialQty: Int = 100,
          initialPrice: Double? = nil,
          editing: SimCondOrder? = nil,
+         trainingBackend: TrainingCondBackend? = nil,
          onFinish: @escaping () -> Void) {
         self.accountID = accountID
         self.metaID = metaID
@@ -88,6 +105,7 @@ struct SimCondEditorView: View {
         self.initialQty = initialQty
         self.initialPrice = initialPrice
         self.editing = editing
+        self.trainingBackend = trainingBackend
         self.onFinish = onFinish
 
         let editingQty = editing?.directive.qty ?? 0
@@ -187,7 +205,7 @@ struct SimCondEditorView: View {
                 Text(lastPriceText)
                     .font(.system(size: 17, weight: .bold))
                     .foregroundColor(changeColor)
-                Text(rowCache.textFor(metaID, .changePct))
+                Text(changePctText)
                     .font(.system(size: 11))
                     .foregroundColor(changeColor)
             }
@@ -791,11 +809,38 @@ struct SimCondEditorView: View {
     // MARK: - 派生数据
 
     private var rules: SimTradingRules { SimTradingRules.default }
-    private var account: SimAccount? { store.account(id: accountID) }
-    private var position: SimPosition? { store.position(accountID: accountID, metaID: metaID) }
-    private var lastPrice: Double? { rowCache.numberFor(metaID, .latestPrice) }
+    private var isTraining: Bool { trainingBackend != nil }
+    private var account: SimAccount? {
+        if let backend = trainingBackend { return backend.account }
+        return store.account(id: accountID)
+    }
+    private var position: SimPosition? {
+        if let backend = trainingBackend { return backend.position() }
+        return store.position(accountID: accountID, metaID: metaID)
+    }
+    /// 训练态当前行情快照（非训练 nil；取训练日收盘价）
+    private var trainingSnapshot: SimCondSnapshot? {
+        trainingBackend.map { $0.snapshot(draftOrder()) }
+    }
+    private var lastPrice: Double? {
+        if let snapshot = trainingSnapshot { return snapshot.last }
+        return rowCache.numberFor(metaID, .latestPrice)
+    }
     private var lastPriceText: String { lastPrice.map { SimFormat.price($0) } ?? "—" }
-    private var changeColor: Color { rowCache.colorFor(metaID, .changePct) }
+    private var changeColor: Color {
+        guard let snapshot = trainingSnapshot else { return rowCache.colorFor(metaID, .changePct) }
+        guard let value = snapshot.changePct else { return Color(.secondaryLabel) }
+        if value > 0 { return Color(.systemRed) }
+        if value < 0 { return Color(.systemGreen) }
+        return Color(.secondaryLabel)
+    }
+    private var changePctText: String {
+        if let snapshot = trainingSnapshot {
+            guard let value = snapshot.changePct else { return "—" }
+            return String(format: "%+.2f%%", value)
+        }
+        return rowCache.textFor(metaID, .changePct)
+    }
     private var dirColor: Color { direction.isBuy ? Color(.systemRed) : Color(.systemGreen) }
     private var isGrid: Bool { kind == .grid }
     private var showOffsetRow: Bool { priceType == .limit && !isGrid }
@@ -831,6 +876,10 @@ struct SimCondEditorView: View {
 
     private var maValueText: String {
         guard let period = params.maPeriod else { return "—" }
+        if let snapshot = trainingSnapshot {
+            guard let value = snapshot.ma else { return "—" }
+            return "MA\(period) \(SimFormat.price(value))"
+        }
         let maFieldValue = maField(period)
         guard let value = rowCache.numberFor(metaID, maFieldValue) else { return "—" }
         return "MA\(period) \(SimFormat.price(value))"
@@ -918,11 +967,27 @@ struct SimCondEditorView: View {
     }
 
     private func validateDraft(_ draft: SimCondOrder) -> SimCondRejection? {
-        guard let account = store.account(id: accountID) else { return .accountUnavailable }
-        let position = store.position(accountID: accountID, metaID: metaID)
-        let snapshot = SimCondSnapshotCenter.snapshot(for: draft)
+        guard let account = account else { return .accountUnavailable }
+        let position = position
+        let snapshot = trainingBackend.map { $0.snapshot(draft) } ?? SimCondSnapshotCenter.snapshot(for: draft)
+        // 训练态「触发时间」是训练日语义：用训练日的「今天」做比较基准（历史数据不会被判为已过期）
+        let now = isTraining ? (trainingDateAsDate ?? Date()) : Date()
         return SimCondRule.validateCreate(order: draft, account: account,
-                                          position: position, snapshot: snapshot)
+                                          position: position, snapshot: snapshot, now: now)
+    }
+
+    /// 当前训练日 0 点对应的 Date（非训练态 nil）
+    private var trainingDateAsDate: Date? {
+        guard isTraining else { return nil }
+        let value = TrainingSessionController.shared.trainingDate
+        guard value > 0 else { return nil }
+        var components = DateComponents()
+        components.year = value / 10000
+        components.month = value / 100 % 100
+        components.day = value % 100
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return calendar.date(from: components)
     }
 
     private var canSave: Bool { validateDraft(draftOrder()) == nil }
@@ -930,8 +995,8 @@ struct SimCondEditorView: View {
     // MARK: - 行为
 
     private func handleAppear() {
-        // 触发一次行情预取，避免最新价长期为空
-        if let meta = SimQuoteCenter.meta(metaID: metaID) {
+        // 触发一次行情预取，避免最新价长期为空（训练态取训练日收盘价，不预取行情）
+        if !isTraining, let meta = SimQuoteCenter.meta(metaID: metaID) {
             _ = rowCache.row(for: meta)
         }
         guard !didSetup else { return }
@@ -1024,7 +1089,11 @@ struct SimCondEditorView: View {
             errorText = rejection.message
             return
         }
-        store.upsertCondOrder(draft)
+        if let backend = trainingBackend {
+            backend.save(draft)
+        } else {
+            store.upsertCondOrder(draft)
+        }
         onFinish()
     }
 }

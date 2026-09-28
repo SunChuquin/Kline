@@ -1280,7 +1280,8 @@ private typealias PatchApplyOutcome = (
 
 /// 会话状态：**一条独立 sqlite3 连接** + 进度时间戳 + 累计计数。
 /// `nonisolated`：只在 `PatchSessionManager.queue` 上读写（默认 MainActor 隔离下需显式放开）。
-nonisolated final class PatchSessionState {
+/// `@unchecked Sendable`：全部可变状态由所在串行队列串行化，跨队列传递的是「队列内独占访问」的引用。
+nonisolated final class PatchSessionState: @unchecked Sendable {
     let db: OpaquePointer
     /// 主库路径（用于插桩读取 `-wal` 文件大小，判断 checkpoint 规模）
     let dbPath: String
@@ -1320,7 +1321,8 @@ typealias PatchSessionCommitResult = (
 ///
 /// 状态只在 `queue` 上读写 → 天然串行，不会与 App 的 dbQueue 争用同一连接。
 /// 主库是 WAL：长写事务**不阻塞读**，但会阻塞其它**写**（拿 SQLITE_BUSY），故有 120s 看门狗兜底。
-nonisolated final class PatchSessionManager {
+/// `@unchecked Sendable`：全部可变状态（`session`）只在 `queue` 上读写，跨队列传递的只有状态引用本身。
+nonisolated final class PatchSessionManager: @unchecked Sendable {
     static let shared = PatchSessionManager()
 
     /// 会话专用串行队列：保护会话状态（连接句柄 / 计时 / 计数），也保证同一时刻只有一步在跑。
@@ -1721,31 +1723,31 @@ enum RootRunner {
         // attr / actions：分配一块不透明缓冲区（opaque 结构体实际远小于 512B）
         let attr = UnsafeMutableRawPointer.allocate(byteCount: 512, alignment: 16)
         let actions = UnsafeMutableRawPointer.allocate(byteCount: 512, alignment: 16)
-        attrInit(OpaquePointer(attr))
-        actInit(OpaquePointer(actions))
+        _ = attrInit(OpaquePointer(attr))
+        _ = actInit(OpaquePointer(actions))
         defer {
-            attrDestroy?(OpaquePointer(attr))
-            actDestroy?(OpaquePointer(actions))
+            _ = attrDestroy?(OpaquePointer(attr))
+            _ = actDestroy?(OpaquePointer(actions))
             attr.deallocate()
             actions.deallocate()
         }
 
         // persona 99 + uid/gid 0（POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE = 0；符号经链接器直接解析）
-        rrSetPersona(attr, 99, 0)
-        rrSetUid(attr, 0)
-        rrSetGid(attr, 0)
+        _ = rrSetPersona(attr, 99, 0)
+        _ = rrSetUid(attr, 0)
+        _ = rrSetGid(attr, 0)
 
         // 捕获 stdout/stderr
         var pipeOut = [Int32](repeating: -1, count: 2)
         var pipeErr = [Int32](repeating: -1, count: 2)
         pipe(&pipeOut)
         pipe(&pipeErr)
-        addDup(OpaquePointer(actions), pipeOut[1], STDOUT_FILENO)
-        addDup(OpaquePointer(actions), pipeErr[1], STDERR_FILENO)
-        addClose(OpaquePointer(actions), pipeOut[0])
-        addClose(OpaquePointer(actions), pipeErr[0])
-        addClose(OpaquePointer(actions), pipeOut[1])
-        addClose(OpaquePointer(actions), pipeErr[1])
+        _ = addDup(OpaquePointer(actions), pipeOut[1], STDOUT_FILENO)
+        _ = addDup(OpaquePointer(actions), pipeErr[1], STDERR_FILENO)
+        _ = addClose(OpaquePointer(actions), pipeOut[0])
+        _ = addClose(OpaquePointer(actions), pipeErr[0])
+        _ = addClose(OpaquePointer(actions), pipeOut[1])
+        _ = addClose(OpaquePointer(actions), pipeErr[1])
 
         var pid: pid_t = 0
         let spawnErr = spawnFn(&pid, executable, OpaquePointer(actions), OpaquePointer(attr), argv, nil)
@@ -1799,12 +1801,12 @@ enum RootRunner {
 
         let attr = UnsafeMutableRawPointer.allocate(byteCount: 512, alignment: 16)
         defer { attr.deallocate() }
-        attrInit(OpaquePointer(attr))
+        _ = attrInit(OpaquePointer(attr))
 
         // persona 99 + uid/gid 0（继承 symbol 直接链接）
-        rrSetPersona(attr, 99, 0)
-        rrSetUid(attr, 0)
-        rrSetGid(attr, 0)
+        _ = rrSetPersona(attr, 99, 0)
+        _ = rrSetUid(attr, 0)
+        _ = rrSetGid(attr, 0)
 
         var pid: pid_t = 0
         let sr = spawnFn(&pid, executable, nil, OpaquePointer(attr), argv, nil)

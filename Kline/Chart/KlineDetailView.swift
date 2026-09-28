@@ -213,9 +213,19 @@ struct KlineDetailView: View {
     @StateObject private var mainLegendPortal = MainLegendPortal(hideInChart: false)
     /// 联动：hideInChart=true → 各 tile 图内跳过按钮，按钮统一显示在信息栏每格左侧
     @State private var tilePortals: [MainLegendPortal] = (0..<4).map { _ in MainLegendPortal(hideInChart: true) }
+    /// 训练态标志（由根呈现层在训练会话激活时传入 true；默认 false 不影响既有调用点）
+    private let isTraining: Bool
+    /// 训练会话状态：观察训练日推进 / 交易笔数 / 完成态，驱动训练指示条与各 K 线图的右边界
+    @ObservedObject private var trainer = TrainingSessionController.shared
 
-    init(item: MetaItem, onClose: @escaping () -> Void) {
+    /// 是否处于训练态：入口参数开启且控制器确有会话（数据始终以控制器为准）
+    private var trainingActive: Bool { isTraining && trainer.isActive }
+    /// 透传给各 K 线图的右边界训练日（非训练态为 nil）
+    private var trainingMaxDateValue: Int? { trainingActive ? trainer.trainingDate : nil }
+
+    init(item: MetaItem, isTraining: Bool = false, onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
+        self.isTraining = isTraining
         self.onClose = onClose
     }
 
@@ -314,6 +324,10 @@ struct KlineDetailView: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
                             .frame(height: 0.5)
+                        // 训练指示条：训练态下插在工具栏下方（不遮挡任何按钮）
+                        if trainingActive {
+                            trainingIndicatorBar
+                        }
                         // 第二行：信息栏仅联动（非钻取）时显示；单图/钻取信息已并入工具栏行，此处省略
                         if effectiveDual {
                             infoBarRow(width: geometry.size.width)
@@ -714,6 +728,37 @@ struct KlineDetailView: View {
         )
     }
 
+    /// 训练指示条：训练态下显示在工具栏行下方（高 24pt、小字号、浅蓝底，不抢眼也不遮挡按钮）。
+    /// 内容：状态 / 标的名称与代码 / 起始与当前训练日 / 本会话已交易笔数。
+    private var trainingIndicatorBar: some View {
+        let meta = trainer.meta
+        return HStack(spacing: 8) {
+            Text(trainer.isFinished ? "训练已完成" : "训练中")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(trainer.isFinished ? .gray : .blue)
+                .lineLimit(1)
+            Text("\(meta?.name ?? "") \(meta?.code ?? "")")
+                .font(.system(size: 11))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Text("起始 \(TrainSessionRecord.dateText(trainer.startDate)) · 当前 \(TrainSessionRecord.dateText(trainer.trainingDate))")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+            Text("交易 \(trainer.trades.count) 笔")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 24)
+        .background(Color.blue.opacity(0.08))
+        .overlay(Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 0.5), alignment: .bottom)
+        .accessibilityIdentifier("training.indicator")
+    }
+
     /// 顶部第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型）
     /// width：整屏宽度（由最外层 GeometryReader 传入，避免在此函数内嵌 GeometryReader 导致布局溢出/错位）
     private func infoBarRow(width: CGFloat) -> some View {
@@ -942,6 +987,8 @@ struct KlineDetailView: View {
                         cursorClearToken: cursorClearToken,
                         mainLegendPortal: tilePortal(at: v.index),
                         sharedLinkSync: linkSync,
+                        // 训练态：各格右缘同样钳制到「日期 ≤ 训练日」的最后一根
+                        trainingMaxDate: trainingMaxDateValue,
                         showCustomEditor: $showCustomEditor,
                         showSystemEditor: $showSystemEditor,
                         editorOwnerIndex: $editorOwnerIndex,
@@ -1216,6 +1263,10 @@ struct KlineDetailView: View {
                        cursorClearToken: cursorClearToken,
                        // 单图：保留"额"字段显示；联动 tile 分支传入 true 隐藏
                        hideQuoteTurnover: false,
+                       // 训练态右边界：右缘钳制到训练日（nil = 正常模式）
+                       trainingMaxDate: trainingMaxDateValue,
+                       // 训练态主图买卖信号（B/S/T）：非训练态为空
+                       trainingSignalMarks: trainingActive ? trainer.signalMarks : [:],
                        onPeriodSwitch: linked ? { _ in } : { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
                            DebugLogger.shared.log("图表滑动切换周期: \(newPeriod.rawValue)")
@@ -1242,8 +1293,9 @@ struct KlineDetailView: View {
                            chartHasCursor = has
                        },
                        suppressCrosshair: suppressCrosshair,
-                       // 单图：副图二指标栏右侧也显示 🔍（与联动多图一致），点击打开覆盖式搜索栏切换标的
-                       showSubTwoSearchButton: true,
+                       // 单图：副图二指标栏右侧也显示 🔍（与联动多图一致），点击打开覆盖式搜索栏切换标的；
+                       // 训练态屏蔽切标的入口 → 不显示 🔍
+                       showSubTwoSearchButton: trainingMaxDateValue == nil,
                        onSubTwoSearch: {
                            showSearch = true
                            // 打开搜索栏时弹起系统键盘

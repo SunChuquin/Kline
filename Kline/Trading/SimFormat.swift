@@ -10,7 +10,9 @@
 
 import Foundation
 
-enum SimFormat {
+/// nonisolated：纯格式化工具（无状态；NumberFormatter / DateFormatter 本身线程安全），
+/// 需在后台线程（历史回测 / 条件单批量生成）构造文案
+nonisolated enum SimFormat {
 
     // MARK: - 格式化器
 

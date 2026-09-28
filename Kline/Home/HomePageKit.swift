@@ -28,6 +28,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     case profile
     /// 触发记录（条件单触发历史，AlertRecordView）
     case alertRecords
+    /// 单人训练（TrainingSetupSheet）
+    case training
     /// 布局编辑器（PageLayoutEditorView）
     case layoutEditor
 
@@ -43,6 +45,7 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .condOrder: return "条件单"
         case .profile: return "个人中心"
         case .alertRecords: return "触发记录"
+        case .training: return "单人训练"
         case .layoutEditor: return "布局编辑"
         }
     }
@@ -57,6 +60,7 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .condOrder: return "监控与触发下单"
         case .profile: return "主题与页面布局"
         case .alertRecords: return "条件单触发历史"
+        case .training: return "逐根复盘历史行情"
         case .layoutEditor: return "自定义四档页面布局"
         }
     }
@@ -71,6 +75,7 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .condOrder: return "bell.badge"
         case .profile: return "person.circle"
         case .alertRecords: return "clock.arrow.circlepath"
+        case .training: return "graduationcap"
         case .layoutEditor: return "square.grid.3x3"
         }
     }
@@ -85,6 +90,7 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .condOrder: return .red
         case .profile: return .blue
         case .alertRecords: return .pink
+        case .training: return .green
         case .layoutEditor: return .indigo
         }
     }
@@ -95,7 +101,7 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .tech: return .tech
         case .picker: return .picker
         case .strategy: return .strategy
-        case .search, .condOrder, .profile, .alertRecords, .layoutEditor: return nil
+        case .search, .condOrder, .profile, .alertRecords, .training, .layoutEditor: return nil
         }
     }
 }

@@ -253,14 +253,15 @@ extension KlineChartView {
                             // 联动态：副图一切标的、副图二切周期（与常规模式交换角色的作用域）
                             if swapSubSwipeRoles {
                                 if fb.slot == .top {
-                                    onSwitchItem?(topDir)
+                                    // 训练态：切换标的入口全部屏蔽（各格保留训练开始时标的）
+                                    if trainingMaxDate == nil { onSwitchItem?(topDir) }
                                 } else {
                                     switchPeriod(direction: dir)
                                 }
                             } else if fb.slot == .top {
                                 switchPeriod(direction: topDir)
                             } else {
-                                onSwitchItem?(dir)
+                                if trainingMaxDate == nil { onSwitchItem?(dir) }
                             }
                             triggeredSwitch = true
                         } else {
@@ -345,7 +346,8 @@ extension KlineChartView {
         if swapSubSwipeRoles {
             // 副图一(上)切标的，副图二(下)切周期
             if slot == .top {
-                return (canSwitchItem?(-1) ?? false, canSwitchItem?(1) ?? false)
+                // 训练态：切标的不可用，也不显示「可滑动」提示
+                return trainingMaxDate != nil ? (false, false) : (canSwitchItem?(-1) ?? false, canSwitchItem?(1) ?? false)
             } else {
                 return (canSwitchPeriod(-1), canSwitchPeriod(1))
             }
@@ -353,7 +355,8 @@ extension KlineChartView {
             if slot == .top {
                 return (canSwitchPeriod(-1), canSwitchPeriod(1))
             } else {
-                return (canSwitchItem?(-1) ?? false, canSwitchItem?(1) ?? false)
+                // 训练态：切标的不可用，也不显示「可滑动」提示
+                return trainingMaxDate != nil ? (false, false) : (canSwitchItem?(-1) ?? false, canSwitchItem?(1) ?? false)
             }
         }
     }

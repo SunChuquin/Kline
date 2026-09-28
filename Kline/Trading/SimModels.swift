@@ -12,7 +12,8 @@ import Foundation
 // MARK: - 枚举
 
 /// 委托方向
-enum SimOrderDirection: String, Codable, Hashable {
+/// nonisolated：纯枚举，需在后台线程（历史回测 / 条件单批量生成）读取
+nonisolated enum SimOrderDirection: String, Codable, Hashable {
     case buy
     case sell
 
@@ -28,7 +29,8 @@ enum SimOrderDirection: String, Codable, Hashable {
 }
 
 /// 报价类型
-enum SimPriceType: String, Codable, Hashable {
+/// nonisolated：纯枚举，需在后台线程（历史回测 / 条件单批量生成）读取
+nonisolated enum SimPriceType: String, Codable, Hashable {
     case limit
     case market
 

@@ -911,3 +911,39 @@ struct SimStrategyFormulaEntryButton: View {
         .accessibilityIdentifier("sim.strategyFormula.entry")
     }
 }
+
+// MARK: - 训练记录入口
+
+/// 工具栏「训练记录」入口按钮：模拟页三个布局（A / B / C）共用，
+/// 置于各自「条件单 / 策略公式」入口旁，点击全屏打开「K 线单人训练」记录管理页。
+/// 视觉令牌与 `SimStrategyFormulaEntryButton` 对齐（12.5pt semibold + 语义蓝 + 44×44 命中区），
+/// 不撑高 44pt 工具栏行；边界：只出现在模拟页三个布局的工具栏。
+struct SimTrainingRecordEntryButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 11.5))
+                Text("训练记录")
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            .foregroundColor(.blue)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sim.trainingRecord")
+    }
+}
+
+extension View {
+    /// 训练记录入口的呈现辅助：单个 `fullScreenCover` 承载训练记录管理页，
+    /// 与同视图的条件单 / 下单页各用独立宿主，避免 iOS 15 上多 cover 相互压制。
+    func simTrainingRecordPresentation(_ isPresented: Binding<Bool>) -> some View {
+        fullScreenCover(isPresented: isPresented) {
+            TrainingRecordListView(onClose: { isPresented.wrappedValue = false })
+        }
+    }
+}

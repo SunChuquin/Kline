@@ -14,7 +14,9 @@ import Foundation
 /// 与 Xcode 沙盒版都写 `Documents/debug_log.txt`。TRAE 读取通道：
 /// - TrollStore 版：`sandbox_cli.py get Documents/debug_log.txt <local>`（沙盒直连，需 Kline 前台）
 /// - Xcode 签名版：`apps pull <bundle_id> Documents/debug_log.txt <local>`（house_arrest）
-final class DebugLogger {
+/// `nonisolated` + `@unchecked Sendable`：写入全部经内部串行队列串行化，
+/// 需要在任意线程（HTTP 会话队列 / 同步队列）调用，故显式放开隔离。
+nonisolated final class DebugLogger: @unchecked Sendable {
     static let shared = DebugLogger()
 
     /// 日志文件名（Documents 下）

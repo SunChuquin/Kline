@@ -52,6 +52,11 @@ struct KlineChartView: View {
     let linkedMetaID: Int?
     /// 联动模式下隐藏行情行里的"额"（成交额）字段：时间轴上一行 与 时间轴内 pinned 覆盖 均隐藏
     let hideQuoteTurnover: Bool
+    /// 训练态右边界上限日期（YYYYMMDD；nil = 正常模式）：右缘不得超过「日期 ≤ 该日」的最后一根 K 线
+    let trainingMaxDate: Int?
+    /// 训练态主图买卖信号标记（key = YYYYMMDD 训练日）：B 买入 / S 卖出 / T 做 T，
+    /// 实心圆 = 手动下单、空心圆 = 条件单触发；非训练态为空
+    let trainingSignalMarks: [Int: TrainSignalMark]
     /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
     let onPeriodSwitch: ((KlinePeriod) -> Void)?
     /// 当前周期后台预计算全部完成后的回调（用于外层继续预计算其它未计算周期）
@@ -204,6 +209,8 @@ struct KlineChartView: View {
          cursorClearToken: UUID = UUID(),
          linkedMetaID: Int? = nil,
          hideQuoteTurnover: Bool = false,
+         trainingMaxDate: Int? = nil,
+         trainingSignalMarks: [Int: TrainSignalMark] = [:],
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
          onPeriodPrefetched: ((KlinePeriod) -> Void)? = nil,
          onSwitchItem: ((Int) -> Void)? = nil,
@@ -234,6 +241,8 @@ struct KlineChartView: View {
         self.cursorClearToken = cursorClearToken
         self.linkedMetaID = linkedMetaID
         self.hideQuoteTurnover = hideQuoteTurnover
+        self.trainingMaxDate = trainingMaxDate
+        self.trainingSignalMarks = trainingSignalMarks
         self.onPeriodSwitch = onPeriodSwitch
         self.onPeriodPrefetched = onPeriodPrefetched
         self.onSwitchItem = onSwitchItem
@@ -334,10 +343,25 @@ struct KlineChartView: View {
     var maxVisibleCount: Int { sortedData.count }
     /// 可见 K 线数上限：非放大与放大模式都允许显示全部 K 线（不限制）
     var capVisibleCount: Int { maxVisibleCount }
+    /// 训练态右边界：训练日在该周期 sortedData 中「最近且不超过」的索引（nil = 非训练态 / 训练日早于本周期第一根）
+    var trainingEndIndex: Int? {
+        guard let maxDate = trainingMaxDate, !sortedData.isEmpty else { return nil }
+        guard let idx = nearestIndex(to: maxDate) else { return nil }
+        if sortedData[idx].date <= maxDate { return idx }
+        // nearest 可能落在训练日之后（如周线存的是当周最后交易日）：退一根回到「≤ 训练日」
+        let prev = idx - 1
+        return prev >= 0 && sortedData[prev].date <= maxDate ? prev : nil
+    }
+    /// 右缘（endIndex）的硬上界：训练态取训练日索引，否则取最后一根
+    var maxEndIndexUpperBound: Int { trainingEndIndex ?? (sortedData.count - 1) }
+    /// 训练态右缘锚定偏移：取该值时 endIndex 恰落在训练日（打开与推进后据此把右缘钉到训练日）
+    var maxEndOffset: Int { max(0, (sortedData.count - 1) - maxEndIndexUpperBound) }
     var endIndex: Int {
         let maxEnd = sortedData.count - 1
         let minEnd = max(0, count - 1)
-        return min(maxEnd, max(minEnd, maxEnd - endOffset))
+        // 训练态：只收紧右缘上界到训练日索引——训练日之后的 K 线一律不进可见窗口，
+        // 而向左查看更早历史不受限（endOffset 的常规钳制保持不变）
+        return min(maxEndIndexUpperBound, max(minEnd, maxEnd - endOffset))
     }
     var startIndex: Int { max(0, endIndex - count + 1) }
     var slice: [KlineItem] {
@@ -699,6 +723,8 @@ struct KlineChartView: View {
             if let saved = initialVisibleCount {
                 visibleCount = clamp(saved, 20, CGFloat(capVisibleCount))
             }
+            // 训练态：打开即以训练日为右缘（endOffset 取锚定值，使 endIndex 落在训练日）
+            if trainingMaxDate != nil { endOffset = maxEndOffset }
             // 记录当前图表配置状态（周期/主图/副图/自定义），供外部读取 debug_log.txt 做自动化校验
             logChartState()
             // 周期一致性校验（单图模式）：联动态下真正的校验在 LinkedKlineTile.loadData 的
@@ -747,6 +773,14 @@ struct KlineChartView: View {
             // 数据副本，边界钳制（sortedData.count - count）会与新数据失真
             cancelPanInertia()
             stopEdgeAutoScroll()
+            // 训练态：数据长度变化后若右缘落后于训练日，重新锚定到训练日
+            if trainingMaxDate != nil, maxEndIndexUpperBound > endIndex { endOffset = maxEndOffset }
+        }
+        // 训练日推进（trainingMaxDate 变化）：新的右缘上界超过当前右缘时，把右缘跟进到新的训练日
+        // （nearestIndex / sortedData 变化都由本模块自行重算：切周期时视图 .id 重建走 onAppear）
+        .onChange(of: trainingMaxDate) { _ in
+            guard trainingMaxDate != nil else { return }
+            if maxEndIndexUpperBound > endIndex { endOffset = maxEndOffset }
         }
         .onChange(of: selectedIndex) { newIdx in
             klineDebug("[KlineDebug] 光标变化(selectedIndex) -> new:\(String(describing: newIdx)) | 变化后副图:[\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] pinned:\(String(describing: pinnedIndex))")
@@ -1128,6 +1162,9 @@ struct MainChartCanvas: View, Equatable {
     /// 联动复盘：未来淡化起始本地索引（含）；nil = 不淡化
     var dimFromIndex: Int? = nil
     var dimAlpha: Double = 1.0 / 3.0
+    /// 训练态主图买卖信号标记（key = YYYYMMDD）：按可见切片日期查找后绘制。
+    /// 实心圆 = 手动下单，空心圆 = 条件单触发；买入 / 做 T 画在 K 线下方，卖出画在上方。
+    var signalMarks: [Int: TrainSignalMark] = [:]
 
     var body: some View {
         Canvas { ctx, size in
@@ -1175,8 +1212,41 @@ struct MainChartCanvas: View, Equatable {
                 ctx.stroke(p, with: .color(lineColor),
                            style: StrokeStyle(lineWidth: 0.5, dash: [12, 6]))
             }
+
+            // 训练态买卖信号（B/S/T）画在最上层，避免被 K 线 / 指标曲线遮挡
+            drawSignalMarks(ctx, w: w, h: h)
         }
     }
+
+    /// 训练态主图买卖信号：按可见切片的日期查标记，在对应 K 线上下方画圆点 + 字母。
+    /// 实心圆 = 手动下单，空心圆 = 条件单触发（颜色区分）；买入 / 做 T 在下方，卖出在上方。
+    private func drawSignalMarks(_ ctx: GraphicsContext, w: CGFloat, h: CGFloat) {
+        guard !signalMarks.isEmpty else { return }
+        let radius: CGFloat = 6.5
+        for (index, bar) in slice.enumerated() {
+            guard let mark = signalMarks[bar.date] else { continue }
+            let x = (CGFloat(index) + 0.5) * candleSpacing
+            guard x >= -radius, x <= w + radius else { continue }
+            let edgeY = mark.isBelow ? yPos(bar.low, h: h) : yPos(bar.high, h: h)
+            let center = CGPoint(x: x, y: mark.isBelow ? edgeY + radius + 2 : edgeY - radius - 2)
+            let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
+                                                width: radius * 2, height: radius * 2))
+            let color: Color = mark.isConditional ? Self.signalCondColor : Self.signalManualColor
+            if mark.isConditional {
+                ctx.stroke(circle, with: .color(color), lineWidth: 1.4)
+            } else {
+                ctx.fill(circle, with: .color(color))
+            }
+            let text = Text(mark.text)
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(mark.isConditional ? color : Color.white)
+            ctx.draw(ctx.resolve(text), at: center, anchor: .center)
+        }
+    }
+
+    /// 手动下单信号色（蓝）/ 条件单触发信号色（橙）：均避开 K 线红绿，深浅色主题下都可读
+    static let signalManualColor = Color(red: 0.20, green: 0.45, blue: 0.90)
+    static let signalCondColor = Color(red: 0.95, green: 0.55, blue: 0.10)
 
     /// 跳空缺口：使用预计算的缺口列表，仅绘制位于当前可见区间内的缺口。
     /// - 关闭"缺口回补后消失"（默认）：已回补的缺口延长到回补K线位置即截止，保留形成到截止区域

@@ -45,6 +45,8 @@ struct TradeTicketView: View {
 
     @ObservedObject private var store = SimStore.shared
     @ObservedObject private var rowCache = MarketRowCache.shared
+    /// 训练态：价格 / 可卖上限 / 提交全部走训练控制器，不触碰模拟账户
+    @ObservedObject private var training = TrainingSessionController.shared
 
     // MARK: 交互状态
 
@@ -58,6 +60,8 @@ struct TradeTicketView: View {
     @State private var didEditPrice = false
     /// 组件内展示的拒绝原因（不弹 alert）
     @State private var errorText: String?
+    /// 训练态成功反馈（统一「已成交」）
+    @State private var successText: String?
     /// 卖出二次确认（bolt / full）
     @State private var showSellConfirm = false
     /// 条件单编辑器呈现请求（仅 full 形态的「转条件单」入口使用）
@@ -106,8 +110,15 @@ struct TradeTicketView: View {
         }
         .onAppear(perform: handleAppear)
         // 最新价变化：仅在用户未手动改过价格时跟随（iOS 15 onChange 为单参数闭包）
-        .onChange(of: rowCache.numberFor(metaID, .latestPrice)) { newValue in
-            if !didEditPrice, let newValue = newValue { price = newValue }
+        .onChange(of: rowCache.numberFor(metaID, .latestPrice)) { _ in
+            // 统一取 lastPrice（训练态即训练日收盘价），避免训练态被行情价覆盖
+            if !didEditPrice, let value = lastPrice { price = value }
+            refreshPriceText()
+        }
+        // 训练态：价格不随行情缓存变化，而随训练日推进而变化（训练日更新即刷新票面价）
+        .onReceive(training.$trainingDate) { _ in
+            guard training.isActive else { return }
+            if !didEditPrice, let close = training.currentClose { price = close }
             refreshPriceText()
         }
         .onChange(of: priceType) { _ in
@@ -161,6 +172,7 @@ struct TradeTicketView: View {
                 .padding(.top, 2)
 
             submitButton(height: 46, horizontalPadding: 16, topPadding: 8, bottomPadding: 6)
+            successLine(padding: 16)
             errorLine(padding: 16)
         }
     }
@@ -173,6 +185,7 @@ struct TradeTicketView: View {
             boltQtyRow
             metaRow(padding: 18)
             boltButtons
+            successLine(padding: 18)
             errorLine(padding: 18)
             Text("默认市价即时成交 · 限价 / 仓位比例 / 撤单请点「展开」")
                 .font(.system(size: 10.5))
@@ -302,6 +315,7 @@ struct TradeTicketView: View {
 
             submitButton(height: 50, horizontalPadding: 18, topPadding: 12, bottomPadding: 10)
             condEntryButton
+            successLine(padding: 18)
             errorLine(padding: 18)
         }
         // 挂在 fullBody（body 的 Group 已承载卖出二次确认对话框），避免与对话框同层
@@ -312,7 +326,9 @@ struct TradeTicketView: View {
                               initialDirection: req.initialDirection,
                               initialQty: req.initialQty,
                               initialPrice: req.initialPrice,
-                              editing: req.editing) { condRequest = nil }
+                              editing: req.editing,
+                              // 训练态：条件单落训练库、快照取训练日收盘价，不触碰模拟账户
+                              trainingBackend: training.isActive ? training.condEditorBackend : nil) { condRequest = nil }
         }
     }
 
@@ -333,7 +349,9 @@ struct TradeTicketView: View {
 
     /// 用当前已填的方向 / 数量 / 价格打开条件单编辑器（不触发 onSubmit）
     private func openCondEditor() {
-        condRequest = SimCondEditorRequest(accountID: accountID,
+        // 训练态：条件单归属训练占位账户（与训练后端 account.id 一致，否则校验判账户不可用）
+        let targetAccount = training.isActive ? TrainingSessionController.trainingAccountID : accountID
+        condRequest = SimCondEditorRequest(accountID: targetAccount,
                                            metaID: metaID,
                                            code: code,
                                            name: name,
@@ -358,6 +376,16 @@ struct TradeTicketView: View {
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
                 .lineLimit(1)
+            // 训练态小胶囊标记，提示当前为训练下单（不涉及模拟账户）
+            if training.isActive {
+                Text("训练")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Color.white)
+                    .padding(.horizontal, 5)
+                    .frame(height: 15)
+                    .background(Capsule().fill(Color.blue))
+                    .accessibilityIdentifier("trade.trainingBadge")
+            }
             Spacer(minLength: 8)
             Text(lastPrice.map { SimFormat.price($0) } ?? "—")
                 .font(.system(size: priceSize, weight: .bold))
@@ -470,6 +498,21 @@ struct TradeTicketView: View {
         }
     }
 
+    /// 训练态成功反馈（绿色小字，位置与拒绝原因一致）
+    @ViewBuilder
+    private func successLine(padding: CGFloat) -> some View {
+        if let message = successText {
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundColor(Color(.systemGreen))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, padding)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
+        }
+    }
+
     /// 主提交按钮（买入红底白字 / 卖出绿底白字，含实时金额）
     private func submitButton(height: CGFloat, horizontalPadding: CGFloat,
                               topPadding: CGFloat, bottomPadding: CGFloat) -> some View {
@@ -498,7 +541,10 @@ struct TradeTicketView: View {
     // MARK: - 派生数据
 
     private var rules: SimTradingRules { SimTradingRules.default }
-    private var lastPrice: Double? { rowCache.numberFor(metaID, .latestPrice) }
+    /// 最新价：训练态取当前训练日收盘价，否则取行情缓存
+    private var lastPrice: Double? {
+        training.isActive ? training.currentClose : rowCache.numberFor(metaID, .latestPrice)
+    }
     private var prevClose: Double? { rowCache.numberFor(metaID, .prevClose) }
     private var changeText: String { rowCache.textFor(metaID, .changePct) }
     private var changeColor: Color { rowCache.colorFor(metaID, .changePct) }
@@ -513,7 +559,10 @@ struct TradeTicketView: View {
     private var position: SimPosition? { store.position(accountID: accountID, metaID: metaID) }
     private var holdQty: Int { position?.qty ?? 0 }
     private var buyAvail: Int { rules.affordableQty(cash: account?.cash ?? 0, price: effectivePrice) }
-    private var sellAvail: Int { rules.sellableQty(position: position) }
+    /// 可卖上限：训练态用训练持仓，不用模拟账户持仓
+    private var sellAvail: Int {
+        training.isActive ? training.positionQty : rules.sellableQty(position: position)
+    }
     private var availQty: Int { direction.isBuy ? buyAvail : sellAvail }
     private var amount: Double { effectivePrice * Double(qty) }
     private var commission: Double { rules.commission(amount: amount) }
@@ -545,9 +594,11 @@ struct TradeTicketView: View {
         case "buy":
             direction = .buy
             errorText = nil
+            successText = nil
         case "sell":
             direction = .sell
             errorText = nil
+            successText = nil
         default:
             priceType = (priceType == .limit) ? .market : .limit
         }
@@ -620,6 +671,16 @@ struct TradeTicketView: View {
     /// 组装草稿并提交；成功回调 onSubmit，失败就地展示拒绝原因
     private func performSubmit(_ dir: SimOrderDirection) {
         errorText = nil
+        successText = nil
+        // 训练态：只写训练 sqlite（不调 store.submit），成功就地反馈「已成交」，失败复用错误文案位
+        if training.isActive {
+            if let reason = training.placeTrade(direction: dir, qty: qty, note: "") {
+                errorText = reason
+            } else {
+                successText = "已成交"
+            }
+            return
+        }
         let draft = SimOrderDraft(accountID: accountID,
                                   metaID: metaID,
                                   code: code,

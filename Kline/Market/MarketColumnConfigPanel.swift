@@ -164,7 +164,7 @@ struct MarketColumnConfigPanel: View {
                 .lineLimit(1)
             Spacer()
             // 可筛选字段：自定义多选下拉（点选项不收起，点「完成」或外部才收起）
-            if let opts = field.rangeFilterOptions {
+            if field.rangeFilterOptions != nil {
                 ColumnFilterButton(
                     field: field,
                     filterLabels: col.filterLabels,

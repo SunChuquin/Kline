@@ -222,6 +222,8 @@ struct FloatingAccessoryPanel: View {
 
     /// 布局偏好：面板打开期间在个人中心切换方案时实时换布局与高度
     @ObservedObject private var layoutStore = TradingLayoutStore.shared
+    /// 训练态：面板整体切到训练下单面板，标题与内容随之变化
+    @ObservedObject private var training = TrainingSessionController.shared
 
     /// 面板高度占屏幕高度比例（按方案不同：A 0.67 / B 0.60 / C 0.35）
     private var heightFraction: CGFloat {
@@ -241,7 +243,7 @@ struct FloatingAccessoryPanel: View {
                 VStack(spacing: 0) {
                     // 头部：标题 + 关闭（字号/间距对齐 sheetHeader）
                     HStack {
-                        Text("快捷面板")
+                        Text(training.isActive ? "训练下单" : "快捷面板")
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.primary)
                         Spacer()
@@ -272,21 +274,150 @@ struct FloatingAccessoryPanel: View {
         }
     }
 
-    /// 按布局偏好分发面板内容
+    /// 按布局偏好分发面板内容；训练态下整块走训练面板（不渲染 A/B/C，避免误触模拟账户）
     @ViewBuilder
     private var panelContent: some View {
-        switch layoutStore.panelLayout {
-        case .a:
-            QuickPanelAView(onClose: onClose)
-        case .b:
-            QuickPanelBView(onClose: onClose)
-        case .c:
-            QuickPanelCView(onClose: onClose)
+        if training.isActive {
+            QuickTrainingPanelView(onClose: onClose)
+        } else {
+            switch layoutStore.panelLayout {
+            case .a:
+                QuickPanelAView(onClose: onClose)
+            case .b:
+                QuickPanelBView(onClose: onClose)
+            case .c:
+                QuickPanelCView(onClose: onClose)
+            }
         }
     }
 
     /// 关闭统一走淡出动画（遮罩点击与「关闭」按钮一致）
     private func close() {
         withAnimation(.easeOut(duration: 0.15)) { onClose() }
+    }
+}
+
+// MARK: - 训练下单面板
+
+/// 训练态下的快捷面板内容：训练信息行 + 训练持仓行 + 复用下单票面。
+/// 成交只经 TrainingSessionController.placeTrade 落训练 sqlite，全程不触碰模拟账户。
+private struct QuickTrainingPanelView: View {
+    let onClose: () -> Void
+
+    @ObservedObject private var training = TrainingSessionController.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let meta = training.meta {
+                infoRow(meta: meta)
+                positionRow
+                conditionEntryRow
+                TradeTicketView(style: .panel,
+                                // 训练无模拟账户：用「全部账户汇总」占位 id（store.account 取不到真实账户）
+                                accountID: SimStore.allAccountID,
+                                metaID: meta.id,
+                                code: meta.code,
+                                name: meta.name,
+                                initialDirection: .buy,
+                                initialPriceType: .limit,
+                                initialQty: 100,
+                                onSubmit: { _ in })
+                    .id("quickTraining.ticket.\(meta.id)")
+            } else {
+                Text("暂无进行中的训练")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            }
+            Spacer(minLength: 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    /// 训练信息行：标的名 + 代码、训练日、已交易笔数，结束态追加「训练已完成」
+    private func infoRow(meta: MetaItem) -> some View {
+        HStack(spacing: 8) {
+            Text(meta.name)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Color.primary)
+                .lineLimit(1)
+            Text(meta.code)
+                .font(.system(size: 11))
+                .foregroundColor(Color(.secondaryLabel))
+                .lineLimit(1)
+            Text("训练日 \(TrainSessionRecord.dateText(training.trainingDate))")
+                .font(.system(size: 11))
+                .foregroundColor(Color(.secondaryLabel))
+                .lineLimit(1)
+            Text("已交易 \(training.trades.count) 笔")
+                .font(.system(size: 11))
+                .foregroundColor(Color(.secondaryLabel))
+                .lineLimit(1)
+            if training.isFinished {
+                Text("训练已完成")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color(.systemGreen))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 30)
+    }
+
+    /// 训练持仓行：持仓 / 均价 / 浮盈，无持仓显示「空仓」
+    private var positionRow: some View {
+        HStack(spacing: 8) {
+            if training.positionQty > 0 {
+                Text("持仓 \(SimFormat.shares(training.positionQty)) 股 · 均价 \(SimFormat.price(training.avgCost)) · 浮盈 \(training.floatingPnl.map { SimFormat.signed($0) } ?? "—")")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
+            } else {
+                Text("空仓")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 26)
+        .background(Color(.secondarySystemBackground))
+    }
+
+    /// 条件单 / 预警入口：关面板后打开训练条件单管理页（浮层由 ContentView 根层承载）
+    private var conditionEntryRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                onClose()
+                TrainingCondRouter.shared.isPresented = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bell.badge")
+                        .font(.system(size: 12))
+                    Text("条件单 / 预警")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    if !training.monitoringConditions.isEmpty {
+                        Text("\(training.monitoringConditions.count)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.blue))
+                    }
+                }
+                .foregroundColor(Color.blue)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.1)))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("quickTraining.conds")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
     }
 }
