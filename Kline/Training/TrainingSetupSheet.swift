@@ -94,6 +94,20 @@ struct TrainingSetupSheet: View {
     @State private var startDate: Date?
     @State private var keyword: String = ""
     @State private var errorText: String?
+    /// 训练账户类型（持久化，下次打开沿用上次选择）
+    @AppStorage("training.accountType") private var accountTypeRaw: String = "percent"
+    /// 仓位金额账户的本金文本（持久化）
+    @AppStorage("training.capitalText") private var capitalText: String = "100000"
+    /// 金额账户「本金买不起两手」的重新选择标的弹窗
+    @State private var showReselectAlert = false
+    /// 上述弹窗的文案
+    @State private var reselectMessage: String = ""
+
+    /// 当前账户类型（容错解析）
+    private var accountType: TrainAccountType { TrainAccountType(rawValue: accountTypeRaw) ?? .percent }
+
+    /// 金额账户本金（从文本解析，非法 → 0）
+    private var capitalValue: Double { Double(capitalText.filter { $0.isNumber }) ?? 0 }
 
     var body: some View {
         GeometryReader { proxy in
@@ -111,6 +125,7 @@ struct TrainingSetupSheet: View {
                         VStack(alignment: .leading, spacing: 18) {
                             categorySection
                             if category == .myGroup { groupSection }
+                            accountSection
                             targetSection
                             dateSection
                             if let errorText {
@@ -134,6 +149,15 @@ struct TrainingSetupSheet: View {
                 .padding(.horizontal, 24)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .alert("标的需要重新选择", isPresented: $showReselectAlert) {
+                Button("重新选择标的", role: .destructive) {
+                    selectedMeta = nil
+                    startDate = nil
+                }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text(reselectMessage)
+            }
         }
     }
 
@@ -192,6 +216,46 @@ struct TrainingSetupSheet: View {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// 训练账户：百分比账户（不校验资金，按仓位比例买卖）/ 仓位金额账户（固定本金，买入校验）
+    private var accountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("训练账户")
+            HStack(spacing: 8) {
+                ForEach(TrainAccountType.allCases) { t in
+                    chip(t.title, selected: t == accountType) {
+                        accountTypeRaw = t.rawValue
+                        errorText = nil
+                    }
+                }
+            }
+            .accessibilityIdentifier("trainingSetup.accountType")
+            Text(accountType.subtitle)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if accountType == .fixedAmount {
+                HStack(spacing: 8) {
+                    Text("本金")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    TextField("100000", text: $capitalText)
+                        .keyboardType(.numberPad)
+                        .font(.system(size: 14))
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
+                        .background(Color(.tertiarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .frame(maxWidth: 170)
+                        .accessibilityIdentifier("trainingSetup.capital")
+                    Text("元")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    Spacer(minLength: 0)
                 }
             }
         }
@@ -434,9 +498,10 @@ struct TrainingSetupSheet: View {
         return TrainingDateMath.isTrainable(meta)
     }
 
-    /// 未选标的 / 不可训练 / 未选日期 → 置灰
+    /// 未选标的 / 不可训练 / 未选日期 → 置灰；金额账户还要求本金为正
     private var canStart: Bool {
         guard let meta = selectedMeta, TrainingDateMath.isTrainable(meta), startDate != nil else { return false }
+        if accountType == .fixedAmount, capitalValue <= 0 { return false }
         return true
     }
 
@@ -450,13 +515,46 @@ struct TrainingSetupSheet: View {
     }
 
     private func pickRandom() {
-        guard let meta = trainablePool.randomElement() else {
+        let pool = trainablePool
+        guard !pool.isEmpty else {
             errorText = "该分类下暂无可训练的标的（需至少 65 天历史）"
             return
         }
+        // 百分比账户不校验资金，直接随机
+        guard accountType == .fixedAmount else {
+            guard let meta = pool.randomElement() else { return }
+            errorText = nil
+            selectedMeta = meta
+            randomizeDate(for: meta)
+            return
+        }
+        // 仓位金额账户：随机抽取只在「起始日收盘价买得起 2 手」的标的里挑
+        guard let picked = pickAffordable(from: pool) else {
+            errorText = "该分类下没有满足条件的标的（当前本金买不起 2 手，请提高本金或换个分类）"
+            return
+        }
         errorText = nil
-        selectedMeta = meta
-        randomizeDate(for: meta)
+        selectedMeta = picked.meta
+        startDate = picked.date
+    }
+
+    /// 金额账户随机抽取：逐个随机候选（每只最多随机 2 个起始日）校验「2 手可买」，命中即返回。
+    /// 上限 60 只，避免极端本金下长时间扫库；全部不满足则返回 nil。
+    private func pickAffordable(from pool: [MetaItem]) -> (meta: MetaItem, date: Date)? {
+        let lot = SimTradingRules.default.lotSize
+        let capital = capitalValue
+        for meta in pool.shuffled().prefix(60) {
+            guard let lower = TrainingDateMath.minDate(of: meta),
+                  let upper = TrainingDateMath.maxDate(of: meta), lower <= upper else { continue }
+            for _ in 0..<2 {
+                guard let day = randomDate(lower: lower, upper: upper) else { continue }
+                guard let close = TrainingSessionController.shared.anchorClose(meta: meta,
+                                                                              startDate: TrainingDateMath.int(from: day)),
+                      capital >= TrainAccountRule.minCapital(price: close, lotSize: lot) else { continue }
+                return (meta, day)
+            }
+        }
+        return nil
     }
 
     private func select(_ meta: MetaItem) {
@@ -475,6 +573,14 @@ struct TrainingSetupSheet: View {
         randomizeDate(for: meta)
     }
 
+    /// [lower, upper] 内随机一个自然日（实际交易日由 begin 吸附）
+    private func randomDate(lower: Date, upper: Date) -> Date? {
+        guard lower <= upper else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: lower, to: upper).day ?? 0
+        let offset = days > 0 ? Int.random(in: 0...days) : 0
+        return Calendar.current.date(byAdding: .day, value: offset, to: lower)
+    }
+
     /// 在 [首日, 上限] 内随机一个自然日（实际交易日由 begin 吸附）
     private func randomizeDate(for meta: MetaItem) {
         guard let lower = TrainingDateMath.minDate(of: meta),
@@ -482,15 +588,44 @@ struct TrainingSetupSheet: View {
             startDate = nil
             return
         }
-        let days = Calendar.current.dateComponents([.day], from: lower, to: upper).day ?? 0
-        let offset = days > 0 ? Int.random(in: 0...days) : 0
-        startDate = Calendar.current.date(byAdding: .day, value: offset, to: lower)
+        startDate = randomDate(lower: lower, upper: upper)
     }
 
     private func startTraining() {
         guard let meta = selectedMeta, let date = startDate else { return }
         errorText = nil
-        if TrainingSessionController.shared.begin(meta: meta, startDate: TrainingDateMath.int(from: date)) {
+
+        if accountType == .fixedAmount {
+            guard capitalValue > 0 else {
+                errorText = "请输入有效的本金金额"
+                return
+            }
+            // 预检：起始日收盘价至少买得起 2 手，否则弹窗要求重新选择标的
+            let startInt = TrainingDateMath.int(from: date)
+            guard let close = TrainingSessionController.shared.anchorClose(meta: meta, startDate: startInt),
+                  close > 0 else {
+                errorText = "该标的暂无行情数据，无法开始训练"
+                return
+            }
+            let need = TrainAccountRule.minCapital(price: close, lotSize: SimTradingRules.default.lotSize)
+            guard capitalValue >= need else {
+                reselectMessage = "「\(meta.name)」在起始日（\(TrainSessionRecord.dateText(startInt))）收盘价 \(SimFormat.price(close))，"
+                    + "买入 2 手需 \(SimFormat.amount(need))，当前本金 \(SimFormat.amount(capitalValue)) 不足，请重新选择标的或提高本金。"
+                showReselectAlert = true
+                return
+            }
+            if TrainingSessionController.shared.begin(meta: meta, startDate: startInt,
+                                                      accountType: .fixedAmount, capital: capitalValue) {
+                isPresented = false
+            } else {
+                errorText = "该标的暂无行情数据，无法开始训练"
+            }
+            return
+        }
+
+        // 百分比账户：不校验资金
+        if TrainingSessionController.shared.begin(meta: meta, startDate: TrainingDateMath.int(from: date),
+                                                  accountType: .percent) {
             isPresented = false
         } else {
             errorText = "该标的暂无行情数据，无法开始训练"

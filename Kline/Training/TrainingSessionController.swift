@@ -22,14 +22,14 @@ final class TrainingSessionController: ObservableObject {
     /// 训练态条件单使用的占位账户 id（训练不落任何真实模拟账户）
     static let trainingAccountID = SimStore.allAccountID
 
-    /// 训练态条件单编辑器使用的占位账户（训练不追踪资金，资金给足即可通过校验）
-    static let trainingAccount = SimAccount(id: trainingAccountID, name: "训练账户", badge: "训",
-                                            colorHex: "#1E5FA8", initialCapital: 1_000_000,
-                                            cash: 1_000_000, createdAt: Date(timeIntervalSince1970: 0),
-                                            isArchived: false)
-
     /// 训练标的；非 nil 即处于训练态
     @Published private(set) var meta: MetaItem?
+    /// 训练账户类型（百分比 / 仓位金额）
+    @Published private(set) var accountType: TrainAccountType = .percent
+    /// 仓位金额账户的初始本金（百分比账户 = 名义本金）
+    @Published private(set) var initialCapital: Double = 0
+    /// 仓位金额账户的可用资金（百分比账户不使用）
+    @Published private(set) var cash: Double = 0
     /// 训练起始日期 YYYYMMDD（已吸附到实际交易日）
     @Published private(set) var startDate: Int = 0
     /// 当前训练日 YYYYMMDD（图表右缘上界）
@@ -72,6 +72,11 @@ final class TrainingSessionController: ObservableObject {
 
     /// 本标的的交收规则（沪深主板 / 沪深京指数 = T+1；扩展行情指数 = T+0）
     var settlementRule: TrainSettlementRule { TrainSettlementRule.resolve(for: meta) }
+
+    /// 买入可用资金：百分比账户用名义本金（不做不足校验），仓位金额账户用实际可用资金
+    var buyingPower: Double {
+        accountType == .percent ? TrainAccountRule.notionalCapital : cash
+    }
 
     /// 可卖数量：T+1 标的要扣掉「当日买入尚不可卖」的锁定量；T+0 标的全部可卖
     var sellableQty: Int {
@@ -122,8 +127,13 @@ final class TrainingSessionController: ObservableObject {
     // MARK: - 生命周期
 
     /// 开始训练：取全量日线（升序缓存）→ 吸附起始日 → 建会话 → 起始日即最新日则直接结束
+    /// - Parameters:
+    ///   - accountType: 百分比账户（不校验资金）/ 仓位金额账户（固定本金，买入校验）
+    ///   - capital: 仓位金额账户的初始本金；百分比账户忽略（内部取名义本金）
     @discardableResult
-    func begin(meta: MetaItem, startDate: Int) -> Bool {
+    func begin(meta: MetaItem, startDate: Int,
+               accountType: TrainAccountType = .percent,
+               capital: Double = TrainAccountRule.defaultCapital) -> Bool {
         // 查询量很小（单只标的），允许同步调用
         let raw = DatabaseManager.shared.fetchDailyData(metaId: meta.id)   // date 降序
         let sorted = raw.sorted { $0.date < $1.date }                      // 升序
@@ -134,6 +144,10 @@ final class TrainingSessionController: ObservableObject {
 
         bars = sorted
         self.meta = meta
+        self.accountType = accountType
+        // 百分比账户用名义本金做「仓位比例 → 股数」的换算基，不参与资金校验
+        self.initialCapital = accountType == .fixedAmount ? max(0, capital) : TrainAccountRule.notionalCapital
+        self.cash = self.initialCapital
         self.startDate = anchor
         self.trainingDate = anchor
         self.latestDate = last.date
@@ -191,6 +205,8 @@ final class TrainingSessionController: ObservableObject {
         positionQtyValue = 0
         avgCostValue = 0
         lockedQtyValue = 0
+        cash = 0
+        initialCapital = 0
     }
 
     // MARK: - 下单
@@ -218,6 +234,11 @@ final class TrainingSessionController: ObservableObject {
 
         let amount = price * Double(qty)
         let fee = SimTradingRules.default.fee(amount: amount, direction: direction)
+        // 仓位金额账户：买入前校验资金（百分比账户不校验，永远买得起）
+        if direction == .buy, accountType == .fixedAmount, amount + fee > cash {
+            let affordable = SimTradingRules.default.affordableQty(cash: cash, price: price)
+            return "可用资金不足，可买 \(affordable) 股（可用 \(SimFormat.amount(cash))）"
+        }
         let pnl: Double? = direction == .sell ? (price - avgCostValue) * Double(qty) - fee : nil
         let seq = trades.count + 1
 
@@ -247,9 +268,22 @@ final class TrainingSessionController: ObservableObject {
             }
         }
 
+        // 仓位金额账户按成交额与费用记账（百分比账户不追踪资金）
+        if accountType == .fixedAmount {
+            cash += direction == .buy ? -(amount + fee) : (amount - fee)
+            if cash < 0 { cash = 0 }
+        }
+
         // 直接回读库内记录（id / seq / mark 与落库一致，做 T 提升也能立刻反映）
         trades = TrainingStore.shared.trades(sessionID: sessionID)
         return nil
+    }
+
+    /// 预检用：某标的在 startDate（吸附到「date ≤ startDate 的最后一根」）的收盘价。
+    /// 只读查询，不改动任何会话状态；供设置窗「金额账户至少能买两手」校验与随机抽取筛选使用。
+    func anchorClose(meta: MetaItem, startDate: Int) -> Double? {
+        let sorted = DatabaseManager.shared.fetchDailyData(metaId: meta.id).sorted { $0.date < $1.date }
+        return sorted.last(where: { $0.date <= startDate })?.close
     }
 
     // MARK: - 条件单 / 预警管理
@@ -257,10 +291,18 @@ final class TrainingSessionController: ObservableObject {
     /// 条件单编辑器的训练后端（取数走训练日快照，保存写训练库并立即结算）
     var condEditorBackend: TrainingCondBackend {
         TrainingCondBackend(
-            account: Self.trainingAccount,
+            account: condEditorAccount,
             position: { [weak self] in self?.trainingPositionSnapshot },
             snapshot: { [weak self] order in self?.condSnapshot(for: order) ?? SimCondSnapshot() },
             save: { [weak self] order in self?.upsertCondition(order) })
+    }
+
+    /// 条件单编辑器用的训练账户快照：资金按当前账户类型给（百分比账户 = 名义本金，金额账户 = 可用资金）
+    private var condEditorAccount: SimAccount {
+        let power = isActive ? buyingPower : TrainAccountRule.notionalCapital
+        return SimAccount(id: Self.trainingAccountID, name: "训练账户", badge: "训",
+                          colorHex: "#1E5FA8", initialCapital: power, cash: power,
+                          createdAt: Date(timeIntervalSince1970: 0), isArchived: false)
     }
 
     /// 重新从训练库加载条件单与预警记录

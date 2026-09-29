@@ -481,7 +481,7 @@ struct TradeTicketView: View {
         .padding(.vertical, 4)
     }
 
-    /// 元信息文案：训练态额外标注本标的交收规则（T+1 且当日有买入时提示锁定数量）
+    /// 元信息文案：训练态额外标注本标的交收规则 + 训练账户类型（T+1 且当日有买入时提示锁定数量）
     private var metaText: String {
         let lotText = "\(rules.lotSize) 股整数倍"
         guard training.isActive else {
@@ -489,14 +489,17 @@ struct TradeTicketView: View {
                 ? "\(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
                 : "可卖 \(SimFormat.shares(sellAvail)) 股"
         }
-        let rule = training.settlementRule.title
+        let prefix = "\(training.settlementRule.title) · \(training.accountType.title)"
         if direction.isBuy {
-            return "\(rule) · \(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
+            // 百分比账户不校验资金，无可买上限
+            return training.accountType == .percent
+                ? "\(prefix) · \(lotText)"
+                : "\(prefix) · \(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
         }
         let locked = training.lockedQty
         return locked > 0
-            ? "\(rule) · 可卖 \(SimFormat.shares(sellAvail)) 股（今日买入锁定 \(SimFormat.shares(locked)) 股）"
-            : "\(rule) · 可卖 \(SimFormat.shares(sellAvail)) 股"
+            ? "\(prefix) · 可卖 \(SimFormat.shares(sellAvail)) 股（今日买入锁定 \(SimFormat.shares(locked)) 股）"
+            : "\(prefix) · 可卖 \(SimFormat.shares(sellAvail)) 股"
     }
 
     /// 拒绝原因（红色小字，展示在提交按钮下方；不用 alert，避免与面板遮罩冲突）
@@ -574,7 +577,11 @@ struct TradeTicketView: View {
     private var account: SimAccount? { store.account(id: accountID) }
     private var position: SimPosition? { store.position(accountID: accountID, metaID: metaID) }
     private var holdQty: Int { position?.qty ?? 0 }
-    private var buyAvail: Int { rules.affordableQty(cash: account?.cash ?? 0, price: effectivePrice) }
+    /// 可用资金：训练态走训练账户（百分比账户 = 名义本金，金额账户 = 实际可用）
+    private var availableCash: Double {
+        training.isActive ? training.buyingPower : (account?.cash ?? 0)
+    }
+    private var buyAvail: Int { rules.affordableQty(cash: availableCash, price: effectivePrice) }
     /// 可卖上限：训练态用训练持仓（并按标的交收规则扣减当日买入锁定），不用模拟账户持仓
     private var sellAvail: Int {
         training.isActive ? training.sellableQty : rules.sellableQty(position: position)
@@ -588,7 +595,7 @@ struct TradeTicketView: View {
 
     /// 委托后可用资金预计
     private var cashAfterTrade: Double {
-        let cash = account?.cash ?? 0
+        let cash = availableCash
         return direction.isBuy ? cash - amount - totalFee : cash + amount - totalFee
     }
 

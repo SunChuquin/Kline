@@ -75,6 +75,46 @@ enum TrainSettlementRule: String {
     }
 }
 
+// MARK: - 训练账户类型
+
+/// 训练账户类型
+enum TrainAccountType: String, CaseIterable, Identifiable {
+    /// 百分比账户：不占用资金，按仓位比例（1/4、1/3、1/2、全仓）买卖，任何标的都买得起
+    case percent
+    /// 仓位金额账户：固定本金，买入前校验资金是否足够
+    case fixedAmount
+
+    var id: String { rawValue }
+
+    var title: String { self == .percent ? "百分比账户" : "仓位金额账户" }
+
+    /// 徽标 / 紧凑处使用的短名
+    var shortTitle: String { self == .percent ? "百分比" : "金额" }
+
+    var subtitle: String {
+        self == .percent
+            ? "不占用资金，按仓位比例（1/4、1/3、1/2、全仓）买卖，任何标的都买得起"
+            : "固定本金，买入前校验资金；开启训练要求本金至少买得起 2 手（200 股）"
+    }
+}
+
+/// 训练账户的规则常量与预检计算
+enum TrainAccountRule {
+    /// 仓位金额账户开启训练的最低手数要求（2 手）
+    static let minLots = 2
+    /// 仓位金额账户默认本金
+    static let defaultCapital: Double = 100_000
+    /// 百分比账户的名义本金：仅用于把「仓位比例」换算成股数，不参与资金校验
+    static let notionalCapital: Double = 1_000_000
+
+    /// 「至少能买 N 手」所需的最低资金（按 price 计，含买入费用）
+    static func minCapital(price: Double, lotSize: Int, lots: Int = minLots) -> Double {
+        guard price > 0 else { return 0 }
+        let amount = price * Double(lotSize * lots)
+        return amount + SimTradingRules.default.fee(amount: amount, direction: .buy)
+    }
+}
+
 /// 主图信号标记种类：B 买入 / S 卖出 / T 做 T（同一训练日既有买入又有卖出）
 enum TrainTradeMark: String {
     case buy = "B"

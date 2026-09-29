@@ -387,12 +387,24 @@ private struct QuickTrainingPanelView: View {
                     .font(.system(size: 11))
                     .foregroundColor(training.lockedQty > 0 ? Color(.systemOrange) : Color(.secondaryLabel))
                     .lineLimit(1)
+                if training.accountType == .fixedAmount {
+                    Text("可用 \(SimFormat.amount(training.cash))")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(.secondaryLabel))
+                        .lineLimit(1)
+                }
             } else {
                 Text("空仓")
                     .font(.system(size: 11))
                     .foregroundColor(Color(.secondaryLabel))
                     .lineLimit(1)
                 Spacer(minLength: 8)
+                Text(training.accountType == .percent
+                     ? "百分比账户 · 按仓位比例"
+                     : "金额账户 · 可用 \(SimFormat.amount(training.cash))")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
             }
         }
         .padding(.horizontal, 16)
