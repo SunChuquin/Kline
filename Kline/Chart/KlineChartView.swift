@@ -1242,8 +1242,8 @@ struct MainChartCanvas: View, Equatable {
         ctx.stroke(line, with: .color(Self.trainingStartColor),
                    style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
-        // 顶部日期标签：贴左右边缘时自动收进画布内，避免被裁掉
-        let resolved = ctx.resolve(Text("起始 \(start)")
+        // 顶部标签：只标「起始」，不写日期（日期位置直接由竖轴落在 K 线上、看横轴即知）
+        let resolved = ctx.resolve(Text("起始")
             .font(.system(size: 9, weight: .bold))
             .foregroundColor(.white))
         let textSize = resolved.measure(in: CGSize(width: w, height: h))

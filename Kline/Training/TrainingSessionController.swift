@@ -28,7 +28,7 @@ struct TrainRangeStats: Equatable {
     var amplitude: Double = 0
     /// C/收：起始至今涨幅 %
     var change: Double = 0
-    /// B/盈：训练账户收益率 %（已实现 + 浮动，相对初始本金）
+    /// 盈：持仓收益率 % =（浮动盈亏 + 已实现盈亏）/ 累计买入成本（无成交时为 0）
     var pnl: Double = 0
 }
 
@@ -71,8 +71,10 @@ final class TrainingSessionController: ObservableObject {
     private var avgCostValue: Double = 0
     /// 当日买入锁定量（T+1 标的当日不可卖部分）；推进训练日 / 重开 / 关闭时清零
     private var lockedQtyValue = 0
-    /// 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用），供顶栏「B 账户盈亏」统计
+    /// 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用），供顶栏「盈」统计
     private var realizedPnlValue: Double = 0
+    /// 累计买入成本（买入成交额之和，不含费用）：作为顶栏「盈」收益率的分母
+    private var investedCostValue: Double = 0
 
     private init() {}
 
@@ -146,7 +148,7 @@ final class TrainingSessionController: ObservableObject {
     /// 但区间固定为 [起始训练日, 当前训练日]，不依赖光标与可见窗口。
     /// M/高 = 区间最大涨幅（区间最高相对基准）、N/低 = 区间最大回撤（区间最低相对基准）、
     /// 振 = 训练振幅（区间最高 − 区间最低）、C/收 = 起始至今涨幅、
-    /// B/盈 = 训练账户收益率（已实现 + 浮动 / 初始本金）、笔 = 成交笔数
+    /// 盈 = 持仓收益率（浮动 + 已实现，相对累计买入成本）、笔 = 成交笔数
     var rangeStats: TrainRangeStats {
         guard isActive else { return TrainRangeStats() }
         guard initialCapital > 0,
@@ -159,7 +161,10 @@ final class TrainingSessionController: ObservableObject {
         let slice = bars[si...ci]
         let high = slice.map(\.high).max() ?? base
         let low = slice.map(\.low).min() ?? base
-        let pnlRatio = (realizedPnlValue + (floatingPnl ?? 0)) / initialCapital * 100
+        // 浮动盈亏必须就地取当前训练日收盘价重算（avgCost × 持仓量），与「浮盈」面板同源；
+        // 收益率分母用累计买入成本，这样 1/4 仓位、全仓都能读出「这笔仓位赚了多少」
+        let floating = Double(positionQtyValue) * (bars[ci].close - avgCostValue)
+        let pnlRatio = investedCostValue > 0 ? (realizedPnlValue + floating) / investedCostValue * 100 : 0
         return TrainRangeStats(trades: trades.count,
                                rally: (high - base) / base * 100,
                                drawdown: (low - base) / base * 100,
@@ -202,6 +207,7 @@ final class TrainingSessionController: ObservableObject {
         avgCostValue = 0
         lockedQtyValue = 0
         realizedPnlValue = 0
+        investedCostValue = 0
         sessionID = TrainingStore.shared.createSession(metaID: meta.id, code: meta.code,
                                                        name: meta.name, startDate: anchor)
         // 起始日即最新日：一开始就到位，直接判定结束并落库
@@ -251,6 +257,7 @@ final class TrainingSessionController: ObservableObject {
         avgCostValue = 0
         lockedQtyValue = 0
         realizedPnlValue = 0
+        investedCostValue = 0
         cash = 0
         initialCapital = 0
     }
@@ -320,10 +327,11 @@ final class TrainingSessionController: ObservableObject {
             if cash < 0 { cash = 0 }
         }
 
-        // 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用）：供顶栏「B 账户盈亏」，
-        // 百分比账户不记资金流，只能靠此口径统计收益
+        // 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用）：供顶栏「盈」，
+        // 百分比账户不记资金流，只能靠此口径统计收益；同时累计买入成本作收益率分母
         if direction == .buy {
             realizedPnlValue -= fee
+            investedCostValue += amount
         } else {
             realizedPnlValue += pnl ?? 0
         }
