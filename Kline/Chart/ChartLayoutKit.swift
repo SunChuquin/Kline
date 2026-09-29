@@ -99,7 +99,7 @@ extension KlineChartView {
                         gaps: mainMirrored ? mirroredGaps : computation.gaps, sliceStart: startIndex,
                         latest: mirroredLatest,
                         syntheticBar: syntheticBar, dimFromIndex: dimFromLocal,
-                        signalMarks: periodSignalMarks)
+                        signalMarks: periodSignalMarks, trainingStartDate: periodTrainingStartDate)
             .equatable()
     }
 
@@ -132,6 +132,18 @@ extension KlineChartView {
             result[bar.date] = TrainSignalMark(mark: merged, isConditional: conditional)
         }
         return result
+    }
+
+    /// 训练起始日按「当前周期」聚合后的 K 线日期：非日线周期把起始日归到包含它的那根 K 线，
+    /// 使起始竖轴在周/月/季/年线上也能画在正确位置（日线恒等返回，零开销）。
+    /// 起始日已滚出可见窗口左侧时返回 nil（竖轴随之消失，符合预期）。
+    private var periodTrainingStartDate: Int? {
+        guard let start = trainingStartDate else { return nil }
+        guard period != .daily else { return start }
+        return slice.first { bar in
+            let (s, e) = KlinePeriod.periodDateRange(period, date: bar.date)
+            return start >= s && start <= e
+        }?.date
     }
 
     // MARK: - 副图

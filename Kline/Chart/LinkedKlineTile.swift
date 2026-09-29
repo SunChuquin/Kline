@@ -37,6 +37,8 @@ struct LinkedKlineTile: View {
     /// 训练态买卖信号标记（key = 训练日 YYYYMMDD）：透传给内部 K 线图，
     /// 由图表按本格自身周期做区间聚合后绘制 B/S/T，保证多图各周期视图同样可见
     var trainingSignalMarks: [Int: TrainSignalMark] = [:]
+    /// 训练起始日（YYYYMMDD；nil = 非训练态）：透传给内部 K 线图，在本格画出训练区间左端竖轴
+    var trainingStartDate: Int? = nil
 
     @Binding var showCustomEditor: Bool
     @Binding var showSystemEditor: Bool
@@ -306,6 +308,8 @@ struct LinkedKlineTile: View {
                        trainingMaxDate: trainingMaxDate,
                        // 训练态买卖信号：本格按自身周期做区间聚合后绘制 B/S/T
                        trainingSignalMarks: trainingSignalMarks,
+                       // 训练起始日：本格按自身周期聚合到包含起始日的那根 K 线上画竖轴
+                       trainingStartDate: trainingStartDate,
                        onPeriodSwitch: { newPeriod in
                            // 副图二切周期（联动态）：只改本视图周期，持久化到 owner
                            pinReservedHelper()

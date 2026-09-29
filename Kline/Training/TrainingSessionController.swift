@@ -20,13 +20,15 @@ import Combine
 struct TrainRangeStats: Equatable {
     /// K：成交笔数
     var trades: Int = 0
-    /// M：区间最大涨幅 %（区间最高相对基准）
+    /// M/高：区间最大涨幅 %（区间最高相对基准）
     var rally: Double = 0
-    /// N：区间最大回撤 %（区间最低相对基准，通常为负）
+    /// N/低：区间最大回撤 %（区间最低相对基准，通常为负）
     var drawdown: Double = 0
-    /// C：起始至今涨幅 %
+    /// 振：训练振幅 %（区间最高 − 区间最低，恒为非负）
+    var amplitude: Double = 0
+    /// C/收：起始至今涨幅 %
     var change: Double = 0
-    /// B：训练账户收益率 %（已实现 + 浮动，相对初始本金）
+    /// B/盈：训练账户收益率 %（已实现 + 浮动，相对初始本金）
     var pnl: Double = 0
 }
 
@@ -142,8 +144,9 @@ final class TrainingSessionController: ObservableObject {
 
     /// 训练区间统计（顶栏徽标用）：口径与光标的区间统计一致（基准 = 起始训练日收盘价），
     /// 但区间固定为 [起始训练日, 当前训练日]，不依赖光标与可见窗口。
-    /// M = 区间最大涨幅（区间最高相对基准）、N = 区间最大回撤（区间最低相对基准）、
-    /// C = 起始至今涨幅、B = 训练账户收益率（已实现 + 浮动 / 初始本金）、K = 成交笔数
+    /// M/高 = 区间最大涨幅（区间最高相对基准）、N/低 = 区间最大回撤（区间最低相对基准）、
+    /// 振 = 训练振幅（区间最高 − 区间最低）、C/收 = 起始至今涨幅、
+    /// B/盈 = 训练账户收益率（已实现 + 浮动 / 初始本金）、笔 = 成交笔数
     var rangeStats: TrainRangeStats {
         guard isActive else { return TrainRangeStats() }
         guard initialCapital > 0,
@@ -160,6 +163,7 @@ final class TrainingSessionController: ObservableObject {
         return TrainRangeStats(trades: trades.count,
                                rally: (high - base) / base * 100,
                                drawdown: (low - base) / base * 100,
+                               amplitude: (high - low) / base * 100,
                                change: (bars[ci].close - base) / base * 100,
                                pnl: pnlRatio)
     }

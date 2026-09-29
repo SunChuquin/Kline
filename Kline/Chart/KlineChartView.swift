@@ -57,6 +57,9 @@ struct KlineChartView: View {
     /// 训练态主图买卖信号标记（key = YYYYMMDD 训练日）：B 买入 / S 卖出 / T 做 T，
     /// 实心圆 = 手动下单、空心圆 = 条件单触发；非训练态为空
     let trainingSignalMarks: [Int: TrainSignalMark]
+    /// 训练起始日（YYYYMMDD；nil = 非训练态）：主图上画一条固定虚线竖轴 + 顶部日期标签，
+    /// 标出本次训练区间的左端（右端即图表右缘的训练当前日），周/月等周期会聚合到包含该日的那根 K 线
+    let trainingStartDate: Int?
     /// 第一副图左右滑动切换周期（传入更大/更小级别周期，由外层决定是否应用）
     let onPeriodSwitch: ((KlinePeriod) -> Void)?
     /// 当前周期后台预计算全部完成后的回调（用于外层继续预计算其它未计算周期）
@@ -211,6 +214,7 @@ struct KlineChartView: View {
          hideQuoteTurnover: Bool = false,
          trainingMaxDate: Int? = nil,
          trainingSignalMarks: [Int: TrainSignalMark] = [:],
+         trainingStartDate: Int? = nil,
          onPeriodSwitch: ((KlinePeriod) -> Void)? = nil,
          onPeriodPrefetched: ((KlinePeriod) -> Void)? = nil,
          onSwitchItem: ((Int) -> Void)? = nil,
@@ -243,6 +247,7 @@ struct KlineChartView: View {
         self.hideQuoteTurnover = hideQuoteTurnover
         self.trainingMaxDate = trainingMaxDate
         self.trainingSignalMarks = trainingSignalMarks
+        self.trainingStartDate = trainingStartDate
         self.onPeriodSwitch = onPeriodSwitch
         self.onPeriodPrefetched = onPeriodPrefetched
         self.onSwitchItem = onSwitchItem
@@ -1165,6 +1170,8 @@ struct MainChartCanvas: View, Equatable {
     /// 训练态主图买卖信号标记（key = YYYYMMDD）：按可见切片日期查找后绘制。
     /// 实心圆 = 手动下单，空心圆 = 条件单触发；买入 / 做 T 画在 K 线下方，卖出画在上方。
     var signalMarks: [Int: TrainSignalMark] = [:]
+    /// 训练起始日（YYYYMMDD）：命中可见切片时画一条虚线竖轴 + 顶部日期标签，标出训练区间左端
+    var trainingStartDate: Int? = nil
 
     var body: some View {
         Canvas { ctx, size in
@@ -1215,8 +1222,41 @@ struct MainChartCanvas: View, Equatable {
 
             // 训练态买卖信号（B/S/T）画在最上层，避免被 K 线 / 指标曲线遮挡
             drawSignalMarks(ctx, w: w, h: h)
+
+            // 训练起始日竖轴：画在信号标记之上（虚线 + 顶部日期标签），始终可见
+            drawTrainingStartLine(ctx, w: w, h: h)
         }
     }
+
+    /// 训练起始日固定竖轴：在起始日那根 K 线上画一条灰色虚线（贯穿主图全高）+ 顶部「起始 YYYYMMDD」标签，
+    /// 让训练者一眼看出本次训练从哪一天开始（区间右端即图表右缘的训练当前日）。
+    /// 起始日不在可见窗口内时整条不画。
+    private func drawTrainingStartLine(_ ctx: GraphicsContext, w: CGFloat, h: CGFloat) {
+        guard let start = trainingStartDate,
+              let index = slice.firstIndex(where: { $0.date == start }) else { return }
+        let x = (CGFloat(index) + 0.5) * candleSpacing
+        guard x >= 0, x <= w else { return }
+        var line = Path()
+        line.move(to: CGPoint(x: x, y: 0))
+        line.addLine(to: CGPoint(x: x, y: h))
+        ctx.stroke(line, with: .color(Self.trainingStartColor),
+                   style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+        // 顶部日期标签：贴左右边缘时自动收进画布内，避免被裁掉
+        let resolved = ctx.resolve(Text("起始 \(start)")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundColor(.white))
+        let textSize = resolved.measure(in: CGSize(width: w, height: h))
+        let labelW = textSize.width + 8
+        let labelH = textSize.height + 2
+        let centerX = min(max(x, labelW / 2), max(labelW / 2, w - labelW / 2))
+        let rect = CGRect(x: centerX - labelW / 2, y: 1, width: labelW, height: labelH)
+        ctx.fill(Path(roundedRect: rect, cornerRadius: 3), with: .color(Self.trainingStartColor))
+        ctx.draw(resolved, at: CGPoint(x: centerX, y: rect.midY), anchor: .center)
+    }
+
+    /// 训练起始竖轴色：中性灰，与光标蓝线 / 买卖信号蓝橙 / K 线红绿都不冲突，深浅色主题下都可读
+    static let trainingStartColor = Color.gray
 
     /// 训练态主图买卖信号：按可见切片的日期查标记，在对应 K 线上下方画圆点 + 字母。
     /// 实心圆 = 手动下单，空心圆 = 条件单触发（颜色区分）；买入 / 做 T 在下方，卖出在上方。

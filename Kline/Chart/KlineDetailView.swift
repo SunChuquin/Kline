@@ -728,7 +728,8 @@ struct KlineDetailView: View {
     }
 
     /// 训练徽标：紧跟在顶栏「标的代码」右侧，单图与联动多图共用同一处（不再单独占一行）。
-    /// 内容：训练中 / 已完成 + K 成交笔数 + M 区间最大涨幅 + N 区间最大回撤 + C 起始至今涨幅 + B 账户盈亏；
+    /// 内容：训练中 / 已完成 + 笔（成交笔数）+ 高（区间最大涨幅）+ 低（区间最大回撤）+
+    /// 振（训练振幅，无符号）+ 收（起始至今涨幅）+ 盈（训练账户盈亏）；
     /// 百分比项按涨跌着色（红涨绿跌），区间口径固定为 [起始训练日, 当前训练日]。
     @ViewBuilder
     private var trainingBadges: some View {
@@ -738,11 +739,13 @@ struct KlineDetailView: View {
                 Text(trainer.isFinished ? "训练已完成" : "训练中")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(trainer.isFinished ? .gray : .blue)
-                badgeItem("K", value: "\(stats.trades)", color: .gray)
-                badgeItem("M", value: percentText(stats.rally), color: signColor(stats.rally))
-                badgeItem("N", value: percentText(stats.drawdown), color: signColor(stats.drawdown))
-                badgeItem("C", value: percentText(stats.change), color: signColor(stats.change))
-                badgeItem("B", value: percentText(stats.pnl), color: signColor(stats.pnl))
+                badgeItem("笔", value: "\(stats.trades)", color: .gray)
+                badgeItem("高", value: percentText(stats.rally), color: signColor(stats.rally))
+                badgeItem("低", value: percentText(stats.drawdown), color: signColor(stats.drawdown))
+                // 振幅恒为非负，无正负号，用主色与「笔」的灰区分
+                badgeItem("振", value: String(format: "%.2f%%", stats.amplitude), color: .primary)
+                badgeItem("收", value: percentText(stats.change), color: signColor(stats.change))
+                badgeItem("盈", value: percentText(stats.pnl), color: signColor(stats.pnl))
             }
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
@@ -1000,6 +1003,8 @@ struct KlineDetailView: View {
                         trainingMaxDate: trainingMaxDateValue,
                         // 训练态：各格主图同样绘制 B/S/T 信号标记（图表内部按本格周期做区间聚合）
                         trainingSignalMarks: trainingActive ? trainer.signalMarks : [:],
+                        // 训练态：各格主图同样画出训练起始日竖轴（图表内部按本格周期聚合）
+                        trainingStartDate: trainingActive ? trainer.startDate : nil,
                         showCustomEditor: $showCustomEditor,
                         showSystemEditor: $showSystemEditor,
                         editorOwnerIndex: $editorOwnerIndex,
@@ -1278,6 +1283,8 @@ struct KlineDetailView: View {
                        trainingMaxDate: trainingMaxDateValue,
                        // 训练态主图买卖信号（B/S/T）：非训练态为空
                        trainingSignalMarks: trainingActive ? trainer.signalMarks : [:],
+                       // 训练态主图：训练起始日竖轴 + 顶部「起始 YYYYMMDD」标签（nil = 非训练态）
+                       trainingStartDate: trainingActive ? trainer.startDate : nil,
                        onPeriodSwitch: linked ? { _ in } : { newPeriod in
                            // 切换周期后图表重建，固定光标随之失效，重置 pin
                            DebugLogger.shared.log("图表滑动切换周期: \(newPeriod.rawValue)")
