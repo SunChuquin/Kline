@@ -16,6 +16,20 @@
 import Foundation
 import Combine
 
+/// 训练区间统计（顶栏徽标用）：区间 = [起始训练日, 当前训练日]，基准 = 起始日收盘价
+struct TrainRangeStats: Equatable {
+    /// K：成交笔数
+    var trades: Int = 0
+    /// M：区间最大涨幅 %（区间最高相对基准）
+    var rally: Double = 0
+    /// N：区间最大回撤 %（区间最低相对基准，通常为负）
+    var drawdown: Double = 0
+    /// C：起始至今涨幅 %
+    var change: Double = 0
+    /// B：训练账户收益率 %（已实现 + 浮动，相对初始本金）
+    var pnl: Double = 0
+}
+
 final class TrainingSessionController: ObservableObject {
     static let shared = TrainingSessionController()
 
@@ -55,6 +69,8 @@ final class TrainingSessionController: ObservableObject {
     private var avgCostValue: Double = 0
     /// 当日买入锁定量（T+1 标的当日不可卖部分）；推进训练日 / 重开 / 关闭时清零
     private var lockedQtyValue = 0
+    /// 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用），供顶栏「B 账户盈亏」统计
+    private var realizedPnlValue: Double = 0
 
     private init() {}
 
@@ -124,6 +140,30 @@ final class TrainingSessionController: ObservableObject {
         return result
     }
 
+    /// 训练区间统计（顶栏徽标用）：口径与光标的区间统计一致（基准 = 起始训练日收盘价），
+    /// 但区间固定为 [起始训练日, 当前训练日]，不依赖光标与可见窗口。
+    /// M = 区间最大涨幅（区间最高相对基准）、N = 区间最大回撤（区间最低相对基准）、
+    /// C = 起始至今涨幅、B = 训练账户收益率（已实现 + 浮动 / 初始本金）、K = 成交笔数
+    var rangeStats: TrainRangeStats {
+        guard isActive else { return TrainRangeStats() }
+        guard initialCapital > 0,
+              let si = bars.firstIndex(where: { $0.date == startDate }),
+              let ci = bars.firstIndex(where: { $0.date == trainingDate }), si <= ci else {
+            return TrainRangeStats(trades: trades.count)
+        }
+        let base = bars[si].close
+        guard base > 0 else { return TrainRangeStats(trades: trades.count) }
+        let slice = bars[si...ci]
+        let high = slice.map(\.high).max() ?? base
+        let low = slice.map(\.low).min() ?? base
+        let pnlRatio = (realizedPnlValue + (floatingPnl ?? 0)) / initialCapital * 100
+        return TrainRangeStats(trades: trades.count,
+                               rally: (high - base) / base * 100,
+                               drawdown: (low - base) / base * 100,
+                               change: (bars[ci].close - base) / base * 100,
+                               pnl: pnlRatio)
+    }
+
     // MARK: - 生命周期
 
     /// 开始训练：取全量日线（升序缓存）→ 吸附起始日 → 建会话 → 起始日即最新日则直接结束
@@ -157,6 +197,7 @@ final class TrainingSessionController: ObservableObject {
         positionQtyValue = 0
         avgCostValue = 0
         lockedQtyValue = 0
+        realizedPnlValue = 0
         sessionID = TrainingStore.shared.createSession(metaID: meta.id, code: meta.code,
                                                        name: meta.name, startDate: anchor)
         // 起始日即最新日：一开始就到位，直接判定结束并落库
@@ -205,6 +246,7 @@ final class TrainingSessionController: ObservableObject {
         positionQtyValue = 0
         avgCostValue = 0
         lockedQtyValue = 0
+        realizedPnlValue = 0
         cash = 0
         initialCapital = 0
     }
@@ -272,6 +314,14 @@ final class TrainingSessionController: ObservableObject {
         if accountType == .fixedAmount {
             cash += direction == .buy ? -(amount + fee) : (amount - fee)
             if cash < 0 { cash = 0 }
+        }
+
+        // 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用）：供顶栏「B 账户盈亏」，
+        // 百分比账户不记资金流，只能靠此口径统计收益
+        if direction == .buy {
+            realizedPnlValue -= fee
+        } else {
+            realizedPnlValue += pnl ?? 0
         }
 
         // 直接回读库内记录（id / seq / mark 与落库一致，做 T 提升也能立刻反映）

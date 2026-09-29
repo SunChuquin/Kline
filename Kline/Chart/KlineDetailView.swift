@@ -324,10 +324,6 @@ struct KlineDetailView: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
                             .frame(height: 0.5)
-                        // 训练指示条：训练态下插在工具栏下方（不遮挡任何按钮）
-                        if trainingActive {
-                            trainingIndicatorBar
-                        }
                         // 第二行：信息栏仅联动（非钻取）时显示；单图/钻取信息已并入工具栏行，此处省略
                         if effectiveDual {
                             infoBarRow(width: geometry.size.width)
@@ -608,6 +604,9 @@ struct KlineDetailView: View {
                     .lineLimit(1)
             }
 
+            // 训练态：徽标紧跟在标的代码右侧（单图与联动多图同一处）
+            trainingBadges
+
             Spacer()
 
             // 「边」/📌 按钮：
@@ -728,36 +727,46 @@ struct KlineDetailView: View {
         )
     }
 
-    /// 训练指示条：训练态下显示在工具栏行下方（高 24pt、小字号、浅蓝底，不抢眼也不遮挡按钮）。
-    /// 内容：状态 / 标的名称与代码 / 起始与当前训练日 / 本会话已交易笔数。
-    private var trainingIndicatorBar: some View {
-        let meta = trainer.meta
-        return HStack(spacing: 8) {
-            Text(trainer.isFinished ? "训练已完成" : "训练中")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(trainer.isFinished ? .gray : .blue)
-                .lineLimit(1)
-            Text("\(meta?.name ?? "") \(meta?.code ?? "")")
-                .font(.system(size: 11))
-                .foregroundColor(.primary)
-                .lineLimit(1)
-            Spacer(minLength: 6)
-            Text("起始 \(TrainSessionRecord.dateText(trainer.startDate)) · 当前 \(TrainSessionRecord.dateText(trainer.trainingDate))")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            Text("交易 \(trainer.trades.count) 笔")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
+    /// 训练徽标：紧跟在顶栏「标的代码」右侧，单图与联动多图共用同一处（不再单独占一行）。
+    /// 内容：训练中 / 已完成 + K 成交笔数 + M 区间最大涨幅 + N 区间最大回撤 + C 起始至今涨幅 + B 账户盈亏；
+    /// 百分比项按涨跌着色（红涨绿跌），区间口径固定为 [起始训练日, 当前训练日]。
+    @ViewBuilder
+    private var trainingBadges: some View {
+        if trainingActive {
+            let stats = trainer.rangeStats
+            HStack(spacing: 6) {
+                Text(trainer.isFinished ? "训练已完成" : "训练中")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(trainer.isFinished ? .gray : .blue)
+                badgeItem("K", value: "\(stats.trades)", color: .gray)
+                badgeItem("M", value: percentText(stats.rally), color: signColor(stats.rally))
+                badgeItem("N", value: percentText(stats.drawdown), color: signColor(stats.drawdown))
+                badgeItem("C", value: percentText(stats.change), color: signColor(stats.change))
+                badgeItem("B", value: percentText(stats.pnl), color: signColor(stats.pnl))
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityIdentifier("training.badges")
         }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 24)
-        .background(Color.blue.opacity(0.08))
-        .overlay(Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 0.5), alignment: .bottom)
-        .accessibilityIdentifier("training.indicator")
     }
+
+    /// 单枚徽标：字母（灰色小字）+ 数值（按涨跌着色加粗）
+    private func badgeItem(_ letter: String, value: String, color: Color) -> some View {
+        HStack(spacing: 1) {
+            Text(letter)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.gray)
+            Text(value)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(color)
+        }
+    }
+
+    private func percentText(_ v: Double) -> String { String(format: "%+.2f%%", v) }
+    private func signColor(_ v: Double) -> Color { v >= 0 ? upColor : downColor }
+    /// 与 K 线主图同源的涨跌色（KlineChartView.upColor / downColor）
+    private var upColor: Color { Color(red: 0.85, green: 0.16, blue: 0.16) }
+    private var downColor: Color { Color(red: 0.0, green: 0.55, blue: 0.35) }
 
     /// 顶部第二行：信息栏（联动各视图标的代码+周期 / 单图：名称代码类型）
     /// width：整屏宽度（由最外层 GeometryReader 传入，避免在此函数内嵌 GeometryReader 导致布局溢出/错位）
