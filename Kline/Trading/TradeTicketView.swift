@@ -493,7 +493,7 @@ struct TradeTicketView: View {
                 ? "\(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
                 : "可卖 \(SimFormat.shares(sellAvail)) 股"
         }
-        let prefix = "\(training.settlementRule.title) · \(training.accountType.title)"
+        let prefix = "\(training.settlementRule.title) · \(training.accountType.title) · \(training.tradeMode.shortTitle)"
         if direction.isBuy {
             // 百分比账户不校验资金，无可买上限
             return training.accountType == .percent
@@ -558,7 +558,10 @@ struct TradeTicketView: View {
     }
 
     private var submitTitle: String {
-        "\(direction.title)下单 · \(SimFormat.amount(amount))"
+        let action = training.isActive && training.tradeMode == .nextDayClose
+            ? "\(direction.title)挂单"
+            : "\(direction.title)下单"
+        return "\(action) · \(SimFormat.amount(amount))"
     }
 
     // MARK: - 派生数据
@@ -704,7 +707,9 @@ struct TradeTicketView: View {
             if let reason = training.placeTrade(direction: dir, qty: qty, note: "") {
                 errorText = reason
             } else {
-                successText = "已成交"
+                successText = training.tradeMode == .nextDayClose
+                    ? "已挂单 · 下一训练日收盘价成交"
+                    : "已成交"
             }
             return
         }

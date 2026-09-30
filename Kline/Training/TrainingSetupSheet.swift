@@ -98,6 +98,8 @@ struct TrainingSetupSheet: View {
     @AppStorage("training.accountType") private var accountTypeRaw: String = "percent"
     /// 仓位金额账户的本金文本（持久化）
     @AppStorage("training.capitalText") private var capitalText: String = "100000"
+    /// 交易模式（持久化，下次打开沿用上次选择）
+    @AppStorage("training.tradeMode") private var tradeModeRaw: String = "sameDayClose"
     /// 金额账户「本金买不起两手」的重新选择标的弹窗
     @State private var showReselectAlert = false
     /// 上述弹窗的文案
@@ -105,6 +107,9 @@ struct TrainingSetupSheet: View {
 
     /// 当前账户类型（容错解析）
     private var accountType: TrainAccountType { TrainAccountType(rawValue: accountTypeRaw) ?? .percent }
+
+    /// 当前交易模式（容错解析）
+    private var tradeMode: TrainTradeMode { TrainTradeMode(rawValue: tradeModeRaw) ?? .sameDayClose }
 
     /// 金额账户本金（从文本解析，非法 → 0）
     private var capitalValue: Double { Double(capitalText.filter { $0.isNumber }) ?? 0 }
@@ -126,6 +131,7 @@ struct TrainingSetupSheet: View {
                             categorySection
                             if category == .myGroup { groupSection }
                             accountSection
+                            tradeModeSection
                             targetSection
                             dateSection
                             if let errorText {
@@ -258,6 +264,26 @@ struct TrainingSetupSheet: View {
                     Spacer(minLength: 0)
                 }
             }
+        }
+    }
+
+    /// 交易模式：当日收盘价成交（下单即刻成交）/ 隔日委托（挂单到下一训练日成交）
+    private var tradeModeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("交易模式")
+            HStack(spacing: 8) {
+                ForEach(TrainTradeMode.allCases) { m in
+                    chip(m.title, selected: m == tradeMode) {
+                        tradeModeRaw = m.rawValue
+                        errorText = nil
+                    }
+                }
+            }
+            .accessibilityIdentifier("trainingSetup.tradeMode")
+            Text(tradeMode.subtitle)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -615,7 +641,8 @@ struct TrainingSetupSheet: View {
                 return
             }
             if TrainingSessionController.shared.begin(meta: meta, startDate: startInt,
-                                                      accountType: .fixedAmount, capital: capitalValue) {
+                                                      accountType: .fixedAmount, capital: capitalValue,
+                                                      tradeMode: tradeMode) {
                 isPresented = false
             } else {
                 errorText = "该标的暂无行情数据，无法开始训练"
@@ -625,7 +652,8 @@ struct TrainingSetupSheet: View {
 
         // 百分比账户：不校验资金
         if TrainingSessionController.shared.begin(meta: meta, startDate: TrainingDateMath.int(from: date),
-                                                  accountType: .percent) {
+                                                  accountType: .percent,
+                                                  tradeMode: tradeMode) {
             isPresented = false
         } else {
             errorText = "该标的暂无行情数据，无法开始训练"

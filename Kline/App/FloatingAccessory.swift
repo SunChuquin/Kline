@@ -315,6 +315,7 @@ private struct QuickTrainingPanelView: View {
                 infoRow(meta: meta)
                 positionRow
                 conditionEntryRow
+                pendingSection
                 TradeTicketView(style: .panel,
                                 // 训练无模拟账户：用「全部账户汇总」占位 id（store.account 取不到真实账户）
                                 accountID: SimStore.allAccountID,
@@ -458,6 +459,68 @@ private struct QuickTrainingPanelView: View {
                     ForEach(training.trades.reversed()) { t in
                         tradeRow(t)
                     }
+                }
+            }
+        }
+    }
+
+    /// 隔日委托队列：展示「已挂单、待下一训练日收盘价成交」的手动委托（当日成交模式恒为空，不渲染）
+    @ViewBuilder
+    private var pendingSection: some View {
+        if !training.pendingOrders.isEmpty || training.pendingRejectText != nil {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Text("隔日委托")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.primary)
+                    Text("\(training.pendingOrders.count) 笔待成交")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(.secondaryLabel))
+                    Spacer(minLength: 8)
+                    Text("下一训练日收盘价成交")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(.secondaryLabel))
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 26)
+                .background(Color(.secondarySystemBackground))
+
+                ForEach(training.pendingOrders) { o in
+                    HStack(spacing: 8) {
+                        Text(TrainSessionRecord.dateText(o.placedDate))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(.secondaryLabel))
+                        Text(o.direction == .buy ? "买" : "卖")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.white)
+                            .frame(width: 16, height: 14)
+                            .background(RoundedRectangle(cornerRadius: 3)
+                                .fill(o.direction == .buy ? Color(.systemRed) : Color(.systemGreen)))
+                        Text("×\(SimFormat.shares(o.qty))")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(.secondaryLabel))
+                        Spacer(minLength: 8)
+                        Text("待成交")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Color(.systemOrange))
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 22)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(Color(.separator))
+                            .frame(height: 0.5)
+                            .padding(.leading, 16)
+                    }
+                }
+
+                if let reject = training.pendingRejectText {
+                    Text(reject)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(.systemOrange))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
                 }
             }
         }
