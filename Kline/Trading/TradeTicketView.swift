@@ -136,7 +136,11 @@ struct TradeTicketView: View {
 
     private var panelBody: some View {
         VStack(spacing: 0) {
-            header(priceSize: 19, horizontalPadding: 16)
+            // 训练态：训练面板已有独立的「名称 + 代码 + 训练日」信息行，且面板标题已写明「训练下单」，
+            // 票面头（名称/代码/「训练」徽标/最新价）整块重复，省略以腾出空间给成交记录
+            if !training.isActive {
+                header(priceSize: 19, horizontalPadding: 16)
+            }
 
             TradeSegmentedRow(options: [
                 TradeSegOption(id: "buy", title: "买入", tint: Color(.systemRed),
@@ -151,15 +155,15 @@ struct TradeTicketView: View {
             .padding(.top, 8)
 
             VStack(spacing: 0) {
-                priceControlRow(label: "委托价", height: 38, unit: "元")
-                qtyControlRow(label: "数量", height: 38, unit: "股", showsDivider: false)
+                priceControlRow(label: "委托价", height: training.isActive ? 34 : 38, unit: "元")
+                qtyControlRow(label: "数量", height: training.isActive ? 34 : 38, unit: "股", showsDivider: false)
             }
             .padding(.horizontal, 16)
 
             TradePosChips(height: 30) { ratio in applyPosition(ratio) }
                 .padding(.horizontal, 16)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
+                .padding(.top, training.isActive ? 4 : 6)
+                .padding(.bottom, training.isActive ? 6 : 8)
 
             metaRow(padding: 16)
 
@@ -171,7 +175,7 @@ struct TradeTicketView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
 
-            submitButton(height: 46, horizontalPadding: 16, topPadding: 8, bottomPadding: 6)
+            submitButton(height: training.isActive ? 42 : 46, horizontalPadding: 16, topPadding: 8, bottomPadding: 6)
             successLine(padding: 16)
             errorLine(padding: 16)
         }

@@ -227,6 +227,9 @@ struct FloatingAccessoryPanel: View {
 
     /// 面板高度占屏幕高度比例（按方案不同：A 0.67 / B 0.60 / C 0.35）
     private var heightFraction: CGFloat {
+        // 训练态：内容固定为「训练信息 + 持仓 + 条件单入口 + 紧凑票面 + 成交记录」，
+        // 与模拟交易三套布局无关，统一给足高度，避免票面/成交记录被裁
+        if training.isActive { return 0.8 }
         switch layoutStore.panelLayout {
         case .a: return 0.67
         case .b: return 0.60
@@ -323,6 +326,8 @@ private struct QuickTrainingPanelView: View {
                                 initialQty: 100,
                                 onSubmit: { _ in })
                     .id("quickTraining.ticket.\(meta.id)")
+                // 成交记录：紧跟票面下方，每笔含方向/价格/数量/已实现盈亏，顶部汇总已实现盈亏
+                tradeHistorySection
             } else {
                 Text("暂无进行中的训练")
                     .font(.system(size: 12))
@@ -372,13 +377,20 @@ private struct QuickTrainingPanelView: View {
         .frame(height: 30)
     }
 
-    /// 训练持仓行：持仓 / 均价 / 浮盈 + 交收规则下的可卖数量，无持仓显示「空仓」
+    /// 训练持仓行：持仓 / 均价 / 浮盈浮亏（金额 + 相对持仓均价的百分比）+ 可卖数量；无持仓显示「空仓」
     private var positionRow: some View {
         HStack(spacing: 8) {
             if training.positionQty > 0 {
-                Text("持仓 \(SimFormat.shares(training.positionQty)) 股 · 均价 \(SimFormat.price(training.avgCost)) · 浮盈 \(training.floatingPnl.map { SimFormat.signed($0) } ?? "—")")
+                let floating = training.floatingPnl ?? 0
+                let avg = training.avgCost
+                let rate = avg > 0 ? ((training.currentClose ?? avg) / avg * 100 - 100) : 0
+                Text("持仓 \(SimFormat.shares(training.positionQty)) 股 · 均价 \(SimFormat.price(avg))")
                     .font(.system(size: 11))
                     .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
+                Text("浮盈 \(SimFormat.signed(floating))（\(String(format: "%+.2f%%", rate))）")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(floating >= 0 ? Color(.systemRed) : Color(.systemGreen))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(training.lockedQty > 0
@@ -410,6 +422,90 @@ private struct QuickTrainingPanelView: View {
         .padding(.horizontal, 16)
         .frame(height: 26)
         .background(Color(.secondarySystemBackground))
+    }
+
+    /// 成交记录：本标的本次训练的逐笔成交（新 → 旧），卖出笔显示已实现盈亏并着色；
+    /// 顶部一行汇总「已实现盈亏」，与持仓行的「浮盈浮亏」配合即可看到账户盈亏全貌
+    private var tradeHistorySection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("成交记录")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.primary)
+                Text("\(training.trades.count) 笔")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                Spacer(minLength: 8)
+                // 已实现盈亏 = 卖出笔盈亏之和 − 买入笔费用之和（与顶栏「盈」的分子同源）
+                let realized = training.trades.reduce(0.0) { $0 + ($1.pnl ?? -$1.fee) }
+                Text("已实现 \(SimFormat.signed(realized))")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(realized >= 0 ? Color(.systemRed) : Color(.systemGreen))
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 26)
+            .background(Color(.secondarySystemBackground))
+
+            if training.trades.isEmpty {
+                Text("本次训练暂无成交")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            } else {
+                // 单次训练成交量为几十笔量级，直接铺开，由外层面板 ScrollView 统一滚动（避免嵌套滚动冲突）
+                LazyVStack(spacing: 0) {
+                    ForEach(training.trades.reversed()) { t in
+                        tradeRow(t)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 单笔成交行：日期 · 买卖标记 · 成交价 × 数量 · 触发来源（条件单）· 已实现盈亏（买入为「—」）
+    private func tradeRow(_ t: TrainTradeRecord) -> some View {
+        HStack(spacing: 8) {
+            Text(t.tradeDateText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Color(.secondaryLabel))
+            Text(t.direction == .buy ? "买" : "卖")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(Color.white)
+                .frame(width: 16, height: 14)
+                .background(RoundedRectangle(cornerRadius: 3)
+                    .fill(t.direction == .buy ? Color(.systemRed) : Color(.systemGreen)))
+            Text(SimFormat.price(t.price))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color.primary)
+            Text("×\(SimFormat.shares(t.qty))")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Color(.secondaryLabel))
+            if t.trigger == .cond {
+                Text(t.condKind ?? "条件单")
+                    .font(.system(size: 9))
+                    .foregroundColor(Color(.systemOrange))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let pnl = t.pnl {
+                Text(SimFormat.signed(pnl))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(pnl >= 0 ? Color(.systemRed) : Color(.systemGreen))
+            } else {
+                Text("—")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Color(.secondaryLabel))
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 24)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 0.5)
+                .padding(.leading, 16)
+        }
     }
 
     /// 条件单 / 预警入口：关面板后打开训练条件单管理页（浮层由 ContentView 根层承载）
