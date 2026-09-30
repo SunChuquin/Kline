@@ -49,3 +49,5 @@
 - `.trae/specs/scale-live-db-to-whole-market/` — 分片契约（schema 3、KEEP_BUCKETS）的来历
 - `../Kline-增量行情库自动同步.md` — **正文已过时**（schema 2 / 14 天片 / 云端 Actions 为默认方案 / 111 B 每根K线），
   仅保留历史与三通道的使用说明，架构事实以本目录为准
+- `../Kline-GiteeGo云端生产方案.md` — **方案未实施**：把「云端分片生产」从境外 Actions 换到**境内 Gitee Go**，
+  解 [[20260922-境外Actions访问国内行情源被502拒绝]] 的网络位置根因；含单 cron 限制、配额核算、待实测清单
