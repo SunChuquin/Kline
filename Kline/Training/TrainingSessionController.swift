@@ -231,7 +231,7 @@ final class TrainingSessionController: ObservableObject {
         return true
     }
 
-    /// 推进一根 K 线；推进后先以新训练日收盘价结算隔日委托队列，再结算条件单 / 预警，最后判是否到最新日。
+    /// 推进一根 K 线；推进后先结算隔日委托（仅对新训练日有效），再结算条件单 / 预警，最后判是否到最新日。
     /// 隔日委托的成交日 = 推进后的新训练日（永远等于「当前训练日」，不会出现未来日期的成交）
     func advanceOneBar() {
         guard isActive, !isFinished else { return }
@@ -249,31 +249,37 @@ final class TrainingSessionController: ObservableObject {
         if trainingDate == latestDate {
             TrainingStore.shared.finishSession(id: sessionID, endDate: latestDate)
             isFinished = true
-            // 已到最新日、无法再推进：残留的隔日委托不会再有成交日，就地作废并提示
-            if !pendingOrders.isEmpty {
-                pendingRejectText = "已到最新交易日，\(pendingOrders.count) 笔隔日委托无法成交（已作废）"
-                pendingOrders = []
-            }
         }
     }
 
-    /// 结算隔日委托队列：以「新训练日收盘价」逐笔成交（成交日 = 新训练日），失败的作废并提示
+    /// 结算隔日委托队列（仅对刚推进到的新训练日有效）：
+    /// 逐笔判断该日行情是否触及委托价（买入：最低价 ≤ 委托价；卖出：最高价 ≥ 委托价），
+    /// 触及则按委托价成交（成交日 = 新训练日），未触及 / 校验失败即作废并提示；队列一律清空。
     private func settlePendingOrders() {
         guard !pendingOrders.isEmpty else { return }
         let queued = pendingOrders
         pendingOrders = []
-        guard let price = currentClose, price > 0 else {
+        guard let bar = bars.first(where: { $0.date == trainingDate }), bar.close > 0, bar.low > 0 else {
             pendingRejectText = "训练日 \(TrainSessionRecord.dateText(trainingDate)) 无可用行情，隔日委托已作废"
             return
         }
+        let dateText = TrainSessionRecord.dateText(trainingDate)
+        var notices: [String] = []
         for order in queued {
-            let rejection = settleTrade(direction: order.direction, qty: order.qty, note: order.note,
-                                        trigger: .manual, condKind: nil, price: price, date: trainingDate)
-            if let rejection {
-                pendingRejectText = "隔日委托未成交（成交日 \(TrainSessionRecord.dateText(trainingDate))）：\(rejection)"
-                DebugLogger.shared.log("[Training] 隔日委托未成交 训练日=\(trainingDate)：\(rejection)")
+            // 买入：当日最低价跌到委托价及以下即视为成交；卖出：当日最高价涨到委托价及以上即视为成交
+            let touched = order.direction == .buy ? bar.low <= order.price : bar.high >= order.price
+            guard touched else {
+                notices.append("\(order.direction.title) \(SimFormat.price(order.price)) 未触及"
+                               + "（\(dateText) 区间 \(SimFormat.price(bar.low))~\(SimFormat.price(bar.high))），隔日委托已作废")
+                continue
+            }
+            if let rejection = settleTrade(direction: order.direction, qty: order.qty, note: order.note,
+                                           trigger: .manual, condKind: nil,
+                                           price: order.price, date: trainingDate) {
+                notices.append("隔日委托未成交（\(dateText)）：\(rejection)")
             }
         }
+        pendingRejectText = notices.isEmpty ? nil : notices.joined(separator: "\n")
     }
 
     /// 关闭训练：未结束则先落 end_date，然后清空运行时状态（页面随之关闭）
@@ -306,25 +312,37 @@ final class TrainingSessionController: ObservableObject {
 
     /// 下单入口；返回 nil = 成功（成交或挂单），否则返回中文拒绝原因。
     /// 交易模式：
-    ///   - 当日收盘价成交 → 立刻以当前训练日收盘价成交（成交日 = 当前训练日）
-    ///   - 隔日委托     → 手动下单只入队，推进到下一训练日时按该日收盘价成交（成交日 = 下一训练日）
+    ///   - 当日收盘价成交 → 立刻以当前训练日收盘价成交（成交日 = 当前训练日，不看委托价）
+    ///   - 隔日委托     → 手动下单按 limitPrice 挂限价单，仅下一训练日有效：
+    ///                    该日行情触及委托价（买入：最低价 ≤ 委托价；卖出：最高价 ≥ 委托价）
+    ///                    才按委托价成交（成交日 = 该训练日），未触及即作废
     /// 条件单始终按「触发日收盘价」成交（判定口径即训练日收盘价），不受本开关影响。
     /// - Parameters:
+    ///   - limitPrice: 委托价（隔日委托用；nil 取当前训练日收盘价）
     ///   - trigger: 触发来源（手动 / 条件单），落训练库供追溯
     ///   - condKind: 触发它的条件单类型中文名（手动为 nil）
     func placeTrade(direction: SimOrderDirection, qty: Int, note: String,
+                    limitPrice: Double? = nil,
                     trigger: TrainTradeTrigger = .manual, condKind: String? = nil) -> String? {
         guard isActive else { return "当前无进行中的训练" }
-        guard let price = currentClose, price > 0 else { return "当前训练日无可用行情" }
+        guard let close = currentClose, close > 0 else { return "当前训练日无可用行情" }
 
         let lot = SimTradingRules.default.lotSize
         if qty <= 0 || qty % lot != 0 {
             return "委托数量需为 \(lot) 股的整数倍且大于 0"
         }
 
-        // 隔日委托：手动下单只挂单，绝不在当前训练日（更不会在未来日）成交
+        // 隔日委托：只挂限价单，绝不在当前训练日、更不会在未来训练日成交
         if tradeMode == .nextDayClose, trigger == .manual {
-            if direction == .sell, qty > sellableQty { return sellRejectionText(qty: qty) }
+            guard !isFinished else { return "训练已到最新交易日，无法再挂隔日委托" }
+            let price = limitPrice ?? close
+            guard price > 0 else { return "请输入有效的委托价" }
+            // 挂单只对下一训练日有效，届时 T+1 锁定量已清零：可卖上限按「持仓 − 已挂卖单」算
+            let queuedSell = pendingOrders.filter { $0.direction == .sell }.reduce(0) { $0 + $1.qty }
+            if direction == .sell, qty > max(0, positionQtyValue - queuedSell) {
+                return "训练持仓不足：当前持仓 \(SimFormat.shares(positionQtyValue)) 股"
+                    + (queuedSell > 0 ? "（已挂卖单 \(SimFormat.shares(queuedSell)) 股）" : "")
+            }
             if direction == .buy, accountType == .fixedAmount {
                 let amount = price * Double(qty)
                 let fee = SimTradingRules.default.fee(amount: amount, direction: .buy)
@@ -332,16 +350,16 @@ final class TrainingSessionController: ObservableObject {
                     return "可用资金不足，可买 \(SimTradingRules.default.affordableQty(cash: cash, price: price)) 股（可用 \(SimFormat.amount(cash))）"
                 }
             }
-            pendingOrders.append(TrainPendingOrder(direction: direction, qty: qty, note: note,
-                                                   placedDate: trainingDate))
+            pendingOrders.append(TrainPendingOrder(direction: direction, qty: qty, price: price,
+                                                   note: note, placedDate: trainingDate))
             pendingRejectText = nil
-            DebugLogger.shared.log("[Training] 隔日委托挂单 \(direction == .buy ? "买" : "卖") \(qty) 股"
-                                   + " 挂单训练日=\(trainingDate) 队列=\(pendingOrders.count)")
+            DebugLogger.shared.log("[Training] 隔日委托挂单 \(direction.title) \(qty) 股"
+                                   + " 委托价=\(price) 挂单训练日=\(trainingDate) 队列=\(pendingOrders.count)")
             return nil
         }
 
         return settleTrade(direction: direction, qty: qty, note: note,
-                           trigger: trigger, condKind: condKind, price: price, date: trainingDate)
+                           trigger: trigger, condKind: condKind, price: close, date: trainingDate)
     }
 
     /// 可卖上限拒绝文案（T+1 标的区分「当日买入锁定」与「持仓不足」）

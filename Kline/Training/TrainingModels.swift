@@ -94,17 +94,19 @@ enum TrainTradeMode: String, CaseIterable, Identifiable {
     var subtitle: String {
         self == .sameDayClose
             ? "点下单立刻以当前训练日收盘价成交（成交日 = 当前训练日）"
-            : "点下单先挂单，推进到下一训练日才以该日收盘价成交（成交日 = 下一训练日，不会出现未来价格成交）"
+            : "隔日限价委托：点下单只挂单，仅下一训练日有效；该日行情触及委托价才按委托价成交，未触及即作废"
     }
 }
 
-/// 隔日委托模式下挂在队列里的委托：推进到下一训练日时按该日收盘价成交
+/// 隔日委托队列里的一笔限价委托：仅下一训练日有效，该日行情触及 price 时按 price 成交
 struct TrainPendingOrder: Identifiable, Equatable {
     var id: String = UUID().uuidString
     var direction: SimOrderDirection
     var qty: Int
+    /// 委托价：买入要求当日最低价 ≤ 委托价、卖出要求当日最高价 ≥ 委托价
+    var price: Double
     var note: String
-    /// 挂单时所在训练日（成交日为推进后的新训练日）
+    /// 挂单时所在训练日（判定日为推进后的新训练日）
     var placedDate: Int
 }
 

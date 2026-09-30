@@ -477,7 +477,7 @@ private struct QuickTrainingPanelView: View {
                         .font(.system(size: 11))
                         .foregroundColor(Color(.secondaryLabel))
                     Spacer(minLength: 8)
-                    Text("下一训练日收盘价成交")
+                    Text("下一训练日判定 · 触及委托价成交")
                         .font(.system(size: 11))
                         .foregroundColor(Color(.secondaryLabel))
                 }
@@ -496,6 +496,9 @@ private struct QuickTrainingPanelView: View {
                             .frame(width: 16, height: 14)
                             .background(RoundedRectangle(cornerRadius: 3)
                                 .fill(o.direction == .buy ? Color(.systemRed) : Color(.systemGreen)))
+                        Text(SimFormat.price(o.price))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(.secondaryLabel))
                         Text("×\(SimFormat.shares(o.qty))")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(Color(.secondaryLabel))
@@ -519,6 +522,7 @@ private struct QuickTrainingPanelView: View {
                         .font(.system(size: 11))
                         .foregroundColor(Color(.systemOrange))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 4)
                 }

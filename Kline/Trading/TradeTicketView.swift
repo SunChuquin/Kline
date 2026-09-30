@@ -704,11 +704,11 @@ struct TradeTicketView: View {
         successText = nil
         // 训练态：只写训练 sqlite（不调 store.submit），成功就地反馈「已成交」，失败复用错误文案位
         if training.isActive {
-            if let reason = training.placeTrade(direction: dir, qty: qty, note: "") {
+            if let reason = training.placeTrade(direction: dir, qty: qty, note: "", limitPrice: price) {
                 errorText = reason
             } else {
                 successText = training.tradeMode == .nextDayClose
-                    ? "已挂单 · 下一训练日收盘价成交"
+                    ? "已挂单 · 下一训练日触及委托价成交"
                     : "已成交"
             }
             return
