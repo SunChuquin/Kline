@@ -6,8 +6,11 @@
 //    清单并集（WatchlistSymbols） → 东财直连拉取当日K线（EastmoneyQuoteFetcher）
 //    → 直写增量库（LiveDataStore.upsertDaily）→ 走既有热刷新链路（dataVersion 自增 → 监控重扫）
 //
-//  五表一致性：除当日日线外，还会用「**主库当期 bar ⊕ 新日线**」合并出**当期季/年 bar**
-//  （`live_quarterly` / `live_yearly`），与日线在同一事务写入增量库。
+//  五表一致性：除当日日线外，还会产出**当期**周/月/季/年 bar：
+//   - **周/月**：日线落库后立刻用「主库日线 ∪ 增量库日线」按当期窗口**重算**
+//     （`LiveDataStore.rebuildCurrentPeriodBars`，与云端分片路径同一套聚合）→ 一次补多日也不漏；
+//   - **季/年**：用「**主库当期 bar ⊕ 新日线**」合并出当期季/年 bar（`live_quarterly` / `live_yearly`），
+//     与日线在同一事务写入增量库。
 //  口径与 `tdx_parser.period_key` 一致：季 `YYYYQ`、年 `YYYY`，`date` = 该周期**首个交易日**；
 //  当期周期允许是**进行中的**（与 `aggregate_full_periods` 既有约定一致）。
 //
@@ -18,6 +21,7 @@
 //   - 不新增任何监控触发机制：写入后只调 LiveDataStore.upsertDaily + reloadAsync，
 //     由既有 `reloadPublisher` → `DatabaseManager.dataVersion` → `MarketRowCache` / `SimStore.sweepConditions`；
 //   - 当期季/年 bar 的基期**只取主库**（不读增量库窗口内的几天）：同一交易日重复跑结果相同 → 幂等；
+//     周/月不走这条口径 —— 它们按当期窗口从日线**全量重算**（同样幂等，且不受主库当期 bar 是否已过期影响）；
 //   - UI 状态一律在主线程写。
 //
 //  线程：`sync(reason:slot:)` 须在主线程调用（内部再切主线程执行）；东财 completion 在它自己的串行队列，
@@ -166,43 +170,60 @@ final class WatchlistSyncManager: ObservableObject {
         }
         let updatedAt = Self.utcMidnightEpoch(result.tradeDate)
 
-        // ④ 当期季/年 bar：**主库当期 bar ⊕ 新日线**（在主库 dbQueue 上批量查一次，避免逐只跨队列）
+        // ④ 在主库 dbQueue 上批量取两样东西（一次跨队列，避免逐只来回）：
+        //    ① 当期季/年 bar = **主库当期 bar ⊕ 新日线**；
+        //    ② 主库日线（周/月当期窗口）→ 供 ⑥ 与增量库日线求并集后重算当期周/月 bar。
         var metaIdByFile: [String: Int] = [:]
         for b in bars { if let m = metaByFile[b.file] { metaIdByFile[b.file] = m.id } }
-        let quarterStart = result.tradeDate > 0 ? KlinePeriod.periodDateRange(.quarterly, date: result.tradeDate).0 : 0
-        let yearStart = result.tradeDate > 0 ? KlinePeriod.periodDateRange(.yearly, date: result.tradeDate).0 : 0
+        let tradeDate = result.tradeDate
+        let quarterStart = tradeDate > 0 ? KlinePeriod.periodDateRange(.quarterly, date: tradeDate).0 : 0
+        let yearStart = tradeDate > 0 ? KlinePeriod.periodDateRange(.yearly, date: tradeDate).0 : 0
+        // 周/月窗口起点：与 LiveDataStore.rebuildCurrentPeriodBars 内部口径一致 = min(本周周一, 本月 1 日)
+        let weekStart = tradeDate > 0 ? KlinePeriod.periodDateRange(.weekly, date: tradeDate).0 : 0
+        let monthStart = tradeDate > 0 ? KlinePeriod.periodDateRange(.monthly, date: tradeDate).0 : 0
+        let windowFrom = Swift.min(weekStart, monthStart)
         let t0 = Date()
-        DatabaseManager.shared.performOnDBQueue({ db -> [String: [LiveUpsertBar]] in
-            guard quarterStart > 0, yearStart > 0 else { return [:] }
-            return Self.currentPeriodBars(db: db, dailyBars: bars, metaIdByFile: metaIdByFile,
-                                          quarterStart: quarterStart, yearStart: yearStart)
-        }, completion: { [weak self] periodBars in
+        DatabaseManager.shared.performOnDBQueue({ db -> ([String: [LiveUpsertBar]], [String: [KlineItem]]) in
+            guard tradeDate > 0, quarterStart > 0, yearStart > 0 else { return ([:], [:]) }
+            let periodBars = Self.currentPeriodBars(db: db, dailyBars: bars, metaIdByFile: metaIdByFile,
+                                                    quarterStart: quarterStart, yearStart: yearStart)
+            let mainDaily = DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
+                                                          fromDate: windowFrom, toDate: tradeDate)
+            return (periodBars, mainDaily)
+        }, completion: { [weak self] (periodBars, mainDaily) in
             guard let self = self else { return }
             let elapsed = Date().timeIntervalSince(t0)
             let rows = periodBars.values.reduce(0) { $0 + $1.count }
             DebugLogger.shared.log("[WatchlistSync] \(reason)：当期季/年 bar \(rows) 行"
                 + "（季 \(periodBars["quarterly"]?.count ?? 0) 行 / 年 \(periodBars["yearly"]?.count ?? 0) 行）"
-                + " = 主库当期 bar ⊕ 新日线，耗时=\(String(format: "%.0fms", elapsed * 1000))")
+                + " = 主库当期 bar ⊕ 新日线；主库日线 \(mainDaily.count) 只（周/月窗口 \(windowFrom)~\(tradeDate)）"
+                + "，耗时=\(String(format: "%.0fms", elapsed * 1000))")
 
             // ⑤ 直写增量库（成功后由既有热刷新链路自增 dataVersion → 监控重扫）
             LiveDataStore.shared.upsertDaily(metas: metas, bars: bars,
                                              periodBars: periodBars, updatedAt: updatedAt) { [weak self] merge in
                 guard let self = self else { return }
-                if merge.ok {
-                    DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库成功 \(merge.message)")
+                guard merge.ok else {
+                    DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库失败 \(merge.message)")
+                    self.finish(outcome: .failed, text: "失败：\(merge.message)", reason: reason, slot: slot,
+                                tradeDate: tradeDate, hit: 0, skipped: result.skipped.count,
+                                batchFailures: result.batchFailures.count)
+                    return
+                }
+                DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库成功 \(merge.message)")
+
+                // ⑥ 当期周/月 bar：日线已落库 → 用「主库日线 ∪ 增量库日线」按当期窗口重算
+                //    （与云端分片路径同一套聚合；必须先写完日线，否则今日这根不在并集里）
+                LiveDataStore.shared.rebuildCurrentPeriodBars(referenceDate: tradeDate, mainDaily: mainDaily) { wm in
+                    DebugLogger.shared.log("[WatchlistSync] \(reason)：当期周/月聚合 \(wm.message)")
                     LiveDataStore.shared.reloadAsync(completion: { summary in
                         DebugLogger.shared.log("[WatchlistSync] 热刷新完成 可用=\(summary.isAvailable)"
                             + " 内容变化=\(summary.contentChanged) 最新=\(summary.latestDateAfter)")
                     })
                     self.finish(outcome: .success,
                                 text: "成功：写入 \(merge.dailyRows) 行 / \(result.hitCount) 只",
-                                reason: reason, slot: slot, tradeDate: result.tradeDate,
+                                reason: reason, slot: slot, tradeDate: tradeDate,
                                 hit: result.hitCount, skipped: result.skipped.count,
-                                batchFailures: result.batchFailures.count)
-                } else {
-                    DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库失败 \(merge.message)")
-                    self.finish(outcome: .failed, text: "失败：\(merge.message)", reason: reason, slot: slot,
-                                tradeDate: result.tradeDate, hit: 0, skipped: result.skipped.count,
                                 batchFailures: result.batchFailures.count)
                 }
             }
