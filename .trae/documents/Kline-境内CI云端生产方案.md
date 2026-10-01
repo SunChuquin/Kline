@@ -1,7 +1,8 @@
 # 云端分片生产改走**境内 CI** 方案（CNB 主 / Gitee Go 备）
 
 > 状态：**方案，未实施**（2026-09-30 首稿；2026-10-01 二稿：纳入 CNB 背景调研与 4000 只规模；
-> 2026-10-01 三稿：规模回落到标的库实测口径、调度收敛为**每工作日 18:00 一次**）
+> 2026-10-01 三稿：规模回落到标的库实测口径、调度收敛为**每工作日 18:00 一次**；
+> 2026-10-01 四稿：核实 CNB 的 `crontab` 键名与镜像声明键名，§6.2 骨架已去掉 ⚠️）
 >
 > 范围：**只解决生产侧** —— 工作日收盘后自动抓东财、产出日分片增量库。**设备侧下载源不动**
 > （仍是 `raw.githubusercontent.com` 主源 + jsDelivr 备源）。**App 侧零改动**。
@@ -79,7 +80,7 @@
 
 | 方案 | 境内构建机 | 免费额度 | 定时 | 环境自由 | 密钥保密 | 推 GitHub | 结论 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **CNB**（cnb.cool，腾讯云云原生构建） | ✅ | **160 核时/月**（构建）+ 1600 核时/月（开发）+ 100 GiB ×2 存储，**月底清零、不叠加** | ✅ crontab（语法**待实测**，§9.3） | ✅ **任意 Docker 镜像** | ✅ **密钥仓库** | ✅ 官方 `git-sync` 插件 | **主方案** |
+| **CNB**（cnb.cool，腾讯云云原生构建） | ✅ | **160 核时/月**（构建）+ 1600 核时/月（开发）+ 100 GiB ×2 存储，**月底清零、不叠加** | ✅ `"crontab: <表达式>"`，时区 `Asia/Shanghai`（**已核实**，§6.2） | ✅ **任意 Docker 镜像** | ✅ **密钥仓库** | ✅ 官方 `git-sync` 插件 | **主方案** |
 | **Gitee Go**（码云流水线） | ✅ | **1000 核分/月**（2C4G ≈ 500 分钟），月末清零；加时包 500 核分 15 元 | ⚠️ 只允许一个 cron 表达式（18:00 单次，**够用**） | ❌ 固定模板：`build@python` 仅 Python ≤3.9，镜像 CentOS 8.3（**已 EOL**） | ❌ `variables` **明文** | ⚠️ 需自己 `git push`，可达性待实测 | 备选 |
 | 阿里云**云效 Flow** | ✅ | 基础版 0 元、不限人数 | ✅ | ✅ | ✅ | ⚠️ | 第三备选 |
 | 腾讯云 **CODING**（老版 CI） | ✅ | 仅 10 核时；**已退市**（标准版 2025-09-01 下线） | — | — | — | — | 不可用 |
@@ -155,35 +156,51 @@
 ### 6.2 流水线骨架（`.cnb.yml`）
 
 官方语法层级已核实：`触发分支 → 触发事件 → Pipeline → Stage → Job`，Job 用 `script` 执行。
-下面骨架里标 ⚠️ 的两处（`crontab` 键名、容器镜像声明键名）**实施前先按 §9.3 实测**。
+定时与镜像两处键名**也已核实**（出处见 §15）：定时任务的事件名就是把表达式写进键里的
+`"crontab: <表达式>"`；镜像在 Pipeline 级写 `docker.image`、在 Job 级直接写 `image`。
 
 ```yaml
 # .cnb.yml
 imports:
   - https://cnb.cool/<org>/kline-secrets/-/blob/main/envs.yml   # 注入 GH_PUSH_TOKEN（密钥仓库）
 
-main:                       # 触发分支
-  crontab:                  # ⚠️ 定时触发的确切键名/语法待实测（§9.3）
-    - cron: '0 18 * * 1-5'  # 每工作日 18:00（UTC+8 口径待确认）
+main:                            # 触发分支（定时任务不支持 glob，必须写明确分支名）
+  "crontab: 0 18 * * 1-5":       # 事件名 = "crontab: <POSIX 5 段表达式>"
+    - name: nightly-publish      # 数组元素即一条 Pipeline
       stages:
         - name: publish
           jobs:
             - name: build-and-publish
-              image: python:3.12      # ⚠️ 镜像声明键名（image / docker）待实测
+              image: python:3.12     # Job 级镜像写法（自带官方示例）
               script: bash src/publish_buckets.sh
 
-  push:                     # 生成端或清单变更时顺带跑一次
-    paths:
-      - src/live_db_builder.py
-      - src/data/universe.txt
-      - src/publish_buckets.sh
-    stages:
-      - name: publish
-        jobs:
-          - name: build-and-publish
-            image: python:3.12
-            script: bash src/publish_buckets.sh
+  push:                          # 生成端或清单变更时顺带跑一次
+    - name: on-push
+      ifModify:                  # Pipeline 级：仅下列文件变更时才执行
+        - src/live_db_builder.py
+        - src/data/universe.txt
+        - src/publish_buckets.sh
+      stages:
+        - name: publish
+          jobs:
+            - name: build-and-publish
+              image: python:3.12
+              script: bash src/publish_buckets.sh
 ```
+
+**两处键名的确切规则（2026-10-01 核实）：**
+
+| | 结论 | 出处 |
+| :--- | :--- | :--- |
+| 定时任务 | 事件名 = **`"crontab: 0 18 * * 1-5"`**（把表达式写进键名），**不是** `crontab:` 下挂 `cron:` 子键。表达式为**标准 POSIX 5 段**（不像 Gitee Go 是 6 段 Quartz） | [CNB 定时任务](https://docs.cnb.cool/zh/build/crontab.html) |
+| 时区 | **系统时区 `Asia/Shanghai`** → `0 18 * * 1-5` 就是北京时间 18:00，**无需换算** | 同上 |
+| 其他限制 | 最小调度间隔 **5 分钟**；分支**不支持 glob**，必须单一明确分支名；执行身份 = 最后修改该配置的用户 | 同上 |
+| Pipeline 级镜像 | `docker.image`（`docker` 是 Object，子键 `image` / `build` / `devcontainer` / `volumes`）；`image` 可写字符串（等同 `image.name`）或对象（`name` / `dockerUser` / `dockerPassword`） | [CNB 语法](https://docs.cnb.cool/zh/grammar/pipeline.html) |
+| Job 级镜像 | 直接写 `image: python:3.12`（官方示例同款写法：`- name: Sync to GitHub` + `image: tencentcom/git-sync`） | 同上 |
+| 两者差异 | Job 级指定 `image` 时该 Job 在**独立容器**中执行；不指定则在流水线容器内执行 | 同上 |
+
+> 本骨架用 Job 级 `image`（更贴近官方插件示例）；若想整条 Pipeline 统一环境，
+> 换成 Pipeline 级 `docker: {image: python:3.12}` 即可，二选一，不必都写。
 
 ### 6.3 发布段（`src/publish_buckets.sh`，CNB / Gitee Go 两条流水线**共用同一份**）
 
@@ -318,15 +335,18 @@ stages:
 > 生成端以**网络等待**为主（34 批 HTTP + 全局限速），CPU 不是瓶颈；
 > 选规格时优先保内存（sqlite 落盘 + 30 片比对），`1C2G`~`2C4G` 都够。
 
-## 9. 实施时必须逐条实测的项（**不要照抄上面的 YAML**）
+## 9. 实施时必须逐条实测/确认的项（**§7.2 的 Gitee Go YAML 不要照抄**；§6.2 的 CNB 语法已核实）
 
 1. **cron 时区（Gitee Go）**：官方文档写「根据国外时间来，周日是 1」，疑似不是北京时间。
    先用一个 5 分钟后触发的 cron 验证，看流水线记录的实际触发时刻，再算偏移量。
 2. **境内 CI → github.com 的 git push 可达性**：这是本方案**最大的不确定点**。
    每次孤儿提交要推 **≈ 18 MB**（30 片）。实测一次计时；若太慢或失败，走 §10 备选。
-3. **CNB 的两处语法**：① 定时触发（`crontab`）的确切键名与 cron 时区口径；
-   ② 容器镜像的声明键名（`image` / `docker`）。官方「语法」页已确认
-   `触发分支 → 触发事件 → stages → jobs → script` 的层级，但定时与镜像两节需在平台上实跑确认。
+3. ~~CNB 的两处语法~~ —— **已在官方文档核实，无需再试**（§6.2 表）：
+   ① 定时任务的事件名是 `"crontab: <POSIX 5 段表达式>"`，时区为 `Asia/Shanghai`，
+   最小间隔 5 分钟，分支不支持 glob；
+   ② 镜像 Pipeline 级用 `docker.image`、Job 级直接用 `image`，两种写法官方都给了示例。
+   **仅剩一条需在平台上实跑确认**：表达式写 `0 18 * * 1-5` 后，流水线记录里的实际触发时刻
+   是否就是北京时间 18:00（做法同第 1 条）。
 4. **CNB 免费额度的口径**：确认「云原生构建-160 核时」是自然月累积、定时任务计入同一池、跨月任务计入结束月。
 5. **Gitee Go 基础镜像是否预装 `git`**：CentOS 8.3 已 EOL，`yum install git` 可能因源下线失败（需换 vault 源）。
    若不预装且装不上，改用 `build@nodejs`（文档称其镜像含 git、wget、Python3）。
@@ -383,5 +403,9 @@ stages:
 - [腾讯云 · 开通使用（社区版/企业版）](https://cloud.tencent.com/document/product/1785/116262) — cnb.cool 微信扫码注册
 - [腾讯云 · 云原生构建动态与公告](https://main.qcloudimg.com/raw/document/product/pdf/1785_116257_cn.pdf) — 2024-11 公测限免配额「仅公测期间限时提供」
 - [腾讯云 · 【CODING DevOps】系列产品退市公告](https://cloud.tencent.com/announce/detail/2057) — 迁移到 CNB
-- [CNB 语法文档](https://docs.cnb.cool/zh/grammar/pipeline.html) — `.cnb.yml` 层级结构
+- [CNB 语法文档](https://docs.cnb.cool/zh/grammar/pipeline.html) — `.cnb.yml` 层级结构、
+  Pipeline / Stage / Job 三级的镜像键名（`docker.image`、Stage.image、Job.image）
+- [CNB 触发规则](https://docs.cnb.cool/zh/build/trigger-rule.html) — 事件类型表（含「定时任务事件」）
+- [CNB 定时任务](https://docs.cnb.cool/zh/build/crontab.html) — 键名 `"crontab: <表达式>"`、
+  时区 `Asia/Shanghai`、最小间隔 5 分钟、分支不支持 glob（**本方案两处待实测项之一据此关闭**）
 - [Gitee Go 触发事件](https://help.gitee.com/gitee-go/pipeline/trigger) / [云端编译插件](https://help.gitee.com/gitee-go/plugin/ci-build) / [计费规则](https://help.gitee.com/enterprise/pipeline/billing)
