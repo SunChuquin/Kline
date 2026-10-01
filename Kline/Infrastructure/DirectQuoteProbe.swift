@@ -4,24 +4,26 @@
 //
 //  【仅调试用 PoC · 不参与任何同步流程 · 不写库 · 不改配置】
 //
-//  目的：验证「App 设备侧直连行情源（腾讯 / 新浪 / 同花顺）」取回的当日K线，
+//  目的：验证「App 设备侧直连行情源（腾讯 / 新浪）」取回的当日K线，
 //  与云端 CNB 分片（`bucket_<id>.db` 的 `bkt_daily` 表）**逐只逐字段对拍**，
 //  先证明量纲（成交量「手/股」）与数值零偏差，再决定是否让 App 全市场直连、下线 CNB。
 //
 //  取数口径与 PC 端 `cloud/scripts/live_db_builder.py` **逐条对齐**（改这里前先读那边）：
 //   - 腾讯 `qt.gtimg.cn/q=`        ≤100/批，GBK，需 Referer；
-//     `[3]`收 `[5]`开 `[33]`高 `[34]`低 `[6]`量 `[35].split("/")[2]`额 `[30]`时间戳 YYYYMMDDHHMMSS
+//     `[3]`收 `[5]`开 `[33]`高 `[34]`低 `[6]`量(手) `[35].split("/")[2]`额 `[30]`时间戳 YYYYMMDDHHMMSS
 //   - 新浪 `hq.sinajs.cn/list=`    ≤300/批，GBK，需 Referer；
 //     `[1]`开 `[3]`收 `[4]`高 `[5]`低 `[8]`量(股) `[9]`额(元) `[30]`日期 YYYY-MM-DD
-//   - 同花顺 `d.10jqka.com.cn/v6/line/{code}/01/last.js` 逐只 JSONP，需 Referer；
-//     末根为最新，字段序 日期,开,高,低,收,量(股),额(元),...
+//   （同花顺逐只取数太慢，「全市场直连」不可行，已从源链与对拍中移除。）
 //
-//  量纲换算 `volIsRaw`（**写错任何一条都是静默 100 倍错误**）：
-//   ① 科创板 688xxx —— 腾讯**直接以「股」报量**（实测 688318 三源一致）；
-//   ② 沪市指数 —— 新浪按上交所口径直接报「手」（实测 sh000001 新浪=腾讯）；
-//   其余一律 ÷100 再**四舍五入**（实测腾讯用的是四舍五入而非截断：
-//   300750 新浪 29699471/100 = 296994.71 → 腾讯 296995）。
-//   指数**不走向同花顺**：其代码体系不同（hs_000009 会被解析成深市「中国宝安」）。
+//  量纲（**写错任何一条都是静默 100 倍错误**；分片 `bkt_daily.vol` 存的是**腾讯口径 = 手**）：
+//   ① **腾讯 `[6]` 本来就是「手」**，是各源对齐的基准 → **原样保留，永不 ÷100**；
+//   ② **新浪 `[8]` 报「股」** → ÷100 再**四舍五入**（实测腾讯用四舍五入而非截断：
+//      300750 新浪 29699471/100 = 296994.71 → 腾讯 296995）；
+//   ③ 例外（原样不除）：科创板 688xxx（腾讯/新浪都报股）、沪市指数（新浪按上交所口径报手）。
+//
+//  2026-10-02 实测（分片 bucket_20726 = 20260930，可比 3312 只）：
+//   腾讯 3312/3312 原始量与分片**逐只全等**、价格零差异 → ①正确；
+//   新浪 ÷100 后 3307 只全等（另 5 只为停牌：整行 0，按未命中处理，同 PC 端）。
 //
 //  基准：`TdxSyncConfig.shared.sourceURLs[0]` → `<base>/live/manifest.json` → 最新分片
 //        `<base>/live/bucket_<id>.db` → `bkt_daily(file,date,open,high,low,close,vol,amo)`
@@ -90,21 +92,25 @@ final class DirectQuoteProbe: ObservableObject {
 
     enum State { case idle, running, ok, failed }
 
+    /// 源侧成交量的量纲口径（决定要不要 ÷100 换成「手」）
+    enum VolUnit {
+        /// 源本来就报「手」= 分片口径（**腾讯 `[6]`**，是各源对齐的基准）→ 原样
+        case hand
+        /// 源报「股」→ ÷100 四舍五入换手（**新浪 `[8]`**）；例外见 `ProbeItem.volIsRaw`
+        case share
+    }
+
     // MARK: 常量（严格照抄 PC 端 live_db_builder.py）
 
     static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     static let tencentBatch = 100
     static let sinaBatch = 300
-    static let thsWorkers = 8
     static let requestTimeout: TimeInterval = 20
-    /// 同花顺逐只太慢，只抽样（其余两源跑全量）
-    static let thsSampleLimit = 120
 
     static let tencentURLPrefix = "https://qt.gtimg.cn/q="
     static let tencentReferer = "https://gu.qq.com/"
     static let sinaURLPrefix = "https://hq.sinajs.cn/list="
     static let sinaReferer = "https://finance.sina.com.cn/"
-    static let thsReferer = "http://stockpage.10jqka.com.cn/"
 
     // MARK: 对外只读状态（一律在主线程发布）
 
@@ -113,7 +119,8 @@ final class DirectQuoteProbe: ObservableObject {
     @Published private(set) var baselineText = "—"
     @Published private(set) var tencentText = "—"
     @Published private(set) var sinaText = "—"
-    @Published private(set) var thsText = "—"
+    /// 结论一句话（UI 断言锚点：含「量纲零偏差」= 通过）
+    @Published private(set) var verdictText = "—"
     /// 不一致明细（最多若干行，逐条列出）
     @Published private(set) var detailLines: [String] = []
 
@@ -136,12 +143,19 @@ final class DirectQuoteProbe: ObservableObject {
     // MARK: - 入口（按钮调用，主线程）
 
     func run() {
-        guard state != .running else { return }
+        // 入口无条件落日志：区分「按钮没点到」与「点到了但早退」（UA 测试排障用）
+        DebugLogger.shared.log("[DirectProbe] run() 入口 state=\(state) meta=\(DatabaseManager.shared.metaList.count)")
+        guard state != .running else {
+            DebugLogger.shared.log("[DirectProbe] 已在运行，忽略本次点击")
+            return
+        }
         // metaList 在主线程读取（DatabaseManager 约定）
         let entries = DatabaseManager.shared.metaList.map { (file: $0.file, type: $0.type) }
         guard !entries.isEmpty else {
+            DebugLogger.shared.log("[DirectProbe] metaList 为空，中止（等待主库打开）")
             state = .failed
             statusText = "主库 metaList 为空（等待主库打开）"
+            verdictText = "失败：主库 metaList 为空"
             return
         }
         let baseURL = TdxSyncConfig.shared.sourceURLs.first
@@ -150,7 +164,7 @@ final class DirectQuoteProbe: ObservableObject {
         baselineText = "—"
         tencentText = "—"
         sinaText = "—"
-        thsText = "—"
+        verdictText = "—"
         detailLines = []
         DebugLogger.shared.log("[DirectProbe] 开始对拍：清单 \(entries.count) 只，基准源 \(baseURL ?? "-")")
 
@@ -183,12 +197,11 @@ final class DirectQuoteProbe: ObservableObject {
             finishFailed("manifest 无分片（buckets=\(buckets.count) latest=\(latestID.map(String.init) ?? "-")）")
             return
         }
-        guard let bucketURL = URL(string: base.absoluteString + "/" + bucketFile) else {
-            finishFailed("分片地址非法：\(bucketFile)")
-            return
-        }
+        // 注意：base 由 `deletingLastPathComponent()` 得到，absoluteString 末尾**自带 `/`**，
+        // 字符串拼接会得到 `…/live//bucket_x.db`（CNB 上直接 404）——必须用 appendingPathComponent
+        let bucketURL = base.appendingPathComponent(bucketFile)
         guard let bucketData = getData(bucketURL) else {
-            finishFailed("下载分片失败：\(bucketFile)")
+            finishFailed("下载分片失败：\(bucketURL.absoluteString)")
             return
         }
         let bucketPath = NSTemporaryDirectory() + "/" + bucketFile
@@ -230,7 +243,7 @@ final class DirectQuoteProbe: ObservableObject {
         var t1 = Date()
         let (tencentQuotes, tencentFailed) = fetchTencent(comparable)
         var stat = Self.compare(name: "腾讯", quotes: tencentQuotes, failed: tencentFailed,
-                                items: comparable, baseline: baseline)
+                                items: comparable, baseline: baseline, volUnit: .hand)
         stat.seconds = Date().timeIntervalSince(t1)
         publish { self.tencentText = stat.summary }
         lines.append("腾讯：" + stat.summary)
@@ -241,41 +254,32 @@ final class DirectQuoteProbe: ObservableObject {
         t1 = Date()
         let (sinaQuotes, sinaFailed) = fetchSina(comparable)
         var statSina = Self.compare(name: "新浪", quotes: sinaQuotes, failed: sinaFailed,
-                                    items: comparable, baseline: baseline)
+                                    items: comparable, baseline: baseline, volUnit: .share)
         statSina.seconds = Date().timeIntervalSince(t1)
         publish { self.sinaText = statSina.summary }
         lines.append("新浪：" + statSina.summary)
         lines.append(contentsOf: Self.detailLines(statSina))
         DebugLogger.shared.log("[DirectProbe] 新浪：" + statSina.summary)
 
-        // ⑤ 同花顺（抽样：只股票，指数跳过）
-        t1 = Date()
-        let thsItems = Self.sample(comparable.filter { !$0.isIndex }, limit: Self.thsSampleLimit)
-        let (thsQuotes, thsFailed) = fetchThs(thsItems)
-        var statThs = Self.compare(name: "同花顺", quotes: thsQuotes, failed: thsFailed,
-                                   items: thsItems, baseline: baseline)
-        statThs.seconds = Date().timeIntervalSince(t1)
-        publish { self.thsText = statThs.summary + "（抽样 \(thsItems.count) 只）" }
-        lines.append("同花顺：抽样 \(thsItems.count) 只 · " + statThs.summary)
-        lines.append(contentsOf: Self.detailLines(statThs))
-        DebugLogger.shared.log("[DirectProbe] 同花顺：抽样 \(thsItems.count) · " + statThs.summary)
-
-        // ⑥ 结论
-        let totalScaled = stat.volScaled + statSina.volScaled + statThs.volScaled
-        let totalPrice = stat.priceMismatch + statSina.priceMismatch + statThs.priceMismatch
+        // ⑤ 结论：腾讯是主源，要求逐只全等；新浪只是兜底源，要求量纲不错位
+        let totalScaled = stat.volScaled + statSina.volScaled
+        let tencentClean = stat.hit == stat.requested && stat.priceMismatch == 0
+            && stat.volOther == 0
+        let tencentBad = stat.priceMismatch + stat.volOther + stat.missing
         let verdict: String
-        if totalScaled == 0 && totalPrice == 0 {
-            verdict = "✅ 三源与 CNB 分片：量纲零偏差、价格零偏差"
+        if tencentClean && totalScaled == 0 {
+            verdict = "✅ 腾讯与 CNB 分片逐只零偏差（价/量）· 新浪量纲零错位"
         } else {
-            verdict = "⚠️ 量纲错位 \(totalScaled) 例 / 价格不一致 \(totalPrice) 例（见下）"
+            verdict = "⚠️ 量纲错位 \(totalScaled) 例 / 腾讯偏差 \(tencentBad) 例（见下）"
         }
         lines.append(verdict + String(format: " · 总耗时 %.1fs", Date().timeIntervalSince(t0)))
 
         let finalLines = lines
         DispatchQueue.main.async {
             self.detailLines = finalLines
+            self.verdictText = verdict
             self.statusText = "完成 · " + String(format: "总耗时 %.1fs", Date().timeIntervalSince(t0))
-            self.state = (totalScaled == 0 && totalPrice == 0) ? .ok : .failed
+            self.state = (tencentClean && totalScaled == 0) ? .ok : .failed
             DebugLogger.shared.log("[DirectProbe] \(verdict)")
             for line in finalLines { DebugLogger.shared.log("[DirectProbe] | " + line) }
         }
@@ -285,6 +289,7 @@ final class DirectQuoteProbe: ObservableObject {
         DebugLogger.shared.log("[DirectProbe] 失败：\(reason)")
         DispatchQueue.main.async {
             self.statusText = "失败：" + reason
+            self.verdictText = "失败：" + reason
             self.state = .failed
         }
     }
@@ -432,6 +437,8 @@ final class DirectQuoteProbe: ObservableObject {
             guard f.count > 31 else { continue }
             guard let open = Double(f[1]), let close = Double(f[3]),
                   let high = Double(f[4]), let low = Double(f[5]) else { continue }
+            // 停牌 / 退市整行为 0 → 跳过并计入未命中（与 PC 端 `close in (None, 0)` 一致）
+            guard close != 0 else { continue }
             let raw = Double(f[8]) ?? 0
             let amo = Double(f[9]) ?? 0
             guard let date = Int(f[30].replacingOccurrences(of: "-", with: "")) else { continue }
@@ -441,66 +448,13 @@ final class DirectQuoteProbe: ObservableObject {
         return out
     }
 
-    // MARK: - 同花顺
-
-    /// 同花顺逐只（限并发），返回 file → 快照
-    private func fetchThs(_ items: [ProbeItem]) -> ([String: DirectProbeQuote], [String]) {
-        guard !items.isEmpty else { return ([:], []) }
-        var quotes: [DirectProbeQuote?] = Array(repeating: nil, count: items.count)
-        var errors: [String?] = Array(repeating: nil, count: items.count)
-        let collector = DispatchQueue(label: "com.sunck.kline.directprobe.collect")
-        let sem = DispatchSemaphore(value: Self.thsWorkers)
-        DispatchQueue.concurrentPerform(iterations: items.count) { i in
-            sem.wait()
-            defer { sem.signal() }
-            let item = items[i]
-            guard let url = URL(string: "https://d.10jqka.com.cn/v6/line/\(item.thsCode)/01/last.js") else {
-                collector.sync { errors[i] = "URL" }
-                return
-            }
-            guard let data = self.getData(url, referer: Self.thsReferer),
-                  let text = String(data: data, encoding: .utf8),
-                  let q = Self.parseThs(text) else {
-                collector.sync { errors[i] = "取数失败" }
-                return
-            }
-            collector.sync { quotes[i] = q }
-        }
-        var map: [String: DirectProbeQuote] = [:]
-        var failed: [String] = []
-        for i in items.indices {
-            if let q = quotes[i] { map[items[i].file] = q } else { failed.append(items[i].file) }
-        }
-        return (map, failed)
-    }
-
-    /// 同花顺 JSONP：`quotebridge_v6_line_hs_600000_01_last({...,"data":"日期,开,高,低,收,量(股),额(元),..;.."})`
-    /// 取 `data` 的最后一根（最新交易日）。
-    private static func parseThs(_ text: String) -> DirectProbeQuote? {
-        guard let l = text.firstIndex(of: "("), let r = text.lastIndex(of: ")"), l < r else { return nil }
-        let json = String(text[text.index(after: l) ..< r])
-        guard let data = json.data(using: .utf8),
-              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let series = obj["data"] as? String else { return nil }
-        let rows = series.split(separator: ";")
-        guard let last = rows.last else { return nil }
-        let f = last.components(separatedBy: ",")
-        guard f.count > 6 else { return nil }
-        guard let open = Double(f[1]), let high = Double(f[2]),
-              let low = Double(f[3]), let close = Double(f[4]) else { return nil }
-        let raw = Double(f[5]) ?? 0
-        let amo = Double(f[6]) ?? 0
-        guard let date = Int(f[0].replacingOccurrences(of: "-", with: "")) else { return nil }
-        return DirectProbeQuote(date: date, open: open, high: high, low: low,
-                                close: close, vol: raw, amo: amo)
-    }
-
     // MARK: - 对拍
 
     /// 与基准逐只比对（量纲先按 PC 端 `_vol_keep_raw` 规则换算）
     private static func compare(name: String, quotes: [String: DirectProbeQuote],
                                 failed: [String], items: [ProbeItem],
-                                baseline: [String: DirectProbeQuote]) -> DirectProbeSourceStat {
+                                baseline: [String: DirectProbeQuote],
+                                volUnit: VolUnit) -> DirectProbeSourceStat {
         var stat = DirectProbeSourceStat(name: name)
         stat.requested = items.count
         let failedSet = Set(failed)
@@ -526,8 +480,10 @@ final class DirectQuoteProbe: ObservableObject {
                         + " 源=" + String(format: "%.3f/%.3f/%.3f/%.3f", q.open, q.high, q.low, q.close))
                 }
             }
-            // 量纲：源侧「股」→ 腾讯口径「手」（四舍五入）；688 / 沪市指数例外原样保留
-            let vol = item.volIsRaw ? q.vol : (q.vol / 100).rounded()
+            // 量纲：分片 vol 存的是「腾讯口径 = 手」。腾讯 [6] 本就是手 → 原样；
+            // 新浪 [8] 报股 → ÷100 四舍五入（科创板 688xxx / 沪市指数例外，见 volIsRaw）
+            let vol: Double = (volUnit == .hand || item.volIsRaw)
+                ? q.vol : (q.vol / 100).rounded()
             if base.vol > 0 {
                 let r = vol / base.vol
                 if abs(r - 1) < 1e-6 {
@@ -574,17 +530,15 @@ final class DirectQuoteProbe: ObservableObject {
 
     // MARK: - 工具
 
-    private static func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) <= 1e-6 }
+    private static func near(_ a: Double, _ b: Double) -> Bool {
+        if a == b { return true }
+        // 指数点位上千，两源在第 3 位小数上各自取整（实测 6660.910 vs 6660.909）→ 放相对容差
+        let scale = max(abs(a), abs(b))
+        return scale > 0 && abs(a - b) / scale <= 1e-5
+    }
 
     private static func fmt(_ v: Double) -> String {
         v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.4f", v)
-    }
-
-    /// 抽样：按 file 排序后等距取样（清单本身按市场+代码有序，天然分层）
-    private static func sample(_ items: [ProbeItem], limit: Int) -> [ProbeItem] {
-        guard items.count > limit else { return items }
-        let step = max(1, items.count / limit)
-        return stride(from: 0, to: items.count, by: step).prefix(limit).map { items[$0] }
     }
 
     /// GBK / GB18030 解码
@@ -606,9 +560,15 @@ final class DirectQuoteProbe: ObservableObject {
         var out: Data?
         session.dataTask(with: req) { data, response, error in
             defer { sem.signal() }
-            guard error == nil else { return }
+            guard error == nil else {
+                DebugLogger.shared.log("[DirectProbe] GET 失败 \(url.absoluteString) err=\(error!.localizedDescription)")
+                return
+            }
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-            guard (200..<300).contains(code), let data = data else { return }
+            guard (200..<300).contains(code), let data = data else {
+                DebugLogger.shared.log("[DirectProbe] GET 非 2xx code=\(code) \(url.absoluteString)")
+                return
+            }
             out = data
         }.resume()
         if sem.wait(timeout: .now() + limit + 5) == .timedOut { return nil }
@@ -618,7 +578,7 @@ final class DirectQuoteProbe: ObservableObject {
 
 // MARK: - 清单条目 → 各源代码
 
-/// 一条可对拍清单（`file` + 三源代码 + 量纲口径）
+/// 一条可对拍清单（`file` + 两源代码 + 量纲口径）
 struct ProbeItem {
     let file: String
     let isIndex: Bool
@@ -626,8 +586,6 @@ struct ProbeItem {
     let marketCode: String
     var tencentCode: String { marketCode }
     var sinaCode: String { marketCode }
-    /// 同花顺代码（`hs_600000`）；指数为 nil（代码体系不同，一律不走）
-    let thsCode: String
     /// 源侧成交量是否**原样保留**（不做 ÷100 换手）：科创板 688xxx、沪市指数
     let volIsRaw: Bool
 
@@ -650,7 +608,6 @@ struct ProbeItem {
         self.file = file
         self.isIndex = isIndex
         self.marketCode = market + code
-        self.thsCode = isIndex ? "" : ("hs_" + code)
         // 688xxx（腾讯按「股」报量）与沪市指数（新浪按「手」报）原样保留；其余 ÷100 四舍五入
         self.volIsRaw = code.hasPrefix("688") || (isIndex && market == "sh")
     }

@@ -46,6 +46,7 @@ struct HomeHeaderBar: View {
                 .background(Color(.systemGray5))
                 .cornerRadius(20)
             }
+            .accessibilityIdentifier("home.profileButton")
             .padding(.trailing, 16)
         }
         .background(Color(.systemBackground))

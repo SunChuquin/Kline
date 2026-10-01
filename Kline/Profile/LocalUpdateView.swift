@@ -775,22 +775,25 @@ struct LocalUpdateView: View {
         }
     }
 
-    /// 状态 / 基准分片 / 三源结果
+    /// 状态 / 基准分片 / 两源结果 / 结论
     private var directProbeStatusRows: some View {
         VStack(spacing: 0) {
-            infoRow(title: "状态", value: directProbe.statusText, valueColor: directProbeStateColor)
+            infoRow(title: "状态", value: directProbe.statusText,
+                    valueColor: directProbeStateColor, identifier: "directProbe.status")
 
             Divider()
-            infoRow(title: "基准（CNB 分片）", value: directProbe.baselineText)
+            infoRow(title: "基准（CNB 分片）", value: directProbe.baselineText,
+                    identifier: "directProbe.baseline")
 
             Divider()
-            infoRow(title: "腾讯", value: directProbe.tencentText)
+            infoRow(title: "腾讯", value: directProbe.tencentText, identifier: "directProbe.tencent")
 
             Divider()
-            infoRow(title: "新浪", value: directProbe.sinaText)
+            infoRow(title: "新浪", value: directProbe.sinaText, identifier: "directProbe.sina")
 
             Divider()
-            infoRow(title: "同花顺", value: directProbe.thsText)
+            infoRow(title: "结论", value: directProbe.verdictText,
+                    valueColor: directProbeStateColor, identifier: "directProbe.verdict")
         }
     }
 
@@ -821,9 +824,10 @@ struct LocalUpdateView: View {
             }
             .buttonStyle(.plain)
             .disabled(!directProbeTappable)
+            .accessibilityIdentifier("directProbe.run")
 
             // 对拍明细（逐条列出，多行不裁切）
-            ForEach(Array(directProbe.detailLines.enumerated()), id: \.offset) { _, line in
+            ForEach(Array(directProbe.detailLines.enumerated()), id: \.offset) { index, line in
                 Divider()
                 Text(line)
                     .font(.system(size: 12))
@@ -832,6 +836,7 @@ struct LocalUpdateView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("directProbe.detail.\(index)")
             }
         }
     }
@@ -1131,16 +1136,19 @@ struct LocalUpdateView: View {
 
     /// 只读信息行（左标题 + 右值），行高固定 48
     private func infoRow(title: String, value: String,
-                         valueColor: Color = Color(.secondaryLabel)) -> some View {
+                         valueColor: Color = Color(.secondaryLabel),
+                         identifier: String? = nil) -> some View {
         HStack(spacing: 10) {
             Text(title)
                 .font(.system(size: 16))
             Spacer(minLength: 12)
+            // 标识打在**值文本**上（staticText）：标识挂在容器 HStack 上在 SwiftUI 里未必进无障碍树
             Text(value)
                 .font(.system(size: 15))
                 .foregroundColor(valueColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .accessibilityIdentifier(identifier ?? "")
         }
         .padding(.horizontal, 16)
         .frame(height: 48)
