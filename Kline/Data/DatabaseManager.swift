@@ -81,6 +81,36 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// 按 file 列表 + 日期窗口读主库**日线**（键 = `file`，值按 date 升序）；
+    /// 供设备侧「当期周/月线本地聚合」补齐被 `trim` 裁掉的那几天（[LiveDataStore.rebuildCurrentPeriodBars]）。
+    /// - Note: 需在 `dbQueue` 上执行（经 `performOnDBQueue` 调用）。`metaIdByFile` 由调用方在**主线程**
+    ///   用 `metaList` 预先建好（避免在 dbQueue 上访问 `@Published` 状态）。
+    nonisolated static func readMainDaily(db: OpaquePointer?, metaIdByFile: [String: Int],
+                                         fromDate: Int, toDate: Int) -> [String: [KlineItem]] {
+        guard let db = db, fromDate > 0, toDate >= fromDate, !metaIdByFile.isEmpty else { return [:] }
+        let idToFile = Dictionary(metaIdByFile.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+        // meta_id 来自本机主库（整数），内联为字面量，避免上万个绑定参数（与 basePeriodBars 同口径）
+        let ids = idToFile.keys.sorted().map { String($0) }.joined(separator: ",")
+        guard !ids.isEmpty else { return [:] }
+        let sql = "SELECT meta_id, date, open, high, low, close, vol, amo FROM daily "
+            + "WHERE meta_id IN (\(ids)) AND date >= \(fromDate) AND date <= \(toDate) ORDER BY meta_id, date ASC;"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        var out: [String: [KlineItem]] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let file = idToFile[Int(sqlite3_column_int64(statement, 0))] else { continue }
+            out[file, default: []].append(KlineItem(date: Int(sqlite3_column_int64(statement, 1)),
+                                                    open: sqlite3_column_double(statement, 2),
+                                                    high: sqlite3_column_double(statement, 3),
+                                                    low: sqlite3_column_double(statement, 4),
+                                                    close: sqlite3_column_double(statement, 5),
+                                                    volume: sqlite3_column_double(statement, 6),
+                                                    turnover: sqlite3_column_double(statement, 7)))
+        }
+        return out
+    }
+
     /// 主库内容被内部合并改写后调用（**在主线程**）：强制自增数据版本并清图表缓存，
     /// 让行情行缓存 / 条件单 / K 线图重查。仅用于「增量库指纹未变化但主库已变」的场合（避免漏刷新）。
     func notifyMainDBChanged() {

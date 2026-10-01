@@ -499,7 +499,7 @@ final class TdxSyncManager: ObservableObject {
                           bucketCount: ctx.bucketCount, bytes: ctx.bytes,
                           coveredFrom: ctx.coveredFrom, coveredTo: ctx.coveredTo)
             if ctx.bucketCount > 0 || applied > 0 {
-                applyTrimThenReload()
+                applyTrimThenReload(referenceDate: ctx.coveredTo)
             } else {
                 DebugLogger.shared.log("[TdxSync] 无分片亦无补丁写入 → 跳过裁剪热刷新")
             }
@@ -561,18 +561,58 @@ final class TdxSyncManager: ObservableObject {
         }
     }
 
-    /// 合并完成后：把「主库已有」的日期从本地增量里裁掉，再一次性 reloadAsync 热刷新
-    private func applyTrimThenReload() {
-        let trimBefore = pendingMainLatest > 0 ? pendingMainLatest : nil
-        guard let trimBefore = trimBefore else {
-            DebugLogger.shared.log("[TdxSync] 主库无 lastDate → 不裁剪增量")
-            LiveDataStore.shared.reloadAsync(completion: TdxSyncManager.logReload)
+    /// 合并完成后：① 重算当期周/月线；② 把「主库已有」的日期从本地增量里裁掉；③ 一次性 reloadAsync 热刷新
+    /// （先聚合再裁剪：保证新写出的当期 bar 在同一轮热刷新里一起生效，且不会被随后的裁剪误删）
+    private func applyTrimThenReload(referenceDate: Int) {
+        rebuildCurrentPeriodBars(referenceDate: referenceDate) { [weak self] in
+            guard let self = self else { return }
+            let trimBefore = self.pendingMainLatest > 0 ? self.pendingMainLatest : nil
+            guard let trimBefore = trimBefore else {
+                DebugLogger.shared.log("[TdxSync] 主库无 lastDate → 不裁剪增量")
+                LiveDataStore.shared.reloadAsync(completion: TdxSyncManager.logReload)
+                return
+            }
+            LiveDataStore.shared.trim(beforeDate: trimBefore) { result in
+                DebugLogger.shared.log("[TdxSync] 增量裁剪：\(result.message)")
+                LiveDataStore.shared.reloadAsync(completion: TdxSyncManager.logReload)
+            }
+        }
+    }
+
+    /// 云端分片只发日线 → 周/月线在设备侧从日线聚合：
+    /// ① 主线程取增量库覆盖标的（`coveredFiles` 是同步读，不在 DatabaseManager 队列上）；
+    /// ② 在 `DatabaseManager.dbQueue` 上批量读「主库日线（当期窗口）」；
+    /// ③ 交 `LiveDataStore.rebuildCurrentPeriodBars` 重算并写入 `live_weekly` / `live_monthly`。
+    /// **跨队列顺序**：先读主库 → 再进 LiveDataStore 队列，双方都不在持锁时回调对方。
+    /// 任一步无数据都静默跳过（当期周/月线仍由主库提供，功能等价于改动前）。
+    private func rebuildCurrentPeriodBars(referenceDate: Int, completion: @escaping () -> Void) {
+        // 参考日取「本批分片最新交易日」与「增量库日线最新日期」的较大者（东财当日路径可能先行写过）
+        let liveNewest = LiveDataStore.shared.newestDates(limit: 1).first ?? 0
+        let ref = Swift.max(referenceDate, liveNewest)
+        let files = LiveDataStore.shared.coveredFiles()
+        guard ref > 0, !files.isEmpty else {
+            DebugLogger.shared.log("[TdxSync] 当期周/月聚合：跳过（参考日 \(ref) / 增量库覆盖 \(files.count) 只）")
+            completion()
             return
         }
-        LiveDataStore.shared.trim(beforeDate: trimBefore) { result in
-            DebugLogger.shared.log("[TdxSync] 增量裁剪：\(result.message)")
-            LiveDataStore.shared.reloadAsync(completion: TdxSyncManager.logReload)
-        }
+        var metaIdByFile: [String: Int] = [:]
+        for m in DatabaseManager.shared.metaList where files.contains(m.file) { metaIdByFile[m.file] = m.id }
+        // 窗口起点与 LiveDataStore 内部口径一致：min(本周周一, 本月 1 日)
+        let weekStart = KlinePeriod.periodDateRange(.weekly, date: ref).0
+        let monthStart = KlinePeriod.periodDateRange(.monthly, date: ref).0
+        let from = Swift.min(weekStart, monthStart)
+        let t0 = Date()
+        DatabaseManager.shared.performOnDBQueue({ db -> [String: [KlineItem]] in
+            DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile, fromDate: from, toDate: ref)
+        }, completion: { mainDaily in
+            let ms = String(format: "%.0fms", Date().timeIntervalSince(t0) * 1000)
+            DebugLogger.shared.log("[TdxSync] 当期周/月聚合：主库日线 \(mainDaily.count) 只"
+                + "（窗口 \(from)~\(ref) / 增量库覆盖 \(files.count) 只）耗时=\(ms)")
+            LiveDataStore.shared.rebuildCurrentPeriodBars(referenceDate: ref, mainDaily: mainDaily) { result in
+                DebugLogger.shared.log("[TdxSync] 当期周/月聚合：\(result.message)")
+                completion()
+            }
+        })
     }
 
     /// nonisolated：作为 `reloadAsync` 的完成回调在后台线程调用，只写线程安全日志
