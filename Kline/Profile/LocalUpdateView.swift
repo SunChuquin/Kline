@@ -59,6 +59,8 @@ struct LocalUpdateView: View {
     @ObservedObject private var dbManager = DatabaseManager.shared
     /// 清单标的自动更新状态（设备侧东财直连：并集数 / 各时刻结果 / 命中数）
     @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
+    /// 直连源链对拍探针（**仅调试用 PoC**：设备侧直连腾讯/新浪/同花顺 vs 云端 CNB 分片）
+    @ObservedObject private var directProbe = DirectQuoteProbe.shared
 
     // MARK: - 合并到 tdx.db（增量库 → 主库）
 
@@ -81,6 +83,7 @@ struct LocalUpdateView: View {
             localUpdateSection
             syncSection
             watchlistSyncSection
+            directProbeSection
         }
         .onAppear {
             refreshServerStatus()
@@ -748,6 +751,99 @@ struct LocalUpdateView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - 直连源链对拍（仅调试用 PoC）
+
+    /// 「直连源链对拍」子区：把设备侧直连腾讯/新浪/同花顺取回的当日K线，与云端 CNB 最新分片
+    /// 的 `bkt_daily` **逐只逐字段对拍**，确认量纲（手/股）与价格零偏差。
+    /// **仅调试用**：不参与任何同步流程、不写库、不改配置。规格与其它卡片组一致。
+    private var directProbeSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("直连源链对拍（仅调试用）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.85))
+
+            // 分段只为控制 ViewBuilder 子视图数量（同「数据同步」卡片）
+            VStack(spacing: 0) {
+                directProbeStatusRows
+                directProbeActionRows
+            }
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+    }
+
+    /// 状态 / 基准分片 / 三源结果
+    private var directProbeStatusRows: some View {
+        VStack(spacing: 0) {
+            infoRow(title: "状态", value: directProbe.statusText, valueColor: directProbeStateColor)
+
+            Divider()
+            infoRow(title: "基准（CNB 分片）", value: directProbe.baselineText)
+
+            Divider()
+            infoRow(title: "腾讯", value: directProbe.tencentText)
+
+            Divider()
+            infoRow(title: "新浪", value: directProbe.sinaText)
+
+            Divider()
+            infoRow(title: "同花顺", value: directProbe.thsText)
+        }
+    }
+
+    /// 跑一次对拍 / 对拍明细
+    private var directProbeActionRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            // 整行可点（命中区 48pt ≥ 44pt），执行中禁用并显示进度圈
+            Button(action: { directProbe.run() }) {
+                HStack(spacing: 10) {
+                    Text("跑一次对拍")
+                        .font(.system(size: 16))
+                        .foregroundColor(directProbeTappable ? Color.primary : Color.gray)
+                    Spacer(minLength: 12)
+                    if directProbe.isRunning {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 18))
+                            .foregroundColor(directProbeTappable ? Color.blue : Color.gray)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!directProbeTappable)
+
+            // 对拍明细（逐条列出，多行不裁切）
+            ForEach(Array(directProbe.detailLines.enumerated()), id: \.offset) { _, line in
+                Divider()
+                Text(line)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var directProbeTappable: Bool { !directProbe.isRunning }
+
+    private var directProbeStateColor: Color {
+        switch directProbe.state {
+        case .idle:    return Color(.secondaryLabel)
+        case .running: return .yellow
+        case .ok:      return .green
+        case .failed:  return .red
         }
     }
 
