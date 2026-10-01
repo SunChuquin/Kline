@@ -1,12 +1,16 @@
 # 云端分片生产改走**境内 CI** 方案（CNB 主 / Gitee Go 备）
 
-> 状态：**方案，未实施**（2026-09-30 首稿；2026-10-01 二稿：纳入 CNB 背景调研与 4000 只规模；
+> 状态：**实施中**（2026-09-30 首稿；2026-10-01 二稿：纳入 CNB 背景调研与 4000 只规模；
 > 2026-10-01 三稿：规模回落到标的库实测口径、调度收敛为**每工作日 18:00 一次**；
 > 2026-10-01 四稿：核实 CNB 的 `crontab` 键名与镜像声明键名，§6.2 骨架已去掉 ⚠️；
-> 2026-10-01 五稿：**云端只发日线表**（周/月线改由 App 本地聚合，见 §3、§3.3））
+> 2026-10-01 五稿：**云端只发日线表**（周/月线改由 App 本地聚合，见 §3、§3.3）；
+> 2026-10-01 六稿：**平台定稿 CNB + 仓库形态定稿**（独立公开仓库 `sunchuquin/kline-data`，
+> 作为 Kline2 的子模块 `cloud/`），**产物推 CNB 自己的 `data` 分支**（GitHub 退出这条链路、
+> 无需密钥仓库与外部 PAT），并**实测结清匿名直链格式与吞吐**；阶段 0 已完成）
 >
 > 范围：**只解决生产侧** —— 工作日收盘后自动抓东财、产出**只含日线表**的日分片增量库。
-> 设备侧下载源不动（仍是 `raw.githubusercontent.com` 主源 + jsDelivr 备源）。
+> 设备侧下载源**要改**：主源改为
+> `https://cnb.cool/sunchuquin/kline-data/-/git/raw/data`（实测 1 MB/s，比 GitHub raw 快约 16 倍）。
 >
 > ⚠️ **App 侧不再是"零改动"**：分片只发日线后，**周/月线要由 App 本地从日线聚合**。
 > 现有 App 只对**季/年**做当期聚合（`WatchlistSyncManager.currentPeriodBars`），
@@ -65,18 +69,18 @@
 | 30 片总产物 | 30 × 600 KiB ≈ **18 MB** |
 
 > **只发日线**是用户 2026-10-01 的更正：周/月线由 App 从日线聚合，云端不必存（§3.3）。
-> 生成端现状是 `PERIODS = ("daily", "weekly", "monthly")`（[live_db_builder.py](../../src/live_db_builder.py#L113)），
+> 生成端现状是 `PERIODS = ("daily", "weekly", "monthly")`（`cloud/scripts/live_db_builder.py`，原在 `src/` 下），
 > 云端调用时需改成只发 `daily`（季/年本来就不在分片里）。
 
 ### 3.2 单次运行成本
 
 | 环节 | 耗时 |
 | :--- | :--- |
-| 取 GitHub `data` 分支上一版（≈18 MB） | 待实测（§9.2） |
+| 取 `data` 分支上一版（≈18 MB） | CNB 同平台匿名 clone，秒级（已实测可行，§3.3 ③） |
 | 生成（34 批） | ≈ 184 s ≈ **3.1 分钟** |
 | `--check` 自检 | 秒级 |
-| 发布（孤儿提交 ≈18 MB 推 GitHub） | 待实测（§9.2） |
-| **单次端到端（保守）** | **≈ 6 分钟** |
+| 发布（孤儿提交 ≈18 MB 强推**本仓库** `data`） | 境内同平台，秒级~十几秒 |
+| **单次端到端（保守）** | **≈ 6 分钟**（原"推 GitHub"的不确定项已消除，估算不变） |
 
 > `universe.txt` 现在 3631 行即可满足需要，**不需要扩表**。
 > 上一稿按 4000 只做的保守换算（40 批 / 单日片 0.65 MB / 30 片 20 MB）作废，本文一律用实测口径。
@@ -120,20 +124,35 @@
 自动享有内网访问加速，无需流量费用"这句**只针对 VPC 内**）。所以**"没有流量费"可确认，
 "没有速率限制"不能确认**，列为 §9 实测项。
 
-**③ 单日（600 KiB）下载耗时估算**
+**③ 单日（600 KiB）下载耗时（CNB 已实测）**
 
-| 源 | 实测/估算 |
+| 源 | 实测值 | 换算 600 KiB |
+| :--- | :--- | :--- |
+| 当前主源 `raw.githubusercontent.com` | 108 KiB / **1.79 s** ≈ 62 KB/s | ≈ **10 s** |
+| 当前备源 jsDelivr | 108 KiB / **3.83 s** ≈ 29 KB/s | ≈ **21 s** |
+| **CNB（`/-/git/raw/`，2026-10-01 实测）** | 120 KB / 0.12 s、112 KB / 0.10 s ≈ **1 MB/s**；小文件延迟 0.07–0.2 s | ≈ **0.6 s** |
+
+**CNB 匿名直链格式（实测确认，非 GitLab 形态）：**
+
+```
+https://cnb.cool/<org>/<repo>/-/git/raw/<branch>/<path>
+实测：https://cnb.cool/sunchuquin/kline-data/-/git/raw/main/README.md
+     → 200  text/plain  21 B  0.074 s  （不带任何凭据）
+```
+
+| 附带结论 | 实测值 |
 | :--- | :--- |
-| 当前主源 `raw.githubusercontent.com` | 实测 108 KiB / **1.79 s** ≈ 62 KB/s → 600 KiB ≈ **10 s** |
-| 当前备源 jsDelivr | 实测 108 KiB / **3.83 s** ≈ 29 KB/s → 600 KiB ≈ **21 s** |
-| CNB（腾讯云境内） | 600 KiB ÷ 典型境内 1–5 MB/s ≈ **0.2–1 s**（含 TLS/RTT） |
+| 匿名可下载 | ✅ 200 且内容逐字节一致；**带 `Authorization` 反而 400 `Invalid argument`** → 纯公开路由 |
+| 单文件上限 | `raw_file_limit_in_byte = 104857600`（**100 MiB**）；600 KiB 分片远低于它 |
+| 首次全量（30 片 ≈18 MB） | ≈ **18 s** |
+| 每日增量（1 片） | ≈ **0.6 s** |
 
-结论：**同一片数据，境内源比 GitHub raw 快约一个数量级**；首次装机的 30 片全量（≈18 MB）也从
-GitHub raw 的几分钟降到境内源的几秒~十几秒。现有下载器
+结论：**同一片数据，CNB 比 GitHub raw 快约 16 倍**；首次装机的 30 片全量（≈18 MB）从
+GitHub raw 的几分钟降到**十几秒**。现有下载器
 （[TdxSyncConfig.swift](../../Kline/Infrastructure/TdxSyncConfig.swift#L39-L42)）本来就是
-**可配置的多源列表 + 按序回退**，加一个 CNB 源属**配置级**改动（manifest + sha256 契约、校验与合并逻辑都不用动）。
-唯一待核实的是 **CNB 仓库文件的匿名直链格式**（GitHub 形如 `raw.githubusercontent.com/<o>/<r>/<branch>/<path>`，
-CNB 的对应形态需实测，§9）。
+**可配置的多源列表 + 按序回退**，加一个 CNB 源属**配置级**改动（manifest + sha256 契约、校验与合并逻辑都不用动）：
+把源从 `raw.githubusercontent.com/<o>/<r>/data` 换成
+`cnb.cool/sunchuquin/kline-data/-/git/raw/data` 即可，**拼路径规则完全对应**。
 
 ## 4. 候选方案横向对比
 
@@ -205,12 +224,37 @@ CNB 的对应形态需实测，§9）。
 
 ## 6. 主方案：CNB
 
-### 6.1 代码怎么进 CNB
+### 6.1 仓库形态（2026-10-01 定稿）
 
-- 在 CNB 建仓库，从 GitHub 导入 `SunChuquin/Kline`（自带迁移工具 `cnb-init-from`）；以后本地加 `cnb` remote 双推。
-- 另建**一个密钥仓库**（CNB 仓库创建时可选中「密钥仓库（仅允许页面查看和修改，适用于云原生构建加载密钥）」），
-  里面只放一个 `envs.yml`（`GH_PUSH_TOKEN=<fine-grained PAT>`），主仓库用 `imports` 引它。
-- 不推荐只放 `src/` 最小集 —— 分叉两份代码会漂移。
+**已落地**：CNB 独立仓库 [`cnb.cool/sunchuquin/kline-data`](https://cnb.cool/sunchuquin/kline-data)，
+**公开**、归属组织 `sunchuquin`，作为 Kline2 的 **git 子模块 `cloud/`** 挂载。
+
+```
+Kline2/                     # 父仓库（GitHub SunChuquin/Kline）
+  Kline/                    # iOS 源码
+  cloud/                    # ← submodule → cnb.cool/sunchuquin/kline-data
+    .cnb.yml                #    定时 + push 触发
+    scripts/live_db_builder.py
+    scripts/publish_buckets.sh
+    data/universe.txt
+  src/                      # 只留电脑侧工具（tdx_parser.py / tdx_gui.py …）
+```
+
+| 与原计划的差异 | 原因 |
+| :--- | :--- |
+| ❌ 不再"从 GitHub 导入整个 Kline" | 生成端与 iOS 工程解耦；CNB 仓库只装生成脚本 + 清单，**与 Kline 无任何关系** |
+| ❌ 不再需要**密钥仓库** | 产物推的是 **CNB 自己的 `data` 分支**，用平台内置凭据，不需要外部 PAT |
+| ❌ 不再需要 **GitHub fine-grained PAT** | 同上。GitHub 只保留"构建 ipa"一条职责 |
+| ✅ 用**子模块**而不是"两份代码手动同步" | 在一个工作区里就能改生成端，且不会漂移 |
+
+> **子模块两个坑**：① `git submodule update --init` 后处于 **detached HEAD**，进目录先 `git checkout main`
+> 再改，否则提交的是游离 commit；② 推代码是**两段** —— 子模块目录 push 到 cnb.cool，
+> Kline2 根再 push 到 GitHub（带上新的 submodule hash 指针），少推一段就会出现"CI 跑的是旧代码"。
+
+**推送通道（实测）**：SSH **三个入口全不通**（`cnb.cool:22` No route to host、`cnb.cool:443` Connection closed、
+`ssh.cnb.cool:22` No route to host）→ 本地推送只能走 **HTTPS + 访问令牌**
+（`git push https://cnb:<token>@cnb.cool/sunchuquin/kline-data.git main`，已实测成功）。
+CNB 流水线内部推自己仓库用平台内置凭据，不需要这个令牌。
 
 ### 6.2 流水线骨架（`.cnb.yml`）
 
@@ -219,33 +263,33 @@ CNB 的对应形态需实测，§9）。
 `"crontab: <表达式>"`；镜像在 Pipeline 级写 `docker.image`、在 Job 级直接写 `image`。
 
 ```yaml
-# .cnb.yml
-imports:
-  - https://cnb.cool/<org>/kline-secrets/-/blob/main/envs.yml   # 注入 GH_PUSH_TOKEN（密钥仓库）
-
+# .cnb.yml —— 放在 CNB 仓库根（= 子模块 cloud/ 的根，**不是** Kline2 根目录）
 main:                            # 触发分支（定时任务不支持 glob，必须写明确分支名）
-  "crontab: 0 18 * * 1-5":       # 事件名 = "crontab: <POSIX 5 段表达式>"
+  "crontab: 0 18 * * 1-5":       # 事件名 = "crontab: <POSIX 5 段表达式>"；时区 Asia/Shanghai
     - name: nightly-publish      # 数组元素即一条 Pipeline
       stages:
         - name: publish
           jobs:
             - name: build-and-publish
               image: python:3.12     # Job 级镜像写法（自带官方示例）
-              script: bash src/publish_buckets.sh
+              script: bash scripts/publish_buckets.sh
 
   push:                          # 生成端或清单变更时顺带跑一次
     - name: on-push
       ifModify:                  # Pipeline 级：仅下列文件变更时才执行
-        - src/live_db_builder.py
-        - src/data/universe.txt
-        - src/publish_buckets.sh
+        - scripts/live_db_builder.py
+        - data/universe.txt
+        - scripts/publish_buckets.sh
       stages:
         - name: publish
           jobs:
             - name: build-and-publish
               image: python:3.12
-              script: bash src/publish_buckets.sh
+              script: bash scripts/publish_buckets.sh
 ```
+
+> **不再有 `imports:`** —— 产物推的是本仓库的 `data` 分支，用平台内置凭据，无需密钥仓库。
+> **`.cnb.yml` 必须在 CNB 仓库根**：放在 Kline2 根目录**不生效**（CNB 只读自己仓库的配置）。
 
 **两处键名的确切规则（2026-10-01 核实）：**
 
@@ -261,35 +305,39 @@ main:                            # 触发分支（定时任务不支持 glob，�
 > 本骨架用 Job 级 `image`（更贴近官方插件示例）；若想整条 Pipeline 统一环境，
 > 换成 Pipeline 级 `docker: {image: python:3.12}` 即可，二选一，不必都写。
 
-### 6.3 发布段（`src/publish_buckets.sh`，CNB / Gitee Go 两条流水线**共用同一份**）
+### 6.3 发布段（`scripts/publish_buckets.sh`）
+
+**产物推本仓库自己的 `data` 分支**（不再推 GitHub），五步：
 
 ```bash
 set -euo pipefail
 
-# ① 取 GitHub data 分支上一版，作为「保留 30 片」的基线
-git clone --depth=1 --branch data \
-  "https://oauth2:${GH_PUSH_TOKEN}@github.com/SunChuquin/Kline.git" /tmp/prev-src
+# ① 取 data 分支上一版，作为「保留 30 片」的基线（匿名 clone 本仓库即可，已实测可行）
+git clone --depth=1 --branch data "$REPO_URL" /tmp/prev-src
 mkdir -p prev && cp -r /tmp/prev-src/live prev/live
 
 # ② 生成当天那一片（真实行情接口，境内网络）
-python3 src/live_db_builder.py \
-  --universe src/data/universe.txt --out dist --prev prev/live
+python3 scripts/live_db_builder.py \
+  --universe data/universe.txt --out dist --prev prev/live
 
 # ③ 自检：manifest 必须与所有分片逐项一致
-python3 src/live_db_builder.py --check --out dist
+python3 scripts/live_db_builder.py --check --out dist
 
 # ④ 无变化则跳过发布（非交易日 / 未开盘时正常走到这里）
 [ "$(cat dist/.changed 2>/dev/null || echo 0)" = "1" ] || { echo '无变化，跳过发布'; exit 0; }
-```
 
-发布回 GitHub 有两条路，**优先 ①**：
+# ⑤ 孤儿提交强推 data 分支（在隔离目录里做，不动 CI 工作区的 git 状态）
+```
 
 | | 做法 | 说明 |
 | :--- | :--- | :--- |
-| **① git-sync 插件（推荐）** | 官方 `git-sync`（`image: tencentcom/git-sync`，settings：`target_url` / `auth_type` / `username` / `password` / `force: true`）把 `dist/` 以**孤儿提交**强推 GitHub `data` 分支 | 不用自己写 git 逻辑，官方维护 |
-| ② 手写 git（兜底） | 在 `/tmp/pub` 里 clone → `git checkout --orphan` → `git rm -rf --cached .` → `git add -f live` → 强推 `HEAD:data` | 与现有 GitHub Actions 版同款逻辑 |
+| **① 手写 git（本方案采用）** | 在 `/tmp/pub` 里 `git init` → `git checkout --orphan data` → `git add -f live` → `git push -f origin HEAD:data` | 目标是**本仓库**，无需外部凭据；与现有 GitHub Actions 版同款逻辑 |
+| ② git-sync 插件 | 官方 `git-sync`（`image: tencentcom/git-sync`，`target_url` / `auth_type` / `username` / `password` / `force: true`） | 推外部仓库时更省事；推本仓库不需要 |
 
-> 关键点：**在隔离目录（`/tmp/pub`）里做孤儿提交**，不要在 CI 工作区里动 git 状态。
+> **关键点 ①**：在隔离目录（`/tmp/pub`）里做孤儿提交，不要在 CI 工作区里动 git 状态。
+> **关键点 ②**：孤儿提交**不需要**改增量提交 —— Git 按内容寻址，29 片内容和昨天一字不差
+> → 同一个对象只存一份，每天真实存储增量 ≈ **600 KiB**（只有新片是新的）。
+> 且孤儿提交让旧提交成为不可达对象 → **clone 恒定 18 MB**，不随时间增长（增量提交反而会让 clone 逐年变大）。
 
 ## 7. 备选方案：Gitee Go
 
@@ -396,10 +444,14 @@ stages:
 
 ## 9. 实施时必须逐条实测/确认的项（**§7.2 的 Gitee Go YAML 不要照抄**；§6.2 的 CNB 语法已核实）
 
+> **平台已拍板 CNB**（2026-10-01），§7 的 Gitee Go 降为**未启用备选** →
+> 第 1 / 5 / 6 条**仅在将来真的启用备选时才需要**，当前不必实测。
+
 1. **cron 时区（Gitee Go）**：官方文档写「根据国外时间来，周日是 1」，疑似不是北京时间。
    先用一个 5 分钟后触发的 cron 验证，看流水线记录的实际触发时刻，再算偏移量。
-2. **境内 CI → github.com 的 git push 可达性**：这是本方案**最大的不确定点**。
-   每次孤儿提交要推 **≈ 18 MB**（30 片）。实测一次计时；若太慢或失败，走 §10 备选。
+2. ~~境内 CI → github.com 的 git push 可达性~~ —— **已作废**：方案定稿为产物推
+   **CNB 自己的 `data` 分支**（§6.1），GitHub 完全退出这条链路。
+   原先的"最大不确定点"随之消失。
 3. ~~CNB 的两处语法~~ —— **已在官方文档核实，无需再试**（§6.2 表）：
    ① 定时任务的事件名是 `"crontab: <POSIX 5 段表达式>"`，时区为 `Asia/Shanghai`，
    最小间隔 5 分钟，分支不支持 glob；
@@ -411,38 +463,55 @@ stages:
    若不预装且装不上，改用 `build@nodejs`（文档称其镜像含 git、wget、Python3）。
 6. **`build@python` 里 `python3` 的实际版本**（模板默认 3.9，实测确认）。
 7. **工作区路径**：CNB / Gitee Go 的工作区绝对路径，以及能否在 `/tmp` 里 clone / push。
-8. **若采纳 §3.3 的"CNB 当设备侧下载源"**：① 仓库文件的**匿名直链格式**；
-   ② 公网的**并发 / 带宽 / 限速**（官方无公开数字）；③ 实测一片 600 KiB 的下载耗时。
+8. ~~CNB 当设备侧下载源~~ —— **已实测确认**（2026-10-01）：
+   ① 匿名直链格式 = **`https://cnb.cool/<org>/<repo>/-/git/raw/<branch>/<path>`**
+      （不是 GitLab 形态的 `/-/raw/`，从页面 JS 的 `"/{repo}/-/git/raw/{ref_with_path}"` 挖出）；
+   ② **匿名可下载** —— 200 `text/plain`，内容逐字节一致；带 `Authorization` 反而 400
+      → 确为纯公开路由；单文件上限 `raw_file_limit_in_byte = 104857600`（100 MiB）；
+   ③ 吞吐实测 **≈ 1 MB/s**（120 KB/0.12 s）→ 600 KiB 单片 ≈ **0.6 s**，30 片全量 ≈ 18 s。
+   ④ 公网**并发 / 带宽上限**官方仍无公开数字（实测未触及限速，但不构成承诺）。
+   详见 §3.3 ③。
 
 ## 10. 风险与备选
 
 | 风险 | 备选 |
 | :--- | :--- |
-| 境内 CI 推 GitHub 不稳（§9.2） | 产物先发到 **CNB/Gitee 自己的 `data` 分支**，再由本机脚本（网络好）同步到 GitHub；或顺势把 App 的**备用源**指向境内（`TdxSyncConfig` 支持备用源可配置，App 主源仍不动） |
+| ~~境内 CI 推 GitHub 不稳~~ | **风险已消除**：方案定稿为产物推 CNB 自己的 `data` 分支（§6.1），不再推 GitHub |
+| 公开仓库 = 日线数据对所有人可见 | 数据源自东财/通达信的公开行情，非私有数据；已与用户确认 |
+| CNB 明文令牌（本地推送用） | 仅用于**初始推送**，完成后**立即吊销重建**；不写入任何仓库文件。CI 内部用平台内置凭据 |
 | 免费额度口径未来调整 | CNB 占用 2.75%、Gitee Go 占用 26%，都有缓冲；且 CNB 额度用尽后是**能力受限**而非删数据 |
-| 明文 token（仅 Gitee Go） | 主方案走 CNB 密钥仓库；若退回 Gitee Go 则最小权限 + 短有效期 + 定期轮换 |
+| 明文 token（若退回 Gitee Go） | CNB 主方案不需要外部 PAT；退回 Gitee Go 才需最小权限 + 短有效期 + 定期轮换 |
 | 那 299 只扩展行情指数覆盖不到 | 由电脑侧 `build_live_buckets_pc.py` 出片补（本来就存在，与 CI 选择无关） |
 | 非交易日被 cron 触发 | 已有防护：交易日取行情源时间戳而非本机日期，且 `dist/.changed = 0` 时跳过发布 |
 
 ## 11. 需要你做的事（实施前）
 
-- [ ] **拍板平台**：CNB（推荐）还是 Gitee Go
-- [ ] 注册并实名：CNB 需**微信扫码 + 实名认证**（未实名禁止写行为）；Gitee 你已有账号
-- [ ] 建仓库：从 GitHub 导入 `SunChuquin/Kline`，仓库名与 GitHub 同名（减少脚本路径改动）
-- [ ] 建密钥仓库（仅走 CNB 时需要），生成 **fine-grained GitHub PAT** 放进去
-      （仅 `contents: write` + 仅 `SunChuquin/Kline` + 短有效期）
-- [ ] **确认调度时刻**：暂定**每工作日 18:00**（收盘后完整日K）；是否要留 push 触发
-- [ ] 开通流水线（CNB 免费额度 / Gitee Go 免费版）
+- [x] ~~**拍板平台**~~ → **CNB**（2026-10-01）
+- [x] ~~注册并实名~~ → 已完成
+- [x] ~~建仓库 / 建密钥仓库 / 生成 GitHub PAT~~ → **三步全部作废**：
+      改为建独立仓库 `sunchuquin/kline-data`（**公开**，已建），无需密钥仓库、无需外部 PAT
+- [x] ~~确认调度时刻~~ → 暂定 `0 18 * * 1-5`（北京时间，无需换算）；push 触发保留
+- [ ] **令牌提醒**：初始推送用的 CNB 访问令牌（明文出现在会话里）**用完立即吊销重建**
+- [ ] 首次跑通后：确认 `cron` 实际触发时刻（§9.3）与 GitHub Action → CNB 推 ipa 的认证方式
 
 ## 12. 实施步骤（每阶段都能独立验证）
 
-1. **阶段 1 · 连通性验证（不写业务）**：一条最小流水线，只做「cron 触发 → 打印北京时间 → 确认时区偏移」。
-   验收：能算出正确的 cron 表达式（CNB 与 Gitee Go 各验一次）。
-2. **阶段 2 · 生成验证**：跑 `live_db_builder.py` 生成分片 + `--check` 自检通过，**先不发布**。
-   验收：日志里覆盖率达标（约 3303/3611）、`dist/.changed` 正确、耗时与 §3.2 相符。
-3. **阶段 3 · 发布验证**：加发布步骤，推 GitHub `data` 分支。
-   验收：GitHub `data` 分支有新孤儿提交（≈18 MB）；App 手动「立即更新」能拉到。
-4. **阶段 4 · 定时打通**：落到 18:00 单次调度，连续观察 1~2 个交易日，核对实际扣减的核分/核时。
+0. **阶段 0 · 仓库与通道（✅ 已完成 2026-10-01）**
+   - 建仓库 `sunchuquin/kline-data`（公开）；`git push` over HTTPS 打通（SSH 三个入口全不通）
+   - **匿名直链 + 吞吐实测**：`/-/git/raw/` 格式确认、1 MB/s、100 MiB 上限（§3.3 ③）
+   - 验收：`curl` 匿名拉到占位文件，内容逐字节一致 ✅
+1. **阶段 1 · 仓库内容落地**：写入 `.cnb.yml`、`scripts/publish_buckets.sh`、
+   `scripts/live_db_builder.py`（`PERIODS` 改**只发日线**）、`data/universe.txt`；
+   在 Kline2 挂子模块 `cloud/`，并删除 Kline2 里已搬走的两份文件。
+   验收：`git ls-remote` 能看到内容；Kline2 `git submodule status` 正常。
+2. **阶段 2 · 生成验证（先不发布）**：跑生成 + `--check` 自检。
+   验收：覆盖率达标（约 3303/3611）、`dist/.changed` 正确、**单日片 = 614,400 B（600 KiB）**
+   （若仍见 921,600 B，说明 `PERIODS` 没改干净）、耗时与 §3.2 相符。
+3. **阶段 3 · 发布验证**：加发布步骤，强推本仓库 `data` 分支。
+   验收：`data` 分支出现孤儿提交；**匿名 curl 拉到 `manifest.json` 与 `bucket_*.db`**；
+   App 把源改成 `https://cnb.cool/sunchuquin/kline-data/-/git/raw/data` 后能拉到。
+4. **阶段 4 · 定时打通**：落到 `0 18 * * 1-5`，连续观察 1~2 个交易日。
+   验收：流水线记录里的实际触发时刻就是北京时间 18:00；核对扣减的核时（预期 ≈0.2 核时/次）。
 
 ## 13. 顺带要拍板的遗留项
 
