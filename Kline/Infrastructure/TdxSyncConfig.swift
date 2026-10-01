@@ -5,7 +5,7 @@
 //  增量行情库（Documents/tdx_live.db）自动拉取配置：UserDefaults 持久化。
 //  与 ChartConfigStore / KlineThemeStore 同惯例：ObservableObject 单例，@Published 写入即持久化。
 //
-//  默认 **关闭**（enabled = false），需用户在「个人中心 → 本地更新 → 数据同步」显式开启。
+//  默认 **开启**（enabled = true），用户可在「个人中心 → 本地更新 → 数据同步」关闭。
 //
 
 import Foundation
@@ -34,9 +34,18 @@ final class TdxSyncConfig: ObservableObject {
     // MARK: - 默认值
 
     /// 默认数据源，按顺序尝试：
-    /// ① 主源 `raw.githubusercontent.com`（data 分支，更新后立即生效）
-    /// ② 备源 jsDelivr CDN（同分支镜像，主源被墙 / 超时兜底；注意 CDN 有缓存延迟）
+    /// ① 主源 CNB（境内，data 分支原始文件直链，实测 ≈1 MB/s，比 GitHub raw 快约 16 倍）
+    /// ② 备源 `raw.githubusercontent.com`（同内容，境内可能超时）
+    /// ③ 备源 jsDelivr CDN（同分支镜像，注意 CDN 有缓存延迟）
     static let defaultSourceURLs: [String] = [
+        "https://cnb.cool/sunchuquin/kline-data/-/git/raw/data",
+        "https://raw.githubusercontent.com/SunChuquin/Kline/data",
+        "https://cdn.jsdelivr.net/gh/SunChuquin/Kline@data",
+    ]
+
+    /// 上一版默认数据源（只有 GitHub 两源）。仅用于**一次性迁移**：已装机用户读回的历史值与它
+    /// 恰好相等 → 升级为新默认值（把 CNB 加为主源）；用户自己改过的值不在此列，保持不变。
+    static let legacyDefaultSourceURLs: [String] = [
         "https://raw.githubusercontent.com/SunChuquin/Kline/data",
         "https://cdn.jsdelivr.net/gh/SunChuquin/Kline@data",
     ]
@@ -92,7 +101,15 @@ final class TdxSyncConfig: ObservableObject {
         // 注：init 内的赋值不会触发 didSet，因此不会反向写回 UserDefaults
         // enabled 默认 true（本功能目的就是自动更新）；用 object(forKey:) 区分"从未设置过"与"用户显式关掉"
         enabled = (d.object(forKey: Self.enabledKey) as? Bool) ?? true
-        sourceURLs = Self.load([String].self, key: Self.sourceURLsKey) ?? Self.defaultSourceURLs
+        // 数据源：一次性迁移（老用户读回旧默认两源 → 升级为新默认并把 CNB 置为主源；用户自改值不动）
+        let storedSources = Self.load([String].self, key: Self.sourceURLsKey)
+        if storedSources == Self.legacyDefaultSourceURLs {
+            sourceURLs = Self.defaultSourceURLs
+            Self.save(Self.defaultSourceURLs, key: Self.sourceURLsKey)
+            DebugLogger.shared.log("[TdxSync] 数据源迁移：旧默认 → 新默认（主源改为 CNB）")
+        } else {
+            sourceURLs = storedSources ?? Self.defaultSourceURLs
+        }
         // 时刻表：一次性迁移（老用户读回旧三档默认值 → 升级为四档并落盘；用户自改值不动）
         let storedTimes = Self.load([String].self, key: Self.scheduleTimesKey)
         if storedTimes == Self.legacyDefaultScheduleTimes {
