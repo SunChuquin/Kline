@@ -169,5 +169,13 @@ final class GapBackfillUITests: XCTestCase {
         let fetch = readText(app, "gapBackfill.fetch")
         XCTAssertTrue(fetch.contains("补齐"),
                       "「补齐结果」行未出现补齐统计：\(fetch.isEmpty ? "<缺失>" : fetch)")
+
+        // 周/月线缺口：日线补齐只让日线图连续，周/月视图还得从新日线重新聚合成桶。
+        // 结论必须带「· 周线 N 行 / 月线 M 行」；明细必须有「周期聚合」行（含周锚/月锚）。
+        // ⚠️ 只断言「存在」不断言行数：本组件幂等，重跑时桶内 bar 与库内一致 → 写入 0 行是**正确**的。
+        XCTAssertTrue(verdictLabel.contains("周线") && verdictLabel.contains("月线"),
+                      "结论未含周/月线行数（周期聚合未接入）：\(verdictLabel)")
+        XCTAssertTrue(details.contains { $0.contains("周期聚合") && $0.contains("月锚") },
+                      "明细缺少「周期聚合」行（周锚/月锚）：\(details)")
     }
 }

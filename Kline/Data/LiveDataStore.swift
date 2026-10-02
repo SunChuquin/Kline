@@ -397,6 +397,42 @@ final class LiveDataStore: ObservableObject {
         }
     }
 
+    /// 补齐「主库覆盖不到的周期 bar」：重算 `mainLatest` 所在周期桶**及其之后全部周期桶**的
+    /// 周/月 bar，写回 `live_weekly` / `live_monthly`（缺口场景专用，与 `rebuildCurrentPeriodBars` 互补）。
+    ///
+    /// 为什么要单独一个方法（`rebuildCurrentPeriodBars` 不够用）：
+    ///   ① 它只重算 `referenceDate` 所在**当期**一根，补不了区间内的**多根**
+    ///      （实测缺口 20260831~20260930 跨 **5 个周** + **2 个月**）；
+    ///   ② 它算不出**被截断的当期**：主库止于 20260828，而 20260831 仍是 8 月的交易日
+    ///      → 主库的 8 月月线只有 `close = 0828 收盘`，必须用「主库 8/1~8/28 ∪ 增量库 8/31」重算。
+    ///
+    /// 口径完全沿用 `rebuildCurrentPeriodBars`（bar 的 `date` = 该周期首个交易日、
+    /// `open` 取首行、`high/low` 取极值、`close` 取末行、`vol/amo` 累加），
+    /// 因为**主库就是这个约定**（实测主库 weekly `20260506`/`20260407` 都落在节后首个交易日）。
+    ///
+    /// 裁剪边界也一并改为「锚桶起始日」：只删**早于** `mainLatest` 所在周期桶的 bar
+    /// （那些主库有完整 bar），锚桶及其之后全部保留在增量库（主库那一份是被截断的）。
+    /// - Parameters:
+    ///   - mainLatest: 主库最新交易日（= 缺口起点）
+    ///   - referenceDate: 补到哪一天（一般 = 今日）
+    ///   - mainDaily: 主库日线（键 = file，date 升序），**必须覆盖 `[锚桶起始日, mainLatest]`**；
+    ///     由调用方在 `DatabaseManager.dbQueue` 上预先读好再传入（硬约束：禁止跨队列嵌套）
+    /// completion 在主线程回调。
+    func rebuildGapPeriods(mainLatest: Int, referenceDate: Int,
+                           mainDaily: [String: [KlineItem]],
+                           completion: @escaping (LiveMergeResult) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let result = self._rebuildGapPeriodsLocked(mainLatest: mainLatest,
+                                                       referenceDate: referenceDate,
+                                                       mainDaily: mainDaily)
+            if result.ok && (result.weeklyRows > 0 || result.monthlyRows > 0) {
+                self._refreshAfterInternalWriteLocked(reason: "本地聚合·缺口周月")
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
     // MARK: - 重载与指纹检查
 
     /// 清缓存、关旧连接、重开、重算指纹、更新 isAvailable，并返回重载摘要（同步，供日志 / 手动调用）
@@ -1042,13 +1078,17 @@ final class LiveDataStore: ObservableObject {
             r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
             return r
         }
-        // 参考日：取增量库日线最新交易日与 beforeDate 的较大者（主库 lastDate 可能落后于增量库）
-        let referenceDate = Swift.max(beforeDate, _scalarLocked(handle, sql: "SELECT MAX(date) FROM live_daily;"))
+        // 日线：删 `date <= beforeDate`（主库已有 → 冗余，**行为与改动前一致**）。
+        // 周/月/季/年：边界取 **beforeDate（= 主库最新交易日）所在周期桶的日历起始**，删 `< 该起始`。
+        //   为什么**不能**再用「增量库日线最新日」当参考（改动前的写法）：
+        //   主库止于 20260828、增量库已补到 20260930 时，以 20260930 为参考 → 周锚 = 20260928
+        //   → 把 0831/0907/0914/0921 这 4 根**主库根本没有**的周线一并删掉（补缺口白做）。
+        //   改用 beforeDate：锚桶及其之后全部保留 —— 主库那一份是**被截断**的
+        //   （8 月月线只有 0801~0828），必须由增量库覆盖。
         var total = 0
         for period in Self.periodTables {
             guard let table = _localTableNameLocked(period) else { continue }
-            // 周/月/季/年按「当期日历起始」为界（严格小于 → 当期 bar 保留）；日线保持 `<= beforeDate`
-            let periodStart = Self.periodCalendarStart(period, referenceDate: referenceDate)
+            let periodStart = Self.periodCalendarStart(period, referenceDate: beforeDate)
             let bound = periodStart ?? beforeDate
             let op = periodStart == nil ? "<=" : "<"
             var statement: OpaquePointer?
@@ -1074,8 +1114,7 @@ final class LiveDataStore: ObservableObject {
         }
         r.ok = true
         r.deletedRows = total
-        r.message = "裁剪完成：删除 \(total) 行（日线 date <= \(beforeDate)；周/月/季/年 < 当期起始"
-            + "（参考日 \(referenceDate)））"
+        r.message = "裁剪完成：删除 \(total) 行（日线 date <= \(beforeDate)；周/月/季/年 < 主库最新日 \(beforeDate) 所在周期桶起始）"
         return r
     }
 
@@ -1207,6 +1246,153 @@ final class LiveDataStore: ObservableObject {
         r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
         r.message = "当期周/月聚合完成（参考日 \(referenceDate) 周起始 \(weekStart) 月起始 \(monthStart)）："
             + "周线写 \(weeklyRows) 行 / 月线写 \(monthlyRows) 行（候选 \(files.count) 只，清理非当期 \(deleted) 行）"
+        return r
+    }
+
+    /// 缺口区间的周/月聚合（需已在 queue 上执行）。与 `_rebuildCurrentPeriodBarsLocked` 的区别：
+    /// 以 **`mainLatest` 所在周期桶的日历起始** 为锚，把锚桶及其之后**所有**周期桶逐桶重算
+    /// （不是只算一根），数据源同样是「增量库日线 ∪ 主库日线，同 date 以增量库为准」。
+    /// 单事务「清掉锚桶之前的 bar → UPSERT」。
+    private func _rebuildGapPeriodsLocked(mainLatest: Int, referenceDate: Int,
+                                          mainDaily: [String: [KlineItem]]) -> LiveMergeResult {
+        var r = LiveMergeResult()
+        guard _ensureWritableOpenLocked(), let handle = db else {
+            r.message = "本地增量库不可写（打开失败）"
+            return r
+        }
+        guard mainLatest > 0, referenceDate >= mainLatest else {
+            r.ok = true
+            r.message = "无缺口区间（主库 \(mainLatest) / 参考日 \(referenceDate)）→ 跳过周期桶聚合"
+            return r
+        }
+        guard let weeklyTable = _localTableNameLocked("weekly"),
+              let monthlyTable = _localTableNameLocked("monthly") else {
+            r.ok = true
+            r.message = "本地缺 weekly/monthly 表 → 跳过周期桶聚合"
+            return r
+        }
+        // 锚 = mainLatest 所在周期桶的日历起始（周 = 该周周一、月 = 该月 1 日）
+        guard let weekAnchor = Self.periodCalendarStart("weekly", referenceDate: mainLatest),
+              let monthAnchor = Self.periodCalendarStart("monthly", referenceDate: mainLatest) else {
+            r.ok = true
+            r.message = "锚桶起始日解析失败 → 跳过周期桶聚合"
+            return r
+        }
+        let anchors: [(period: String, table: String, start: Int)] = [
+            ("weekly", weeklyTable, weekAnchor),
+            ("monthly", monthlyTable, monthAnchor),
+        ]
+        let lo = Swift.min(weekAnchor, monthAnchor)
+
+        // ① 逐 file：并集日线（date 升序）→ 按周期桶分组 → 逐桶算 bar
+        let liveDaily = _dailyRowsLocked(handle, from: lo, to: referenceDate)
+        var files = Set(liveDaily.keys)
+        files.formUnion(mainDaily.keys)
+        var bars: [String: [LiveUpsertBar]] = [:]
+        for file in files {
+            var byDate: [Int: LiveIncrementRow] = [:]
+            for m in mainDaily[file] ?? [] {
+                byDate[m.date] = LiveIncrementRow(file: file, date: m.date, open: m.open, high: m.high,
+                                                  low: m.low, close: m.close, vol: m.volume, amo: m.turnover)
+            }
+            for l in liveDaily[file] ?? [] { byDate[l.date] = l }
+            let rows = byDate.values.sorted { $0.date < $1.date }
+            guard let newest = rows.last, newest.date >= lo else { continue }
+            for anchor in anchors {
+                let win = rows.filter { $0.date >= anchor.start }
+                guard !win.isEmpty else { continue }
+                // 按「该行所属周期桶的日历起始」分组（同一桶内的日线聚成一根 bar）
+                var buckets: [Int: [LiveIncrementRow]] = [:]
+                for row in win {
+                    guard let bucket = Self.periodCalendarStart(anchor.period, referenceDate: row.date) else { continue }
+                    buckets[bucket, default: []].append(row)
+                }
+                for (_, group) in buckets {
+                    let sorted = group.sorted { $0.date < $1.date }
+                    guard let first = sorted.first, let last = sorted.last else { continue }
+                    var high = first.high, low = first.low, vol = 0.0, amo = 0.0
+                    for row in sorted {
+                        high = Swift.max(high, row.high)
+                        low = Swift.min(low, row.low)
+                        vol += row.vol
+                        amo += row.amo
+                    }
+                    // bar 的 date = 该周期**首个交易日**（主库同约定）
+                    bars[anchor.period, default: []].append(
+                        LiveUpsertBar(file: file, date: first.date, open: first.open, high: high, low: low,
+                                      close: last.close, vol: vol, amo: amo))
+                }
+            }
+        }
+
+        // ② 单事务：**整表清空后按桶重写**（只留下本次重算的锚桶及之后各桶）。
+        //   为什么是整表而不是 `date < 锚桶起始`：
+        //   云分片给「当期」bar 的 date 用的是**当天**（实测 live_weekly 全是 20260930），
+        //   而正确约定是「周期内首个交易日」（20260928）。若只删锚桶之前，
+        //   那根 date=20260930 的陈旧行会与本次重算出的 date=20260928 **并存**
+        //   → 查询层 merge 按 date 去重，两根都在 → 同一周显示两根。
+        //   锚桶之前的 bar 对应主库完整区间（本就该由 trim 清掉），一并清除同样无害。
+        guard sqlite3_exec(handle, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
+            return r
+        }
+        var failed: String?
+        var deleted = 0
+        var weeklyRows = 0
+        var monthlyRows = 0
+        for anchor in anchors {
+            guard sqlite3_exec(handle, "DELETE FROM \(anchor.table);",
+                               nil, nil, nil) == SQLITE_OK else {
+                failed = "清理 \(anchor.table)：\(String(cString: sqlite3_errmsg(handle)))"
+                break
+            }
+            deleted += Int(sqlite3_changes(handle))
+            var statement: OpaquePointer?
+            let sql = "INSERT OR REPLACE INTO \(anchor.table)(file,date,open,high,low,close,vol,amo) VALUES(?,?,?,?,?,?,?,?);"
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
+                failed = "准备写入 \(anchor.table) 失败：\(String(cString: sqlite3_errmsg(handle)))"
+                break
+            }
+            // 表刚被清空 → 无需再比对（`_rowIdenticalLocked` 恒为 false），直接全量写入
+            var written = 0
+            for bar in bars[anchor.period] ?? [] {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                sqlite3_bind_text(statement, 1, bar.file, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(statement, 2, Int64(bar.date))
+                sqlite3_bind_double(statement, 3, bar.open)
+                sqlite3_bind_double(statement, 4, bar.high)
+                sqlite3_bind_double(statement, 5, bar.low)
+                sqlite3_bind_double(statement, 6, bar.close)
+                sqlite3_bind_double(statement, 7, bar.vol)
+                sqlite3_bind_double(statement, 8, bar.amo)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    failed = "写入 \(anchor.table) 失败：\(String(cString: sqlite3_errmsg(handle)))"
+                    break
+                }
+                written += 1
+            }
+            sqlite3_finalize(statement)
+            if failed != nil { break }
+            if anchor.period == "weekly" { weeklyRows = written } else { monthlyRows = written }
+        }
+        if let failed = failed {
+            sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
+            r.message = "缺口周/月聚合失败（已回滚）：\(failed)"
+            return r
+        }
+        guard sqlite3_exec(handle, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
+            r.message = "缺口周/月聚合提交失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
+            return r
+        }
+        r.ok = true
+        r.weeklyRows = weeklyRows
+        r.monthlyRows = monthlyRows
+        r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
+        r.message = "缺口周/月聚合完成（主库最新 \(mainLatest) 参考日 \(referenceDate)"
+            + " 周锚 \(weekAnchor) 月锚 \(monthAnchor)）：周线写 \(weeklyRows) 行 / 月线写 \(monthlyRows) 行"
+            + "（候选 \(files.count) 只，清空旧 bar \(deleted) 行）"
         return r
     }
 
