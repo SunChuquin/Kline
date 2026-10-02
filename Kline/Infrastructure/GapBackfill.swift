@@ -16,10 +16,12 @@
 //    ⑤ 生成 `date > mainLatest` 的缺口行（量按自校准系数折算到**主库口径**），
 //       经 `LiveDataStore.upsertDaily` 写入 `tdx_live.db`（`(file,date)` UPSERT）
 //       → 查询层「live 覆盖 main」自动生效，日线图立刻连续。
-//    ⑥ 缺口区间的**周/月线**：日线落库后，以「主库最新日所在周期桶」为锚，把锚桶及之后各桶
-//       用「主库日线 ∪ 增量库日线」逐桶重算（`LiveDataStore.rebuildGapPeriods`）→ 周/月视图同样连续。
-//       **锚桶必须一起重算**：主库那一份是**被截断**的（8 月月线只聚到 0828，而 0831 仍属 8 月）。
+//    ⑥ 缺口区间的**周/月/季/年线**：日线落库后，以「主库最新日所在周期桶」为锚，把锚桶及之后各桶
+//       用「主库日线 ∪ 增量库日线」逐桶重算（`LiveDataStore.rebuildGapPeriods`）→ 周期视图同样连续。
+//       **锚桶必须一起重算**：主库那一份是**被截断**的（8 月月线只聚到 0828，而 0831 仍属 8 月；
+//       季线 Q3、年线 2026 同理，`close` 都是 0828 的收盘）。
 //       柱的 `date` = 该周期内该只的**首个交易日**（与主库口径逐槽一致，停牌股会落在周中/月中）。
+//       季/年**不读整年日线**：直接取主库该桶当期 bar 作基期再叠加缺口日线（口径同 `mergePeriodBar`）。
 //
 //  顺带修掉「旧断崖」：云分片那几天的 `live_daily.vol` 是**手**（腾讯快照口径），而主库个股是**股**，
 //  查询层直接拼接 → 增量那几天成交量柱只有历史 1/100 高（已由子代理全链路核查确认无任何换算）。
@@ -356,16 +358,17 @@ final class GapBackfill: ObservableObject {
                 return
             }
             DebugLogger.shared.log("[GapBackfill] 写入增量库成功 \(merge.message)")
-            // ⑤ 缺口区间的周/月线：日线落库后，按「主库最新日所在周期桶 → 今日」逐桶重算
-            //    （日线补齐只让日线图连续；周/月线还得从新日线聚合，否则周/月视图仍是洞）
+            // ⑥ 缺口区间的周/月/季/年线：日线落库后，按「主库最新日所在周期桶 → 今日」逐桶重算
+            //    （日线补齐只让日线图连续；周期视图还得从新日线聚合，否则周/月/季/年仍是洞）
             self.rebuildPeriods(metas: metas, mainLatest: mainLatest, today: today) { period in
                 let periodText = period.ok
-                    ? " · 周线 \(period.weeklyRows) 行 / 月线 \(period.monthlyRows) 行"
-                    : " · 周/月线聚合失败"
+                    ? " · 周 \(period.weeklyRows) / 月 \(period.monthlyRows)"
+                        + " / 季 \(period.quarterlyRows) / 年 \(period.yearlyRows) 行"
+                    : " · 周/月/季/年线聚合失败"
                 DebugLogger.shared.log("[GapBackfill] 周期聚合：\(period.message)")
                 lines.append("周期聚合：" + period.message)
                 self.state = period.ok ? .ok : .failed
-                self.statusText = period.ok ? "缺口已补（含周/月线）" : "周/月线聚合失败"
+                self.statusText = period.ok ? "缺口已补（含周/月/季/年线）" : "周/月/季/年线聚合失败"
                 self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
                 self.verdictText = period.ok
                     ? "缺口已补：\(gapFiles) 只 / \(outBars.count) 行 · 新写入 \(merge.dailyRows) 行"
@@ -374,7 +377,7 @@ final class GapBackfill: ObservableObject {
                         + " · 未补（无重叠校准日 \(anchorMissing) · 停牌 \(suspended)）"
                         + periodText
                         + " · 覆盖 \(dateSpan)"
-                    : "失败：周/月线聚合 \(period.message)"
+                    : "失败：周期聚合 \(period.message)"
                 self.detailLines = lines
                 // 热刷新：让查询层与图表立刻看到补入的日线 + 周/月线
                 LiveDataStore.shared.reloadAsync { summary in
@@ -385,24 +388,38 @@ final class GapBackfill: ObservableObject {
         }
     }
 
-    /// 缺口区间的周/月线：读主库 `[锚桶起始日, mainLatest]` 日线 → 交 LiveDataStore 逐桶聚合。
-    /// 主库日线必须先在 `DatabaseManager.dbQueue` 上读完再进 LiveDataStore 队列（禁止跨队列嵌套）。
+    /// 缺口区间的周/月/季/年线：读主库「日线（周/月锚桶窗口）」+「季/年当期基期 bar」→ 逐桶聚合。
+    /// 季/年**刻意不读整年日线**（160 个交易日 × 3600 只 ≈ 57 万行）：主库那根当期 bar 本身就是
+    /// 「该周期起始日 → `mainLatest`」的聚合快照，叠加缺口日线即可（口径同 `mergePeriodBar`）。
+    /// 主库数据必须先在 `DatabaseManager.dbQueue` 上读完再进 LiveDataStore 队列（禁止跨队列嵌套）。
     private func rebuildPeriods(metas: [MetaItem], mainLatest: Int, today: Int,
                                 completion: @escaping (LiveMergeResult) -> Void) {
-        publish { self.statusText = "聚合周/月线…" }
+        publish { self.statusText = "聚合周/月/季/年线…" }
         let weekAnchor = KlinePeriod.periodDateRange(.weekly, date: mainLatest).0
         let monthAnchor = KlinePeriod.periodDateRange(.monthly, date: mainLatest).0
-        let from = Swift.min(weekAnchor, monthAnchor)
+        let quarterAnchor = KlinePeriod.periodDateRange(.quarterly, date: mainLatest).0
+        let yearAnchor = KlinePeriod.periodDateRange(.yearly, date: mainLatest).0
+        let dailyFrom = Swift.min(weekAnchor, monthAnchor)
         var metaIdByFile: [String: Int] = [:]
         for m in metas { metaIdByFile[m.file] = m.id }
-        DatabaseManager.shared.performOnDBQueue({ db in
-            DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
-                                          fromDate: from, toDate: mainLatest)
-        }, completion: { [weak self] mainDaily in
+        DatabaseManager.shared.performOnDBQueue({ db -> ([String: [KlineItem]], [String: [String: KlineItem]]) in
+            let daily = DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
+                                                      fromDate: dailyFrom, toDate: mainLatest)
+            var bases: [String: [String: KlineItem]] = [:]
+            for (period, table, start) in [("quarterly", "quarterly", quarterAnchor),
+                                           ("yearly", "yearly", yearAnchor)] {
+                bases[period] = DatabaseManager.readMainCurrentPeriodBar(db: db, table: table,
+                                                                         metaIdByFile: metaIdByFile,
+                                                                         fromDate: start)
+            }
+            return (daily, bases)
+        }, completion: { [weak self] (mainDaily, bases) in
             guard let self = self else { return }
-            DebugLogger.shared.log("[GapBackfill] 周/月聚合：主库日线 [\(from), \(mainLatest)] 覆盖 \(mainDaily.count) 只")
+            DebugLogger.shared.log("[GapBackfill] 周期聚合：主库日线 [\(dailyFrom), \(mainLatest)] 覆盖 \(mainDaily.count) 只"
+                + " · 当期基期 bar 季 \(bases["quarterly"]?.count ?? 0) 只 / 年 \(bases["yearly"]?.count ?? 0) 只")
             LiveDataStore.shared.rebuildGapPeriods(mainLatest: mainLatest, referenceDate: today,
-                                                   mainDaily: mainDaily, completion: completion)
+                                                   mainDaily: mainDaily, mainPeriodBars: bases,
+                                                   completion: completion)
         })
     }
 

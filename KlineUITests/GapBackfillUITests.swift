@@ -170,12 +170,13 @@ final class GapBackfillUITests: XCTestCase {
         XCTAssertTrue(fetch.contains("补齐"),
                       "「补齐结果」行未出现补齐统计：\(fetch.isEmpty ? "<缺失>" : fetch)")
 
-        // 周/月线缺口：日线补齐只让日线图连续，周/月视图还得从新日线重新聚合成桶。
-        // 结论必须带「· 周线 N 行 / 月线 M 行」；明细必须有「周期聚合」行（含周锚/月锚）。
-        // ⚠️ 只断言「存在」不断言行数：本组件幂等，重跑时桶内 bar 与库内一致 → 写入 0 行是**正确**的。
-        XCTAssertTrue(verdictLabel.contains("周线") && verdictLabel.contains("月线"),
-                      "结论未含周/月线行数（周期聚合未接入）：\(verdictLabel)")
-        XCTAssertTrue(details.contains { $0.contains("周期聚合") && $0.contains("月锚") },
-                      "明细缺少「周期聚合」行（周锚/月锚）：\(details)")
+        // 周/月/季/年线缺口：日线补齐只让日线图连续，周期视图还得从新日线重新聚合成桶。
+        // 结论必须带「周 N / 月 M / 季 Q / 年 Y 行」；明细必须有「周期聚合」行（含四类锚与行数）。
+        // ⚠️ 只断言「存在」不断言行数：本组件幂等，重跑时桶内 bar 与库内一致，行数会变（不写重复行）。
+        XCTAssertTrue(verdictLabel.contains("周 ") && verdictLabel.contains("月 ")
+                      && verdictLabel.contains("季 ") && verdictLabel.contains("年 "),
+                      "结论未含周/月/季/年线行数（周期聚合未接入）：\(verdictLabel)")
+        XCTAssertTrue(details.contains { $0.contains("周期聚合") && $0.contains("季线") && $0.contains("年线") },
+                      "明细缺少「周期聚合」行（含四类锚与周/月/季/年行数）：\(details)")
     }
 }

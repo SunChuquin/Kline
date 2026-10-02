@@ -415,19 +415,25 @@ final class LiveDataStore: ObservableObject {
     /// - Parameters:
     ///   - mainLatest: 主库最新交易日（= 缺口起点）
     ///   - referenceDate: 补到哪一天（一般 = 今日）
-    ///   - mainDaily: 主库日线（键 = file，date 升序），**必须覆盖 `[锚桶起始日, mainLatest]`**；
+    ///   - mainDaily: 主库日线（键 = file，date 升序），**必须覆盖 `[周锚桶起始日, mainLatest]`**；
     ///     由调用方在 `DatabaseManager.dbQueue` 上预先读好再传入（硬约束：禁止跨队列嵌套）
+    ///   - mainPeriodBars: 主库**当期基期 bar**（`["quarterly": file→bar, "yearly": file→bar]`）。
+    ///     季/年**不读整年日线**（那是 160 个交易日 × 3600 只 ≈ 57 万行），而是取主库该桶那一根快照
+    ///     再叠加缺口日线 —— 与 [WatchlistSyncManager.mergePeriodBar] 同一口径。
     /// completion 在主线程回调。
     func rebuildGapPeriods(mainLatest: Int, referenceDate: Int,
                            mainDaily: [String: [KlineItem]],
+                           mainPeriodBars: [String: [String: KlineItem]],
                            completion: @escaping (LiveMergeResult) -> Void) {
         queue.async { [weak self] in
             guard let self = self else { return }
             let result = self._rebuildGapPeriodsLocked(mainLatest: mainLatest,
                                                        referenceDate: referenceDate,
-                                                       mainDaily: mainDaily)
-            if result.ok && (result.weeklyRows > 0 || result.monthlyRows > 0) {
-                self._refreshAfterInternalWriteLocked(reason: "本地聚合·缺口周月")
+                                                       mainDaily: mainDaily,
+                                                       mainPeriodBars: mainPeriodBars)
+            if result.ok && (result.weeklyRows > 0 || result.monthlyRows > 0
+                             || result.quarterlyRows > 0 || result.yearlyRows > 0) {
+                self._refreshAfterInternalWriteLocked(reason: "本地聚合·缺口周月季年")
             }
             DispatchQueue.main.async { completion(result) }
         }
@@ -1249,12 +1255,19 @@ final class LiveDataStore: ObservableObject {
         return r
     }
 
-    /// 缺口区间的周/月聚合（需已在 queue 上执行）。与 `_rebuildCurrentPeriodBarsLocked` 的区别：
+    /// 缺口区间的**周/月/季/年**聚合（需已在 queue 上执行）。与 `_rebuildCurrentPeriodBarsLocked` 的区别：
     /// 以 **`mainLatest` 所在周期桶的日历起始** 为锚，把锚桶及其之后**所有**周期桶逐桶重算
-    /// （不是只算一根），数据源同样是「增量库日线 ∪ 主库日线，同 date 以增量库为准」。
-    /// 单事务「清掉锚桶之前的 bar → UPSERT」。
+    /// （不是只算一根）。数据源两类：
+    ///   - 周/月：日线桶内聚合，输入 = 「主库日线 ∪ 增量库日线，同 date 以增量库为准」；
+    ///   - 季/年：**不读整年日线**。锚桶那一根取主库的**当期基期 bar**（导入时点快照，只聚到
+    ///     `mainLatest`）再**叠加**桶内缺口日线；锚桶之后的桶若出现（跨季/跨年）没有基期，
+    ///     就纯用缺口日线聚合 —— 那些行本来就在增量库里，无需碰主库。
+    /// 合并口径与 [WatchlistSyncManager.mergePeriodBar] 一致：`open` 取基期、`high/low` 取极值、
+    /// `close` 取末行、`vol/amo` 累加，bar 的 `date` 取基期（= 该周期首个交易日）。
+    /// 单事务「整表清空后按桶重写」。
     private func _rebuildGapPeriodsLocked(mainLatest: Int, referenceDate: Int,
-                                          mainDaily: [String: [KlineItem]]) -> LiveMergeResult {
+                                          mainDaily: [String: [KlineItem]],
+                                          mainPeriodBars: [String: [String: KlineItem]]) -> LiveMergeResult {
         var r = LiveMergeResult()
         guard _ensureWritableOpenLocked(), let handle = db else {
             r.message = "本地增量库不可写（打开失败）"
@@ -1266,14 +1279,18 @@ final class LiveDataStore: ObservableObject {
             return r
         }
         guard let weeklyTable = _localTableNameLocked("weekly"),
-              let monthlyTable = _localTableNameLocked("monthly") else {
+              let monthlyTable = _localTableNameLocked("monthly"),
+              let quarterlyTable = _localTableNameLocked("quarterly"),
+              let yearlyTable = _localTableNameLocked("yearly") else {
             r.ok = true
-            r.message = "本地缺 weekly/monthly 表 → 跳过周期桶聚合"
+            r.message = "本地缺周/月/季/年表 → 跳过周期桶聚合"
             return r
         }
-        // 锚 = mainLatest 所在周期桶的日历起始（周 = 该周周一、月 = 该月 1 日）
+        // 锚 = mainLatest 所在周期桶的日历起始（周 = 该周周一、月 = 该月 1 日、季 = 当季首月 1 日、年 = 当年 1 月 1 日）
         guard let weekAnchor = Self.periodCalendarStart("weekly", referenceDate: mainLatest),
-              let monthAnchor = Self.periodCalendarStart("monthly", referenceDate: mainLatest) else {
+              let monthAnchor = Self.periodCalendarStart("monthly", referenceDate: mainLatest),
+              let quarterAnchor = Self.periodCalendarStart("quarterly", referenceDate: mainLatest),
+              let yearAnchor = Self.periodCalendarStart("yearly", referenceDate: mainLatest) else {
             r.ok = true
             r.message = "锚桶起始日解析失败 → 跳过周期桶聚合"
             return r
@@ -1281,13 +1298,18 @@ final class LiveDataStore: ObservableObject {
         let anchors: [(period: String, table: String, start: Int)] = [
             ("weekly", weeklyTable, weekAnchor),
             ("monthly", monthlyTable, monthAnchor),
+            ("quarterly", quarterlyTable, quarterAnchor),
+            ("yearly", yearlyTable, yearAnchor),
         ]
-        let lo = Swift.min(weekAnchor, monthAnchor)
+        // 增量库日线的读取下界：四者最小值（年锚）。增量库里只有缺口那几天，读起来很轻。
+        let lo = Swift.min(Swift.min(weekAnchor, monthAnchor), Swift.min(quarterAnchor, yearAnchor))
 
         // ① 逐 file：并集日线（date 升序）→ 按周期桶分组 → 逐桶算 bar
         let liveDaily = _dailyRowsLocked(handle, from: lo, to: referenceDate)
         var files = Set(liveDaily.keys)
         files.formUnion(mainDaily.keys)
+        if let q = mainPeriodBars["quarterly"] { files.formUnion(q.keys) }
+        if let y = mainPeriodBars["yearly"] { files.formUnion(y.keys) }
         var bars: [String: [LiveUpsertBar]] = [:]
         for file in files {
             var byDate: [Int: LiveIncrementRow] = [:]
@@ -1297,30 +1319,58 @@ final class LiveDataStore: ObservableObject {
             }
             for l in liveDaily[file] ?? [] { byDate[l.date] = l }
             let rows = byDate.values.sorted { $0.date < $1.date }
-            guard let newest = rows.last, newest.date >= lo else { continue }
             for anchor in anchors {
                 let win = rows.filter { $0.date >= anchor.start }
-                guard !win.isEmpty else { continue }
+                // 主库该周期的**当期基期 bar**（只有锚桶会有；季/年靠它避免读整年日线）
+                let base = mainPeriodBars[anchor.period]?[file]
+                let baseBucket = base.flatMap {
+                    Self.periodCalendarStart(anchor.period, referenceDate: $0.date)
+                }
+                guard !win.isEmpty || base != nil else { continue }
                 // 按「该行所属周期桶的日历起始」分组（同一桶内的日线聚成一根 bar）
                 var buckets: [Int: [LiveIncrementRow]] = [:]
                 for row in win {
                     guard let bucket = Self.periodCalendarStart(anchor.period, referenceDate: row.date) else { continue }
                     buckets[bucket, default: []].append(row)
                 }
-                for (_, group) in buckets {
+                // 基期桶可能**一根缺口日线都没有**（如周/月的锚桶、停牌股）→ 也要产出（值 = 基期）
+                if let baseBucket = baseBucket, baseBucket >= anchor.start, buckets[baseBucket] == nil {
+                    buckets[baseBucket] = []
+                }
+                for (bucket, group) in buckets {
                     let sorted = group.sorted { $0.date < $1.date }
-                    guard let first = sorted.first, let last = sorted.last else { continue }
-                    var high = first.high, low = first.low, vol = 0.0, amo = 0.0
-                    for row in sorted {
-                        high = Swift.max(high, row.high)
-                        low = Swift.min(low, row.low)
-                        vol += row.vol
-                        amo += row.amo
+                    if let base = base, baseBucket == bucket {
+                        // 主库当期 bar ⊕ 缺口日线（口径同 WatchlistSyncManager.mergePeriodBar）。
+                        // ⚠️ 只能叠加 `date > mainLatest` 的行：基期 bar 是「该周期起始日 → mainLatest」的
+                        //    聚合快照，已经含了主库日线窗口（`0801~0828`）那些行；若把 `sorted` 全加进去
+                        //    会把 8 月整月重复累加（实测季线 vol 多 1,362,394,878、年线同理），价格字段
+                        //    取极值/末值不受影响，所以只看 close 是查不出这个错的。
+                        let gapRows = sorted.filter { $0.date > mainLatest }
+                        var high = base.high, low = base.low
+                        var vol = base.volume, amo = base.turnover
+                        for row in gapRows {
+                            high = Swift.max(high, row.high)
+                            low = Swift.min(low, row.low)
+                            vol += row.vol
+                            amo += row.amo
+                        }
+                        bars[anchor.period, default: []].append(
+                            LiveUpsertBar(file: file, date: base.date, open: base.open, high: high, low: low,
+                                          close: gapRows.last?.close ?? base.close, vol: vol, amo: amo))
+                    } else {
+                        guard let first = sorted.first, let last = sorted.last else { continue }
+                        var high = first.high, low = first.low, vol = 0.0, amo = 0.0
+                        for row in sorted {
+                            high = Swift.max(high, row.high)
+                            low = Swift.min(low, row.low)
+                            vol += row.vol
+                            amo += row.amo
+                        }
+                        // bar 的 date = 该周期**首个交易日**（主库同约定）
+                        bars[anchor.period, default: []].append(
+                            LiveUpsertBar(file: file, date: first.date, open: first.open, high: high, low: low,
+                                          close: last.close, vol: vol, amo: amo))
                     }
-                    // bar 的 date = 该周期**首个交易日**（主库同约定）
-                    bars[anchor.period, default: []].append(
-                        LiveUpsertBar(file: file, date: first.date, open: first.open, high: high, low: low,
-                                      close: last.close, vol: vol, amo: amo))
                 }
             }
         }
@@ -1340,6 +1390,8 @@ final class LiveDataStore: ObservableObject {
         var deleted = 0
         var weeklyRows = 0
         var monthlyRows = 0
+        var quarterlyRows = 0
+        var yearlyRows = 0
         for anchor in anchors {
             guard sqlite3_exec(handle, "DELETE FROM \(anchor.table);",
                                nil, nil, nil) == SQLITE_OK else {
@@ -1374,24 +1426,32 @@ final class LiveDataStore: ObservableObject {
             }
             sqlite3_finalize(statement)
             if failed != nil { break }
-            if anchor.period == "weekly" { weeklyRows = written } else { monthlyRows = written }
+            switch anchor.period {
+            case "weekly":    weeklyRows = written
+            case "monthly":   monthlyRows = written
+            case "quarterly": quarterlyRows = written
+            default:          yearlyRows = written
+            }
         }
         if let failed = failed {
             sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
-            r.message = "缺口周/月聚合失败（已回滚）：\(failed)"
+            r.message = "缺口周期聚合失败（已回滚）：\(failed)"
             return r
         }
         guard sqlite3_exec(handle, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
             sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
-            r.message = "缺口周/月聚合提交失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
+            r.message = "缺口周期聚合提交失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
             return r
         }
         r.ok = true
         r.weeklyRows = weeklyRows
         r.monthlyRows = monthlyRows
+        r.quarterlyRows = quarterlyRows
+        r.yearlyRows = yearlyRows
         r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
-        r.message = "缺口周/月聚合完成（主库最新 \(mainLatest) 参考日 \(referenceDate)"
-            + " 周锚 \(weekAnchor) 月锚 \(monthAnchor)）：周线写 \(weeklyRows) 行 / 月线写 \(monthlyRows) 行"
+        r.message = "缺口周期聚合完成（主库最新 \(mainLatest) 参考日 \(referenceDate)"
+            + " 锚 周\(weekAnchor)/月\(monthAnchor)/季\(quarterAnchor)/年\(yearAnchor)）："
+            + "周线 \(weeklyRows) / 月线 \(monthlyRows) / 季线 \(quarterlyRows) / 年线 \(yearlyRows) 行"
             + "（候选 \(files.count) 只，清空旧 bar \(deleted) 行）"
         return r
     }
