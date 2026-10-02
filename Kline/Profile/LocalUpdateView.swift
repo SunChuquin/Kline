@@ -61,6 +61,8 @@ struct LocalUpdateView: View {
     @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
     /// 直连源链对拍探针（**仅调试用 PoC**：设备侧直连腾讯/新浪/同花顺 vs 云端 CNB 分片）
     @ObservedObject private var directProbe = DirectQuoteProbe.shared
+    /// 补缺口（设备侧直连腾讯历史K线，把主库最新日 → 今天的日线自行补齐）
+    @ObservedObject private var gapBackfill = GapBackfill.shared
 
     // MARK: - 合并到 tdx.db（增量库 → 主库）
 
@@ -84,6 +86,7 @@ struct LocalUpdateView: View {
             syncSection
             watchlistSyncSection
             directProbeSection
+            gapBackfillSection
         }
         .onAppear {
             refreshServerStatus()
@@ -845,6 +848,100 @@ struct LocalUpdateView: View {
 
     private var directProbeStateColor: Color {
         switch directProbe.state {
+        case .idle:    return Color(.secondaryLabel)
+        case .running: return .yellow
+        case .ok:      return .green
+        case .failed:  return .red
+        }
+    }
+
+    // MARK: - 补缺口（主库最新日 → 今天）
+
+    /// 「补缺口」子区：读主库 `meta.last_date` 最大值 → 逐只直连腾讯历史K线 `newfqkline`
+    /// 拉 `[主库最新日, 今天]` 的日线 → 用基准当天自校准量纲 → 缺口行写入增量库
+    /// （`(file,date)` UPSERT，顺带把云分片那几天的「手」值就地覆盖成「股」→ 消除旧断崖）。
+    /// 规格与其它卡片组一致。
+    private var gapBackfillSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("补缺口（主库最新日 → 今天）")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.85))
+
+            VStack(spacing: 0) {
+                gapBackfillStatusRows
+                gapBackfillActionRows
+            }
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+    }
+
+    /// 状态 / 区间 / 结果 / 结论
+    private var gapBackfillStatusRows: some View {
+        VStack(spacing: 0) {
+            infoRow(title: "状态", value: gapBackfill.statusText,
+                    valueColor: gapBackfillStateColor, identifier: "gapBackfill.status")
+
+            Divider()
+            infoRow(title: "主库 → 今日", value: gapBackfill.coverageText,
+                    identifier: "gapBackfill.coverage")
+
+            Divider()
+            infoRow(title: "补齐结果", value: gapBackfill.fetchText,
+                    identifier: "gapBackfill.fetch")
+
+            Divider()
+            infoRow(title: "结论", value: gapBackfill.verdictText,
+                    valueColor: gapBackfillStateColor, identifier: "gapBackfill.verdict")
+        }
+    }
+
+    /// 跑一次补缺口 / 明细
+    private var gapBackfillActionRows: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            Button(action: { gapBackfill.run() }) {
+                HStack(spacing: 10) {
+                    Text("补一次缺口")
+                        .font(.system(size: 16))
+                        .foregroundColor(gapBackfillTappable ? Color.primary : Color.gray)
+                    Spacer(minLength: 12)
+                    if gapBackfill.isRunning {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "square.and.arrow.down.on.square")
+                            .font(.system(size: 18))
+                            .foregroundColor(gapBackfillTappable ? Color.blue : Color.gray)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!gapBackfillTappable)
+            .accessibilityIdentifier("gapBackfill.run")
+
+            ForEach(Array(gapBackfill.detailLines.enumerated()), id: \.offset) { index, line in
+                Divider()
+                Text(line)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("gapBackfill.detail.\(index)")
+            }
+        }
+    }
+
+    private var gapBackfillTappable: Bool { !gapBackfill.isRunning }
+
+    private var gapBackfillStateColor: Color {
+        switch gapBackfill.state {
         case .idle:    return Color(.secondaryLabel)
         case .running: return .yellow
         case .ok:      return .green
