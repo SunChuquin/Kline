@@ -593,13 +593,12 @@ struct ProbeItem {
     /// 映射规则（2026-10-03 PC 全量对拍 299 只扩展行情实测）：
     ///   · `SH#`/`SZ#` → `sh`/`sz`（上证指数伪代码 999999 → 000001）
     ///   · `12#NDX` 等纳指系 → `usNDX`（us 前缀；当前 meta 无 12#，留作扩展）
-    ///   · `62#`/`102#` 的 000 段 → `sh`、399/980 段 → `sz`（深交所国证发布段；
-    ///     量比精确 1e-4、额比精确 1e-6 → 由补缺口 ÷10000 窗口吸附。smartbox 实测
-    ///     12 只 980 段（国证芯片 980017 等）全部对拍通过；930/931/932/950/H30 段
-    ///     直接探测 0/80 无源）
+    ///   · `62#`/`102#` → **全段映射**：000 段→sh、其余→sz（腾讯市场码猜测值，仅当主源尝试）。
+    ///     其中 000/399/980 段腾讯有源；930/931/932/950/987/970/CN 等定制段腾讯无码，
+    ///     自动落东财 `emSecids`（2026-10-04 实测东财 2.<代码> 覆盖 233/235）
+    ///   · 其余 42#/46#（贵金属等）→ 两源皆无，nil
     ///   · `27#HSI` 等恒生系 → `hkHSI`（hk 前缀；2026-10-04 复检：主库 vol = 源÷1e7 整数舍入、
     ///     amo = 源×0.01，30 日×3 只验证精确稳定 → 可安全换算，由补缺口 1e-7 窗口吸附）
-    ///   · 其余（62#/102# 的 930/931/932/950/CN 段国证指数、42#、46# 贵金属）→ 腾讯无源，nil
     /// 兜底：错映射是**安全的**——补缺口自校准要求锚点日价格逐字段相等 + 量比吸附，对不上判异常丢弃
     init?(file: String, type: String) {
         let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
@@ -615,11 +614,9 @@ struct ProbeItem {
         case "SZ": market = "sz"
         case "27": market = "hk"                    // 恒生系指数（量纲 = 源÷1e7 舍入，可安全换算）
         case "12": market = "us"                    // 纳斯达克系指数
-        case "62", "102":                           // 国证/中证扩展：仅交易所发布段有源
-            if code.hasPrefix("000") { market = "sh" }
-            else if code.hasPrefix("399") || code.hasPrefix("980") { market = "sz" }
-            else { return nil }
-        default: return nil                         // 42#/46# 等无源
+        case "62", "102":                           // 国证/中证扩展全段：000 段→sh，其余→sz
+            market = code.hasPrefix("000") ? "sh" : "sz"   // 000/399/980 段腾讯有源；定制段腾讯无码→落东财
+        default: return nil                         // 42#/46# 等两源皆无
         }
         let isIndex = type.contains("指数")
         self.file = file
@@ -627,5 +624,27 @@ struct ProbeItem {
         self.marketCode = market + code
         // 688xxx（腾讯按「股」报量）与指数（量纲杂）原样保留；其余 ÷100 四舍五入
         self.volIsRaw = code.hasPrefix("688") || isIndex
+    }
+
+    /// 东财 secid 候选（按序尝试，第二源兜底用）：
+    /// 中证/国证定制段（930/931/932/950/987/970 等）= `2.<代码>`（实测）；国证 980 段 = `0.<代码>`；
+    /// 沪/深 = `1.`/`0.`；恒生系 = `116.`；纳指系 = `100.`（后两者未实测，仅腾讯失败时兜底）
+    var emSecids: [String] {
+        let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return [] }
+        let prefix = parts[0].uppercased()
+        var code = String(parts[1])
+        if prefix == "SH" && code == "999999" { code = "000001" }
+        switch prefix {
+        case "SH": return ["1." + code]
+        case "SZ": return ["0." + code]
+        case "27": return ["116." + code]
+        case "12": return ["100." + code]
+        case "62", "102":
+            var list = ["2." + code]
+            if code.hasPrefix("980") { list = ["0." + code, "2." + code] }
+            return list
+        default: return []
+        }
     }
 }

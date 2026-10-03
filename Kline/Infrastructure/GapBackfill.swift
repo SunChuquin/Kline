@@ -11,8 +11,8 @@
 //    ① 主库 `meta.last_date` 最大值 = 全市场主库最新交易日 `mainLatest`；
 //    ② 读主库 `mainLatest` 当天每只的 OHLCV/AMO 作为**自校准基准**（一次 SQL 取全市场）；
 //    ③ 逐只直连腾讯历史K线 `newfqkline` 拉 `[mainLatest, today]` 的日线
-//       （4 条 h2 连接 × 24 路并发；根数按缺口自然日差动态算 + 10 余量、封顶 320，
-//        避免白拉 90% 无用数据）；
+//       （4 条 h2 连接 × 24 路并发；根数按缺口自然日差动态算 + 10 余量、封顶 320；
+//        腾讯失败/无码自动落东财 push2his 第二源——62#/102# 定制段 930/931 等只有东财有）；
 //    ④ 用基准当天那一行做**自校准**（价格必须逐字段相等；量比吸附到 1 或 100；额比须 ≈1），
 //       任一条不符 → 判为口径异常并**丢弃该只**（宁可少补，绝不静默写错值）；
 //    ⑤ 生成 `date > mainLatest` 的缺口行（量按自校准系数折算到**主库口径**），
@@ -93,8 +93,8 @@ private struct GapBar {
 
 /// 单只取数结果
 private enum GapOutcome {
-    /// 有缺口行（含自校准系数，供汇总统计量纲分布）
-    case gap(bars: [GapBar], volRatio: Double)
+    /// 有缺口行（含自校准系数，供汇总统计量纲分布）；priceOnly = 量额缺失只补价格
+    case gap(bars: [GapBar], volRatio: Double, priceOnly: Bool)
     /// 接口返回的行全部 ≤ 主库最新日 → 本来就是最新的
     case upToDate
     /// 基准日停牌（量或额为 0）→ 无从校准
@@ -107,7 +107,7 @@ private enum GapOutcome {
     case failed(String)
 }
 
-/// 补缺口（**App 直连腾讯历史K线，自行把主库最新日 → 今天的日线补齐**）
+/// 补缺口（**App 直连腾讯历史K线为主源、东财 push2his 兜底，自行把主库最新日 → 今天的日线补齐**）
 final class GapBackfill: ObservableObject {
     static let shared = GapBackfill()
 
@@ -307,16 +307,18 @@ final class GapBackfill: ObservableObject {
         let lock = NSLock()
         let gate = DispatchSemaphore(value: Self.concurrency)
         var outcomes = [GapOutcome?](repeating: nil, count: total)
+        var emFlags = [Bool](repeating: false, count: total)
         var processed = 0
         var lastPublish = Date.distantPast
         DispatchQueue.concurrentPerform(iterations: total) { idx in
             gate.wait()
             let session = self.sessions[idx % self.sessions.count]
-            let outcome = self.fetchGap(job: jobs[idx], mainLatest: mainLatest, today: today,
-                                        session: session)
+            let (outcome, usedEM) = self.fetchGap(job: jobs[idx], mainLatest: mainLatest, today: today,
+                                                  session: session)
             gate.signal()
             lock.lock()
             outcomes[idx] = outcome
+            emFlags[idx] = usedEM
             processed += 1
             let done = processed
             // UI 节流 0.25s：既不刷爆主线程，又让用户看到「还在跑、跑到哪」
@@ -353,14 +355,19 @@ final class GapBackfill: ObservableObject {
         var ratio1 = 0
         var ratio100 = 0
         var ratio10000 = 0
+        var emCount = 0
+        var priceOnlyCount = 0
         var gapDates = Set<Int>()
         for (idx, outcome) in outcomes.enumerated() {
             guard let outcome = outcome else { continue }
             let m = jobs[idx].meta
             switch outcome {
-            case .gap(let bars, let volRatio):
+            case .gap(let bars, let volRatio, let priceOnly):
                 gapFiles += 1
-                if volRatio == 1 { ratio1 += 1 }
+                if emFlags[idx] { emCount += 1 }
+                if priceOnly {
+                    priceOnlyCount += 1
+                } else if volRatio == 1 { ratio1 += 1 }
                 else if volRatio == 100 { ratio100 += 1 }
                 else { ratio10000 += 1 }
                 outMetas.append(LiveUpsertMeta(file: m.file, code: m.code, name: m.name, type: m.type))
@@ -393,9 +400,11 @@ final class GapBackfill: ObservableObject {
         lines.append("主库 \(mainLatest) → 今日 \(today)：待补 \(total) 只"
             + "（不可映射 \(unmappable) · 基准行缺 \(noBaseline)）")
         lines.append("缺口覆盖 \(dateSpan)")
-        lines.append(String(format: "自校准量纲：1x %d 只 / 100x %d 只 / 指数折算 %d 只；口径异常 %d 只 · 取数失败 %d 只"
+        lines.append(String(format: "自校准量纲：1x %d 只 / 100x %d 只 / 指数折算 %d 只 / 仅补价格 %d 只"
+                                  + " · 东财兜底 %d 只 · 口径异常 %d 只 · 取数失败 %d 只"
                                   + " · 无重叠校准日 %d 只 · 停牌 %d 只 · 已最新 %d 只（%.1fs）",
-                            ratio1, ratio100, ratio10000, anomalyCount, failureCount,
+                            ratio1, ratio100, ratio10000, priceOnlyCount, emCount,
+                            anomalyCount, failureCount,
                             anchorMissing, suspended, upToDate, seconds))
         for s in anomalies { lines.append("口径异常：\(s)") }
         for s in failures { lines.append("取数失败：\(s)") }
@@ -459,6 +468,7 @@ final class GapBackfill: ObservableObject {
                     self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
                     self.verdictText = "缺口已补：\(gapFiles) 只 / \(outBars.count) 行 · 新写入 \(merge.dailyRows) 行"
                         + " · 量纲 1x \(ratio1) / 100x \(ratio100) / 指数折算 \(ratio10000)"
+                        + " · 仅补价格 \(priceOnlyCount) · 东财兜底 \(emCount)"
                         + " · 口径异常 \(anomalyCount) · 取数失败 \(failureCount)"
                         + " · 未补（无重叠校准日 \(anchorMissing) · 停牌 \(suspended)）"
                         + periodText
@@ -516,26 +526,46 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 单只取数与自校准（并发执行）
 
-    private func fetchGap(job: GapJob, mainLatest: Int, today: Int, session: URLSession) -> GapOutcome {
-        let (fetched, why) = fetchSourceBars(item: job.item, from: mainLatest, to: today,
-                                             count: Self.barsCount(from: mainLatest, to: today),
-                                             session: session)
-        guard let rows = fetched else { return .failed(why) }
-        guard !rows.isEmpty else { return .failed("接口返回 0 根") }
+    private func fetchGap(job: GapJob, mainLatest: Int, today: Int, session: URLSession) -> (GapOutcome, Bool) {
+        let count = Self.barsCount(from: mainLatest, to: today)
+        // ⓪ 主源腾讯；失败/空 → 东财兜底（62#/102# 定制段 930/931/932/987 等只有东财有）
+        var (fetched, why) = fetchSourceBars(item: job.item, from: mainLatest, to: today,
+                                             count: count, session: session)
+        var usedEM = false
+        if fetched == nil || fetched?.isEmpty == true {
+            let (emRows, whyEM) = fetchEastmoneyBars(item: job.item, from: mainLatest, to: today,
+                                                     session: session)
+            if let em = emRows, !em.isEmpty {
+                fetched = em
+                usedEM = true
+            } else {
+                why = "\(why)｜东财:\(whyEM)"
+            }
+        }
+        guard let rows = fetched, !rows.isEmpty else { return (.failed(why), false) }
         // 基准当天那行（自校准锚点）；源侧没有该行 = 长期停牌、两边无重叠可校准日 → 跳过
         guard let anchor = rows.first(where: { $0.date == mainLatest }) else {
-            return .anchorMissing
+            return (.anchorMissing, usedEM)
         }
         let b = job.base
         // ① 价格必须逐字段相等（口径不同：复权 / 代码错配 / 接口换版 → 绝不写库）
         guard Self.near(b.open, anchor.open), Self.near(b.high, anchor.high),
               Self.near(b.low, anchor.low), Self.near(b.close, anchor.close) else {
-            return .anomaly(String(format: "价格不符 主库 %.3f/%.3f/%.3f/%.3f 源 %.3f/%.3f/%.3f/%.3f",
-                                   b.open, b.high, b.low, b.close,
-                                   anchor.open, anchor.high, anchor.low, anchor.close))
+            return (.anomaly(String(format: "价格不符 主库 %.3f/%.3f/%.3f/%.3f 源 %.3f/%.3f/%.3f/%.3f",
+                                    b.open, b.high, b.low, b.close,
+                                    anchor.open, anchor.high, anchor.low, anchor.close)), usedEM)
         }
-        // ② 量比吸附到 1 / 100 / 0.0001（中证指数）/ 1e-7（恒生系）
-        guard anchor.vol > 0, b.volume > 0 else { return .suspended }
+        // ② 主库锚点无量额口径（如 MSCI 定制指数官方不发布）→ **只补价格**，vol/amo 写 0 与主库一致
+        if b.volume <= 0 {
+            let bars = rows.filter { $0.date > mainLatest }.map {
+                GapBar(date: $0.date, open: $0.open, high: $0.high, low: $0.low, close: $0.close,
+                       vol: 0, amo: 0)
+            }
+            return bars.isEmpty ? (.upToDate, usedEM) : (.gap(bars: bars, volRatio: 1, priceOnly: true), usedEM)
+        }
+        // 源侧锚点量为 0 → 真实停牌，无从折算
+        guard anchor.vol > 0 else { return (.suspended, usedEM) }
+        // ③ 量比吸附到 1 / 100 / 0.0001（中证指数）/ 1e-7（恒生系）
         let rawVol = b.volume / anchor.vol
         let volRatio: Double
         if Self.volRatioBand1.contains(rawVol) {
@@ -547,18 +577,18 @@ final class GapBackfill: ObservableObject {
         } else if Self.volRatioBand1e_7.contains(rawVol) {
             volRatio = 1e-7
         } else {
-            return .anomaly(String(format: "量比异常 %.3g（既不像 1/100/1e-4/1e-7）", rawVol))
+            return (.anomaly(String(format: "量比异常 %.3g（既不像 1/100/1e-4/1e-7）", rawVol)), usedEM)
         }
-        // ③ 额比哨兵：rawAmo = 主库 / (源[万]×10000)。个股/普通指数 ≈1（主库元）；
+        // ④ 额比哨兵：rawAmo = 主库 / (源[万]×10000)。个股/普通指数 ≈1（主库元）；
         //    指数折算类（中证/恒生，volRatio<1）主库额 = 源×0.01（PC 实测精确）→ rawAmo ≈1e-6
         if anchor.amo > 0, b.turnover > 0 {
             let expected = volRatio >= 1 ? 1.0 : 1e-6
             let rawAmo = b.turnover / (anchor.amo * 10000)
             if abs(rawAmo - expected) / expected > Self.amoRatioTolerance {
-                return .anomaly(String(format: "额比异常 %.4g", rawAmo))
+                return (.anomaly(String(format: "额比异常 %.4g", rawAmo)), usedEM)
             }
         }
-        // ④ 生成缺口行：量/额折算到**主库口径**。额：个股=源(万)×10000；指数类=源(万)×0.01。
+        // ⑤ 生成缺口行：量/额折算到**主库口径**。额：个股=源(万)×10000；指数类=源(万)×0.01。
         //    量：指数折算类主库是**整数舍入**口径 → round 对齐（个股 100x 精确整数，round 无损）
         let amoScale: Double = volRatio >= 1 ? 10_000 : 0.01
         let bars = rows.filter { $0.date > mainLatest }.map {
@@ -566,7 +596,7 @@ final class GapBackfill: ObservableObject {
                    vol: volRatio >= 1 ? $0.vol * volRatio : ($0.vol * volRatio).rounded(),
                    amo: $0.amo * amoScale)
         }
-        return bars.isEmpty ? .upToDate : .gap(bars: bars, volRatio: volRatio)
+        return bars.isEmpty ? (.upToDate, usedEM) : (.gap(bars: bars, volRatio: volRatio, priceOnly: false), usedEM)
     }
 
     // MARK: - 腾讯 newfqkline 取数
@@ -639,6 +669,45 @@ final class GapBackfill: ObservableObject {
                                  close: close, vol: vol, amo: amo))
         }
         return (out, "")
+    }
+
+    /// 东财 push2his 日线（**第二源**）：62#/102# 定制段（930/931/932/950/987/970 等）只有东财有。
+    /// fields2=f51..f57 → 日期,开,收,高,低,量(手),额(元)——开收高低顺序与腾讯一致（PC 校准确认）；
+    /// amo 元→万元 折算，与腾讯 SourceBar 同口径（额比哨兵/写库逻辑共用）。
+    /// 量纲经 PC 对拍与腾讯同构（中证类量比 1e-4、额比 1e-6），自校准窗口原样适用。
+    private func fetchEastmoneyBars(item: ProbeItem, from: Int, to: Int,
+                                    session: URLSession) -> ([SourceBar]?, String) {
+        let secids = item.emSecids
+        guard !secids.isEmpty else { return (nil, "无东财候选") }
+        var lastWhy = "无候选"
+        for secid in secids {
+            let url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=\(secid)"
+                + "&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0"
+                + "&beg=\(from)&end=\(to)"
+            guard let data = getData(url, session) else { lastWhy = "HTTP 失败/超时"; continue }
+            guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                lastWhy = "响应非 JSON"; continue
+            }
+            guard let d = root["data"] as? [String: Any],
+                  let lines = d["klines"] as? [String], !lines.isEmpty else {
+                lastWhy = "无 klines"; continue
+            }
+            var out: [SourceBar] = []
+            out.reserveCapacity(lines.count)
+            for line in lines {
+                let p = line.split(separator: ",").map(String.init)
+                guard p.count >= 7,
+                      let date = Int(p[0].replacingOccurrences(of: "-", with: "")),
+                      let open = Self.num(p[1]), let close = Self.num(p[2]),
+                      let high = Self.num(p[3]), let low = Self.num(p[4]),
+                      let vol = Self.num(p[5]), let amo = Self.num(p[6]) else { continue }
+                out.append(SourceBar(date: date, open: open, high: high, low: low,
+                                     close: close, vol: vol, amo: amo / 10000))
+            }
+            if !out.isEmpty { return (out, "") }
+            lastWhy = "klines 全部解析失败"
+        }
+        return (nil, lastWhy)
     }
 
     /// 同步 GET（并发调用，各自等待）；失败落日志并返回 nil。
