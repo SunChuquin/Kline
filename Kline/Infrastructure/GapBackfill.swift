@@ -139,9 +139,12 @@ final class GapBackfill: ObservableObject {
     /// 而「既不像 1 也不像 100」的比值仍会被拦下（宁可少补，绝不写错量纲）。
     static let volRatioBand1: ClosedRange<Double> = 0.5...2
     static let volRatioBand100: ClosedRange<Double> = 50...200
-    /// 中证/国证指数（62#/102# 的 000 段 → sh000xxx）：主库 vol = 源 vol ÷ 10000
-    /// （volRatio = 主库/源 = 精确 1e-4。2026-10-03 PC 全量对拍 23 只，价格逐字段全过）
+    /// 中证/国证指数（62#/102# 的 000/399/980 段）：主库 vol = 源 vol ÷ 10000（PC 全量对拍精确 1e-4）
     static let volRatioBand0_0001: ClosedRange<Double> = 0.00005...0.0002
+    /// 恒生系（27# → hk）：主库 vol = 源 vol ÷ 1e7 **再四舍五入到整数**。
+    /// 2026-10-03 复检（30 日 × 3 只）：round(源/1e7)==主库vol 90 样本仅 2 例边界违例（银行家舍入），
+    /// amo 关系精确 ×0.01 —— 主库港股指数口径就是「成交额(港元)÷1e7」，可安全换算
+    static let volRatioBand1e_7: ClosedRange<Double> = 0.00000008...0.000000125
     /// 成交额相对容差：**只当量纲哨兵用**（拦 100x / 10000x 级别错误），不做数值一致性判据。
     /// 个股实测偏差 0.0000%；但深市指数（399006/399102）源与主库自身就有 **+0.73%** 的
     /// 统计口径差（与两者 vol 差 +4% 同源），卡在 0.5% 会把它们误判成口径异常。
@@ -390,7 +393,7 @@ final class GapBackfill: ObservableObject {
         lines.append("主库 \(mainLatest) → 今日 \(today)：待补 \(total) 只"
             + "（不可映射 \(unmappable) · 基准行缺 \(noBaseline)）")
         lines.append("缺口覆盖 \(dateSpan)")
-        lines.append(String(format: "自校准量纲：1x %d 只 / 100x %d 只 / ÷10000 %d 只；口径异常 %d 只 · 取数失败 %d 只"
+        lines.append(String(format: "自校准量纲：1x %d 只 / 100x %d 只 / 指数折算 %d 只；口径异常 %d 只 · 取数失败 %d 只"
                                   + " · 无重叠校准日 %d 只 · 停牌 %d 只 · 已最新 %d 只（%.1fs）",
                             ratio1, ratio100, ratio10000, anomalyCount, failureCount,
                             anchorMissing, suspended, upToDate, seconds))
@@ -402,7 +405,7 @@ final class GapBackfill: ObservableObject {
             self.detailLines = lines
         }
         DebugLogger.shared.log("[GapBackfill] 取数完成：补齐 \(gapFiles) 只 / \(outBars.count) 行"
-            + "（1x \(ratio1) / 100x \(ratio100) / ÷10000 \(ratio10000) · 最新 \(upToDate) · 停牌 \(suspended)"
+            + "（1x \(ratio1) / 100x \(ratio100) / 指数折算 \(ratio10000) · 最新 \(upToDate) · 停牌 \(suspended)"
             + " · 无重叠校准日 \(anchorMissing) · 口径异常 \(anomalyCount) · 失败 \(failureCount)）"
             + "，覆盖 \(dateSpan)，耗时 \(String(format: "%.1fs", seconds))")
 
@@ -455,7 +458,7 @@ final class GapBackfill: ObservableObject {
                     self.statusText = merged.ok ? "缺口已补（含周/月/季/年线，已合并主库）" : "缺口已补，但合并主库失败"
                     self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
                     self.verdictText = "缺口已补：\(gapFiles) 只 / \(outBars.count) 行 · 新写入 \(merge.dailyRows) 行"
-                        + " · 量纲 1x \(ratio1) / 100x \(ratio100) / ÷10000 \(ratio10000)"
+                        + " · 量纲 1x \(ratio1) / 100x \(ratio100) / 指数折算 \(ratio10000)"
                         + " · 口径异常 \(anomalyCount) · 取数失败 \(failureCount)"
                         + " · 未补（无重叠校准日 \(anchorMissing) · 停牌 \(suspended)）"
                         + periodText
@@ -531,7 +534,7 @@ final class GapBackfill: ObservableObject {
                                    b.open, b.high, b.low, b.close,
                                    anchor.open, anchor.high, anchor.low, anchor.close))
         }
-        // ② 量比吸附到 1 / 100 / 0.0001（volRatio = 主库/源：个股=股/手 →100；中证指数 = 源÷10000 → 0.0001）
+        // ② 量比吸附到 1 / 100 / 0.0001（中证指数）/ 1e-7（恒生系）
         guard anchor.vol > 0, b.volume > 0 else { return .suspended }
         let rawVol = b.volume / anchor.vol
         let volRatio: Double
@@ -541,23 +544,27 @@ final class GapBackfill: ObservableObject {
             volRatio = 100
         } else if Self.volRatioBand0_0001.contains(rawVol) {
             volRatio = 0.0001
+        } else if Self.volRatioBand1e_7.contains(rawVol) {
+            volRatio = 1e-7
         } else {
-            return .anomaly(String(format: "量比异常 %.6f（既不像 1/100/0.0001）", rawVol))
+            return .anomaly(String(format: "量比异常 %.3g（既不像 1/100/1e-4/1e-7）", rawVol))
         }
-        // ③ 额比哨兵：rawAmo = 主库 / (源[万元]×10000)。个股/普通指数 ≈1（主库元）；
-        //    中证指数类（volRatio=0.0001）主库额 = 源(万元)×0.01（PC 实测精确，000171/000922 两点核实）→ rawAmo ≈1e-6
+        // ③ 额比哨兵：rawAmo = 主库 / (源[万]×10000)。个股/普通指数 ≈1（主库元）；
+        //    指数折算类（中证/恒生，volRatio<1）主库额 = 源×0.01（PC 实测精确）→ rawAmo ≈1e-6
         if anchor.amo > 0, b.turnover > 0 {
-            let expected = volRatio == 0.0001 ? 1e-6 : 1.0
+            let expected = volRatio >= 1 ? 1.0 : 1e-6
             let rawAmo = b.turnover / (anchor.amo * 10000)
             if abs(rawAmo - expected) / expected > Self.amoRatioTolerance {
                 return .anomaly(String(format: "额比异常 %.4g", rawAmo))
             }
         }
-        // ④ 生成缺口行：量/额都折算到**主库口径**（中证指数类额 = 源(万元)×0.01，个股 = ×10000）
-        let amoScale: Double = volRatio == 0.0001 ? 0.01 : 10_000
+        // ④ 生成缺口行：量/额折算到**主库口径**。额：个股=源(万)×10000；指数类=源(万)×0.01。
+        //    量：指数折算类主库是**整数舍入**口径 → round 对齐（个股 100x 精确整数，round 无损）
+        let amoScale: Double = volRatio >= 1 ? 10_000 : 0.01
         let bars = rows.filter { $0.date > mainLatest }.map {
             GapBar(date: $0.date, open: $0.open, high: $0.high, low: $0.low, close: $0.close,
-                   vol: $0.vol * volRatio, amo: $0.amo * amoScale)
+                   vol: volRatio >= 1 ? $0.vol * volRatio : ($0.vol * volRatio).rounded(),
+                   amo: $0.amo * amoScale)
         }
         return bars.isEmpty ? .upToDate : .gap(bars: bars, volRatio: volRatio)
     }

@@ -597,9 +597,8 @@ struct ProbeItem {
     ///     量比精确 1e-4、额比精确 1e-6 → 由补缺口 ÷10000 窗口吸附。smartbox 实测
     ///     12 只 980 段（国证芯片 980017 等）全部对拍通过；930/931/932/950/H30 段
     ///     直接探测 0/80 无源）
-    ///   · ⚠️ `27#` 恒生系**不映射**：价格虽逐字段相等，但源 vol 与主库 vol 比值 ≈1e-7
-    ///     且**非精确倍数**（逐只偏差达 0.03% → 额/量语义不同，日间浮动），
-    ///     按比例换算会把错误的量写进缺口行 → 宁可少补
+    ///   · `27#HSI` 等恒生系 → `hkHSI`（hk 前缀；2026-10-04 复检：主库 vol = 源÷1e7 整数舍入、
+    ///     amo = 源×0.01，30 日×3 只验证精确稳定 → 可安全换算，由补缺口 1e-7 窗口吸附）
     ///   · 其余（62#/102# 的 930/931/932/950/CN 段国证指数、42#、46# 贵金属）→ 腾讯无源，nil
     /// 兜底：错映射是**安全的**——补缺口自校准要求锚点日价格逐字段相等 + 量比吸附，对不上判异常丢弃
     init?(file: String, type: String) {
@@ -614,12 +613,13 @@ struct ProbeItem {
         switch prefix {
         case "SH": market = "sh"
         case "SZ": market = "sz"
+        case "27": market = "hk"                    // 恒生系指数（量纲 = 源÷1e7 舍入，可安全换算）
         case "12": market = "us"                    // 纳斯达克系指数
         case "62", "102":                           // 国证/中证扩展：仅交易所发布段有源
             if code.hasPrefix("000") { market = "sh" }
             else if code.hasPrefix("399") || code.hasPrefix("980") { market = "sz" }
             else { return nil }
-        default: return nil                         // 27# 恒生系（量纲不可换算）/ 42#/46# 等无源
+        default: return nil                         // 42#/46# 等无源
         }
         let isIndex = type.contains("指数")
         self.file = file
