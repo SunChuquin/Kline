@@ -11,7 +11,8 @@
 //    ① 主库 `meta.last_date` 最大值 = 全市场主库最新交易日 `mainLatest`；
 //    ② 读主库 `mainLatest` 当天每只的 OHLCV/AMO 作为**自校准基准**（一次 SQL 取全市场）；
 //    ③ 逐只直连腾讯历史K线 `newfqkline` 拉 `[mainLatest, today]` 的日线
-//       （并发 24 路；根数按缺口自然日差动态算 + 10 余量、封顶 320，避免白拉 90% 无用数据）；
+//       （4 条 h2 连接 × 24 路并发；根数按缺口自然日差动态算 + 10 余量、封顶 320，
+//        避免白拉 90% 无用数据）；
 //    ④ 用基准当天那一行做**自校准**（价格必须逐字段相等；量比吸附到 1 或 100；额比须 ≈1），
 //       任一条不符 → 判为口径异常并**丢弃该只**（宁可少补，绝不静默写错值）；
 //    ⑤ 生成 `date > mainLatest` 的缺口行（量按自校准系数折算到**主库口径**），
@@ -120,6 +121,10 @@ final class GapBackfill: ObservableObject {
     /// 并发路数（2026-10-03 PC 实测：12 路 18.6 只/s、24 路 30.6 只/s、32 路延迟雪崩
     /// max 18.5s 且吞吐掉到 10.6 只/s → 24 是吞吐拐点，且未复现限流）
     static let concurrency = 24
+    /// Session 数 = h2 连接数：URLSession 对同一 host 复用**单条** HTTP/2 连接，
+    /// PC 实测单连接 24 并发流会被服务端掐断（PROTOCOL_ERROR last_stream_id=661）、
+    /// 12 流正常 → 4 条连接分摊，每条 ≤6 流
+    static let sessionCount = 4
     static let requestTimeout: TimeInterval = 20
     /// 每只请求的**最大**根数（实测 320 有效）。正常缺口用 `barsCount(from:to:)` 动态算，
     /// 只有缺口超过 310 个自然日时才会用到这个上限（保留旧行为）
@@ -163,13 +168,14 @@ final class GapBackfill: ObservableObject {
     // MARK: 内部
 
     private let queue = DispatchQueue(label: "com.sunck.kline.gapbackfill")
-    private let session: URLSession = {
+    /// 多 Session = 多条独立 h2 连接（原因见 `sessionCount` 注释）
+    private let sessions: [URLSession] = (0..<Self.sessionCount).map { _ in
         let cfg = URLSessionConfiguration.ephemeral
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         cfg.timeoutIntervalForRequest = 20
         cfg.timeoutIntervalForResource = 60
         return URLSession(configuration: cfg)
-    }()
+    }
 
     private init() {}
 
@@ -263,19 +269,30 @@ final class GapBackfill: ObservableObject {
         let gate = DispatchSemaphore(value: Self.concurrency)
         var outcomes = [GapOutcome?](repeating: nil, count: total)
         var processed = 0
+        var lastPublish = Date.distantPast
         DispatchQueue.concurrentPerform(iterations: total) { idx in
             gate.wait()
-            let outcome = self.fetchGap(job: jobs[idx], mainLatest: mainLatest, today: today)
+            let session = self.sessions[idx % self.sessions.count]
+            let outcome = self.fetchGap(job: jobs[idx], mainLatest: mainLatest, today: today,
+                                        session: session)
             gate.signal()
             lock.lock()
             outcomes[idx] = outcome
             processed += 1
             let done = processed
+            // UI 节流 0.25s：既不刷爆主线程，又让用户看到「还在跑、跑到哪」
+            let now = Date()
+            let shouldPublish = done == total || now.timeIntervalSince(lastPublish) >= 0.25
+            if shouldPublish { lastPublish = now }
             lock.unlock()
+            let elapsed = now.timeIntervalSince(t0)
+            let rate = Double(done) / max(elapsed, 0.001)
+            if shouldPublish {
+                self.publish {
+                    self.statusText = String(format: "取数中… %d/%d · %.1f只/s", done, total, rate)
+                }
+            }
             if done % 200 == 0 {
-                let elapsed = Date().timeIntervalSince(t0)
-                let rate = Double(done) / max(elapsed, 0.001)
-                self.publish { self.statusText = String(format: "取数中… %d/%d · %.1f只/s", done, total, rate) }
                 DebugLogger.shared.log(String(format: "[GapBackfill] 进度 %d/%d · %.1fs · %.1f只/s",
                                                     done, total, elapsed, rate))
             }
@@ -443,9 +460,10 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 单只取数与自校准（并发执行）
 
-    private func fetchGap(job: GapJob, mainLatest: Int, today: Int) -> GapOutcome {
+    private func fetchGap(job: GapJob, mainLatest: Int, today: Int, session: URLSession) -> GapOutcome {
         let (fetched, why) = fetchSourceBars(item: job.item, from: mainLatest, to: today,
-                                             count: Self.barsCount(from: mainLatest, to: today))
+                                             count: Self.barsCount(from: mainLatest, to: today),
+                                             session: session)
         guard let rows = fetched else { return .failed(why) }
         guard !rows.isEmpty else { return .failed("接口返回 0 根") }
         // 基准当天那行（自校准锚点）；源侧没有该行 = 长期停牌、两边无重叠可校准日 → 跳过
@@ -515,14 +533,15 @@ final class GapBackfill: ObservableObject {
 
     /// 取某只 `[from, to]` 的日线（**不复权**，与主库同口径）。
     /// 返回 `(K线, 失败原因)`：成功时原因为空串；请求 / 解析 / 接口报错都给出可读原因
-    private func fetchSourceBars(item: ProbeItem, from: Int, to: Int, count: Int) -> ([SourceBar]?, String) {
+    private func fetchSourceBars(item: ProbeItem, from: Int, to: Int, count: Int,
+                                 session: URLSession) -> ([SourceBar]?, String) {
         // param 必须 6 段：<代码>,day,<起>,<止>,<根数>,bfq（bfq = 不复权；缺这段接口判 bad params）
         let param = "\(item.marketCode),day,\(Self.ymd(from)),\(Self.ymd(to)),\(count),bfq"
         guard let encoded = param.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: Self.klineURLPrefix + encoded) else {
             return (nil, "URL 非法")
         }
-        guard let data = getData(url) else { return (nil, "HTTP 失败/超时") }
+        guard let data = getData(url, session) else { return (nil, "HTTP 失败/超时") }
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return (nil, "响应非 JSON")
         }
@@ -558,10 +577,10 @@ final class GapBackfill: ObservableObject {
     }
 
     /// 同步 GET（并发调用，各自等待）；失败落日志并返回 nil。
-    /// 12 路猛打会被腾讯瞬时限流 → 失败短退避重试 `maxAttempts` 次
-    private func getData(_ url: URL) -> Data? {
+    /// 失败短退避重试 `maxAttempts` 次（服务端偶发掐 h2 连接 / 限流都可自愈）
+    private func getData(_ url: URL, _ session: URLSession) -> Data? {
         for attempt in 1...Self.maxAttempts {
-            if let data = getDataOnce(url) { return data }
+            if let data = getDataOnce(url, session) { return data }
             if attempt < Self.maxAttempts {
                 DebugLogger.shared.log("[GapBackfill] GET 失败，退避重试(\(attempt)) \(url.absoluteString)")
                 Thread.sleep(forTimeInterval: Self.retryDelay * Double(attempt))
@@ -570,7 +589,7 @@ final class GapBackfill: ObservableObject {
         return nil
     }
 
-    private func getDataOnce(_ url: URL) -> Data? {
+    private func getDataOnce(_ url: URL, _ session: URLSession) -> Data? {
         var req = URLRequest(url: url)
         req.timeoutInterval = Self.requestTimeout
         req.setValue(DirectQuoteProbe.userAgent, forHTTPHeaderField: "User-Agent")
