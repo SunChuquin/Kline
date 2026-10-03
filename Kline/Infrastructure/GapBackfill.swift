@@ -396,22 +396,33 @@ final class GapBackfill: ObservableObject {
                     : " · 周/月/季/年线聚合失败"
                 DebugLogger.shared.log("[GapBackfill] 周期聚合：\(period.message)")
                 lines.append("周期聚合：" + period.message)
-                self.state = period.ok ? .ok : .failed
-                self.statusText = period.ok ? "缺口已补（含周/月/季/年线）" : "周/月/季/年线聚合失败"
-                self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
-                self.verdictText = period.ok
-                    ? "缺口已补：\(gapFiles) 只 / \(outBars.count) 行 · 新写入 \(merge.dailyRows) 行"
+                guard period.ok else {
+                    self.state = .failed
+                    self.statusText = "周/月/季/年线聚合失败"
+                    self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
+                    self.verdictText = "失败：周期聚合 \(period.message)"
+                    self.detailLines = lines
+                    LiveDataStore.shared.reloadAsync { _ in }
+                    return
+                }
+                // ⑦ 自动合并入主库：五张表（日/周/月/季/年）+ meta.last_date，单事务 UPSERT；
+                //    合并器内部含「裁剪增量（保留最新 3 个交易日）→ 热刷新 → 通知全 App 重查」，
+                //    其 completion 在热刷新之后回调，此处无需再刷
+                self.publish { self.statusText = "合并入主库…" }
+                MainDBMerger.shared.mergeIncrementIntoMainDB { merged in
+                    DebugLogger.shared.log("[GapBackfill] 自动合并主库：\(merged.ok ? "成功" : "失败") \(merged.message)")
+                    lines.append("自动合并主库：" + merged.message)
+                    self.state = .ok
+                    self.statusText = merged.ok ? "缺口已补（含周/月/季/年线，已合并主库）" : "缺口已补，但合并主库失败"
+                    self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
+                    self.verdictText = "缺口已补：\(gapFiles) 只 / \(outBars.count) 行 · 新写入 \(merge.dailyRows) 行"
                         + " · 量纲 1x \(ratio1) / 100x \(ratio100)"
                         + " · 口径异常 \(anomalyCount) · 取数失败 \(failureCount)"
                         + " · 未补（无重叠校准日 \(anchorMissing) · 停牌 \(suspended)）"
                         + periodText
+                        + " · " + (merged.ok ? "已合并主库" : "合并主库失败：\(merged.message)")
                         + " · 覆盖 \(dateSpan)"
-                    : "失败：周期聚合 \(period.message)"
-                self.detailLines = lines
-                // 热刷新：让查询层与图表立刻看到补入的日线 + 周/月线
-                LiveDataStore.shared.reloadAsync { summary in
-                    DebugLogger.shared.log("[GapBackfill] 热刷新完成 可用=\(summary.isAvailable)"
-                        + " 内容变化=\(summary.contentChanged) 最新=\(summary.latestDateAfter)")
+                    self.detailLines = lines
                 }
             }
         }

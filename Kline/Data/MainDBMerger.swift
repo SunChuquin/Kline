@@ -2,14 +2,17 @@
 //  MainDBMerger.swift
 //  Kline
 //
-//  「合并到 tdx.db」：把本地增量库（Documents/tdx_live.db）里 daily/weekly/monthly 的行
-//  按 `(meta_id, date)` 主键 UPSERT 写回主库（Documents/tdx.db），并同步 `meta.last_date`。
+//  「合并到 tdx.db」：把本地增量库（Documents/tdx_live.db）里五张周期表
+//  （daily/weekly/monthly/quarterly/yearly）的行按 `(meta_id, date)` 主键 UPSERT 写回
+//  主库（Documents/tdx.db），并同步 `meta.last_date`。
 //  映射键 = `file`（如 `SH#600000`，3611/3611 唯一；`code` 有 55 处重复不可用）。
 //
 //  契约与边界：
 //   - 全部写操作在 `DatabaseManager.dbQueue` 上、**单事务**执行；任一步失败 → ROLLBACK，主库原样；
 //   - 读增量库必须在 `LiveDataStore` 的队列上取快照（本类先取快照，再回 dbQueue 写），避免跨队列嵌套；
-//   - 主库缺 daily/weekly/monthly 中某张表时跳过该表（季/年表不参与合并）；
+//   - 主库缺五张表中某张时跳过该表（2026-10-03 起季/年也参与合并，与 PC 差分通道同契约：
+//     「差分升级需同时更新五张表」——增量库当期季/年 bar 本身就是「主库当期 bar ⊕ 缺口日线」
+//     的完整聚合快照，直接 REPLACE 主库当期 bar 口径一致）；
 //   - 合并**不删除**主库任何历史行；完成后把已入主库的日期从增量里裁掉（保留最新 3 个交易日缓冲）；
 //   - 不持锁做网络 / 文件 IO；`@Published` 与回调一律在主线程。
 //
@@ -24,6 +27,8 @@ struct MainMergePreview {
     var dailyRows = 0
     var weeklyRows = 0
     var monthlyRows = 0
+    var quarterlyRows = 0
+    var yearlyRows = 0
     /// 命中标的数（去重后的 meta_id 数）
     var hitSymbols = 0
     /// 增量里有、主库 meta 里没有的 file 对应的行数
@@ -31,7 +36,7 @@ struct MainMergePreview {
     /// 将被写入的最大交易日（YYYYMMDD）
     var latestDate = 0
 
-    var totalRows: Int { dailyRows + weeklyRows + monthlyRows }
+    var totalRows: Int { dailyRows + weeklyRows + monthlyRows + quarterlyRows + yearlyRows }
     var isMergeable: Bool { totalRows > 0 && hitSymbols > 0 }
 }
 
@@ -41,6 +46,8 @@ struct MainMergeResult {
     var dailyRows = 0
     var weeklyRows = 0
     var monthlyRows = 0
+    var quarterlyRows = 0
+    var yearlyRows = 0
     /// 命中标的数（被写入的 meta_id 数）
     var hitSymbols = 0
     /// 跳过数（主库 meta 里没有该 file）
@@ -49,7 +56,7 @@ struct MainMergeResult {
     var latestDate = 0
     var message = ""
 
-    var totalRows: Int { dailyRows + weeklyRows + monthlyRows }
+    var totalRows: Int { dailyRows + weeklyRows + monthlyRows + quarterlyRows + yearlyRows }
 }
 
 // MARK: - 合并器
@@ -75,6 +82,7 @@ final class MainDBMerger {
                 var ids = Set<Int>()
                 let groups: [(rows: [LiveIncrementRow], table: String)] = [
                     (snapshot.daily, "daily"), (snapshot.weekly, "weekly"), (snapshot.monthly, "monthly"),
+                    (snapshot.quarterly, "quarterly"), (snapshot.yearly, "yearly"),
                 ]
                 for group in groups {
                     var count = 0
@@ -85,9 +93,11 @@ final class MainDBMerger {
                         if row.date > preview.latestDate { preview.latestDate = row.date }
                     }
                     switch group.table {
-                    case "daily":  preview.dailyRows = count
-                    case "weekly": preview.weeklyRows = count
-                    default:       preview.monthlyRows = count
+                    case "daily":     preview.dailyRows = count
+                    case "weekly":    preview.weeklyRows = count
+                    case "monthly":   preview.monthlyRows = count
+                    case "quarterly": preview.quarterlyRows = count
+                    default:          preview.yearlyRows = count
                     }
                 }
                 preview.hitSymbols = ids.count
@@ -181,9 +191,10 @@ final class MainDBMerger {
             r.message = "主库 meta 为空，无法合并"
             return r
         }
-        let present = ["daily", "weekly", "monthly"].filter { mainTableExists(db: db, name: $0) }
+        let present = ["daily", "weekly", "monthly", "quarterly", "yearly"]
+            .filter { mainTableExists(db: db, name: $0) }
         guard !present.isEmpty else {
-            r.message = "主库缺少 daily/weekly/monthly 表，无法合并"
+            r.message = "主库缺少周期表，无法合并"
             return r
         }
 
@@ -212,6 +223,7 @@ final class MainDBMerger {
         if failed == nil {
             let groups: [(table: String, rows: [LiveIncrementRow])] = [
                 ("daily", snapshot.daily), ("weekly", snapshot.weekly), ("monthly", snapshot.monthly),
+                ("quarterly", snapshot.quarterly), ("yearly", snapshot.yearly),
             ]
             for group in groups {
                 guard let statement = statements[group.table] else { continue }
@@ -242,9 +254,11 @@ final class MainDBMerger {
                 }
                 if failed != nil { break }
                 switch group.table {
-                case "daily":   r.dailyRows = written
-                case "weekly":  r.weeklyRows = written
-                default:        r.monthlyRows = written
+                case "daily":     r.dailyRows = written
+                case "weekly":    r.weeklyRows = written
+                case "monthly":   r.monthlyRows = written
+                case "quarterly": r.quarterlyRows = written
+                default:          r.yearlyRows = written
                 }
             }
         }
@@ -278,6 +292,8 @@ final class MainDBMerger {
             r.dailyRows = 0
             r.weeklyRows = 0
             r.monthlyRows = 0
+            r.quarterlyRows = 0
+            r.yearlyRows = 0
             r.hitSymbols = 0
             r.latestDate = 0
             r.message = "合并失败（已回滚）：\(failed)"
@@ -289,7 +305,8 @@ final class MainDBMerger {
             return r
         }
         r.ok = true
-        r.message = "已合并 \(r.totalRows) 行（日\(r.dailyRows)/周\(r.weeklyRows)/月\(r.monthlyRows)）"
+        r.message = "已合并 \(r.totalRows) 行（日\(r.dailyRows)/周\(r.weeklyRows)/月\(r.monthlyRows)"
+            + "/季\(r.quarterlyRows)/年\(r.yearlyRows)）"
             + " · 覆盖 \(r.hitSymbols) 只 · 最新 \(r.latestDate)"
         return r
     }
