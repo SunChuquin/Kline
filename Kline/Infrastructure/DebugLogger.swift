@@ -12,7 +12,8 @@ import Foundation
 ///
 /// 日志落点（2026-09-07 起统一写沙盒）：TrollStore 版（AppDataContainers 修复后）
 /// 与 Xcode 沙盒版都写 `Documents/debug_log.txt`。TRAE 读取通道：
-/// - TrollStore 版：`sandbox_cli.py get Documents/debug_log.txt <local>`（沙盒直连，需 Kline 前台）
+/// - TrollStore 版：`sandbox_cli.py get debug_log.txt <local>`（沙盒直连，需 Kline 前台）
+///   ⚠️ 沙盒根**就是** Documents：带 `Documents/` 前缀会被拼成 Documents/Documents 而 404
 /// - Xcode 签名版：`apps pull <bundle_id> Documents/debug_log.txt <local>`（house_arrest）
 /// `nonisolated` + `@unchecked Sendable`：写入全部经内部串行队列串行化，
 /// 需要在任意线程（HTTP 会话队列 / 同步队列）调用，故显式放开隔离。

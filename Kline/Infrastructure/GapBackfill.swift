@@ -10,7 +10,8 @@
 //  本组件一次跑完（可重复跑，幂等）：
 //    ① 主库 `meta.last_date` 最大值 = 全市场主库最新交易日 `mainLatest`；
 //    ② 读主库 `mainLatest` 当天每只的 OHLCV/AMO 作为**自校准基准**（一次 SQL 取全市场）；
-//    ③ 逐只直连腾讯历史K线 `newfqkline` 拉 `[mainLatest, today]` 的日线（并发 12 路）；
+//    ③ 逐只直连腾讯历史K线 `newfqkline` 拉 `[mainLatest, today]` 的日线
+//       （并发 24 路；根数按缺口自然日差动态算 + 10 余量、封顶 320，避免白拉 90% 无用数据）；
 //    ④ 用基准当天那一行做**自校准**（价格必须逐字段相等；量比吸附到 1 或 100；额比须 ≈1），
 //       任一条不符 → 判为口径异常并**丢弃该只**（宁可少补，绝不静默写错值）；
 //    ⑤ 生成 `date > mainLatest` 的缺口行（量按自校准系数折算到**主库口径**），
@@ -116,11 +117,15 @@ final class GapBackfill: ObservableObject {
     /// 腾讯历史K线（带成交额）：`param=<marketCode>,day,<起>,<止>,<根数>,bfq`
     /// ⚠️ 末尾 `bfq` 不可省（= 不复权，与主库口径一致）；省略第 6 段会被接口判 `bad params`
     static let klineURLPrefix = "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get?param="
-    /// 并发路数（逐只请求；全市场 3600 只约 1~3 分钟）
-    static let concurrency = 12
+    /// 并发路数（2026-10-03 PC 实测：12 路 18.6 只/s、24 路 30.6 只/s、32 路延迟雪崩
+    /// max 18.5s 且吞吐掉到 10.6 只/s → 24 是吞吐拐点，且未复现限流）
+    static let concurrency = 24
     static let requestTimeout: TimeInterval = 20
-    /// 每只请求的最大根数（实测 320 有效；足够从今日回溯到主库最新日）
+    /// 每只请求的**最大**根数（实测 320 有效）。正常缺口用 `barsCount(from:to:)` 动态算，
+    /// 只有缺口超过 310 个自然日时才会用到这个上限（保留旧行为）
     static let maxBars = 320
+    /// 动态根数的额外余量（自然日差已覆盖交易日，余量只防长假边界取整）
+    static let barsMargin = 10
     /// 价格相对容差（主库与源应逐字段相等，只留浮点余量）
     static let priceTolerance = 1e-5
     /// 量比吸附：落在这两个窗口内才认（1 → [0.5, 2]；100 → [50, 200]），窗口外判口径异常。
@@ -268,7 +273,11 @@ final class GapBackfill: ObservableObject {
             let done = processed
             lock.unlock()
             if done % 200 == 0 {
-                self.publish { self.statusText = "取数中… \(done)/\(total)" }
+                let elapsed = Date().timeIntervalSince(t0)
+                let rate = Double(done) / max(elapsed, 0.001)
+                self.publish { self.statusText = String(format: "取数中… %d/%d · %.1f只/s", done, total, rate) }
+                DebugLogger.shared.log(String(format: "[GapBackfill] 进度 %d/%d · %.1fs · %.1f只/s",
+                                                    done, total, elapsed, rate))
             }
         }
         publish { self.statusText = "写入增量库…" }
@@ -435,7 +444,8 @@ final class GapBackfill: ObservableObject {
     // MARK: - 单只取数与自校准（并发执行）
 
     private func fetchGap(job: GapJob, mainLatest: Int, today: Int) -> GapOutcome {
-        let (fetched, why) = fetchSourceBars(item: job.item, from: mainLatest, to: today)
+        let (fetched, why) = fetchSourceBars(item: job.item, from: mainLatest, to: today,
+                                             count: Self.barsCount(from: mainLatest, to: today))
         guard let rows = fetched else { return .failed(why) }
         guard !rows.isEmpty else { return .failed("接口返回 0 根") }
         // 基准当天那行（自校准锚点）；源侧没有该行 = 长期停牌、两边无重叠可校准日 → 跳过
@@ -478,11 +488,36 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 腾讯 newfqkline 取数
 
+    /// 缺口需要的根数：**自然日差 + 余量**（交易日 ≤ 自然日，余量 10 防长假边界），
+    /// 封顶 `maxBars`。接口恒返回「最近 N 根」（起始日会被向前扩，见文件头），
+    /// 只要 N ≥ 缺口交易日数 + 1（含锚点日）即正确；若仍不够会缺锚点 → `anchorMissing`
+    /// 安全跳过（宁可少补，绝不写错值）。PC 实测 45 根响应 5.8KB vs 320 根 31.6KB（-82%），
+    /// 弱网（热点）下直接缩短传输时间。
+    static func barsCount(from: Int, to: Int) -> Int {
+        guard from > 0, to >= from else { return maxBars }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)
+        func date(_ v: Int) -> Date? {
+            var comps = DateComponents()
+            comps.year = v / 10000
+            comps.month = (v / 100) % 100
+            comps.day = v % 100
+            return cal.date(from: comps)
+        }
+        let days: Int
+        if let d1 = date(from), let d2 = date(to) {
+            days = cal.dateComponents([.day], from: d1, to: d2).day ?? (to - from)
+        } else {
+            days = to - from
+        }
+        return Swift.min(maxBars, days + barsMargin)
+    }
+
     /// 取某只 `[from, to]` 的日线（**不复权**，与主库同口径）。
     /// 返回 `(K线, 失败原因)`：成功时原因为空串；请求 / 解析 / 接口报错都给出可读原因
-    private func fetchSourceBars(item: ProbeItem, from: Int, to: Int) -> ([SourceBar]?, String) {
+    private func fetchSourceBars(item: ProbeItem, from: Int, to: Int, count: Int) -> ([SourceBar]?, String) {
         // param 必须 6 段：<代码>,day,<起>,<止>,<根数>,bfq（bfq = 不复权；缺这段接口判 bad params）
-        let param = "\(item.marketCode),day,\(Self.ymd(from)),\(Self.ymd(to)),\(Self.maxBars),bfq"
+        let param = "\(item.marketCode),day,\(Self.ymd(from)),\(Self.ymd(to)),\(count),bfq"
         guard let encoded = param.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: Self.klineURLPrefix + encoded) else {
             return (nil, "URL 非法")
