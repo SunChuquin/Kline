@@ -496,7 +496,7 @@ final class GapBackfill: ObservableObject {
     static func barsCount(from: Int, to: Int) -> Int {
         guard from > 0, to >= from else { return maxBars }
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(secondsFromGMT: 0)
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
         func date(_ v: Int) -> Date? {
             var comps = DateComponents()
             comps.year = v / 10000
