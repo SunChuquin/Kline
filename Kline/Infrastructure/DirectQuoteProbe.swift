@@ -590,13 +590,16 @@ struct ProbeItem {
     let volIsRaw: Bool
 
     /// `SH#600000` → ProbeItem；不可映射 → nil
-    /// 映射规则（2026-10-03 实测腾讯 newfqkline 覆盖，样本全过）：
+    /// 映射规则（2026-10-03 PC 全量对拍 299 只扩展行情实测）：
     ///   · `SH#`/`SZ#` → `sh`/`sz`（上证指数伪代码 999999 → 000001）
-    ///   · `27#HSI` 等恒生系 → `hkHSI`（hk 前缀）
-    ///   · `12#NDX` 等纳指系 → `usNDX`（us 前缀）
-    ///   · `62#`/`102#` 的 000 段 → `sh`、399 段 → `sz`（中证/国证在交易所发布的代码段）
+    ///   · `12#NDX` 等纳指系 → `usNDX`（us 前缀；当前 meta 无 12#，留作扩展）
+    ///   · `62#`/`102#` 的 000 段 → `sh`、399 段 → `sz`（中证/国证在交易所发布的代码段；
+    ///     量比精确 1e-4，价格逐字段全过 → 由补缺口 10000x 窗口吸附）
+    ///   · ⚠️ `27#` 恒生系**不映射**：价格虽逐字段相等，但源 vol 与主库 vol 比值 ≈1e-7
+    ///     且**非精确倍数**（逐只偏差达 0.03% → 额/量语义不同，日间浮动），
+    ///     按比例换算会把错误的量写进缺口行 → 宁可少补
     ///   · 其余（62#/102# 的 980/930/921/CN 段国证指数、42#、46# 贵金属）→ 腾讯无源，nil
-    /// ⚠️ 错映射是**安全的**：补缺口自校准要求锚点日价格逐字段相等，对不上会判异常丢弃
+    /// 兜底：错映射是**安全的**——补缺口自校准要求锚点日价格逐字段相等 + 量比吸附，对不上判异常丢弃
     init?(file: String, type: String) {
         let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
@@ -609,13 +612,12 @@ struct ProbeItem {
         switch prefix {
         case "SH": market = "sh"
         case "SZ": market = "sz"
-        case "27": market = "hk"                    // 恒生系指数
         case "12": market = "us"                    // 纳斯达克系指数
         case "62", "102":                           // 国证/中证扩展：仅交易所发布段有源
             if code.hasPrefix("000") { market = "sh" }
             else if code.hasPrefix("399") { market = "sz" }
             else { return nil }
-        default: return nil                         // 42#/46# 等：腾讯无源
+        default: return nil                         // 27# 恒生系（量纲不可换算）/ 42#/46# 等无源
         }
         let isIndex = type.contains("指数")
         self.file = file
