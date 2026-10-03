@@ -169,7 +169,7 @@ final class GapBackfill: ObservableObject {
 
     private let queue = DispatchQueue(label: "com.sunck.kline.gapbackfill")
     /// 多 Session = 多条独立 h2 连接（原因见 `sessionCount` 注释）
-    private let sessions: [URLSession] = (0..<Self.sessionCount).map { _ in
+    private let sessions: [URLSession] = (0..<GapBackfill.sessionCount).map { _ in
         let cfg = URLSessionConfiguration.ephemeral
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         cfg.timeoutIntervalForRequest = 20
