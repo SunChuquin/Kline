@@ -156,6 +156,40 @@ class DatabaseManager: ObservableObject {
     /// 沙盒内可写数据库文件名（放在 Documents，可通过 Finder / 文件 App 单独替换更新，无需重装 App）
     static let dbFileName = "tdx.db"
 
+    /// 主库基线日期的 UserDefaults 键（PC 生成全量 tdx.db 的近似日期，YYYYMMDD）
+    private static let mainDBBaselineKey = "kline.maindb.baselineDate"
+
+    /// 主库基线日期（YYYYMMDD；0 = 无法确定）：复权因子的时点锚，超过 3 个月应提示 PC 重新生成。
+    /// 优先取 UserDefaults；未记录时回落到 tdx.db 文件**创建时间**（首次拷入沙盒的时点）并落盘。
+    var mainDBBaselineDate: Int {
+        let stored = UserDefaults.standard.integer(forKey: Self.mainDBBaselineKey)
+        if stored > 0 { return stored }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: Self.writableDBPath)
+        if let created = attrs?[.creationDate] as? Date {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyyMMdd"
+            let v = Int(f.string(from: created)) ?? 0
+            if v > 0 {
+                UserDefaults.standard.set(v, forKey: Self.mainDBBaselineKey)
+                DebugLogger.shared.log("[DB] 主库基线日期回落到文件创建时间：\(v)")
+                return v
+            }
+        }
+        return 0
+    }
+
+    /// 全量主库拷入沙盒（首次安装 / PC 重灌）→ 记录基线日期（增量补丁不改动基线）
+    static func recordMainDBBaselineToday() {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd"
+        let v = Int(f.string(from: Date())) ?? 0
+        guard v > 0 else { return }
+        UserDefaults.standard.set(v, forKey: mainDBBaselineKey)
+        DebugLogger.shared.log("[DB] 主库基线日期记录：\(v)")
+    }
+
     /// 内置种子数据库路径（随 App 打包）
     private var seedPath: String? {
         Bundle.main.path(forResource: "tdx", ofType: "db")
@@ -186,6 +220,7 @@ class DatabaseManager: ObservableObject {
         }
         do {
             try FileManager.default.copyItem(atPath: seed, toPath: target)
+            Self.recordMainDBBaselineToday()
             return true
         } catch {
             DispatchQueue.main.async { [weak self] in

@@ -265,8 +265,14 @@ final class TdxSyncManager: ObservableObject {
         ranSlots.insert(slotKey)
         DebugLogger.shared.log("[TdxSync] \(trigger)：已到点 \(Self.slotText(slot))，触发同步")
         beginSync(reason: trigger)
-        // 同一时刻同时触发「清单标的当日K线」东财直连更新（独立通道：与云端 manifest 成败互不影响）
-        WatchlistSyncManager.shared.sync(reason: trigger, slot: Self.slotText(slot))
+        // 17:30 档：清单盘中快照已无意义（完整K线 15:05 档已覆盖）→ 改为「补缺口」
+        // （拉主库最新日 → 今天的日线并自动合并入主库）；其余档位照旧触发清单直连更新
+        if Self.slotText(slot) == "17:30" {
+            DebugLogger.shared.log("[TdxSync] 17:30 档 → 触发补缺口（含自动合并主库）")
+            GapBackfill.shared.run()
+        } else {
+            WatchlistSyncManager.shared.sync(reason: trigger, slot: Self.slotText(slot))
+        }
     }
 
     /// 刷新「下次计划时刻」文案（未启用时也展示，便于用户理解时刻表）

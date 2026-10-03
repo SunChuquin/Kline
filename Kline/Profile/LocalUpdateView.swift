@@ -59,8 +59,6 @@ struct LocalUpdateView: View {
     @ObservedObject private var dbManager = DatabaseManager.shared
     /// 清单标的自动更新状态（设备侧东财直连：并集数 / 各时刻结果 / 命中数）
     @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
-    /// 直连源链对拍探针（**仅调试用 PoC**：设备侧直连腾讯/新浪/同花顺 vs 云端 CNB 分片）
-    @ObservedObject private var directProbe = DirectQuoteProbe.shared
     /// 补缺口（设备侧直连腾讯历史K线，把主库最新日 → 今天的日线自行补齐）
     @ObservedObject private var gapBackfill = GapBackfill.shared
 
@@ -85,7 +83,6 @@ struct LocalUpdateView: View {
             localUpdateSection
             syncSection
             watchlistSyncSection
-            directProbeSection
             gapBackfillSection
         }
         .onAppear {
@@ -634,7 +631,7 @@ struct LocalUpdateView: View {
             Divider()
 
             // ⑲ 语义说明：合并只按主键 UPSERT，不删除主库历史
-            Text("合并会把增量库的日/周/月线写回 tdx.db（按 标的+日期 主键覆盖，不删除历史行；失败自动回滚）")
+            Text("合并会把增量库的日/周/月/季/年线写回 tdx.db（按 标的+日期 主键覆盖，不删除历史行；失败自动回滚）")
                 .font(.system(size: 12))
                 .foregroundColor(Color.gray.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -757,104 +754,6 @@ struct LocalUpdateView: View {
         }
     }
 
-    // MARK: - 直连源链对拍（仅调试用 PoC）
-
-    /// 「直连源链对拍」子区：把设备侧直连腾讯/新浪/同花顺取回的当日K线，与云端 CNB 最新分片
-    /// 的 `bkt_daily` **逐只逐字段对拍**，确认量纲（手/股）与价格零偏差。
-    /// **仅调试用**：不参与任何同步流程、不写库、不改配置。规格与其它卡片组一致。
-    private var directProbeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("直连源链对拍（仅调试用）")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
-
-            // 分段只为控制 ViewBuilder 子视图数量（同「数据同步」卡片）
-            VStack(spacing: 0) {
-                directProbeStatusRows
-                directProbeActionRows
-            }
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(12)
-        }
-    }
-
-    /// 状态 / 基准分片 / 两源结果 / 结论
-    private var directProbeStatusRows: some View {
-        VStack(spacing: 0) {
-            infoRow(title: "状态", value: directProbe.statusText,
-                    valueColor: directProbeStateColor, identifier: "directProbe.status")
-
-            Divider()
-            infoRow(title: "基准（CNB 分片）", value: directProbe.baselineText,
-                    identifier: "directProbe.baseline")
-
-            Divider()
-            infoRow(title: "腾讯", value: directProbe.tencentText, identifier: "directProbe.tencent")
-
-            Divider()
-            infoRow(title: "新浪", value: directProbe.sinaText, identifier: "directProbe.sina")
-
-            Divider()
-            infoRow(title: "结论", value: directProbe.verdictText,
-                    valueColor: directProbeStateColor, identifier: "directProbe.verdict")
-        }
-    }
-
-    /// 跑一次对拍 / 对拍明细
-    private var directProbeActionRows: some View {
-        VStack(spacing: 0) {
-            Divider()
-
-            // 整行可点（命中区 48pt ≥ 44pt），执行中禁用并显示进度圈
-            Button(action: { directProbe.run() }) {
-                HStack(spacing: 10) {
-                    Text("跑一次对拍")
-                        .font(.system(size: 16))
-                        .foregroundColor(directProbeTappable ? Color.primary : Color.gray)
-                    Spacer(minLength: 12)
-                    if directProbe.isRunning {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 18))
-                            .foregroundColor(directProbeTappable ? Color.blue : Color.gray)
-                            .frame(width: 24, height: 24)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .frame(height: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!directProbeTappable)
-            .accessibilityIdentifier("directProbe.run")
-
-            // 对拍明细（逐条列出，多行不裁切）
-            ForEach(Array(directProbe.detailLines.enumerated()), id: \.offset) { index, line in
-                Divider()
-                Text(line)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("directProbe.detail.\(index)")
-            }
-        }
-    }
-
-    private var directProbeTappable: Bool { !directProbe.isRunning }
-
-    private var directProbeStateColor: Color {
-        switch directProbe.state {
-        case .idle:    return Color(.secondaryLabel)
-        case .running: return .yellow
-        case .ok:      return .green
-        case .failed:  return .red
-        }
-    }
-
     // MARK: - 补缺口（主库最新日 → 今天）
 
     /// 「补缺口」子区：读主库 `meta.last_date` 最大值 → 逐只直连腾讯历史K线 `newfqkline`
@@ -885,6 +784,11 @@ struct LocalUpdateView: View {
             Divider()
             infoRow(title: "主库 → 今日", value: gapBackfill.coverageText,
                     identifier: "gapBackfill.coverage")
+
+            Divider()
+            infoRow(title: "主库基线", value: mainDBBaselineText,
+                    valueColor: mainDBBaselineStale ? .orange : Color(.secondaryLabel),
+                    identifier: "gapBackfill.baseline")
 
             Divider()
             infoRow(title: "补齐结果", value: gapBackfill.fetchText,
@@ -1033,14 +937,17 @@ struct LocalUpdateView: View {
         "\(time) · \(slotSemantics(time))"
     }
 
-    /// 时刻语义：15:00 之前 = 盘中快照（当日未完成K线），15:00 及之后 = 收盘（完整K线）
+    /// 时刻语义：17:30 = 补缺口（含自动合并主库）；15:00 之前 = 盘中快照（当日未完成K线）；
+    /// 15:00 及之后（17:30 除外）= 收盘（完整K线）
     private func slotSemantics(_ time: String) -> String {
+        if time == "17:30" { return "补缺口" }
         guard let minutes = TdxSyncManager.minutes(of: time) else { return "—" }
         return minutes < 15 * 60 ? "盘中快照" : "收盘"
     }
 
     /// 时刻表语义说明（跟随 `TdxSyncConfig.scheduleTimes` 动态生成，不再硬编码三档时刻）
     private var scheduleSemanticsText: String {
+        let gapfix = syncConfig.scheduleTimes.filter { $0 == "17:30" }
         let intraday = syncConfig.scheduleTimes.filter { slotSemantics($0) == "盘中快照" }
         let close = syncConfig.scheduleTimes.filter { slotSemantics($0) == "收盘" }
         var parts: [String] = []
@@ -1049,6 +956,9 @@ struct LocalUpdateView: View {
         }
         if !close.isEmpty {
             parts.append("\(close.joined(separator: " / ")) 为当日完整K线")
+        }
+        if !gapfix.isEmpty {
+            parts.append("\(gapfix.joined(separator: " / ")) 为补缺口（自动合并入主库）")
         }
         return parts.isEmpty ? "未配置更新时刻" : parts.joined(separator: "；")
     }
@@ -1163,6 +1073,22 @@ struct LocalUpdateView: View {
         guard latest > 0 else { return "—" }
         return "\(latest)（缺口 \(TdxSyncManager.naturalDaysSince(latest)) 天）"
     }
+
+    /// 主库基线（PC 生成全量 tdx.db 的近似日期）+ 距今天数；超 3 个月提示 PC 重新生成。
+    /// 复权因子会随分红除权持续变化，基线过旧则主库历史与 PC 端不一致——补缺口只补「新增」不补「改写」。
+    private var mainDBBaselineDays: Int? {
+        let d = dbManager.mainDBBaselineDate
+        guard d > 0 else { return nil }
+        return TdxSyncManager.naturalDaysSince(d)
+    }
+
+    private var mainDBBaselineText: String {
+        guard let days = mainDBBaselineDays else { return "—" }
+        let d = dbManager.mainDBBaselineDate
+        return "\(d)（\(days) 天）" + (days > 90 ? " · 超3个月，请PC重新生成" : "")
+    }
+
+    private var mainDBBaselineStale: Bool { (mainDBBaselineDays ?? 0) > 90 }
 
     // MARK: - 合并到 tdx.db
 

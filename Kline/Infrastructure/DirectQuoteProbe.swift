@@ -589,7 +589,14 @@ struct ProbeItem {
     /// 源侧成交量是否**原样保留**（不做 ÷100 换手）：科创板 688xxx、沪市指数
     let volIsRaw: Bool
 
-    /// `SH#600000` → ProbeItem；不可映射（扩展指数 27#/62#/102# 等）→ nil
+    /// `SH#600000` → ProbeItem；不可映射 → nil
+    /// 映射规则（2026-10-03 实测腾讯 newfqkline 覆盖，样本全过）：
+    ///   · `SH#`/`SZ#` → `sh`/`sz`（上证指数伪代码 999999 → 000001）
+    ///   · `27#HSI` 等恒生系 → `hkHSI`（hk 前缀）
+    ///   · `12#NDX` 等纳指系 → `usNDX`（us 前缀）
+    ///   · `62#`/`102#` 的 000 段 → `sh`、399 段 → `sz`（中证/国证在交易所发布的代码段）
+    ///   · 其余（62#/102# 的 980/930/921/CN 段国证指数、42#、46# 贵金属）→ 腾讯无源，nil
+    /// ⚠️ 错映射是**安全的**：补缺口自校准要求锚点日价格逐字段相等，对不上会判异常丢弃
     init?(file: String, type: String) {
         let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
@@ -602,13 +609,19 @@ struct ProbeItem {
         switch prefix {
         case "SH": market = "sh"
         case "SZ": market = "sz"
-        default: return nil          // 27#/62#/102# 扩展行情指数：本 PoC 不参与
+        case "27": market = "hk"                    // 恒生系指数
+        case "12": market = "us"                    // 纳斯达克系指数
+        case "62", "102":                           // 国证/中证扩展：仅交易所发布段有源
+            if code.hasPrefix("000") { market = "sh" }
+            else if code.hasPrefix("399") { market = "sz" }
+            else { return nil }
+        default: return nil                         // 42#/46# 等：腾讯无源
         }
         let isIndex = type.contains("指数")
         self.file = file
         self.isIndex = isIndex
         self.marketCode = market + code
-        // 688xxx（腾讯按「股」报量）与沪市指数（新浪按「手」报）原样保留；其余 ÷100 四舍五入
-        self.volIsRaw = code.hasPrefix("688") || (isIndex && market == "sh")
+        // 688xxx（腾讯按「股」报量）与指数（量纲杂）原样保留；其余 ÷100 四舍五入
+        self.volIsRaw = code.hasPrefix("688") || isIndex
     }
 }

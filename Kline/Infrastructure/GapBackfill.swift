@@ -216,18 +216,51 @@ final class GapBackfill: ObservableObject {
             return
         }
 
-        var metaIdByFile: [String: Int] = [:]
-        for m in metas { metaIdByFile[m.file] = m.id }
-        // 基准行：主库 mainLatest 当天的 OHLCV/AMO（一次 SQL 取全市场）
-        DatabaseManager.shared.performOnDBQueue({ db in
-            DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
-                                          fromDate: mainLatest, toDate: mainLatest)
-        }, completion: { [weak self] baseline in
+        // ⓪ 单只探测：源侧最新交易日 ≤ 主库最新 → 无缺口早退（节假日/已补齐时省 3312 次请求）。
+        //    探测失败（网络抖动）→ 照旧跑全市场（fail-open，不因探测阻塞正常补缺口）
+        probeUpToDate(mainLatest: mainLatest, today: today) {
+            var metaIdByFile: [String: Int] = [:]
+            for m in metas { metaIdByFile[m.file] = m.id }
+            // 基准行：主库 mainLatest 当天的 OHLCV/AMO（一次 SQL 取全市场）
+            DatabaseManager.shared.performOnDBQueue({ db in
+                DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
+                                              fromDate: mainLatest, toDate: mainLatest)
+            }, completion: { [weak self] baseline in
+                guard let self = self else { return }
+                self.queue.async {
+                    self.perform(metas: metas, baseline: baseline, mainLatest: mainLatest, today: today)
+                }
+            })
+        }
+    }
+
+    /// 无缺口早退探测：拉一只活跃标的（SH#600000）最近几根，源侧最新日 ≤ 主库最新 → 判定全市场无缺口。
+    /// 回调（proceed）在主线程。探针失败 → 照常继续（宁可多跑，不因探测失败阻塞补缺口）。
+    private func probeUpToDate(mainLatest: Int, today: Int, proceed: @escaping () -> Void) {
+        queue.async { [weak self] in
             guard let self = self else { return }
-            self.queue.async {
-                self.perform(metas: metas, baseline: baseline, mainLatest: mainLatest, today: today)
+            guard let item = ProbeItem(file: "SH#600000", type: "股票") else { proceed(); return }
+            let (fetched, why) = self.fetchSourceBars(item: item, from: mainLatest, to: today,
+                                                      count: 10, session: self.sessions[0])
+            if let rows = fetched, let srcLatest = rows.last?.date {
+                if srcLatest <= mainLatest {
+                    DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest) → 无缺口早退")
+                    self.publish {
+                        self.state = .ok
+                        self.statusText = "无缺口"
+                        self.coverageText = "主库 \(mainLatest) → 今日 \(today)"
+                        self.fetchText = "—"
+                        self.verdictText = "无缺口：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest)（非交易日或已补齐）"
+                        self.detailLines = ["探测 \(item.marketCode)：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest)"]
+                    }
+                    return
+                }
+                DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) > 主库 \(mainLatest) → 有缺口，跑全市场")
+            } else {
+                DebugLogger.shared.log("[GapBackfill] 探测失败（\(why)）→ 照旧跑全市场")
             }
-        })
+            DispatchQueue.main.async(execute: proceed)
+        }
     }
 
     // MARK: - 主流程（只在 queue 上）
