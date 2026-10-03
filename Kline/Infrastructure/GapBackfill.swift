@@ -681,9 +681,10 @@ final class GapBackfill: ObservableObject {
         guard !secids.isEmpty else { return (nil, "无东财候选") }
         var lastWhy = "无候选"
         for secid in secids {
-            let url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=\(secid)"
+            let urlStr = "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=\(secid)"
                 + "&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0"
                 + "&beg=\(from)&end=\(to)"
+            guard let url = URL(string: urlStr) else { lastWhy = "URL 非法"; continue }
             guard let data = getData(url, session) else { lastWhy = "HTTP 失败/超时"; continue }
             guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
                 lastWhy = "响应非 JSON"; continue
