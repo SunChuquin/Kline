@@ -288,13 +288,16 @@ final class GapBackfill: ObservableObject {
             let elapsed = now.timeIntervalSince(t0)
             let rate = Double(done) / max(elapsed, 0.001)
             if shouldPublish {
+                let remaining = Double(total - done) / max(rate, 0.001)
                 self.publish {
-                    self.statusText = String(format: "取数中… %d/%d · %.1f只/s", done, total, rate)
+                    self.statusText = String(format: "取数中… %d/%d · %.1f只/s · 预计剩余%.0fs",
+                                              done, total, rate, remaining)
                 }
             }
             if done % 200 == 0 {
-                DebugLogger.shared.log(String(format: "[GapBackfill] 进度 %d/%d · %.1fs · %.1f只/s",
-                                                    done, total, elapsed, rate))
+                DebugLogger.shared.log(String(format: "[GapBackfill] 进度 %d/%d · %.1fs · %.1f只/s · 剩余%.0fs",
+                                                    done, total, elapsed, rate,
+                                                    Double(total - done) / max(rate, 0.001)))
             }
         }
         publish { self.statusText = "写入增量库…" }
