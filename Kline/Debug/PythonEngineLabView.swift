@@ -558,6 +558,8 @@ struct PythonEngineLabView: View {
     private static let exp3Script = """
     import json, time, traceback, urllib.request
     from concurrent.futures import ThreadPoolExecutor
+    # 禁用系统代理：设备侧直连行情源（项目硬约束）；VPN/HTTP 代理会劫持或拖慢国内直连请求
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     codes = ['sh600000','sz000001','sh000001','sh600036','sz000002','sh600519',
              'sz000858','sh601318','sh601988','sz000651','sh600030','sz002415',
              'sh600887','sz002304','sh601899','sh600900','sh601166','sh600016',
@@ -565,7 +567,7 @@ struct PythonEngineLabView: View {
     result = {'reqs': len(codes)}
     try:
         def _fetch(c):
-            with urllib.request.urlopen('https://qt.gtimg.cn/q=' + c, timeout=10) as r:
+            with _opener.open('https://qt.gtimg.cn/q=' + c, timeout=10) as r:
                 return len(r.read())
         t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=8) as ex:
