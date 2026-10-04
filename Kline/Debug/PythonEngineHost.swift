@@ -776,7 +776,7 @@ final class PythonEngineHost: ObservableObject {
                 self.appendOutput("已复制 \(copied) 个 .ips 到 Documents/crashlogs")
                 // 附带：/var/tmp/opener.log（py 模式诊断全在里面，root 创建 0644，mobile 可读）
                 if let openerLog = self.fm.contents(atPath: "/private/var/tmp/opener.log") {
-                    try? self.fm.write(openerLog, to: docs.appendingPathComponent("opener_log_copy.txt"))
+                    try? openerLog.write(to: docs.appendingPathComponent("opener_log_copy.txt"))
                     self.appendOutput("已附带 opener.log（\(openerLog.count) bytes）")
                 }
                 self.endBusy()
