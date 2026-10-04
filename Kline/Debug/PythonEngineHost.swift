@@ -682,39 +682,66 @@ final class PythonEngineHost: ObservableObject {
                 return
             }
 
-            // ② root detached 拉起 pyrunner：argv = [dylib, home, script, out, stderr]
-            let t0 = CFAbsoluteTimeGetCurrent()
-            let sr = RootRunner.spawnDetached(executable: appPath + "/pyrunner",
-                                              arguments: [dylibPath, homePath, scriptPath, outPath, stderrPath])
-            guard sr == 0 else {
-                self.appendOutput("pyrunner spawn 失败（sr=\(sr)）")
+            // ③ root 同步执行 + 捕获子进程 stdout/stderr（spawnRoot：waitpid + 管道读取）。
+            //    之前用 detached+轮询会丢失子进程死因；spawnRoot 把 dlopen/Python fatal 的
+            //    stderr 直接带回，pyrunner 的任何死法都有据可查。
+            let runnerPath = appPath + "/pyrunner"
+            if !self.fm.fileExists(atPath: runnerPath) {
                 self.endBusy()
-                DispatchQueue.main.async { completion(.failure("pyrunner 拉起失败（sr=\(sr)）")) }
+                DispatchQueue.main.async {
+                    completion(.failure("pyrunner 不存在于 Engine.app（引擎包版本过旧，请重新下载安装）"))
+                }
                 return
             }
-
-            // ③ workQueue 轮询（每 100ms，上限 30s）。超时基本等于子进程崩溃
-            //    （posix_spawn 成功但进程死了），输出文件永远不出现。
-            let deadline = CFAbsoluteTimeGetCurrent() + 30.0
-            while CFAbsoluteTimeGetCurrent() < deadline {
-                if self.fm.fileExists(atPath: outPath) {
-                    let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-                    guard let data = self.fm.contents(atPath: outPath) else {
-                        self.endBusy()
-                        DispatchQueue.main.async { completion(.failure("py_out.json 读取失败")) }
-                        return
+            let perms = (try? self.fm.attributesOfItem(atPath: runnerPath)[.posixPermissions] as? Int) ?? 0
+            self.appendOutput("pyrunner 权限：\(String(perms ?? 0, radix: 8))")
+            if (perms ?? 0) & 0o111 != 0o111 {
+                // TrollStore 安装不保证次级可执行文件的执行位：先试 mobile chmod，再试 root chmod
+                try? self.fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runnerPath)
+                let p2 = (try? self.fm.attributesOfItem(atPath: runnerPath)[.posixPermissions] as? Int) ?? 0
+                if (p2 ?? 0) & 0o111 == 0o111 {
+                    self.appendOutput("chmod(mobile) 成功")
+                } else {
+                    for cp in ["/bin/chmod", "/usr/bin/chmod"] where self.fm.fileExists(atPath: cp) {
+                        _ = RootRunner.spawnRoot(executable: cp, arguments: ["755", runnerPath])
+                        break
                     }
-                    self.appendOutput(String(format: "pyrunner 完成，总耗时 %.1fms（含子进程启动+init）", totalMs))
-                    self.endBusy()
-                    DispatchQueue.main.async { completion(.success((data, totalMs))) }
-                    return
+                    let p3 = (try? self.fm.attributesOfItem(atPath: runnerPath)[.posixPermissions] as? Int) ?? 0
+                    self.appendOutput("chmod(root) 后：\(String(p3, radix: 8))")
                 }
-                Thread.sleep(forTimeInterval: 0.1)
             }
+
+            let total0 = CFAbsoluteTimeGetCurrent()
+            let r = RootRunner.spawnRoot(executable: runnerPath,
+                                         arguments: [dylibPath, homePath, scriptPath, outPath, stderrPath])
+            let totalMs = (CFAbsoluteTimeGetCurrent() - total0) * 1000
+            self.appendOutput(String(format: "pyrunner 退出码=%d，耗时 %.1fms", r.code, totalMs))
+            if !r.stderr.isEmpty {
+                let trimmed = r.stderr.count > 600 ? String(r.stderr.suffix(600)) : r.stderr
+                self.appendOutput("pyrunner stderr：\n" + trimmed)
+            }
+            guard r.code == 0 else {
+                self.endBusy()
+                let hint: String
+                switch r.code {
+                case 3: hint = "参数不足"
+                case 4: hint = "dlopen 失败"
+                case 5: hint = "dlsym 失败"
+                case 6: hint = "脚本打开失败"
+                case 7: hint = "脚本读取失败"
+                default: hint = "子进程异常退出（信号或 fatal，stderr 见上）"
+                }
+                DispatchQueue.main.async { completion(.failure("pyrunner 失败（退出码 \(r.code)：\(hint)）")) }
+                return
+            }
+            guard let data = self.fm.contents(atPath: outPath) else {
+                self.endBusy()
+                DispatchQueue.main.async { completion(.failure("py_out.json 读取失败")) }
+                return
+            }
+            self.appendOutput(String(format: "pyrunner 完成，总耗时 %.1fms（含子进程启动+init）", totalMs))
             self.endBusy()
-            DispatchQueue.main.async {
-                completion(.failure("pyrunner 超时（子进程可能崩溃，stderr 见 py_runner_stderr.log）"))
-            }
+            DispatchQueue.main.async { completion(.success((data, totalMs))) }
         }
     }
 
