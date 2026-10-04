@@ -572,30 +572,19 @@ final class PythonEngineHost: ObservableObject {
 
 // MARK: - 引擎包解包（gzip → tar，纯 Swift；iOS 无 libarchive/tar 可用）
 
-/// 引擎包解包器：gzip（RFC1952 容器）→ raw DEFLATE（Compression 框架流式）→ tar 解包。
+/// 引擎包解包器：gzip（RFC1952 容器）→ raw DEFLATE（Compression 框架一次性解码，ISIZE 校验）→ tar 解包。
 /// tar 支持：普通文件/目录/软链/硬链、ustar prefix、GNU 'L' 长名、pax 'x' 扩展头 path 记录。
 enum EngineArchive {
 
-    private static let chunkSize = 1 << 18   // 256KB
-
-    /// gzip 解码到目标文件（头部手工解析，payload 为 raw DEFLATE 流式解码），返回输出字节数
+    /// gzip 解码到目标文件（**一次性解码**：gzip 尾部 ISIZE 给出精确解压后大小，预分配后
+    /// compression_decode_buffer 单发解码 + ISIZE 严格校验——杜绝流式缓冲管理的静默截断）。返回输出字节数
     static func gunzip(srcPath: String, dstPath: String) throws -> Int {
         let fm = FileManager.default
         if fm.fileExists(atPath: dstPath) { try fm.removeItem(atPath: dstPath) }
-        guard fm.createFile(atPath: dstPath, contents: nil),
-              let dst = FileHandle(forWritingAtPath: dstPath) else {
-            throw EngineFlowError(msg: "创建解压输出文件失败")
+        guard let raw = fm.contents(atPath: srcPath), raw.count > 18 else {
+            throw EngineFlowError(msg: "gzip 文件不可读或过小")
         }
-        defer { try? dst.close() }
-
-        let src = try FileHandle(forReadingFrom: URL(fileURLWithPath: srcPath))
-        defer { try? src.close() }
-
-        // 解析 gzip 头（RFC1952）
-        guard let head = try src.read(upToCount: 512), head.count >= 10 else {
-            throw EngineFlowError(msg: "gzip 头不完整")
-        }
-        let b = [UInt8](head)
+        let b = [UInt8](raw)
         guard b[0] == 0x1F, b[1] == 0x8B, b[2] == 8 else {
             throw EngineFlowError(msg: "不是 gzip 文件")
         }
@@ -609,64 +598,33 @@ enum EngineArchive {
         if flags & 0x08 != 0 { while i < b.count && b[i] != 0 { i += 1 }; i += 1 }   // FNAME
         if flags & 0x10 != 0 { while i < b.count && b[i] != 0 { i += 1 }; i += 1 }   // FCOMMENT
         if flags & 0x02 != 0 { i += 2 }                                              // FHCRC
-        guard i <= b.count else { throw EngineFlowError(msg: "gzip 头越界") }
+        let payloadEnd = b.count - 8    // 8 字节 gzip 尾部（CRC32 + ISIZE）
+        guard i < payloadEnd else { throw EngineFlowError(msg: "gzip payload 区间异常") }
 
-        var pending: Data? = (i < head.count) ? Data(head.dropFirst(i)) : nil
-        return try deflateDecode(src: src, pending: &pending, dst: dst)
-    }
+        // 尾部 ISIZE（LE uint32）= 解压后大小 mod 2^32（<4GB 的引擎包即精确大小）
+        let isize = UInt32(b[b.count - 4]) | (UInt32(b[b.count - 3]) << 8)
+                  | (UInt32(b[b.count - 2]) << 16) | (UInt32(b[b.count - 1]) << 24)
+        let expected = Int(isize)
+        guard expected > 0, expected < (1 << 31) else {
+            throw EngineFlowError(msg: "gzip 尾部 ISIZE 异常：\(isize)")
+        }
 
-    /// raw DEFLATE 流式解码（COMPRESSION_ZLIB 即 raw DEFLATE，无 zlib 头，与 gzip payload 匹配），返回写入字节数
-    private static func deflateDecode(src: FileHandle, pending: inout Data?, dst: FileHandle) throws -> Int {
-        var written = 0
-        let dstCap = chunkSize
-        let dstBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: dstCap)
+        // 一次性解码（输出容量由 ISIZE 精确给出）
+        let dstBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: expected)
         defer { dstBuf.deallocate() }
-
-        var stream = compression_stream(dst_ptr: dstBuf, dst_size: dstCap,
-                                        src_ptr: UnsafePointer<UInt8>(dstBuf), src_size: 0,
-                                        state: nil)
-        guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
-                == COMPRESSION_STATUS_OK else {
-            throw EngineFlowError(msg: "Compression 流初始化失败")
+        let payload = Array(b[i..<payloadEnd])
+        let decoded = payload.withUnsafeBytes { srcRaw in
+            compression_decode_buffer(dstBuf, expected,
+                                      srcRaw.baseAddress?.assumingMemoryBound(to: UInt8.self) ?? dstBuf,
+                                      srcRaw.count, nil, COMPRESSION_ZLIB)
         }
-
-        var current: Data?    // 当前喂给流的输入块（强持有到被消费，防悬垂）
-        var srcEOF = false
-        while true {
-            if stream.src_size == 0, !srcEOF {
-                if let p = pending {
-                    current = p
-                    pending = nil
-                } else if let chunk = try src.read(upToCount: chunkSize), !chunk.isEmpty {
-                    current = chunk
-                } else {
-                    current = nil
-                    srcEOF = true
-                }
-                if let cur = current {
-                    cur.withUnsafeBytes { raw in
-                        stream.src_ptr = raw.baseAddress?.assumingMemoryBound(to: UInt8.self)
-                                         ?? UnsafePointer<UInt8>(dstBuf)
-                        stream.src_size = raw.count
-                    }
-                }
-            }
-            let flags: Int32 = srcEOF ? Int32(COMPRESSION_STREAM_FINALIZE.rawValue) : 0
-            let st = compression_stream_process(&stream, flags)
-            if st == COMPRESSION_STATUS_ERROR { throw EngineFlowError(msg: "DEFLATE 解码失败") }
-            if stream.dst_size < dstCap {
-                let produced = dstCap - stream.dst_size
-                dst.write(Data(bytes: dstBuf, count: produced))
-                written += produced
-                stream.dst_ptr = dstBuf
-                stream.dst_size = dstCap
-            }
-            if st == COMPRESSION_STATUS_END { break }
-            if srcEOF && stream.src_size > 0 {
-                throw EngineFlowError(msg: "DEFLATE 流异常终止")
-            }
+        guard decoded == expected else {
+            throw EngineFlowError(msg: "DEFLATE 一次性解码不完整：输出 \(decoded) / 期望 \(expected)（payload \(payload.count) bytes）")
         }
-        return written
+        guard fm.createFile(atPath: dstPath, contents: Data(bytes: dstBuf, count: decoded)) else {
+            throw EngineFlowError(msg: "写入解压输出文件失败")
+        }
+        return decoded
     }
 
     /// 解包 tar 到目标目录（progress：已处理字节 / 总字节），返回处理的 entry 数
@@ -675,6 +633,9 @@ enum EngineArchive {
         let fm = FileManager.default
         try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
         let total = (try fm.attributesOfItem(atPath: tarPath)[.size] as? UInt64) ?? 0
+        guard total >= 1024 else {
+            throw EngineFlowError(msg: "tar 文件过小（\(total) bytes）——解压输出异常，拒绝解析")
+        }
         let src = try FileHandle(forReadingFrom: URL(fileURLWithPath: tarPath))
         defer { try? src.close() }
 
