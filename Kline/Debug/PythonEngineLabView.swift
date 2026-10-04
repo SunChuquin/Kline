@@ -443,7 +443,7 @@ struct PythonEngineLabView: View {
 
     private func runExp1() {
         runningExp = 1
-        host.runScriptIsolated(Self.exp1Script) { [weak host] r in
+        host.runScriptCapturingOutput(Self.exp1Script) { [weak host] r in
             runningExp = 0
             refreshStatus()
             guard let host = host else { return }
@@ -526,7 +526,7 @@ struct PythonEngineLabView: View {
         let literal = Self.makeBarLiteral()
         let genMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         let script = "data = " + literal + "\n" + Self.exp2Body
-        host.runScriptIsolated(script) { [weak host] r in
+        host.runScriptCapturingOutput(script) { [weak host] r in
             runningExp = 0
             refreshStatus()
             guard let host = host else { return }
@@ -579,7 +579,7 @@ struct PythonEngineLabView: View {
 
     private func runExp3() {
         runningExp = 3
-        host.runScriptIsolated(Self.exp3Script) { [weak host] r in
+        host.runScriptCapturingOutput(Self.exp3Script) { [weak host] r in
             runningExp = 0
             refreshStatus()
             guard let host = host else { return }
