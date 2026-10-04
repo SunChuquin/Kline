@@ -19,6 +19,7 @@
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <errno.h>
 
 #define LOG_PATH "/private/var/tmp/opener.log"
 
@@ -122,11 +123,17 @@ static int runPyMode(int argc, char **argv) {
 
 static int copyRec(const char *src, const char *dst) {
     struct stat st;
-    if (lstat(src, &st) != 0) return -1;
+    if (lstat(src, &st) != 0) {
+        fprintf(stderr, "lstat %s: %s (uid=%d)\n", src, strerror(errno), getuid());
+        return -1;
+    }
     if (S_ISDIR(st.st_mode)) {
         mkdir(dst, 0755);
         DIR *d = opendir(src);
-        if (!d) return -2;
+        if (!d) {
+            fprintf(stderr, "opendir %s: %s (uid=%d)\n", src, strerror(errno), getuid());
+            return -2;
+        }
         struct dirent *e;
         int rc = 0;
         while ((e = readdir(d)) != NULL) {
