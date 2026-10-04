@@ -145,7 +145,6 @@ struct ProfileDetailView: View {
                     .buttonStyle(.plain)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(12)
-#endif
                 }
                 .padding()
             }
