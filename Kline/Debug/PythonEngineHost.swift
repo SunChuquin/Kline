@@ -682,77 +682,51 @@ final class PythonEngineHost: ObservableObject {
                 return
             }
 
-            // ③ root 同步执行 + 捕获子进程 stdout/stderr（spawnRoot：waitpid + 管道读取）。
-            //    之前用 detached+轮询会丢失子进程死因；spawnRoot 把 dlopen/Python fatal 的
-            //    stderr 直接带回，pyrunner 的任何死法都有据可查。
-            let runnerPath = appPath + "/pyrunner"
-            if !self.fm.fileExists(atPath: runnerPath) {
+            // ③ 借道 opener 的 --py 模式（root detached）执行：opener 是 Kline.app 内
+            //    已被证明可 exec 的受信二进制，而 Engine.app 内的二进制 exec 会被 AMFI SIGKILL
+            //    （2026-10-04 实证）。dlopen Engine.app 内 libpython 则不受此限（App 内已成功）。
+            //    opener 退出码：0=脚本成功 4=dlopen 失败 5=dlsym 失败 6/7=脚本读写失败；
+            //    Python fatal abort 时进程死掉 → out 文件不出现 → 轮询超时（stderr 已重定向落盘）。
+            let openerPath = Bundle.main.bundlePath + "/opener"
+            guard self.fm.fileExists(atPath: openerPath) else {
                 self.endBusy()
-                DispatchQueue.main.async {
-                    completion(.failure("pyrunner 不存在于 Engine.app（引擎包版本过旧，请重新下载安装）"))
-                }
+                DispatchQueue.main.async { completion(.failure("opener 不存在（构建异常）")) }
                 return
             }
-            let perms = (try? self.fm.attributesOfItem(atPath: runnerPath)[.posixPermissions] as? Int) ?? 0
-            self.appendOutput("pyrunner 权限：\(String(perms ?? 0, radix: 8))")
-            if (perms ?? 0) & 0o111 != 0o111 {
-                // TrollStore 安装不保证次级可执行文件的执行位：先试 mobile chmod，再试 root chmod
-                try? self.fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runnerPath)
-                let p2 = (try? self.fm.attributesOfItem(atPath: runnerPath)[.posixPermissions] as? Int) ?? 0
-                if (p2 ?? 0) & 0o111 == 0o111 {
-                    self.appendOutput("chmod(mobile) 成功")
-                } else {
-                    for cp in ["/bin/chmod", "/usr/bin/chmod"] where self.fm.fileExists(atPath: cp) {
-                        _ = RootRunner.spawnRoot(executable: cp, arguments: ["755", runnerPath])
-                        break
-                    }
-                    let p3 = (try? self.fm.attributesOfItem(atPath: runnerPath)[.posixPermissions] as? Int) ?? 0
-                    self.appendOutput("chmod(root) 后：\(String(p3, radix: 8))")
-                }
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let sr = RootRunner.spawnDetached(executable: openerPath,
+                                              arguments: ["--py", dylibPath, homePath,
+                                                          scriptPath, outPath, stderrPath])
+            guard sr == 0 else {
+                self.endBusy()
+                DispatchQueue.main.async { completion(.failure("opener spawn 失败（sr=\(sr)）")) }
+                return
             }
 
-            let total0 = CFAbsoluteTimeGetCurrent()
-            let r = RootRunner.spawnRoot(executable: runnerPath,
-                                         arguments: [dylibPath, homePath, scriptPath, outPath, stderrPath])
-            let totalMs = (CFAbsoluteTimeGetCurrent() - total0) * 1000
-            if r.rawStatus & 0x7f != 0 {
-                let sig = r.rawStatus & 0x7f
-                let sigName = sig == 9 ? "SIGKILL（AMFI exec 拒绝的典型形态——信任/签名问题）"
-                    : sig == 4 ? "SIGILL" : sig == 11 ? "SIGSEGV" : sig == 6 ? "SIGABRT" : "signal \(sig)"
-                self.appendOutput("⚠️ pyrunner 被信号杀死：\(sigName)，退出码 0 是假象")
-                self.endBusy()
-                DispatchQueue.main.async {
-                    completion(.failure("pyrunner 被信号 \(sig) 杀死（子进程 exec 阶段被拒），App 不受影响"))
+            // ④ 轮询 out 文件（每 200ms，上限 60s：含子进程 spawn + dlopen + init）
+            let deadline = CFAbsoluteTimeGetCurrent() + 60.0
+            while CFAbsoluteTimeGetCurrent() < deadline {
+                if self.fm.fileExists(atPath: outPath) {
+                    let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+                    guard let data = self.fm.contents(atPath: outPath) else {
+                        self.endBusy()
+                        DispatchQueue.main.async { completion(.failure("py_out.json 读取失败")) }
+                        return
+                    }
+                    self.appendOutput(String(format: "opener --py 完成，总耗时 %.1fms（含子进程启动+init）", totalMs))
+                    self.endBusy()
+                    DispatchQueue.main.async { completion(.success((data, totalMs))) }
+                    return
                 }
-                return
+                Thread.sleep(forTimeInterval: 0.2)
             }
-            self.appendOutput(String(format: "pyrunner 退出码=%d，耗时 %.1fms", r.code, totalMs))
-            if !r.stderr.isEmpty {
-                let trimmed = r.stderr.count > 600 ? String(r.stderr.suffix(600)) : r.stderr
-                self.appendOutput("pyrunner stderr：\n" + trimmed)
-            }
-            guard r.code == 0 else {
-                self.endBusy()
-                let hint: String
-                switch r.code {
-                case 3: hint = "参数不足"
-                case 4: hint = "dlopen 失败"
-                case 5: hint = "dlsym 失败"
-                case 6: hint = "脚本打开失败"
-                case 7: hint = "脚本读取失败"
-                default: hint = "子进程异常退出（信号或 fatal，stderr 见上）"
-                }
-                DispatchQueue.main.async { completion(.failure("pyrunner 失败（退出码 \(r.code)：\(hint)）")) }
-                return
-            }
-            guard let data = self.fm.contents(atPath: outPath) else {
-                self.endBusy()
-                DispatchQueue.main.async { completion(.failure("py_out.json 读取失败")) }
-                return
-            }
-            self.appendOutput(String(format: "pyrunner 完成，总耗时 %.1fms（含子进程启动+init）", totalMs))
             self.endBusy()
-            DispatchQueue.main.async { completion(.success((data, totalMs))) }
+            let stderrTail = (self.fm.contents(atPath: stderrPath))
+                .flatMap { String(data: $0, encoding: .utf8) }
+                .map { $0.count > 400 ? String($0.suffix(400)) : $0 } ?? "(空)"
+            DispatchQueue.main.async {
+                completion(.failure("opener --py 超时（Python fatal abort，stderr 尾部：\n\(stderrTail)）"))
+            }
         }
     }
 

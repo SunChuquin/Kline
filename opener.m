@@ -20,6 +20,10 @@
 
 #define LOG_PATH "/private/var/tmp/opener.log"
 
+// py 模式的 Python C API 函数指针（dlsym 取用，版本无关）
+typedef void (*VoidFnInit)(void);
+typedef int (*VoidFnRun)(const char *);
+
 static char gExtraLog[1024] = {0};   // argv[3]：额外日志文件（App 沙盒），空 = 不写
 
 static void logmsg(const char *s);   // 前置声明：loadLSFrameworks 在其定义前调用
@@ -73,7 +77,48 @@ static int openApp(const char *bundleID) {
     return ok ? 0 : -3;
 }
 
+// py 模式：opener 已被证明可 exec（Kline.app 内受信二进制），而 Engine.app 内的
+// 二进制 exec 会被 AMFI SIGKILL（2026-10-04 实证）——故 Python 子进程隔离借道 opener：
+//   opener --py <dylibPath> <home> <scriptPath> <outPath> [stderrPath]
+// 流程：stderr 重定向（可选）→ setenv PYTHONHOME → dlopen Engine.app 内 libpython
+//       → Py_Initialize → PyRun_SimpleString(脚本文件) → 退出码 0=成功
+// 脚本自己把结果写到 outPath（__kline_out__ 约定）；fatal abort 的死前信息落 stderrPath。
+static int runPyMode(int argc, char **argv) {
+    if (argc < 6) { logmsg("py mode: argc<6"); return 3; }
+    const char *dylib = argv[2], *home = argv[3], *script = argv[4], *out = argv[5];
+    if (argc >= 7) {
+        FILE *se = fopen(argv[6], "a");
+        if (se) { dup2(fileno(se), 2); fclose(se); }
+    }
+    char log[512];
+    setenv("PYTHONHOME", home, 1);
+    snprintf(log, sizeof log, "py mode: PYTHONHOME=%s dylib=%s", home, dylib); logmsg(log);
+    void *h = dlopen(dylib, RTLD_NOW | RTLD_GLOBAL);
+    if (!h) {
+        snprintf(log, sizeof log, "py mode dlopen fail: %s", dlerror()); logmsg(log);
+        return 4;
+    }
+    VoidFnInit init = (VoidFnInit)dlsym(h, "Py_Initialize");
+    VoidFnRun run = (VoidFnRun)dlsym(h, "PyRun_SimpleString");
+    if (!init || !run) { logmsg("py mode dlsym fail"); return 5; }
+    init();
+    FILE *f = fopen(script, "r");
+    if (!f) { logmsg("py mode script open fail"); return 6; }
+    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (!buf || fread(buf, 1, (size_t)n, f) != (size_t)n) { if (buf) free(buf); fclose(f); logmsg("py mode script read fail"); return 7; }
+    buf[n] = 0; fclose(f);
+    int rc = run(buf);
+    free(buf);
+    snprintf(log, sizeof log, "py mode PyRun rc=%d", rc); logmsg(log);
+    return rc;
+}
+
 int main(int argc, char **argv) {
+    // py 模式分发：不涉及 LaunchServices/更新守护，直接执行并返回
+    if (argc >= 2 && strcmp(argv[1], "--py") == 0) {
+        return runPyMode(argc, argv);
+    }
     // 小结：用 autoreleasepool 包裹主逻辑，避免 ObjC 泄漏
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     loadLSFrameworks();   // 先 dlopen 私有框架，保证 NSClassFromString 能找到 LSApplicationWorkspace
