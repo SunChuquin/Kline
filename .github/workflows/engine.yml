@@ -111,6 +111,45 @@ jobs:
           xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 -o Engine.app/Engine stub.c
           rm stub.c
           file Engine.app/Engine   # 冒烟：应为 Mach-O arm64
+          # pyrunner：独立 Python 执行子进程（App 内 PyRun_SimpleString 曾零日志原生段错误，
+          # 引擎执行全部挪进本子进程——引擎崩溃只死 pyrunner，绝不影响主 App）。
+          # argv 契约：pyrunner <dylib> <home> <script> <out> <stderrLog>；返回 0=脚本成功
+          cat > pyrunner.c <<'EOF'
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <unistd.h>
+          #include <dlfcn.h>
+          typedef void (*VoidFn)(void);
+          typedef int (*RunFn)(const char*);
+          int main(int argc, char **argv) {
+              if (argc < 6) return 3;
+              const char *dylib = argv[1], *home = argv[2], *script = argv[3], *out = argv[4], *errlog = argv[5];
+              FILE *se = fopen(errlog, "w");
+              if (se) { dup2(fileno(se), 2); fclose(se); }
+              setenv("PYTHONHOME", home, 1);
+              void *h = dlopen(dylib, RTLD_NOW | RTLD_GLOBAL);
+              if (!h) { fprintf(stderr, "dlopen fail: %s\n", dlerror()); return 4; }
+              VoidFn init = (VoidFn)dlsym(h, "Py_Initialize");
+              RunFn run = (RunFn)dlsym(h, "PyRun_SimpleString");
+              VoidFn fin = (VoidFn)dlsym(h, "Py_Finalize");
+              if (!init || !run) { fprintf(stderr, "dlsym fail\n"); return 5; }
+              init();
+              FILE *f = fopen(script, "r");
+              if (!f) { fprintf(stderr, "script open fail\n"); return 6; }
+              fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+              char *buf = (char*)malloc((size_t)n + 1);
+              if (fread(buf, 1, (size_t)n, f) != (size_t)n) { fclose(f); free(buf); return 7; }
+              buf[n] = 0; fclose(f);
+              int rc = run(buf);
+              free(buf);
+              if (fin) fin();
+              return rc;   // 0=脚本成功
+          }
+          EOF
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 -o Engine.app/pyrunner pyrunner.c
+          rm pyrunner.c
+          file Engine.app/pyrunner   # 冒烟：应为 Mach-O arm64（App 以 root detached 拉起它执行脚本）
           # 之前解出的 framework 挪入 bundle
           mv engine/Python.xcframework Engine.app/Frameworks/Python.xcframework
           rmdir engine

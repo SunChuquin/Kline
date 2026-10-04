@@ -111,10 +111,23 @@ final class PythonEngineHost: ObservableObject {
         return docs.appendingPathComponent("py_out.json").path
     }
 
-    /// Python stderr 捕获文件（Py_Initialize fatal abort 的死前信息落这里）
+    /// Python stderr 捕获文件（Py_Initialize fatal abort 的死前信息落这里；仅进程内加载链路用）
     static var pyStderrPath: String {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("py_stderr.log").path
+    }
+
+    /// pyrunner 子进程脚本文件（每次隔离执行前重写；内容 = wrappedScript 包装后的实脚本）
+    static var pyScriptPath: String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("py_script.py").path
+    }
+
+    /// pyrunner 子进程自己的 stderr（dlopen/init/脚本的死前信息；独立命名，
+    /// 避免与进程内加载链路的 py_stderr.log 混淆）
+    static var pyRunnerStderrPath: String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("py_runner_stderr.log").path
     }
 
     private let workQueue = DispatchQueue(label: "com.sunck.Kline.pyengine")   // 串行：下载/加载/跑脚本全在此排队
@@ -605,6 +618,153 @@ final class PythonEngineHost: ObservableObject {
         return "import base64 as _kb64\n"
              + "__kline_out__ = _kb64.b64decode('" + b64 + "').decode()\n"
              + body
+    }
+
+    // MARK: - 子进程隔离执行（pyrunner，Phase-0 实验主链路）
+
+    /// 经 pyrunner 子进程执行脚本：进程内 PyRun_SimpleString 曾发生零 stderr 原生段错误
+    /// （直接闪退），故 Python 执行全部挪到独立子进程——引擎崩溃只死 pyrunner，App 不受影响。
+    /// 前置只要求 Engine.app 已安装（pyrunner/dylib/home 都在其中）：解释器初始化由子进程自做，
+    /// 进程内 loadEngine 的成功状态不再是实验前置（loadEngine 保留，仅用于进程内 init 计时）。
+    ///
+    /// spawn 说明：RootRunner.spawnDetached 以 root（persona 99 + uid/gid 0）detached 拉起
+    /// pyrunner，不回读、不 waitpid，子进程孤儿化由 launchd 收养；App 进程内绝无任何
+    /// Python 调用。计时从 spawn 前到读到 py_out.json（总耗时含子进程启动 + Py_Initialize，
+    /// 这正是 Phase-0 要的「含隔离开销」数字）。
+    func runScriptIsolated(_ body: String,
+                           completion: @escaping (Result<(data: Data, totalMs: Double), String>) -> Void) {
+        workQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard !self.busy else {
+                DispatchQueue.main.async { completion(.failure("已有任务进行中")) }
+                return
+            }
+            switch self.status() {
+            case .installed:
+                break
+            case .notInstalled:
+                DispatchQueue.main.async { completion(.failure("未安装引擎")) }
+                return
+            case .versionMismatch(let v):
+                DispatchQueue.main.async {
+                    completion(.failure("apiVersion=\(v) 超出兼容区间 [\(Self.minEngineAPI), \(Self.maxEngineAPI)]"))
+                }
+                return
+            case .corrupted(let r):
+                DispatchQueue.main.async {
+                    completion(.failure("引擎损坏：\(r)——请在 TrollStore 内卸载 Engine.app 后重装"))
+                }
+                return
+            }
+            guard let appPath = self.locateEngineApp(),
+                  let m = self.readManifest(in: appPath) else {
+                DispatchQueue.main.async { completion(.failure("Engine.app 定位失败")) }
+                return
+            }
+            let dylibPath = Self.resolve(appPath, m.layout.dylib)
+            let homePath = Self.resolve(appPath, m.layout.home)
+            let scriptPath = Self.pyScriptPath
+            let outPath = Self.pyOutPath
+            let stderrPath = Self.pyRunnerStderrPath
+
+            self.beginBusy("pyrunner 运行脚本…")
+
+            // ① 写脚本：复用 wrappedScript 包装（__kline_out__ base64 注入，防拼接注入）；
+            //    先删旧输出/旧 stderr，轮询以「py_out.json 出现」为完成信号
+            try? self.fm.removeItem(atPath: outPath)
+            try? self.fm.removeItem(atPath: stderrPath)
+            let script = Self.wrappedScript(body, outPath: outPath)
+            do {
+                try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
+            } catch {
+                self.endBusy()
+                DispatchQueue.main.async { completion(.failure("脚本写入失败：" + error.localizedDescription)) }
+                return
+            }
+
+            // ② root detached 拉起 pyrunner：argv = [dylib, home, script, out, stderr]
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let sr = RootRunner.spawnDetached(executable: appPath + "/pyrunner",
+                                              arguments: [dylibPath, homePath, scriptPath, outPath, stderrPath])
+            guard sr == 0 else {
+                self.appendOutput("pyrunner spawn 失败（sr=\(sr)）")
+                self.endBusy()
+                DispatchQueue.main.async { completion(.failure("pyrunner 拉起失败（sr=\(sr)）")) }
+                return
+            }
+
+            // ③ workQueue 轮询（每 100ms，上限 30s）。超时基本等于子进程崩溃
+            //    （posix_spawn 成功但进程死了），输出文件永远不出现。
+            let deadline = CFAbsoluteTimeGetCurrent() + 30.0
+            while CFAbsoluteTimeGetCurrent() < deadline {
+                if self.fm.fileExists(atPath: outPath) {
+                    let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+                    guard let data = self.fm.contents(atPath: outPath) else {
+                        self.endBusy()
+                        DispatchQueue.main.async { completion(.failure("py_out.json 读取失败")) }
+                        return
+                    }
+                    self.appendOutput(String(format: "pyrunner 完成，总耗时 %.1fms（含子进程启动+init）", totalMs))
+                    self.endBusy()
+                    DispatchQueue.main.async { completion(.success((data, totalMs))) }
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            self.endBusy()
+            DispatchQueue.main.async {
+                completion(.failure("pyrunner 超时（子进程可能崩溃，stderr 见 py_runner_stderr.log）"))
+            }
+        }
+    }
+
+    // MARK: - 排障：导出崩溃报告
+
+    /// 把 /var/mobile/Library/Logs/CrashReporter 拷进 App Documents/crashlogs（排障用，
+    /// 不做 UI 浏览——用户经既有沙盒/日志通道确认）。CrashReporter 属 root 受限目录，
+    /// 走 root detached cp；cp 二进制在 iOS 上的路径不固定，依次尝试 /bin/cp、/usr/bin/cp。
+    /// 注意 detached spawn 不等退出码，「已导出」仅代表已成功拉起 cp（结果看 Documents/crashlogs）。
+    func exportCrashLogs(completion: @escaping (String) -> Void) {
+        workQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard !self.busy else {
+                DispatchQueue.main.async { completion("有任务进行中，稍后再试") }
+                return
+            }
+            self.beginBusy("导出崩溃报告…")
+            let docs = self.fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let dest = docs.appendingPathComponent("crashlogs").path
+            try? self.fm.removeItem(atPath: dest)
+            let candidates = ["/bin/cp", "/usr/bin/cp"]
+            var spawned = false
+            var existed = false
+            var lastSr: Int32 = -1
+            for cp in candidates {
+                guard !spawned else { break }
+                guard self.fm.fileExists(atPath: cp) else { continue }
+                existed = true
+                lastSr = RootRunner.spawnDetached(
+                    executable: cp,
+                    arguments: ["-R", "/var/mobile/Library/Logs/CrashReporter", dest])
+                spawned = (lastSr == 0)
+            }
+            self.endBusy()
+            DispatchQueue.main.async {
+                if spawned {
+                    let msg = "已导出到 Documents/crashlogs"
+                    self.appendOutput(msg)
+                    completion(msg)
+                } else if !existed {
+                    let msg = "导出失败：/bin/cp 与 /usr/bin/cp 均不存在"
+                    self.appendOutput(msg)
+                    completion(msg)
+                } else {
+                    let msg = "导出失败：cp 拉起失败（sr=\(lastSr)）"
+                    self.appendOutput(msg)
+                    completion(msg)
+                }
+            }
+        }
     }
 
     // MARK: - 清理下载文件

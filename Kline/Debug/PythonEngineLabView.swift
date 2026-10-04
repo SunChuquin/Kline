@@ -172,8 +172,8 @@ struct PythonEngineLabView: View {
 
                 Divider()
 
-                // ③ 加载引擎（从 Engine.app 安装路径 dlopen）
-                actionRow(title: "加载引擎（dlopen + 初始化）",
+                // ③ 加载引擎（从 Engine.app 安装路径 dlopen；仅测进程内 init 计时，实验不需要）
+                actionRow(title: "加载引擎（进程内 dlopen+init 计时）",
                           systemImage: "play.circle",
                           enabled: !host.isBusy && engineStatus == .installed && !host.isLoaded,
                           showSpinner: host.isBusy && (host.busyText.hasPrefix("dlopen") || host.busyText.hasPrefix("Py_Initialize"))) {
@@ -182,28 +182,29 @@ struct PythonEngineLabView: View {
 
                 Divider()
 
-                actionRow(title: "实验① 最小脚本",
+                // 实验①②③均经 pyrunner 子进程执行（进程隔离，前置只要求已安装，无需先加载）
+                actionRow(title: "实验① 最小脚本（隔离）",
                           systemImage: "1.circle",
-                          enabled: !host.isBusy && host.isLoaded,
-                          showSpinner: host.isBusy && host.busyText == "运行脚本…" && runningExp == 1) {
+                          enabled: !host.isBusy && engineStatus == .installed,
+                          showSpinner: host.isBusy && host.busyText == "pyrunner 运行脚本…" && runningExp == 1) {
                     runExp1()
                 }
 
                 Divider()
 
-                actionRow(title: "实验② 冷启动与150根计时",
+                actionRow(title: "实验② 冷启动与150根计时（隔离）",
                           systemImage: "2.circle",
-                          enabled: !host.isBusy && host.isLoaded,
-                          showSpinner: host.isBusy && host.busyText == "运行脚本…" && runningExp == 2) {
+                          enabled: !host.isBusy && engineStatus == .installed,
+                          showSpinner: host.isBusy && host.busyText == "pyrunner 运行脚本…" && runningExp == 2) {
                     runExp2()
                 }
 
                 Divider()
 
-                actionRow(title: "实验③ 并发吞吐",
+                actionRow(title: "实验③ 并发吞吐（隔离）",
                           systemImage: "3.circle",
-                          enabled: !host.isBusy && host.isLoaded,
-                          showSpinner: host.isBusy && host.busyText == "运行脚本…" && runningExp == 3) {
+                          enabled: !host.isBusy && engineStatus == .installed,
+                          showSpinner: host.isBusy && host.busyText == "pyrunner 运行脚本…" && runningExp == 3) {
                     runExp3()
                 }
 
@@ -215,12 +216,20 @@ struct PythonEngineLabView: View {
                           enabled: !host.isBusy) {
                     cleanDownloads()
                 }
+
+                Divider()
+
+                actionRow(title: "导出崩溃报告",
+                          systemImage: "square.and.arrow.down.on.square",
+                          enabled: !host.isBusy) {
+                    exportCrashLogs()
+                }
             }
             .background(Color(.secondarySystemBackground))
             .cornerRadius(12)
 
-            // 三段式流程说明（每步预期：下载后 sha256 通过；安装后状态变已安装；加载后可跑实验）
-            Text("流程：① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）→ ② 用 TrollStore 安装（安装时整包授信代码签名，装成 Engine.app）→ ③ 回本页「刷新状态」确认已安装后「加载引擎」。Engine.app 的卸载请在 TrollStore 内操作；「清理下载文件」只删除已下载的 tipa。")
+            // 三段式流程说明（实验已进程隔离：Python 在 pyrunner 子进程执行，崩溃不影响本 App）
+            Text("流程：① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）→ ② 用 TrollStore 安装（安装时整包授信代码签名，装成 Engine.app）→ ③ 回本页「刷新状态」确认已安装后即可跑实验①②③。实验经 pyrunner 独立子进程执行 Python（root 拉起、进程隔离），引擎崩溃只死子进程，绝不影响本 App；超时多为子进程崩溃，stderr 见 Documents/py_runner_stderr.log。「加载引擎」仅为测量进程内 dlopen/Py_Initialize 计时，跑实验无需它。Engine.app 的卸载请在 TrollStore 内操作；「清理下载文件」只删除已下载的 tipa。")
                 .font(.system(size: 12))
                 .foregroundColor(Color.gray.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -415,6 +424,11 @@ struct PythonEngineLabView: View {
         }
     }
 
+    /// 排障：把系统 CrashReporter 拷进 Documents/crashlogs（结果由 host appendOutput 到输出区）
+    private func exportCrashLogs() {
+        host.exportCrashLogs { _ in }
+    }
+
     // MARK: 实验① 最小脚本（sys.version / platform 回读）
 
     /// 脚本常量（结果写到 __kline_out__，路径由宿主 base64 注入）
@@ -429,14 +443,14 @@ struct PythonEngineLabView: View {
 
     private func runExp1() {
         runningExp = 1
-        host.runScriptCapturingOutput(Self.exp1Script) { [weak host] r in
+        host.runScriptIsolated(Self.exp1Script) { [weak host] r in
             runningExp = 0
             refreshStatus()
             guard let host = host else { return }
             switch r {
             case .success(let out):
                 if let obj = (try? JSONSerialization.jsonObject(with: out.data)) as? [String: Any] {
-                    host.appendOutput(String(format: "实验① 完成，总耗时 %.1fms", out.totalMs))
+                    host.appendOutput(String(format: "实验① 完成，总耗时 %.1fms（含子进程启动+init 隔离开销）", out.totalMs))
                     host.appendOutput("sys.version：\(obj["version"] as? String ?? "?")")
                     host.appendOutput("platform：\(obj["platform"] as? String ?? "?")")
                     host.appendOutput("sys.prefix：\(obj["prefix"] as? String ?? "?")")
@@ -512,14 +526,14 @@ struct PythonEngineLabView: View {
         let literal = Self.makeBarLiteral()
         let genMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         let script = "data = " + literal + "\n" + Self.exp2Body
-        host.runScriptCapturingOutput(script) { [weak host] r in
+        host.runScriptIsolated(script) { [weak host] r in
             runningExp = 0
             refreshStatus()
             guard let host = host else { return }
             switch r {
             case .success(let out):
                 if let obj = (try? JSONSerialization.jsonObject(with: out.data)) as? [String: Any] {
-                    host.appendOutput(String(format: "实验② 总耗时 %.1fms（Swift 生成数据 %.2fms）",
+                    host.appendOutput(String(format: "实验② 总耗时 %.1fms（含隔离开销；Swift 生成数据 %.2fms）",
                                              out.totalMs, genMs))
                     host.appendOutput(String(format: "纯计算 %.2fms（%d 根，MA5/MA10/EMA12 各一遍）",
                                              obj["pure_ms"] as? Double ?? -1,
@@ -565,7 +579,7 @@ struct PythonEngineLabView: View {
 
     private func runExp3() {
         runningExp = 3
-        host.runScriptCapturingOutput(Self.exp3Script) { [weak host] r in
+        host.runScriptIsolated(Self.exp3Script) { [weak host] r in
             runningExp = 0
             refreshStatus()
             guard let host = host else { return }
