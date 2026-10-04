@@ -134,14 +134,18 @@ final class PythonEngineHost: ObservableObject {
     private var busy = false                                                  // 只在 workQueue 上读写
     private let fm = FileManager.default
 
-    // Python C API 函数指针（dlsym 取用；版本无关：仅三个最简符号，不 import Python 头）
+    // Python C API 函数指针（dlsym 取用；版本无关：仅最简符号，不 import Python 头）
     private typealias Py_InitializeFn = @convention(c) () -> Void
     private typealias PyRun_SimpleStringFn = @convention(c) (UnsafePointer<CChar>?) -> Int32
     private typealias Py_FinalizeFn = @convention(c) () -> Void
+    private typealias PyGILState_EnsureFn = @convention(c) () -> Int32
+    private typealias PyGILState_ReleaseFn = @convention(c) (Int32) -> Void
     private var pyHandle: UnsafeMutableRawPointer?
     private var pyInitFn: Py_InitializeFn?
     private var pyRunFn: PyRun_SimpleStringFn?
     private var pyFinalizeFn: Py_FinalizeFn?   // 仅持有引用，进程内不调用（dlclose/卸载不可靠）
+    private var pyGilEnsureFn: PyGILState_EnsureFn?
+    private var pyGilReleaseFn: PyGILState_ReleaseFn?
 
     private init() {}
 
@@ -496,11 +500,13 @@ final class PythonEngineHost: ObservableObject {
             }
             guard let symInit = dlsym(handle, "Py_Initialize"),
                   let symRun = dlsym(handle, "PyRun_SimpleString"),
-                  let symFin = dlsym(handle, "Py_Finalize") else {
+                  let symFin = dlsym(handle, "Py_Finalize"),
+                  let symGilE = dlsym(handle, "PyGILState_Ensure"),
+                  let symGilR = dlsym(handle, "PyGILState_Release") else {
                 self.appendOutput("dlsym 失败：缺少 Python C API 符号")
                 self.endBusy()
                 DispatchQueue.main.async {
-                    completion(.failure("dlsym 缺少 Py_Initialize / PyRun_SimpleString / Py_Finalize"))
+                    completion(.failure("dlsym 缺少 Py_Initialize / PyRun_SimpleString / Py_Finalize / PyGILState_*"))
                 }
                 return
             }
@@ -544,6 +550,8 @@ final class PythonEngineHost: ObservableObject {
             let initFn = unsafeBitCast(symInit, to: Py_InitializeFn.self)
             let runFn = unsafeBitCast(symRun, to: PyRun_SimpleStringFn.self)
             let finFn = unsafeBitCast(symFin, to: Py_FinalizeFn.self)
+            let gilE = unsafeBitCast(symGilE, to: PyGILState_EnsureFn.self)
+            let gilR = unsafeBitCast(symGilR, to: PyGILState_ReleaseFn.self)
 
             self.updateBusy("Py_Initialize…")
             let t1 = CFAbsoluteTimeGetCurrent()
@@ -554,6 +562,8 @@ final class PythonEngineHost: ObservableObject {
             self.pyInitFn = initFn
             self.pyRunFn = runFn
             self.pyFinalizeFn = finFn       // 只持有引用，不调用
+            self.pyGilEnsureFn = gilE
+            self.pyGilReleaseFn = gilR
             DispatchQueue.main.async { self.isLoaded = true }
             self.appendOutput(String(format: "加载完成：dlopen %.1fms，Py_Initialize %.1fms", dlopenMs, initMs))
             self.endBusy()
@@ -576,7 +586,13 @@ final class PythonEngineHost: ObservableObject {
                 return
             }
             let t0 = CFAbsoluteTimeGetCurrent()
+            // GIL 线程状态保障：Py_Initialize 可能在 GCD 的线程 A 上执行，而本闭包在
+            // 线程 B 上运行（串行队列不保证同 pthread）——无线程状态直接调 C API 会
+            // 在 _PyObject_Malloc 段错误（2026-10-04 崩溃报告实证）。标准姿势：
+            // PyGILState_Ensure 在当前线程创建/绑定线程状态并持 GIL。
+            let gil = self.pyGilEnsureFn.map { $0() } ?? -1
             let rc = script.withCString { run($0) }   // 经函数指针调用，版本无关
+            if let rel = self.pyGilReleaseFn, gil >= 0 { rel(gil) }
             let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             DispatchQueue.main.async {
                 completion(rc == 0 ? .success(ms)
