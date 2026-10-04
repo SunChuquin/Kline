@@ -110,6 +110,10 @@ jobs:
           # 之前解出的 framework 挪入 bundle
           mv engine/Python.xcframework Engine.app/Frameworks/Python.xcframework
           rmdir engine
+          # stdlib 目录对齐 CPython 平台发现逻辑：sys.platlibdir='lib'，Py_Initialize 会在
+          # <PYTHONHOME>/lib/python3.14 找 stdlib——beeware 的 lib-arm64 必须重命名为 lib，
+          # 否则 import encodings 失败 → fatal abort 闪退（2026-10-04 真机 stderr 实证）
+          mv Engine.app/Frameworks/Python.xcframework/ios-arm64/lib-arm64 Engine.app/Frameworks/Python.xcframework/ios-arm64/lib
           # manifest 契约（schema 1）见 Phase-0 引擎实验 plan（两端共用，勿改字段名/路径）
           # 路径前缀从 engine/ 变为 Engine.app/（tipa 解包后 Engine.app 即 TrollStore 安装目录）
           cat > Engine.app/manifest.json <<EOF
@@ -121,7 +125,7 @@ jobs:
             "apiVersion": 1,
             "layout": {
               "dylib": "Engine.app/Frameworks/Python.xcframework/ios-arm64/Python.framework/Python",
-              "home": "Engine.app/Frameworks/Python.xcframework/ios-arm64/lib-arm64/python3.14"
+              "home": "Engine.app/Frameworks/Python.xcframework/ios-arm64/lib/python3.14"
             }
           }
           EOF
