@@ -15,6 +15,7 @@
 
 import Foundation
 import Darwin
+import Combine
 import CryptoKit
 import Compression
 
@@ -55,6 +56,10 @@ struct EngineFlowError: LocalizedError {
     let msg: String
     var errorDescription: String? { msg }
 }
+
+/// 调试代码域内统一以 String 作为 Result.Failure（本模块显式声明 conform，
+/// 免去宿主与调试页共 15+ 处 `.failure(...)` 的机械包装；仅调试文件作用，不外溢）
+extension String: Error {}
 
 // MARK: - 宿主
 
