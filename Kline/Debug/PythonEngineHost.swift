@@ -240,15 +240,23 @@ final class PythonEngineHost: ObservableObject {
                 let tarPath = self.rootPath + "/incoming.tar.gz"
                 let shaPath = self.rootPath + "/incoming.sha256"
 
-                // ① tar.gz 与 .sha256 sidecar（CI 同名发布）
-                try self.downloadFileSync(tarURL, to: tarPath) { f in
+                // ① tar.gz 与 .sha256 sidecar（CI 同名发布）。
+                //    加时间戳查询参数穿透缓存：Release 资产 --clobber 更新后，同名 URL 可能被
+                //    GitHub CDN / 用户代理缓存到旧文件，导致「新 sidecar + 旧 tar」哈希不匹配。
+                guard tarURL.absoluteString.hasSuffix(".tar.gz") else {
+                    throw EngineFlowError(msg: "引擎包 URL 非 .tar.gz")
+                }
+                let tarStr = tarURL.absoluteString
+                let shaStr = tarStr + ".sha256"
+                let bust = "?nc=\(Int(Date().timeIntervalSince1970))"
+                guard let tarBusted = URL(string: tarStr + bust),
+                      let shaBusted = URL(string: shaStr + bust) else {
+                    throw EngineFlowError(msg: "URL 拼接失败")
+                }
+                try self.downloadFileSync(tarBusted, to: tarPath) { f in
                     DispatchQueue.main.async { self.downloadProgress = f }
                 }
-                guard tarURL.absoluteString.hasSuffix(".tar.gz"),
-                      let shaURL = URL(string: tarURL.absoluteString + ".sha256") else {
-                    throw EngineFlowError(msg: "无法推导 sidecar 地址（URL 非 .tar.gz）")
-                }
-                try self.downloadFileSync(shaURL, to: shaPath, progress: nil)
+                try self.downloadFileSync(shaBusted, to: shaPath, progress: nil)
 
                 // ② sha256 校验（CryptoKit 流式）
                 self.updateBusy("sha256 校验…")
