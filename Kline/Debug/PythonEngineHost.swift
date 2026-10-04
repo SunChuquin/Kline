@@ -111,6 +111,12 @@ final class PythonEngineHost: ObservableObject {
         return docs.appendingPathComponent("py_out.json").path
     }
 
+    /// Python stderr 捕获文件（Py_Initialize fatal abort 的死前信息落这里）
+    static var pyStderrPath: String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("py_stderr.log").path
+    }
+
     private let workQueue = DispatchQueue(label: "com.sunck.Kline.pyengine")   // 串行：下载/加载/跑脚本全在此排队
     private var busy = false                                                  // 只在 workQueue 上读写
     private let fm = FileManager.default
@@ -490,6 +496,13 @@ final class PythonEngineHost: ObservableObject {
             // 初始化前设置 PYTHONHOME（值随引擎包 manifest 走，不硬编码；指向 Engine.app 内 stdlib）
             setenv("PYTHONHOME", homePath, 1)
             self.appendOutput("PYTHONHOME=\(homePath)")
+
+            // stderr 捕获：CPython stdlib 发现失败时 fatal error + abort（进程级闪退），
+            // 死前信息全走 stderr——重定向到文件才能跨闪退取证
+            if let f = fopen(Self.pyStderrPath, "a") {
+                dup2(fileno(f), 2)
+                fclose(f)
+            }
 
             let initFn = unsafeBitCast(symInit, to: Py_InitializeFn.self)
             let runFn = unsafeBitCast(symRun, to: PyRun_SimpleStringFn.self)

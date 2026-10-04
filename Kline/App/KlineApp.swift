@@ -26,8 +26,7 @@ struct KlineApp: App {
     static let appVersion = "1.0.2"
 
     init() {
-        // 每次启动重置沙盒日志，保证 debug_log.txt 只含本次启动到现在的记录
-        DebugLogger.shared.clear()
+        // 启动不再清空日志（Phase-0 排障需要跨闪退保留证据；体积由 trimIfNeeded 封顶）
         DebugLogger.shared.log("== App 启动 == 版本:\(KlineApp.appVersion)")
 
         // 启动本地 HTTP 服务器（A2 本地更新安装 + 🥈 远程更新触发）

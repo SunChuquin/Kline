@@ -34,9 +34,9 @@ nonisolated final class DebugLogger: @unchecked Sendable {
         logURL = docs.appendingPathComponent(Self.fileName)
     }
 
-    /// 追加写一行日志（线程安全）
+    /// 追加写一行日志（串行写盘 + **同步**执行：闪退前的最后几行也必须落盘，排障取证用）
     func log(_ message: String) {
-        queue.async { [self] in
+        queue.sync { [self] in
             let line = Self.timestamp() + " " + message + "\n"
             do {
                 let data = Data(line.utf8)
