@@ -25,10 +25,8 @@ struct ProfileDetailView: View {
     @State private var showFormulaCenter = false
     /// 布局编辑器（全屏 overlay）开合
     @State private var showLayoutEditor = false
-#if DEBUG
-    /// Python 引擎实验室（纯调试页，仅 DEBUG 构建提供入口，不污染生产 UI）
+    /// Python 引擎实验室（Phase-0 调试页；引擎不进 IPA，按需下载加载，不点不动作）
     @State private var showPythonLab = false
-#endif
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @ObservedObject private var tradingLayoutStore = TradingLayoutStore.shared
     @ObservedObject private var pageLayoutStore = PageLayoutStore.shared
@@ -129,8 +127,7 @@ struct ProfileDetailView: View {
                     // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
                     LocalUpdateView()
 
-#if DEBUG
-                    // Python 引擎实验室（低调调试入口，仅 DEBUG 构建；引擎不进 IPA，按需下载加载）
+                    // Python 引擎实验室（低调调试入口；引擎不进 IPA，按需下载加载）
                     Button(action: { showPythonLab = true }) {
                         HStack(spacing: 10) {
                             Text("Python 引擎实验室")
@@ -261,14 +258,12 @@ struct ProfileDetailView: View {
                     .transition(.opacity)
                     .zIndex(1000)
             }
-#if DEBUG
             // Python 引擎实验室：全屏页面（铺满，无遮罩），关闭走页内「返回」
             if showPythonLab {
                 ZStack { PythonEngineLabView(onClose: { showPythonLab = false }) }
                     .transition(.opacity)
                     .zIndex(1000)
             }
-#endif
         }
         // 浮层互斥：任一打开时关掉其余（iOS 15 的 onChange 为单参数闭包）
         .onChange(of: showThemePanel) { newValue in

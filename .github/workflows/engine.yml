@@ -134,11 +134,13 @@ jobs:
             echo "构建：run #${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7}"
           } > release_notes.md
           # 幂等：Release 已存在则 --clobber 覆盖同名资产并刷新说明（与 build.yml 的 latest 模式一致），重复触发不报错
+          # prerelease：GitHub /releases/latest 会跳过预发布——引擎包绝不能抢占 App 更新检查的 latest 端点
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "$ASSET" "$SIDE" --clobber
-            gh release edit "$TAG" --title "Kline Python Engine ${PYTHON_VERSION}" --notes-file release_notes.md
+            gh release edit "$TAG" --prerelease --title "Kline Python Engine ${PYTHON_VERSION}" --notes-file release_notes.md
           else
             gh release create "$TAG" "$ASSET" "$SIDE" \
+              --prerelease \
               --title "Kline Python Engine ${PYTHON_VERSION}" \
               --notes-file release_notes.md
           fi
