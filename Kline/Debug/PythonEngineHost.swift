@@ -747,6 +747,43 @@ final class PythonEngineHost: ObservableObject {
             let docs = self.fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let dest = docs.appendingPathComponent("crashlogs").path
             try? self.fm.removeItem(atPath: dest)
+            let crPath = "/var/mobile/Library/Logs/CrashReporter"
+
+            // 优先：App 直接枚举（mobile + no-sandbox 下 CrashReporter 可能可直接读，无需 opener/root）
+            do {
+                let items = try self.fm.contentsOfDirectory(atPath: crPath)
+                self.appendOutput("直接枚举 CrashReporter 成功：\(items.count) 项")
+                try self.fm.createDirectory(atPath: dest, withIntermediateDirectories: true)
+                var copied = 0
+                for name in items.sorted() {
+                    let src = crPath + "/" + name
+                    let d = dest + "/" + name
+                    var isDir: ObjCBool = false
+                    if self.fm.fileExists(atPath: src, isDirectory: &isDir), isDir.boolValue {
+                        // 子目录只取一层 .ips
+                        if let subs = try? self.fm.contentsOfDirectory(atPath: src) {
+                            try? self.fm.createDirectory(atPath: d, withIntermediateDirectories: true)
+                            for s2 in subs where s2.hasSuffix(".ips") {
+                                try? self.fm.copyItem(atPath: src + "/" + s2, toPath: d + "/" + s2)
+                                copied += 1
+                            }
+                        }
+                    } else if name.hasSuffix(".ips") {
+                        try? self.fm.copyItem(atPath: src, toPath: d)
+                        copied += 1
+                    }
+                }
+                self.appendOutput("已复制 \(copied) 个 .ips 到 Documents/crashlogs")
+                self.endBusy()
+                let msg = "已导出到 Documents/crashlogs（直接读取，\(copied) 个 .ips）"
+                self.appendOutput(msg)
+                completion(msg)
+                return
+            } catch {
+                self.appendOutput("直接枚举失败：\(error.localizedDescription) → 走 opener --cp 兜底")
+            }
+
+            // 兜底：opener --cp（root 递归拷贝）
             let openerPath = Bundle.main.bundlePath + "/opener"
             guard self.fm.fileExists(atPath: openerPath) else {
                 self.endBusy()
