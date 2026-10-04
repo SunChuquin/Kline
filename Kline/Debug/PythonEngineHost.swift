@@ -207,7 +207,7 @@ final class PythonEngineHost: ObservableObject {
             guard parts.count == 2 else { continue }
             let expect = String(parts[0]).lowercased()
             guard expect.count == 64 else { continue }
-            var rel = String(parts[1])
+            var rel = String(parts[1]).trimmingCharacters(in: .whitespaces)   // shasum 输出 hash 后是两个空格，maxSplits=1 的尾段带前导空格，必须 trim
             if rel.hasPrefix("./") { rel.removeFirst(2) }
             guard let actual = try? fileSHA256(path: dir + "/" + rel) else {
                 throw EngineFlowError(msg: "文件缺失：\(rel)")
