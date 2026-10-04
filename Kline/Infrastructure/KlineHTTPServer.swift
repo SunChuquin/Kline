@@ -1691,9 +1691,11 @@ enum RootRunner {
     }
 
     /// 以 root spawn 一条命令并捕获 stdout/stderr。
-    /// - Returns: (code, stdout, stderr)。spawn 本身失败时 code 为 posix 错误码（>0，如 2=ENOENT）。
+    /// - Returns: (code, rawStatus, stdout, stderr)。spawn 本身失败时 code 为 posix 错误码（>0，如 2=ENOENT）。
+    ///   rawStatus 为原始 waitpid status：`rawStatus & 0x7f != 0` = 被信号杀死（9=SIGKILL，
+    ///   AMFI exec 拒绝的典型形态——此时 code 恒为 0，不区分会误判成「成功」）。
     @discardableResult
-    static func spawnRoot(executable: String, arguments: [String] = []) -> (code: Int32, stdout: String, stderr: String) {
+    static func spawnRoot(executable: String, arguments: [String] = []) -> (code: Int32, rawStatus: Int32, stdout: String, stderr: String) {
         typealias SpawnFn = @convention(c) (UnsafeMutablePointer<pid_t>?, UnsafePointer<CChar>?, OpaquePointer?, OpaquePointer?, UnsafePointer<UnsafeMutablePointer<CChar>?>?, UnsafePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
         typealias AttrFn = @convention(c) (OpaquePointer) -> Int32
         typealias AddDupFn = @convention(c) (OpaquePointer, Int32, Int32) -> Int32
@@ -1767,7 +1769,7 @@ enum RootRunner {
         var status: Int32 = 0
         waitpid(pid, &status, 0)
         let code = (status >> 8) & 0xff
-        return (code,
+        return (code, status,
                 String(data: outData, encoding: .utf8) ?? "",
                 String(data: errData, encoding: .utf8) ?? "")
     }

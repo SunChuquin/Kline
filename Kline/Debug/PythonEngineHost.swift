@@ -715,6 +715,17 @@ final class PythonEngineHost: ObservableObject {
             let r = RootRunner.spawnRoot(executable: runnerPath,
                                          arguments: [dylibPath, homePath, scriptPath, outPath, stderrPath])
             let totalMs = (CFAbsoluteTimeGetCurrent() - total0) * 1000
+            if r.rawStatus & 0x7f != 0 {
+                let sig = r.rawStatus & 0x7f
+                let sigName = sig == 9 ? "SIGKILL（AMFI exec 拒绝的典型形态——信任/签名问题）"
+                    : sig == 4 ? "SIGILL" : sig == 11 ? "SIGSEGV" : sig == 6 ? "SIGABRT" : "signal \(sig)"
+                self.appendOutput("⚠️ pyrunner 被信号杀死：\(sigName)，退出码 0 是假象")
+                self.endBusy()
+                DispatchQueue.main.async {
+                    completion(.failure("pyrunner 被信号 \(sig) 杀死（子进程 exec 阶段被拒），App 不受影响"))
+                }
+                return
+            }
             self.appendOutput(String(format: "pyrunner 退出码=%d，耗时 %.1fms", r.code, totalMs))
             if !r.stderr.isEmpty {
                 let trimmed = r.stderr.count > 600 ? String(r.stderr.suffix(600)) : r.stderr
