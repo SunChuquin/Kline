@@ -62,8 +62,12 @@ final class QuoteParsingContractTests: XCTestCase {
 
     /// decodeChunk 需要 HTTP 200 响应才会走解析分支（只看 statusCode，不发请求）
     private func okResponse() -> URLResponse {
-        return HTTPURLResponse(url: URL(fileURLWithPath: "/kline-contract-test"),
-                               statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
+        // Xcode 26 SDK 起 HTTPURLResponse(url:) 为可失败初始化器（合法 URL + 固定参数不会失败）
+        guard let resp = HTTPURLResponse(url: URL(fileURLWithPath: "/kline-contract-test"),
+                                         statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil) else {
+            fatalError("HTTPURLResponse 初始化失败（契约测试固定参数，不应发生）")
+        }
+        return resp
     }
 
     private func describe(_ o: GapOutcome) -> String {
