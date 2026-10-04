@@ -1,0 +1,74 @@
+name: CI Unit Tests (simulator + golden determinism)
+
+# 独立测试工作流：不触碰 build.yml 构建链，不发布任何产物。
+# 1) golden 确定性：在 CI 机器上重跑 src/contract_golden.py，与已提交 fixtures 逐字节对拍（跨平台验证）
+# 2) KlineTests 单元测试：iOS 模拟器跑契约测试（KlineTests scheme，跳过 KlineUITests）
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Kline/**'
+      - 'KlineTests/**'
+      - 'Kline.xcodeproj/**'
+      - 'src/contract_golden.py'
+      - '.github/workflows/test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Golden determinism + KlineTests (simulator)
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Golden determinism check (regenerate twice, diff against committed)
+        run: |
+          set -euo pipefail
+          python3 src/contract_golden.py
+          python3 src/contract_golden.py
+          echo "---- git status after regeneration ----"
+          git status --porcelain -- KlineTests/Fixtures
+          git diff --exit-code -- KlineTests/Fixtures
+          echo "OK: fixtures are byte-level deterministic on CI"
+
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          SIM=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+( Pro Max| Pro| Plus)?' | head -1)
+          if [ -z "$SIM" ]; then
+            echo "No available iPhone simulator found" >&2
+            exit 1
+          fi
+          echo "simulator=$SIM" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $SIM"
+
+      - name: Run KlineTests (skip KlineUITests)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Kline.xcodeproj \
+            -scheme Kline \
+            -destination 'platform=iOS Simulator,name=${{ steps.sim.outputs.simulator }}' \
+            -skip-testing:KlineUITests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee xcodebuild_test.log
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-test-log
+          path: xcodebuild_test.log
+          retention-days: 14
