@@ -63,10 +63,12 @@ nonisolated final class DebugLogger: @unchecked Sendable {
     /// 当前日志清空重新开始——即「保上次、清上上次」，便于取证最近两次会话
     func rollOnLaunch() {
         queue.sync { [self] in
-            guard fm.fileExists(atPath: logURL.path) else { return }
+            guard FileManager.default.fileExists(atPath: logURL.path) else { return }
             let prev = logURL.deletingLastPathComponent().appendingPathComponent("debug_log.prev.txt")
-            if fm.fileExists(atPath: prev.path) { try? fm.removeItem(at: prev) }
-            try? fm.moveItem(at: logURL, to: prev)
+            if FileManager.default.fileExists(atPath: prev.path) {
+                try? FileManager.default.removeItem(at: prev)
+            }
+            try? FileManager.default.moveItem(at: logURL, to: prev)
         }
     }
 
