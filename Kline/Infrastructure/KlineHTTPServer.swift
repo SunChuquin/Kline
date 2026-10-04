@@ -1711,7 +1711,7 @@ enum RootRunner {
                        "posix_spawn_file_actions_init", "posix_spawn_file_actions_destroy",
                        "posix_spawn_file_actions_adddup2", "posix_spawn_file_actions_addclose"]
             let missing = std.filter { dlsym(UnsafeMutableRawPointer(bitPattern: -2), $0) == nil }
-            return (-200, "", "MISSING: " + (missing.isEmpty ? "?" : missing.joined(separator: ",")))
+            return (-200, -1, "", "MISSING: " + (missing.isEmpty ? "?" : missing.joined(separator: ",")))
         }
         let attrDestroy: AttrFn? = load("posix_spawnattr_destroy")
         let actDestroy: AttrFn? = load("posix_spawn_file_actions_destroy")
@@ -1757,7 +1757,7 @@ enum RootRunner {
         close(pipeOut[1]); close(pipeErr[1])
         guard spawnErr == 0 else {
             close(pipeOut[0]); close(pipeErr[0])
-            return (spawnErr, "", "posix_spawn error \(spawnErr)")
+            return (spawnErr, -1, "", "posix_spawn error \(spawnErr)")
         }
 
         var outData = Data()
