@@ -615,7 +615,8 @@ enum EngineArchive {
         let payload = Array(b[i..<payloadEnd])
         let decoded = payload.withUnsafeBytes { srcRaw in
             compression_decode_buffer(dstBuf, expected,
-                                      srcRaw.baseAddress?.assumingMemoryBound(to: UInt8.self) ?? dstBuf,
+                                      srcRaw.baseAddress?.assumingMemoryBound(to: UInt8.self)
+                                          ?? UnsafePointer<UInt8>(dstBuf),
                                       srcRaw.count, nil, COMPRESSION_ZLIB)
         }
         guard decoded == expected else {
