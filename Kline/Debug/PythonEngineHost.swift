@@ -92,7 +92,7 @@ final class PythonEngineHost: ObservableObject {
     // Python C API 函数指针（dlsym 取用；版本无关：仅三个最简符号，不 import Python 头）
     private typealias Py_InitializeFn = @convention(c) () -> Void
     private typealias PyRun_SimpleStringFn = @convention(c) (UnsafePointer<CChar>?) -> Int32
-    private typealias Py_FinalizeFn = @convention(c) -> Void
+    private typealias Py_FinalizeFn = @convention(c) () -> Void
     private var pyHandle: UnsafeMutableRawPointer?
     private var pyInitFn: Py_InitializeFn?
     private var pyRunFn: PyRun_SimpleStringFn?
