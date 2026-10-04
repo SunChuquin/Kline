@@ -4,8 +4,9 @@
 //
 //  Phase-0 Stage B：Python 引擎实验室（纯调试页，引擎不进 IPA）。
 //  契约：.trae/documents/python-engine/Phase-0引擎实验-plan.md
+//  （Engine.app 方案：下载 .tipa → TrollStore 安装授信 → 主 App dlopen，三段式流程）
 //
-//  - 引擎下载/加载只在本页按钮触发时发生，不进任何生产路径
+//  - 引擎下载/安装/加载只在本页按钮触发时发生，不进任何生产路径
 //  - 行式布局与语义化颜色对齐 LocalUpdateView（48pt 行高、16pt 左右 padding、
 //    secondarySystemBackground + 12 圆角，深浅色自适应）
 //  - 实验脚本全部为常量；只有「结果文件路径」经 base64 传入脚本（防拼接注入）
@@ -22,12 +23,13 @@ struct PythonEngineLabView: View {
 
     @StateObject private var host = PythonEngineHost.shared
 
-    /// 引擎包下载地址（GitHub Release 独立通道 tag engine-3.14.7，与 IPA 的 latest 互不干扰）
-    private static let engineTarURL =
-        URL(string: "https://github.com/SunChuquin/Kline/releases/download/engine-3.14.7/KlineEngine-3.14.7.tar.gz")!
+    /// 引擎 .tipa 下载地址（GitHub Release 独立通道 tag engine-3.14.7，与 IPA 的 latest 互不干扰）
+    private static let engineTipaURL =
+        URL(string: "https://github.com/SunChuquin/Kline/releases/download/engine-3.14.7/KlineEngine-3.14.7.tipa")!
 
     // 状态区（由「刷新状态」与各操作完成后刷新，避免每次渲染扫盘）
     @State private var engineStatus: PythonEngineStatus = .notInstalled
+    @State private var engineAppPathText = "—"
     @State private var manifestVersionText = "—"
     /// 当前运行中的实验编号（用于图标位转圈）
     @State private var runningExp = 0
@@ -103,6 +105,8 @@ struct PythonEngineLabView: View {
 
                 infoRow(title: "当前状态", value: statusText(engineStatus), valueColor: statusColor(engineStatus))
                 Divider()
+                infoRow(title: "Engine.app", value: engineAppPathText)
+                Divider()
                 infoRow(title: "引擎版本", value: manifestVersionText)
                 Divider()
                 infoRow(title: "解释器", value: host.isLoaded ? "已加载（进程内常驻）" : "未加载",
@@ -112,7 +116,7 @@ struct PythonEngineLabView: View {
             .cornerRadius(12)
 
             if host.isBusy {
-                // 忙指示：说明当前阶段 + 下载/解压进度，避免用户以为卡死
+                // 忙指示：说明当前阶段 + 下载进度，避免用户以为卡死
                 HStack(spacing: 10) {
                     ProgressView()
                     Text(host.busyText)
@@ -127,16 +131,11 @@ struct PythonEngineLabView: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.top, 4)
-                if host.busyText.hasPrefix("解压") {
-                    ProgressView(value: host.extractProgress)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 2)
-                }
             }
         }
     }
 
-    // MARK: - 操作区
+    // MARK: - 操作区（三段式：下载 → 安装 → 加载）
 
     private var actionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -145,10 +144,10 @@ struct PythonEngineLabView: View {
                 .foregroundColor(Color.gray.opacity(0.85))
 
             VStack(spacing: 0) {
-                // 下载引擎包（GitHub Release）：进行中图标位换成进度圈/百分比
+                // ① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）
                 Button(action: { downloadEngine() }) {
                     HStack(spacing: 10) {
-                        Text("下载引擎包（GitHub Release）")
+                        Text("下载引擎包（.tipa）")
                             .font(.system(size: 16))
                             .foregroundColor(host.isBusy ? Color.gray : Color.primary)
                         Spacer(minLength: 12)
@@ -164,6 +163,16 @@ struct PythonEngineLabView: View {
 
                 Divider()
 
+                // ② 拉起 TrollStore 安装（切出 App；装完 Engine.app 回本页）
+                actionRow(title: "用 TrollStore 安装",
+                          systemImage: "shippingbox",
+                          enabled: !host.isBusy) {
+                    installEngine()
+                }
+
+                Divider()
+
+                // ③ 加载引擎（从 Engine.app 安装路径 dlopen）
                 actionRow(title: "加载引擎（dlopen + 初始化）",
                           systemImage: "play.circle",
                           enabled: !host.isBusy && engineStatus == .installed && !host.isLoaded,
@@ -200,18 +209,18 @@ struct PythonEngineLabView: View {
 
                 Divider()
 
-                actionRow(title: "重置（删除引擎文件）",
+                actionRow(title: "清理下载文件",
                           systemImage: "trash",
                           tint: .red,
                           enabled: !host.isBusy) {
-                    resetEngine()
+                    cleanDownloads()
                 }
             }
             .background(Color(.secondarySystemBackground))
             .cornerRadius(12)
 
-            // 重置语义说明（卸载不可靠，必须讲清）
-            Text("重置只删除引擎文件（active/staging/下载缓存）；已加载的解释器在下次启动 App 后才真正释放。")
+            // 三段式流程说明（每步预期：下载后 sha256 通过；安装后状态变已安装；加载后可跑实验）
+            Text("流程：① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）→ ② 用 TrollStore 安装（安装时整包授信代码签名，装成 Engine.app）→ ③ 回本页「刷新状态」确认已安装后「加载引擎」。Engine.app 的卸载请在 TrollStore 内操作；「清理下载文件」只删除已下载的 tipa。")
                 .font(.system(size: 12))
                 .foregroundColor(Color.gray.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -336,13 +345,13 @@ struct PythonEngineLabView: View {
     private func statusText(_ st: PythonEngineStatus) -> String {
         switch st {
         case .notInstalled:
-            return "未安装"
+            return "未安装（请用 TrollStore 安装 Engine.app）"
         case .installed:
             return "已安装（可用）"
         case .versionMismatch(let v):
             return "版本不兼容（api=\(v)，App 支持 [\(PythonEngineHost.minEngineAPI), \(PythonEngineHost.maxEngineAPI)]）"
         case .corrupted(let r):
-            return "损坏（\(r)）"
+            return "损坏（\(r)）——请在 TrollStore 内卸载引擎后重装"
         }
     }
 
@@ -357,24 +366,36 @@ struct PythonEngineLabView: View {
 
     private func refreshStatus() {
         engineStatus = host.status()
-        if let m = host.activeManifest() {
+        if let p = host.locateEngineApp() {
+            engineAppPathText = p
+        } else {
+            engineAppPathText = "—"
+        }
+        if let m = host.engineManifest() {
             manifestVersionText = "v\(m.engineVersion)（\(m.build)，api=\(m.apiVersion)）"
         } else {
             manifestVersionText = "—"
         }
     }
 
-    // MARK: - 操作实现
+    // MARK: - 操作实现（下载 → 安装 → 加载 三段式）
 
+    /// ① 下载 .tipa + .sha256（校验通过即完成，安装交给 TrollStore）
     private func downloadEngine() {
-        host.downloadAndActivate(from: Self.engineTarURL) { [weak host] r in
+        host.downloadTipa(from: Self.engineTipaURL) { [weak host] r in
             refreshStatus()
             if case .failure(let e) = r {
-                host?.appendOutput("引擎包下载/激活失败：" + e)
+                host?.appendOutput("引擎包下载失败：" + e)
             }
         }
     }
 
+    /// ② 拉起 TrollStore 安装（复用 Kline.ipa 同一条本地 HTTP + opener 链路；装完手动回本页）
+    private func installEngine() {
+        host.installViaTrollStore()
+    }
+
+    /// ③ 从 Engine.app 安装路径 dlopen 并初始化解释器
     private func loadEngine() {
         host.loadEngine { [weak host] r in
             refreshStatus()
@@ -387,10 +408,10 @@ struct PythonEngineLabView: View {
         }
     }
 
-    private func resetEngine() {
-        host.resetEngine { [weak host] msg in
+    /// 清理已下载的 tipa / .sha256（Engine.app 本体由 TrollStore 管理，卸载在 TrollStore 内做）
+    private func cleanDownloads() {
+        host.cleanDownloads { [weak host] _ in
             refreshStatus()
-            host?.appendOutput("重置完成：" + msg)
         }
     }
 

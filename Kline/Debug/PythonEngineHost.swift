@@ -4,32 +4,37 @@
 //
 //  Phase-0 Stage B：Python 引擎宿主（纯调试，引擎不进 IPA）。
 //  契约：.trae/documents/python-engine/Phase-0引擎实验-plan.md
+//  （Engine.app 方案：沙盒 staging/active 下载激活链路已废弃——实测「运行时下载 dylib
+//   到沙盒再 dlopen」被 iOS AMFI 拒绝（code signature invalid，TrollStore 信任只在安装时
+//   授予），引擎改打包成迷你 Engine.app 的 .tipa，经 TrollStore 安装授信，
+//   主 App 从 Engine.app 安装路径 dlopen）
 //
 //  硬约束：
-//  - 引擎不进 IPA：本文件不嵌入任何 Python 资源，只在用户点按钮时下载/加载
+//  - 引擎不进 IPA：本文件不嵌入任何 Python 资源，只在用户点按钮时下载/安装/加载
 //  - 所有 Python C API 经 dlsym 函数指针调用（版本无关，不 import 任何 Python 头文件，
 //    只依赖 Py_Initialize / PyRun_SimpleString / Py_Finalize 三个最简符号，不碰 PyConfig 结构体）
-//  - dlopen 句柄进程内永不释放（dlclose 不可靠，§5.6）
-//  - 引擎激活走 staging→rename 原子切换，任何失败保留旧 active（§5.6 禁止覆盖写）
+//  - dlopen 句柄进程内永不释放（dlclose 不可靠）
+//  - Engine.app 整包随安装由 TrollStore 授信（安装原子），App 侧不做逐文件 sha256 校验
 //
 
 import Foundation
 import Darwin
 import Combine
+import UIKit
 import CryptoKit
-import Compression
 
 // MARK: - 状态机
 
-/// 引擎安装状态（§5.6.1 配对校验：App 内置常量区间 vs manifest.apiVersion）
+/// 引擎安装状态（配对校验：App 内置常量区间 vs manifest.apiVersion）
 enum PythonEngineStatus: Equatable {
-    case notInstalled                       // 无 active
-    case installed                          // active 存在 + manifest 可读 + apiVersion 在区间 + dylib 存在
+    case notInstalled                       // Engine.app 未安装（Bundle/Application 下找不到）
+    case installed                          // 已安装 + manifest 可读 + apiVersion 在区间 + dylib 存在
     case versionMismatch(apiVersion: Int)   // manifest 可读但 apiVersion 不在 [min, max]
-    case corrupted(reason: String)          // manifest 不可读或 dylib 缺失
+    case corrupted(reason: String)          // manifest 不可读或 dylib 缺失（TrollStore 内卸载引擎后重装）
 }
 
-/// engine/manifest.json（schema v1，两端共用契约）
+/// Engine.app 内 manifest.json（schema v1，两端共用契约；layout 为相对仓库根的旧前缀，
+/// 实际路径相对 Engine.app，解析时剥掉「Engine.app/」前缀）
 struct EngineManifest: Codable {
     let schema: Int
     let engineId: String
@@ -51,7 +56,7 @@ struct EngineLoadResult {
     var build: String
 }
 
-/// 解包/流程错误（带可读信息）
+/// 流程错误（带可读信息）
 struct EngineFlowError: LocalizedError {
     let msg: String
     var errorDescription: String? { msg }
@@ -67,22 +72,38 @@ final class PythonEngineHost: ObservableObject {
 
     static let shared = PythonEngineHost()
 
-    /// App 内置引擎 API 兼容区间（§5.6.1 配对校验，Phase-0 = 1..1）
+    /// App 内置引擎 API 兼容区间（配对校验，Phase-0 = 1..1）
     static let minEngineAPI = 1
     static let maxEngineAPI = 1
+
+    // MARK: Engine.app 契约常量
+    /// Engine.app 的 bundle id（CI 构建 .tipa 时固定，定位时核对 Info.plist）
+    static let engineBundleID = "com.sunck.KlineEngine"
+    /// 用户级 App 安装根（每个 App 一个 <UUID> 子目录；App entitlements 含 no-sandbox，可枚举）
+    static let bundleAppsRoot = "/var/containers/Bundle/Application"
+    /// 迷你引擎 App 的目录名
+    static let engineAppName = "Engine.app"
+    /// 引擎 tipa 文件名（下载产物与 TrollStore 安装共用）
+    static let tipaFileName = "KlineEngine-3.14.7.tipa"
+
+    /// 引擎 tipa 落盘路径：Documents/Downloads/（与 Kline.ipa 同目录，
+    /// 该目录经 KlineHTTPServer 的 /sandbox 路由暴露给 TrollStore）
+    static var tipaLocalPath: String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("Downloads/" + tipaFileName).path
+    }
+
+    /// 引擎 tipa 是否已下载（下载完成后为 true，供「拉起安装」前置提示）
+    static var tipaDownloaded: Bool {
+        FileManager.default.fileExists(atPath: tipaLocalPath)
+    }
 
     // MARK: 状态（主线程发布，UI 由 @Published 驱动）
     @Published private(set) var isBusy = false
     @Published private(set) var busyText = ""
     @Published private(set) var downloadProgress: Double = 0    // 0~1（下载引擎包）
-    @Published private(set) var extractProgress: Double = 0     // 0~1（解包 tar）
     @Published private(set) var isLoaded = false                // Py_Initialize 已成功（进程内只一次）
     @Published private(set) var outputLines: [String] = []      // 结果区逐行输出（等宽展示）
-
-    // MARK: 目录布局（Documents/KlineEngine/{active, staging} + incoming.*）
-    let rootPath: String
-    let activePath: String
-    let stagingPath: String
 
     /// 脚本结果回读文件（实验脚本把结果写这里，Swift 读回——绕开 stdout 重定向的复杂性）
     static var pyOutPath: String {
@@ -90,7 +111,7 @@ final class PythonEngineHost: ObservableObject {
         return docs.appendingPathComponent("py_out.json").path
     }
 
-    private let workQueue = DispatchQueue(label: "com.sunck.Kline.pyengine")   // 串行：下载/解包/加载/跑脚本全在此排队
+    private let workQueue = DispatchQueue(label: "com.sunck.Kline.pyengine")   // 串行：下载/加载/跑脚本全在此排队
     private var busy = false                                                  // 只在 workQueue 上读写
     private let fm = FileManager.default
 
@@ -103,13 +124,7 @@ final class PythonEngineHost: ObservableObject {
     private var pyRunFn: PyRun_SimpleStringFn?
     private var pyFinalizeFn: Py_FinalizeFn?   // 仅持有引用，进程内不调用（dlclose/卸载不可靠）
 
-    private init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let root = docs.appendingPathComponent("KlineEngine").path
-        rootPath = root
-        activePath = root + "/active"
-        stagingPath = root + "/staging"
-    }
+    private init() {}
 
     // MARK: - 输出与日志
 
@@ -142,7 +157,6 @@ final class PythonEngineHost: ObservableObject {
             self.isBusy = true
             self.busyText = text
             self.downloadProgress = 0
-            self.extractProgress = 0
         }
     }
 
@@ -155,15 +169,33 @@ final class PythonEngineHost: ObservableObject {
         DispatchQueue.main.async { self.isBusy = false; self.busyText = "" }
     }
 
-    // MARK: - 状态扫描
+    // MARK: - Engine.app 定位与状态扫描
 
-    /// 状态机：notInstalled / installed / versionMismatch / corrupted（§5.6.1）
+    /// 定位 Engine.app：枚举 /var/containers/Bundle/Application/ 下每个目录，
+    /// 找 Engine.app 子目录并核对 Info.plist 的 CFBundleIdentifier（防撞名）。
+    /// 未找到返回 nil（no-sandbox entitlement 下可枚举该目录）。
+    func locateEngineApp() -> String? {
+        guard let entries = try? fm.contentsOfDirectory(atPath: Self.bundleAppsRoot) else {
+            return nil
+        }
+        for uuid in entries {
+            let appPath = Self.bundleAppsRoot + "/" + uuid + "/" + Self.engineAppName
+            let plistPath = appPath + "/Info.plist"
+            guard fm.fileExists(atPath: plistPath),
+                  let info = NSDictionary(contentsOfFile: plistPath),
+                  let bid = info["CFBundleIdentifier"] as? String else { continue }
+            if bid == Self.engineBundleID { return appPath }
+        }
+        return nil
+    }
+
+    /// 状态机：notInstalled / installed / versionMismatch / corrupted
     func status() -> PythonEngineStatus {
-        guard fm.fileExists(atPath: activePath) else { return .notInstalled }
-        guard let m = readManifest(in: activePath) else {
+        guard let appPath = locateEngineApp() else { return .notInstalled }
+        guard let m = readManifest(in: appPath) else {
             return .corrupted(reason: "manifest.json 不可读")
         }
-        guard fm.fileExists(atPath: Self.resolve(activePath, m.layout.dylib)) else {
+        guard fm.fileExists(atPath: Self.resolve(appPath, m.layout.dylib)) else {
             return .corrupted(reason: "dylib 缺失")
         }
         guard (Self.minEngineAPI...Self.maxEngineAPI).contains(m.apiVersion) else {
@@ -172,10 +204,10 @@ final class PythonEngineHost: ObservableObject {
         return .installed
     }
 
-    /// active 引擎 manifest（可读即返回，供 UI 显示版本/构建号）
-    func activeManifest() -> EngineManifest? {
-        guard fm.fileExists(atPath: activePath) else { return nil }
-        return readManifest(in: activePath)
+    /// 已安装 Engine.app 的 manifest（可读即返回，供 UI 显示版本/构建号）
+    func engineManifest() -> EngineManifest? {
+        guard let appPath = locateEngineApp() else { return nil }
+        return readManifest(in: appPath)
     }
 
     private func readManifest(in dir: String) -> EngineManifest? {
@@ -183,50 +215,23 @@ final class PythonEngineHost: ObservableObject {
         return try? JSONDecoder().decode(EngineManifest.self, from: data)
     }
 
-    /// manifest.layout 相对路径解析：先按「相对解包根（engine/... 前缀）」拼；
-    /// 不存在则去掉 engine/ 前缀按「相对 engine 目录本身」拼（切换后 active 即 engine 目录）
+    /// manifest.layout 相对路径解析：先按「相对 Engine.app 根」直接拼；
+    /// 不存在则剥掉「Engine.app/」前缀再拼（manifest 里的 layout 是相对仓库根的旧前缀，
+    /// 相对 Engine.app 的实际路径要去掉该前缀）
     static func resolve(_ base: String, _ rel: String) -> String {
         let fm = FileManager.default
         let direct = base + "/" + rel
         if fm.fileExists(atPath: direct) { return direct }
-        let stripped = rel.hasPrefix("engine/") ? String(rel.dropFirst("engine/".count)) : rel
+        let stripped = rel.hasPrefix("Engine.app/") ? String(rel.dropFirst("Engine.app/".count)) : rel
         return base + "/" + stripped
     }
 
-    /// 激活前逐文件 sha256 校验（engine/files.sha256：`<hex>  <相对路径>`，路径相对 engine 根；
-    /// 由 CI 打包时生成）。解包损坏会精确报出哪个文件；清单缺失则跳过（返回 0）
-    static func verifyExtractedFiles(in dir: String) throws -> Int {
-        guard let data = fm0.contents(atPath: dir + "/files.sha256"),
-              let text = String(data: data, encoding: .utf8) else { return 0 }
-        var count = 0
-        for rawLine in text.split(separator: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty { continue }
-            let parts = line.split(maxSplits: 1, omittingEmptySubsequences: true,
-                                   whereSeparator: { $0 == " " || $0 == "\t" })
-            guard parts.count == 2 else { continue }
-            let expect = String(parts[0]).lowercased()
-            guard expect.count == 64 else { continue }
-            var rel = String(parts[1]).trimmingCharacters(in: .whitespaces)   // shasum 输出 hash 后是两个空格，maxSplits=1 的尾段带前导空格，必须 trim
-            if rel.hasPrefix("./") { rel.removeFirst(2) }
-            guard let actual = try? fileSHA256(path: dir + "/" + rel) else {
-                throw EngineFlowError(msg: "文件缺失：\(rel)")
-            }
-            guard actual == expect else {
-                throw EngineFlowError(msg: "内容损坏：\(rel)（实际 \(actual.prefix(12))… ≠ 期望 \(expect.prefix(12))…）")
-            }
-            count += 1
-        }
-        return count
-    }
+    // MARK: - 下载（tipa + sha256 sidecar → Documents/Downloads，安装交给 TrollStore）
 
-    private static let fm0 = FileManager.default
-
-    // MARK: - 下载 → 校验 → 解包 → 原子激活（§5.6：禁止覆盖写，失败保留旧 active）
-
-    /// 下载引擎包与 .sha256 sidecar 到 staging，校验后解包，manifest 合法则原子切换为 active
-    func downloadAndActivate(from tarURL: URL,
-                             completion: @escaping (Result<EngineManifest, String>) -> Void) {
+    /// 下载引擎 .tipa 与同名 .sha256 sidecar 到 Documents/Downloads/，
+    /// sha256 校验通过即完成（文件随 TrollStore 安装整包授信，App 侧不再逐文件校验）
+    func downloadTipa(from tipaURL: URL,
+                      completion: @escaping (Result<String, String>) -> Void) {
         workQueue.async { [weak self] in
             guard let self = self else { return }
             guard !self.busy else {
@@ -234,114 +239,89 @@ final class PythonEngineHost: ObservableObject {
                 return
             }
             self.beginBusy("下载引擎包…")
-            self.appendOutput("开始下载：\(tarURL.lastPathComponent)")
+            self.appendOutput("开始下载：\(tipaURL.lastPathComponent)")
             do {
-                try self.fm.createDirectory(atPath: self.rootPath, withIntermediateDirectories: true)
-                let tarPath = self.rootPath + "/incoming.tar.gz"
-                let shaPath = self.rootPath + "/incoming.sha256"
+                let tipaPath = Self.tipaLocalPath
+                let shaPath = tipaPath + ".sha256"
+                try self.fm.createDirectory(atPath: (tipaPath as NSString).deletingLastPathComponent,
+                                            withIntermediateDirectories: true)
 
-                // ① tar.gz 与 .sha256 sidecar（CI 同名发布）。
+                // ① tipa 与 .sha256 sidecar（CI 同名发布）。
                 //    加时间戳查询参数穿透缓存：Release 资产 --clobber 更新后，同名 URL 可能被
-                //    GitHub CDN / 用户代理缓存到旧文件，导致「新 sidecar + 旧 tar」哈希不匹配。
-                guard tarURL.absoluteString.hasSuffix(".tar.gz") else {
-                    throw EngineFlowError(msg: "引擎包 URL 非 .tar.gz")
+                //    GitHub CDN / 用户代理缓存到旧文件，导致「新 sidecar + 旧包」哈希不匹配。
+                guard tipaURL.absoluteString.hasSuffix(".tipa") else {
+                    throw EngineFlowError(msg: "引擎包 URL 非 .tipa")
                 }
-                let tarStr = tarURL.absoluteString
-                let shaStr = tarStr + ".sha256"
+                let tipaStr = tipaURL.absoluteString
                 let bust = "?nc=\(Int(Date().timeIntervalSince1970))"
-                guard let tarBusted = URL(string: tarStr + bust),
-                      let shaBusted = URL(string: shaStr + bust) else {
+                guard let tipaBusted = URL(string: tipaStr + bust),
+                      let shaBusted = URL(string: tipaStr + ".sha256" + bust) else {
                     throw EngineFlowError(msg: "URL 拼接失败")
                 }
-                try self.downloadFileSync(tarBusted, to: tarPath) { f in
+                try self.downloadFileSync(tipaBusted, to: tipaPath) { f in
                     DispatchQueue.main.async { self.downloadProgress = f }
                 }
                 try self.downloadFileSync(shaBusted, to: shaPath, progress: nil)
 
-                // ② sha256 校验（CryptoKit 流式）
+                // ② sha256 校验（CryptoKit 流式）。通过即完成——安装交给 TrollStore
                 self.updateBusy("sha256 校验…")
                 let expect = try Self.expectedSha256(sidecarPath: shaPath)
-                let actual = try Self.fileSHA256(path: tarPath)
+                let actual = try Self.fileSHA256(path: tipaPath)
                 guard expect.lowercased() == actual.lowercased() else {
                     throw EngineFlowError(msg: "sha256 不匹配（期望 \(expect.prefix(12))…，实际 \(actual.prefix(12))…）")
                 }
-                self.appendOutput("sha256 校验通过")
-
-                // ③ 解包到 staging（gunzip → tar 解包，均带进度）
-                self.updateBusy("解压 tar.gz…")
-                try self.cleanAndRecreateStaging()
-                let tmpTar = self.stagingPath + "/.unpack.tar"
-                let gzBytes = try EngineArchive.gunzip(srcPath: tarPath, dstPath: tmpTar)
-                let entries = try EngineArchive.untar(tarPath: tmpTar, into: self.stagingPath) { f in
-                    DispatchQueue.main.async { self.extractProgress = f }
-                }
-                try? self.fm.removeItem(atPath: tmpTar)
-                self.appendOutput("解压完成：gunzip 输出 \(gzBytes) bytes，untar 解出 \(entries) 个 entry"
-                    + (self.fm.fileExists(atPath: self.stagingPath + "/engine") ? "" : "（⚠️ staging/engine 不存在）"))
-
-                // ④ 校验 staging/engine：逐文件 sha256（files.sha256 清单）→ manifest + apiVersion 配对 → dylib 存在
-                self.updateBusy("逐文件校验…")
-                let verified = try Self.verifyExtractedFiles(in: self.stagingPath + "/engine")
-                self.appendOutput(verified > 0
-                    ? "逐文件 sha256 校验通过：\(verified) 个文件"
-                    : "（包内无 files.sha256 清单，跳过逐文件校验）")
-                self.updateBusy("校验引擎包…")
-                guard let m = self.readManifest(in: self.stagingPath + "/engine") else {
-                    throw EngineFlowError(msg: "staging/engine/manifest.json 不可读")
-                }
-                guard (Self.minEngineAPI...Self.maxEngineAPI).contains(m.apiVersion) else {
-                    throw EngineFlowError(msg: "apiVersion=\(m.apiVersion) 超出兼容区间 [\(Self.minEngineAPI), \(Self.maxEngineAPI)]")
-                }
-                guard self.fm.fileExists(atPath: Self.resolve(self.stagingPath, m.layout.dylib)) else {
-                    throw EngineFlowError(msg: "dylib 缺失：\(m.layout.dylib)")
-                }
-
-                // ⑤ 原子切换：active.old-<ts> → staging/engine rename 为 active → 删 old
-                self.updateBusy("切换 active…")
-                try self.activateStagedEngine()
-                self.appendOutput("引擎已激活：v\(m.engineVersion)（\(m.build)，api=\(m.apiVersion)）")
+                self.appendOutput("sha256 校验通过：\(tipaPath)")
+                self.appendOutput("下一步：点「用 TrollStore 安装」，装完 Engine.app 后回本页刷新状态并加载")
                 self.endBusy()
-                DispatchQueue.main.async { completion(.success(m)) }
+                DispatchQueue.main.async { completion(.success(tipaPath)) }
             } catch {
                 let msg = (error as? EngineFlowError)?.msg ?? error.localizedDescription
-                self.appendOutput("下载/激活失败：" + msg)
-                self.appendOutput("诊断 staging 树：\n" + Self.dumpTree(self.stagingPath, depth: 0, budget: 30))
-                // 失败清理 staging（旧 active 原样保留）
-                try? self.fm.removeItem(atPath: self.stagingPath)
+                self.appendOutput("下载失败：" + msg)
                 self.endBusy()
                 DispatchQueue.main.async { completion(.failure(msg)) }
             }
         }
     }
 
-    /// staging/engine → active 的 rename 原子切换（同容器内 rename；失败回滚旧 active）
-    private func activateStagedEngine() throws {
-        let stagedEngine = stagingPath + "/engine"
-        guard fm.fileExists(atPath: stagedEngine + "/manifest.json") else {
-            throw EngineFlowError(msg: "staging/engine 不完整")
+    /// 拉起 TrollStore 安装已下载的引擎 tipa。
+    /// 复用 LocalUpdateView 同一条链路：本地 HTTP /sandbox 路由 + opener 守护 +
+    /// apple-magnifier URL + 后台执行时间（不走 trollStoreInstallURL——其 /download 路由
+    /// 映射的是公共 /var/mobile/Media/Downloads 且会剥掉子路径，tipa 在沙盒 Documents/Downloads）。
+    func installViaTrollStore() {
+        guard Self.tipaDownloaded else {
+            appendOutput("未找到 \(Self.tipaFileName)，请先下载引擎包")
+            return
         }
-        if fm.fileExists(atPath: activePath) {
-            let old = rootPath + "/active.old-\(Int(Date().timeIntervalSince1970))"
-            try fm.moveItem(atPath: activePath, toPath: old)
-            do {
-                try fm.moveItem(atPath: stagedEngine, toPath: activePath)
-            } catch {
-                try? fm.moveItem(atPath: old, toPath: activePath)   // 回滚，保留在用引擎
-                throw EngineFlowError(msg: "切换 active 失败（已回滚）：\(error.localizedDescription)")
+        KlineHTTPServer.shared.start()
+        let dlURL = "http://127.0.0.1:\(KlineHTTPServer.shared.port)/sandbox/Downloads/\(Self.tipaFileName)"
+        let trollURL = "apple-magnifier://install?url=\(dlURL.percentEncodedForQuery)"
+        // 拉起 TrollStore 前先申请后台执行时间：否则 App 切后台被挂起后，
+        // TrollStore 从 127.0.0.1 取文件连得上却收不到数据，安装卡死
+        keepServingForInstall()
+        KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
+        appendOutput("已拉起 TrollStore 安装（\(Self.tipaFileName)）；装完回本页点「刷新状态」→「加载引擎」")
+    }
+
+    /// 拉起 TrollStore 前申请一段后台执行时间（写法对齐 LocalUpdateView.keepServingIPAForInstall）：
+    /// App 会随 URL scheme 切后台，若被系统挂起，本地 HTTP 监听虽能被连上但没人回包。
+    /// 到期自动释放，不影响正常后台行为。
+    private func keepServingForInstall(seconds: Double = 30) {
+        var taskID = UIBackgroundTaskIdentifier.invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "kline-serve-engine-tipa") {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
             }
-            try? fm.removeItem(atPath: old)
-        } else {
-            try fm.moveItem(atPath: stagedEngine, toPath: activePath)
         }
-        try? fm.removeItem(atPath: stagingPath)   // 清理 staging 残留
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
+            }
+        }
     }
 
-    private func cleanAndRecreateStaging() throws {
-        if fm.fileExists(atPath: stagingPath) { try fm.removeItem(atPath: stagingPath) }
-        try fm.createDirectory(atPath: stagingPath, withIntermediateDirectories: true)
-    }
-
-    /// 诊断：staging 目录树转储（限预算防刷屏；目录带 / 后缀，文件带字节数）
+    /// 诊断：目录树转储（限预算防刷屏；目录带 / 后缀，文件带字节数）
     static func dumpTree(_ path: String, depth: Int, budget: Int) -> String {
         guard budget > 0 else { return "…（超出预算截断）" }
         guard let items = try? FileManager.default.contentsOfDirectory(atPath: path) else {
@@ -443,9 +423,9 @@ final class PythonEngineHost: ObservableObject {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    // MARK: - 加载（dlopen + Py_Initialize）
+    // MARK: - 加载（定位 Engine.app → dlopen + Py_Initialize）
 
-    /// dlopen 引擎 dylib → dlsym 三个最简 C API 符号 → setenv PYTHONHOME → Py_Initialize。
+    /// dlopen Engine.app 内引擎 dylib → dlsym 三个最简 C API 符号 → setenv PYTHONHOME → Py_Initialize。
     /// 各阶段计时；句柄进程内不释放；Py_Finalize 不调用（进程内卸载不可靠）。
     func loadEngine(completion: @escaping (Result<EngineLoadResult, String>) -> Void) {
         workQueue.async { [weak self] in
@@ -459,7 +439,7 @@ final class PythonEngineHost: ObservableObject {
             case .installed:
                 break
             case .notInstalled:
-                DispatchQueue.main.async { completion(.failure("未安装引擎（请先下载引擎包）")) }
+                DispatchQueue.main.async { completion(.failure("未安装 Engine.app（请先下载引擎包并用 TrollStore 安装）")) }
                 return
             case .versionMismatch(let v):
                 DispatchQueue.main.async {
@@ -467,15 +447,21 @@ final class PythonEngineHost: ObservableObject {
                 }
                 return
             case .corrupted(let r):
-                DispatchQueue.main.async { completion(.failure("引擎损坏：\(r)")) }
+                DispatchQueue.main.async {
+                    completion(.failure("引擎损坏：\(r)——请在 TrollStore 内卸载 Engine.app 后重装"))
+                }
                 return
             }
-            guard let m = self.readManifest(in: self.activePath) else {
+            guard let appPath = self.locateEngineApp() else {
+                DispatchQueue.main.async { completion(.failure("Engine.app 定位失败")) }
+                return
+            }
+            guard let m = self.readManifest(in: appPath) else {
                 DispatchQueue.main.async { completion(.failure("manifest 读取失败")) }
                 return
             }
-            let dylibPath = Self.resolve(self.activePath, m.layout.dylib)
-            let homePath = Self.resolve(self.activePath, m.layout.home)
+            let dylibPath = Self.resolve(appPath, m.layout.dylib)
+            let homePath = Self.resolve(appPath, m.layout.home)
 
             self.beginBusy("dlopen 引擎…")
             let t0 = CFAbsoluteTimeGetCurrent()
@@ -484,6 +470,7 @@ final class PythonEngineHost: ObservableObject {
                 var msg = "dlopen 失败"
                 if let e = dlerror() { msg += "：" + String(cString: e) }
                 self.appendOutput(msg + "（\(dylibPath)）")
+                self.appendOutput("Engine.app 树：\n" + Self.dumpTree(appPath, depth: 0, budget: 30))
                 self.endBusy()
                 DispatchQueue.main.async { completion(.failure(msg)) }
                 return
@@ -500,7 +487,7 @@ final class PythonEngineHost: ObservableObject {
             }
             let dlopenMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
-            // 初始化前设置 PYTHONHOME（值随引擎包 manifest 走，不硬编码）
+            // 初始化前设置 PYTHONHOME（值随引擎包 manifest 走，不硬编码；指向 Engine.app 内 stdlib）
             setenv("PYTHONHOME", homePath, 1)
             self.appendOutput("PYTHONHOME=\(homePath)")
 
@@ -583,11 +570,12 @@ final class PythonEngineHost: ObservableObject {
              + body
     }
 
-    // MARK: - 卸载重置
+    // MARK: - 清理下载文件
 
-    /// 删除 active/staging/incoming。不做 Py_Finalize：进程内卸载不可靠，
+    /// 删除已下载的 tipa 与 .sha256（Engine.app 本体由 TrollStore 管理，
+    /// 卸载请在 TrollStore 内操作）。不做 Py_Finalize：进程内卸载不可靠，
     /// 已加载的解释器待下次启动 App 后才真正释放（UI 文案需说明）。
-    func resetEngine(completion: @escaping (String) -> Void) {
+    func cleanDownloads(completion: @escaping (String) -> Void) {
         workQueue.async { [weak self] in
             guard let self = self else { return }
             guard !self.busy else {
@@ -595,217 +583,17 @@ final class PythonEngineHost: ObservableObject {
                 return
             }
             var removed: [String] = []
-            let targets = [self.activePath, self.stagingPath,
-                           self.rootPath + "/incoming.tar.gz",
-                           self.rootPath + "/incoming.sha256"]
-            for p in targets where self.fm.fileExists(atPath: p) {
+            let tipaPath = Self.tipaLocalPath
+            for p in [tipaPath, tipaPath + ".sha256"] where self.fm.fileExists(atPath: p) {
                 try? self.fm.removeItem(atPath: p)
                 removed.append((p as NSString).lastPathComponent)
             }
             let note = self.pyHandle != nil
                 ? "；已加载的解释器进程内不卸载（dlclose 不可靠），重启 App 后彻底释放"
                 : ""
-            let msg = removed.isEmpty ? "无引擎文件可删除" : "已删除：" + removed.joined(separator: "、") + note
-            self.appendOutput("重置：" + msg)
+            let msg = removed.isEmpty ? "无下载文件可删除" : "已删除：" + removed.joined(separator: "、") + note
+            self.appendOutput("清理：" + msg)
             DispatchQueue.main.async { completion(msg) }
         }
-    }
-}
-
-// MARK: - 引擎包解包（gzip → tar，纯 Swift；iOS 无 libarchive/tar 可用）
-
-/// 引擎包解包器：gzip（RFC1952 容器）→ raw DEFLATE（Compression 框架一次性解码，ISIZE 校验）→ tar 解包。
-/// tar 支持：普通文件/目录/软链/硬链、ustar prefix、GNU 'L' 长名、pax 'x' 扩展头 path 记录。
-enum EngineArchive {
-
-    /// gzip 解码到目标文件（**一次性解码**：gzip 尾部 ISIZE 给出精确解压后大小，预分配后
-    /// compression_decode_buffer 单发解码 + ISIZE 严格校验——杜绝流式缓冲管理的静默截断）。返回输出字节数
-    static func gunzip(srcPath: String, dstPath: String) throws -> Int {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: dstPath) { try fm.removeItem(atPath: dstPath) }
-        guard let raw = fm.contents(atPath: srcPath), raw.count > 18 else {
-            throw EngineFlowError(msg: "gzip 文件不可读或过小")
-        }
-        let b = [UInt8](raw)
-        guard b[0] == 0x1F, b[1] == 0x8B, b[2] == 8 else {
-            throw EngineFlowError(msg: "不是 gzip 文件")
-        }
-        let flags = b[3]
-        var i = 10
-        if flags & 0x04 != 0 {                       // FEXTRA
-            guard i + 2 <= b.count else { throw EngineFlowError(msg: "gzip 头越界") }
-            let xlen = Int(b[i]) | (Int(b[i + 1]) << 8)
-            i += 2 + xlen
-        }
-        if flags & 0x08 != 0 { while i < b.count && b[i] != 0 { i += 1 }; i += 1 }   // FNAME
-        if flags & 0x10 != 0 { while i < b.count && b[i] != 0 { i += 1 }; i += 1 }   // FCOMMENT
-        if flags & 0x02 != 0 { i += 2 }                                              // FHCRC
-        let payloadEnd = b.count - 8    // 8 字节 gzip 尾部（CRC32 + ISIZE）
-        guard i < payloadEnd else { throw EngineFlowError(msg: "gzip payload 区间异常") }
-
-        // 尾部 ISIZE（LE uint32）= 解压后大小 mod 2^32（<4GB 的引擎包即精确大小）
-        let isize = UInt32(b[b.count - 4]) | (UInt32(b[b.count - 3]) << 8)
-                  | (UInt32(b[b.count - 2]) << 16) | (UInt32(b[b.count - 1]) << 24)
-        let expected = Int(isize)
-        guard expected > 0, expected < (1 << 31) else {
-            throw EngineFlowError(msg: "gzip 尾部 ISIZE 异常：\(isize)")
-        }
-
-        // 一次性解码（输出容量由 ISIZE 精确给出）
-        let dstBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: expected)
-        defer { dstBuf.deallocate() }
-        let payload = Array(b[i..<payloadEnd])
-        let decoded = payload.withUnsafeBytes { srcRaw in
-            compression_decode_buffer(dstBuf, expected,
-                                      srcRaw.baseAddress?.assumingMemoryBound(to: UInt8.self)
-                                          ?? UnsafePointer<UInt8>(dstBuf),
-                                      srcRaw.count, nil, COMPRESSION_ZLIB)
-        }
-        guard decoded == expected else {
-            throw EngineFlowError(msg: "DEFLATE 一次性解码不完整：输出 \(decoded) / 期望 \(expected)（payload \(payload.count) bytes）")
-        }
-        guard fm.createFile(atPath: dstPath, contents: Data(bytes: dstBuf, count: decoded)) else {
-            throw EngineFlowError(msg: "写入解压输出文件失败")
-        }
-        return decoded
-    }
-
-    /// 解包 tar 到目标目录（progress：已处理字节 / 总字节），返回处理的 entry 数
-    static func untar(tarPath: String, into destDir: String,
-                      progress: @escaping (Double) -> Void) throws -> Int {
-        let fm = FileManager.default
-        try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
-        let total = (try fm.attributesOfItem(atPath: tarPath)[.size] as? UInt64) ?? 0
-        guard total >= 1024 else {
-            throw EngineFlowError(msg: "tar 文件过小（\(total) bytes）——解压输出异常，拒绝解析")
-        }
-        let src = try FileHandle(forReadingFrom: URL(fileURLWithPath: tarPath))
-        defer { try? src.close() }
-
-        var offset: UInt64 = 0
-        var longName: String?    // GNU 'L' 长名
-        var paxPath: String?     // pax 'x' 扩展头 path 记录
-        var entryCount = 0
-
-        while offset + 512 <= total {
-            let header = try readAt(src, offset: offset, count: 512)
-            if header.allSatisfy({ $0 == 0 }) { break }   // 结束块
-            let name0 = cstr(Array(header[0..<100]))
-            let size = octal(Array(header[124..<136]))
-            let type = header[156]
-            let link = cstr(Array(header[157..<257]))
-            let magic = cstr(Array(header[257..<263]))
-            var name = name0
-            if magic.hasPrefix("ustar") {
-                let prefix = cstr(Array(header[345..<500]))
-                if !prefix.isEmpty { name = prefix + "/" + name0 }
-            }
-            offset += 512
-            entryCount += 1
-
-            // typeflag（十六进制字面量，避免字符转换歧义）：0x30='0' 文件 0x35='5' 目录
-            // 0x32='2' 软链 0x31='1' 硬链 0x4C='L' GNU 长名 0x78='x'/0x67='g' pax 头
-            let effectiveName = longName ?? paxPath ?? name
-            switch type {
-            case 0x4C:
-                let data = try readAt(src, offset: offset, count: Int(size))
-                longName = cstr([UInt8](data))
-            case 0x78, 0x67:
-                let data = try readAt(src, offset: offset, count: Int(size))
-                paxPath = paxPathValue(data)
-            case 0x35:
-                try fm.createDirectory(atPath: destDir + "/" + effectiveName,
-                                       withIntermediateDirectories: true)
-            case 0x32:
-                let target = destDir + "/" + effectiveName
-                try? fm.removeItem(atPath: target)
-                try fm.createSymbolicLink(atPath: target, withDestinationPath: link)
-            case 0x31:
-                let dstp = destDir + "/" + effectiveName
-                let srcp = destDir + "/" + link
-                try? fm.removeItem(atPath: dstp)
-                if fm.fileExists(atPath: srcp) { try fm.copyItem(atPath: srcp, toPath: dstp) }
-            case 0x30, 0:
-                try extractFile(src: src, at: offset, size: size, to: destDir + "/" + effectiveName)
-                let mode = octal(Array(header[100..<108]))
-                if mode > 0 {   // 恢复 tar 记录的权限（保留可执行位）
-                    try? fm.setAttributes([.posixPermissions: Int(mode & 0o7777)],
-                                          ofItemAtPath: destDir + "/" + effectiveName)
-                }
-            default:
-                break   // 其它类型跳过数据体
-            }
-            offset += (size + 511) & ~UInt64(511)
-            longName = nil
-            paxPath = nil
-            if total > 0 { progress(min(1, Double(offset) / Double(total))) }
-        }
-        progress(1)
-        return entryCount
-    }
-
-    /// 定位读一块 tar 数据
-    private static func readAt(_ src: FileHandle, offset: UInt64, count: Int) throws -> Data {
-        try src.seek(toOffset: offset)
-        guard let d = try src.read(upToCount: count), d.count == count else {
-            throw EngineFlowError(msg: "tar 数据不完整")
-        }
-        return d
-    }
-
-    /// 流式抽取普通文件（分块读写，避免整块载入内存）
-    private static func extractFile(src: FileHandle, at offset: UInt64, size: UInt64,
-                                    to path: String) throws {
-        let fm = FileManager.default
-        let dir = (path as NSString).deletingLastPathComponent
-        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try? fm.removeItem(atPath: path)
-        guard fm.createFile(atPath: path, contents: nil),
-              let dst = FileHandle(forWritingAtPath: path) else {
-            throw EngineFlowError(msg: "创建文件失败：\((path as NSString).lastPathComponent)")
-        }
-        defer { try? dst.close() }
-        try src.seek(toOffset: offset)
-        var remaining = size
-        while remaining > 0 {
-            let want = Int(min(UInt64(1 << 20), remaining))
-            guard let d = try src.read(upToCount: want), !d.isEmpty else {
-                throw EngineFlowError(msg: "tar 文件数据不完整")
-            }
-            try dst.write(contentsOf: d)
-            remaining -= UInt64(d.count)
-        }
-    }
-
-    /// NUL 截断的 C 字符串（UTF-8）
-    private static func cstr(_ bytes: [UInt8]) -> String {
-        String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
-    }
-
-    /// 八进制长度/模式解析（容忍空格与 NUL 填充）
-    private static func octal(_ bytes: [UInt8]) -> UInt64 {
-        var v: UInt64 = 0
-        for b in bytes {
-            if b == 0 || b == 0x20 { if v > 0 { break }; continue }
-            guard b >= 0x30, b <= 0x37 else { break }
-            v = v << 3 | UInt64(b - 0x30)
-        }
-        return v
-    }
-
-    /// pax 扩展头记录解析（"<len> path=...\n" 逐条），取 path 值
-    private static func paxPathValue(_ data: Data) -> String? {
-        let bytes = [UInt8](data)
-        var i = 0
-        while i < bytes.count {
-            var j = i
-            while j < bytes.count && bytes[j] != 0x20 { j += 1 }
-            guard let len = Int(String(decoding: bytes[i..<j], as: UTF8.self)),
-                  len > 0, i + len <= bytes.count else { break }
-            let rec = String(decoding: bytes[(j + 1)..<(i + len)], as: UTF8.self)
-            if rec.hasPrefix("path=") { return String(rec.dropFirst(5)) }
-            i += len
-        }
-        return nil
     }
 }

@@ -1,6 +1,9 @@
-# Kline 独立 Python 引擎包（Phase-0 Stage A）
+# Kline 独立 Python 引擎包（Phase-0 Stage A · TrollStore .tipa 版）
 # 手动触发：下载 beeware/Python-Apple-support 支持包 → 只保留真机 slice（剥离 simulator/build）
-# → 全部 Mach-O ad-hoc 重签 → 打包 KlineEngine-<ver>.tar.gz + sha256 sidecar → 发独立 Release
+# → 全部 Mach-O ldid ad-hoc 重签 → 组装 Engine.app（stub 可执行 + Info.plist + framework + manifest.json）
+# → 打包 KlineEngine-<ver>.tipa（TrollStore 可安装格式，结构同 ipa：Payload/Engine.app）+ sha256 sidecar → 发独立 Release
+# 背景：iOS AMFI 拒绝「运行时下载 dylib 再 dlopen」（code signature invalid），信任只在 TrollStore 安装时授予——
+# 引擎改为迷你 .tipa，用户经 TrollStore 安装授信 Engine.app，主 App 从 Engine.app 安装路径 dlopen Python。
 # 注意：引擎包只手动产（不得被 push 触发）；tag=engine-<python_version>，与 build.yml 的 IPA latest Release 互不干扰
 # 契约：.trae/documents/python-engine/Phase-0引擎实验-plan.md（manifest v1）
 name: Engine Pack (Python standalone engine)
@@ -73,10 +76,43 @@ jobs:
           echo "=== probe signature (ldid -e) ==="
           ldid -e engine/Python.xcframework/ios-arm64/Python.framework/Python | head -5 || echo "(no entitlements -> ok)"
 
-      - name: Write engine/manifest.json
+      - name: Build Engine.app (stub exe + Info.plist + framework + manifest + fakesign)
         run: |
+          # TrollStore 安装授信的最小 bundle：主 App 从其安装路径 dlopen（运行时下载 dylib 会被 AMFI 拒绝）
+          mkdir -p Engine.app/Frameworks
+          cat > Engine.app/Info.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleIdentifier</key><string>com.sunck.KlineEngine</string>
+            <key>CFBundleName</key><string>KlineEngine</string>
+            <key>CFBundleDisplayName</key><string>Kline Python Engine</string>
+            <key>CFBundleExecutable</key><string>Engine</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${PYTHON_VERSION}</string>
+            <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER}</string>
+            <key>MinimumOSVersion</key><string>13.0</string>
+            <key>CFBundleSupportedPlatforms</key>
+            <array><string>iPhoneOS</string></array>
+            <key>DTPlatformName</key><string>iphoneos</string>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint Engine.app/Info.plist
+          # 最小 stub 可执行文件：TrollStore 安装 .app 必须有已签名可执行文件；它永远不会被运行
+          cat > stub.c <<EOF
+          int main(void){return 0;}
+          EOF
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=13.0 -o Engine.app/Engine stub.c
+          rm stub.c
+          file Engine.app/Engine   # 冒烟：应为 Mach-O arm64
+          # 之前解出的 framework 挪入 bundle
+          mv engine/Python.xcframework Engine.app/Frameworks/Python.xcframework
+          rmdir engine
           # manifest 契约（schema 1）见 Phase-0 引擎实验 plan（两端共用，勿改字段名/路径）
-          cat > engine/manifest.json <<EOF
+          # 路径前缀从 engine/ 变为 Engine.app/（tipa 解包后 Engine.app 即 TrollStore 安装目录）
+          cat > Engine.app/manifest.json <<EOF
           {
             "schema": 1,
             "engineId": "cpython",
@@ -84,44 +120,62 @@ jobs:
             "build": "beeware-${BEEWARE_TAG}",
             "apiVersion": 1,
             "layout": {
-              "dylib": "engine/Python.xcframework/ios-arm64/Python.framework/Python",
-              "home": "engine/Python.xcframework/ios-arm64/lib-arm64/python3.14"
+              "dylib": "Engine.app/Frameworks/Python.xcframework/ios-arm64/Python.framework/Python",
+              "home": "Engine.app/Frameworks/Python.xcframework/ios-arm64/lib-arm64/python3.14"
             }
           }
           EOF
-          cat engine/manifest.json
-          python3 -c "import json; json.load(open('engine/manifest.json'))"   # JSON 合法性冒烟
+          cat Engine.app/manifest.json
+          python3 -c "import json; json.load(open('Engine.app/manifest.json'))"   # JSON 合法性冒烟
+          # stub 必须签（TrollStore 安装校验 bundle 主可执行）；framework Mach-O 已在前面签过，这里幂等重签兜底
+          echo "=== ldid -S every Mach-O under Engine.app/ ==="
+          find Engine.app -type f -exec sh -c 'file "$1" | grep -q Mach-O && printf "%s\n" "$1"' _ {} \; | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "  ldid: $f"
+            ldid -S "$f"
+          done
+          echo "=== probe stub signature (codesign -dv) ==="
+          codesign -dv Engine.app/Engine 2>&1 | head -5
 
-      - name: Generate per-file sha256 manifest (engine/files.sha256)
+      - name: Generate per-file sha256 manifest (Engine.app/files.sha256)
         run: |
           # 逐文件完整性清单：设备端激活前逐个校验（解包损坏会精确报出哪个文件）
-          cd engine
+          # 路径相对 Engine.app 根（不含 Engine.app/ 前缀，Swift 侧按相对 Engine.app 拼路径）
+          # manifest.json 也进清单；排除 files.sha256 自身（自引用）
+          cd Engine.app
           find . -type f ! -name files.sha256 -exec shasum -a 256 {} \; | sed 's| \./| |' > files.sha256
           wc -l files.sha256
           head -3 files.sha256
 
-      - name: Package tar.gz + sha256 sidecar
+      - name: Package .tipa + sha256 sidecar
         run: |
-          ASSET="KlineEngine-${PYTHON_VERSION}.tar.gz"
-          tar -czf "$ASSET" engine/
+          # TrollStore 可安装格式 .tipa：结构与 .ipa 相同（Payload/<App>.app）
+          mkdir Payload
+          cp -R Engine.app Payload/Engine.app
+          ASSET="KlineEngine-${PYTHON_VERSION}.tipa"
+          zip -qry "$ASSET" Payload
+          rm -rf Payload
           # sha256 不进包内（自引用），放同名 sidecar，内容即 shasum -a 256 原始输出
           shasum -a 256 "$ASSET" | tee "${ASSET}.sha256"
           ls -la "$ASSET" "${ASSET}.sha256"
 
       - name: Publish engine Release (idempotent)
         run: |
-          ASSET="KlineEngine-${PYTHON_VERSION}.tar.gz"
+          ASSET="KlineEngine-${PYTHON_VERSION}.tipa"
           SIDE="${ASSET}.sha256"
           TAG="engine-${PYTHON_VERSION}"
           {
-            echo "Kline Python Engine ${PYTHON_VERSION}"
+            echo "Kline Python Engine ${PYTHON_VERSION}（TrollStore .tipa）"
             echo ""
             echo "来源：beeware/Python-Apple-support \`${BEEWARE_TAG}\`（Python-${PYTHON_VERSION%.*}-iOS-support.${BEEWARE_TAG#*-}.tar.gz）"
-            echo "内容：Python.xcframework ios-arm64 真机 slice（剥离 simulator / build），全部 Mach-O 已 ad-hoc 重签"
+            echo "内容：Engine.app = Info.plist + Engine stub 可执行（仅满足安装校验，永不运行）+ Python.xcframework ios-arm64 真机 slice + manifest.json，全部 Mach-O 已 ldid ad-hoc 重签"
+            echo ""
+            echo "安装：用 TrollStore 安装本 .tipa 授信 Engine.app → 主 App 从 Engine.app 安装路径 dlopen Python"
+            echo "（旧 tar.gz 方式已废弃：运行时下载 dylib 再 dlopen 会被 iOS AMFI 以 code signature invalid 拒绝）"
             echo ""
             echo "manifest.json:"
             echo '```json'
-            cat engine/manifest.json
+            cat Engine.app/manifest.json
             echo '```'
             echo ""
             echo "sha256:"
@@ -131,9 +185,15 @@ jobs:
             echo ""
             echo "构建：run #${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7}"
           } > release_notes.md
-          # 幂等：Release 已存在则 --clobber 覆盖同名资产并刷新说明（与 build.yml 的 latest 模式一致），重复触发不报错
+          # 幂等：Release 已存在则先删旧 .tar.gz 资产（历史格式，已被 .tipa 取代；存在才删）再 --clobber 覆盖并刷新说明
           # prerelease：GitHub /releases/latest 会跳过预发布——引擎包绝不能抢占 App 更新检查的 latest 端点
           if gh release view "$TAG" > /dev/null 2>&1; then
+            for OLD in "KlineEngine-${PYTHON_VERSION}.tar.gz" "KlineEngine-${PYTHON_VERSION}.tar.gz.sha256"; do
+              if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx "$OLD"; then
+                echo "删除旧 tar.gz 资产: $OLD"
+                gh release delete-asset "$TAG" "$OLD" -y
+              fi
+            done
             gh release upload "$TAG" "$ASSET" "$SIDE" --clobber
             gh release edit "$TAG" --prerelease --title "Kline Python Engine ${PYTHON_VERSION}" --notes-file release_notes.md
           else
