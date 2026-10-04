@@ -3,11 +3,15 @@ name: CI Build App (unsigned + ad-hoc for TrollStore)
 on:
   push:
     branches: [ main ]
-    # 仅改动文档/设计/归档目录（.trae、archive、figma）时不触发云端构建
+    # 仅改动文档/设计/归档目录（.trae、archive、figma）、CI 工作流自身、纯测试文件时，不触发云端构建
+    # （测试由 test.yml 负责：动了哪个跑哪个；Kline 源码 + 测试都动时两边都跑）
     paths-ignore:
       - '.trae/**'
       - 'archive/**'
       - 'figma/**'
+      - '.github/**'
+      - 'KlineTests/**'
+      - 'src/contract_golden.py'
   workflow_dispatch:
 
 # 发布 latest Release 需要写仓库权限（App 内远程更新的下载源）
