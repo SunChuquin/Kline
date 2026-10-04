@@ -17,12 +17,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #define LOG_PATH "/private/var/tmp/opener.log"
 
 // py 模式的 Python C API 函数指针（dlsym 取用，版本无关）
 typedef void (*VoidFnInit)(void);
 typedef int (*VoidFnRun)(const char *);
+
+// cp 模式：iOS 无 cp 命令（/bin/cp、/usr/bin/cp 均不存在，2026-10-04 实证），
+// 递归拷贝用纯 C 实现（目录/普通文件/符号链接）
+static int copyRec(const char *src, const char *dst);   // 前置声明（递归）
 
 static char gExtraLog[1024] = {0};   // argv[3]：额外日志文件（App 沙盒），空 = 不写
 
@@ -114,7 +120,58 @@ static int runPyMode(int argc, char **argv) {
     return rc;
 }
 
+static int copyRec(const char *src, const char *dst) {
+    struct stat st;
+    if (lstat(src, &st) != 0) return -1;
+    if (S_ISDIR(st.st_mode)) {
+        mkdir(dst, 0755);
+        DIR *d = opendir(src);
+        if (!d) return -2;
+        struct dirent *e;
+        int rc = 0;
+        while ((e = readdir(d)) != NULL) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            char *s2 = (char *)malloc(strlen(src) + strlen(e->d_name) + 2);
+            char *d2 = (char *)malloc(strlen(dst) + strlen(e->d_name) + 2);
+            if (!s2 || !d2) { free(s2); free(d2); closedir(d); return -8; }
+            sprintf(s2, "%s/%s", src, e->d_name);
+            sprintf(d2, "%s/%s", dst, e->d_name);
+            int r = copyRec(s2, d2);
+            free(s2); free(d2);
+            if (r != 0) { rc = r; break; }
+        }
+        closedir(d);
+        return rc;
+    }
+    if (S_ISLNK(st.st_mode)) {
+        char target[1024];
+        ssize_t n = readlink(src, target, sizeof target - 1);
+        if (n < 0) return -3;
+        target[n] = 0;
+        unlink(dst);
+        return symlink(target, dst) != 0 ? -4 : 0;
+    }
+    FILE *a = fopen(src, "rb");
+    if (!a) return -5;
+    FILE *b = fopen(dst, "wb");
+    if (!b) { fclose(a); return -6; }
+    char buf[65536];
+    size_t r;
+    int rc = 0;
+    while ((r = fread(buf, 1, sizeof buf, a)) > 0) {
+        if (fwrite(buf, 1, r, b) != r) { rc = -7; break; }
+    }
+    fclose(a); fclose(b);
+    chmod(dst, st.st_mode & 07777);
+    return rc;
+}
+
 int main(int argc, char **argv) {
+    // cp 模式分发：opener --cp <src> <dst>（递归拷贝，root 权限读 CrashReporter 等）
+    if (argc >= 2 && strcmp(argv[1], "--cp") == 0) {
+        if (argc < 4) { logmsg("cp mode: argc<4"); return 3; }
+        return copyRec(argv[2], argv[3]);
+    }
     // py 模式分发：不涉及 LaunchServices/更新守护，直接执行并返回
     if (argc >= 2 && strcmp(argv[1], "--py") == 0) {
         return runPyMode(argc, argv);

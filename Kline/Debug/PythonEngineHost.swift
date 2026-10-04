@@ -734,8 +734,8 @@ final class PythonEngineHost: ObservableObject {
 
     /// 把 /var/mobile/Library/Logs/CrashReporter 拷进 App Documents/crashlogs（排障用，
     /// 不做 UI 浏览——用户经既有沙盒/日志通道确认）。CrashReporter 属 root 受限目录，
-    /// 走 root detached cp；cp 二进制在 iOS 上的路径不固定，依次尝试 /bin/cp、/usr/bin/cp。
-    /// 注意 detached spawn 不等退出码，「已导出」仅代表已成功拉起 cp（结果看 Documents/crashlogs）。
+    /// 走 opener --cp（递归拷贝内建在 opener 里——iOS 上没有 cp 命令，2026-10-04 实证），
+    /// spawnRoot 同步等待并带回退出码与 stderr，成功/失败即时可知。
     func exportCrashLogs(completion: @escaping (String) -> Void) {
         workQueue.async { [weak self] in
             guard let self = self else { return }
@@ -747,35 +747,27 @@ final class PythonEngineHost: ObservableObject {
             let docs = self.fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let dest = docs.appendingPathComponent("crashlogs").path
             try? self.fm.removeItem(atPath: dest)
-            let candidates = ["/bin/cp", "/usr/bin/cp"]
-            var spawned = false
-            var existed = false
-            var lastSr: Int32 = -1
-            for cp in candidates {
-                guard !spawned else { break }
-                guard self.fm.fileExists(atPath: cp) else { continue }
-                existed = true
-                lastSr = RootRunner.spawnDetached(
-                    executable: cp,
-                    arguments: ["-R", "/var/mobile/Library/Logs/CrashReporter", dest])
-                spawned = (lastSr == 0)
+            let openerPath = Bundle.main.bundlePath + "/opener"
+            guard self.fm.fileExists(atPath: openerPath) else {
+                self.endBusy()
+                DispatchQueue.main.async { completion("导出失败：opener 不存在（构建异常）") }
+                return
+            }
+            let r = RootRunner.spawnRoot(executable: openerPath,
+                                         arguments: ["--cp", "/var/mobile/Library/Logs/CrashReporter", dest])
+            self.appendOutput("opener --cp 退出码=\(r.code)（rawStatus=\(r.rawStatus)）")
+            if !r.stderr.isEmpty {
+                self.appendOutput("opener --cp stderr：\n" + r.stderr)
             }
             self.endBusy()
-            DispatchQueue.main.async {
-                if spawned {
-                    let msg = "已导出到 Documents/crashlogs"
-                    self.appendOutput(msg)
-                    completion(msg)
-                } else if !existed {
-                    let msg = "导出失败：/bin/cp 与 /usr/bin/cp 均不存在"
-                    self.appendOutput(msg)
-                    completion(msg)
-                } else {
-                    let msg = "导出失败：cp 拉起失败（sr=\(lastSr)）"
-                    self.appendOutput(msg)
-                    completion(msg)
-                }
+            let msg: String
+            if r.code == 0 && r.rawStatus & 0x7f == 0 {
+                msg = "已导出到 Documents/crashlogs"
+            } else {
+                msg = "导出失败：opener --cp 退出码=\(r.code)（见 stderr）"
             }
+            self.appendOutput(msg)
+            completion(msg)
         }
     }
 
