@@ -55,33 +55,23 @@ jobs:
           ls -la engine/Python.xcframework/ios-arm64
           du -sh engine
 
-      - name: Ad-hoc codesign all Mach-O
+      - name: ldid fakesign all Mach-O (TrollStore AMFI-friendly)
         run: |
-          FW="engine/Python.xcframework/ios-arm64/Python.framework"
-          echo "=== original signature state (probe) ==="
-          codesign -dv "$FW" 2>&1 || echo "(framework has no signature yet -> expected)"
-          echo ""
-          # 1) framework 之外的独立 Mach-O（lib-dynload 扩展 .so、bin/ 工具链等）逐个 ad-hoc 签
-          MACHO_LIST=$(find engine/Python.xcframework/ios-arm64 -type f -not -path "*/Python.framework/*" \
-            -exec sh -c 'file "$1" | grep -q Mach-O && printf "%s\n" "$1"' _ {} \;)
-          echo "=== standalone Mach-O files ==="
-          echo "$MACHO_LIST"
-          while IFS= read -r f; do
+          brew install ldid
+          # 修 sig：macOS codesign 的 ad-hoc 签名在 iOS AMFI 对容器内 dlopen 场景被拒
+          # （code signature invalid）。TrollStore 生态标准做法是 ldid -S 生成 iOS 友好 ad-hoc 签名。
+          # 旧 _CodeSignature 目录（beeware 原始 bundle 残留）一并清除，避免陈旧资源清单干扰。
+          find engine -type d -name _CodeSignature -exec rm -rf {} +
+          echo "=== ldid -S every Mach-O under engine/ ==="
+          find engine -type f -exec sh -c 'file "$1" | grep -q Mach-O && printf "%s\n" "$1"' _ {} \; | while IFS= read -r f; do
             [ -z "$f" ] && continue
-            echo "  signing: $f"
-            codesign -f -s - "$f"
-          done <<< "$MACHO_LIST"
-          # 2) framework bundle 整体签（覆盖主二进制 Python.framework/Python）
-          codesign -f -s - "$FW"
-          echo ""
-          echo "=== verify (codesign -vv) ==="
-          codesign -vv "$FW"
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            codesign -vv "$f"
-          done <<< "$MACHO_LIST"
-          echo "=== signature after signing ==="
-          codesign -dv "$FW" 2>&1
+            echo "  ldid: $f"
+            ldid -S "$f"
+          done
+          echo "=== probe signature (codesign -dv) ==="
+          codesign -dv engine/Python.xcframework/ios-arm64/Python.framework/Python 2>&1 | head -5
+          echo "=== probe signature (ldid -e) ==="
+          ldid -e engine/Python.xcframework/ios-arm64/Python.framework/Python | head -5 || echo "(no entitlements -> ok)"
 
       - name: Write engine/manifest.json
         run: |
@@ -101,6 +91,14 @@ jobs:
           EOF
           cat engine/manifest.json
           python3 -c "import json; json.load(open('engine/manifest.json'))"   # JSON 合法性冒烟
+
+      - name: Generate per-file sha256 manifest (engine/files.sha256)
+        run: |
+          # 逐文件完整性清单：设备端激活前逐个校验（解包损坏会精确报出哪个文件）
+          cd engine
+          find . -type f ! -name files.sha256 -exec shasum -a 256 {} \; | sed 's| \./| |' > files.sha256
+          wc -l files.sha256
+          head -3 files.sha256
 
       - name: Package tar.gz + sha256 sidecar
         run: |

@@ -193,6 +193,35 @@ final class PythonEngineHost: ObservableObject {
         return base + "/" + stripped
     }
 
+    /// 激活前逐文件 sha256 校验（engine/files.sha256：`<hex>  <相对路径>`，路径相对 engine 根；
+    /// 由 CI 打包时生成）。解包损坏会精确报出哪个文件；清单缺失则跳过（返回 0）
+    static func verifyExtractedFiles(in dir: String) throws -> Int {
+        guard let data = fm0.contents(atPath: dir + "/files.sha256"),
+              let text = String(data: data, encoding: .utf8) else { return 0 }
+        var count = 0
+        for rawLine in text.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            let parts = line.split(maxSplits: 1, omittingEmptySubsequences: true,
+                                   whereSeparator: { $0 == " " || $0 == "\t" })
+            guard parts.count == 2 else { continue }
+            let expect = String(parts[0]).lowercased()
+            guard expect.count == 64 else { continue }
+            var rel = String(parts[1])
+            if rel.hasPrefix("./") { rel.removeFirst(2) }
+            guard let actual = try? fileSHA256(path: dir + "/" + rel) else {
+                throw EngineFlowError(msg: "文件缺失：\(rel)")
+            }
+            guard actual == expect else {
+                throw EngineFlowError(msg: "内容损坏：\(rel)（实际 \(actual.prefix(12))… ≠ 期望 \(expect.prefix(12))…）")
+            }
+            count += 1
+        }
+        return count
+    }
+
+    private static let fm0 = FileManager.default
+
     // MARK: - 下载 → 校验 → 解包 → 原子激活（§5.6：禁止覆盖写，失败保留旧 active）
 
     /// 下载引擎包与 .sha256 sidecar 到 staging，校验后解包，manifest 合法则原子切换为 active
@@ -242,7 +271,12 @@ final class PythonEngineHost: ObservableObject {
                 self.appendOutput("解压完成：gunzip 输出 \(gzBytes) bytes，untar 解出 \(entries) 个 entry"
                     + (self.fm.fileExists(atPath: self.stagingPath + "/engine") ? "" : "（⚠️ staging/engine 不存在）"))
 
-                // ④ 校验 staging/engine：manifest + apiVersion 配对 + dylib 存在
+                // ④ 校验 staging/engine：逐文件 sha256（files.sha256 清单）→ manifest + apiVersion 配对 → dylib 存在
+                self.updateBusy("逐文件校验…")
+                let verified = try Self.verifyExtractedFiles(in: self.stagingPath + "/engine")
+                self.appendOutput(verified > 0
+                    ? "逐文件 sha256 校验通过：\(verified) 个文件"
+                    : "（包内无 files.sha256 清单，跳过逐文件校验）")
                 self.updateBusy("校验引擎包…")
                 guard let m = self.readManifest(in: self.stagingPath + "/engine") else {
                     throw EngineFlowError(msg: "staging/engine/manifest.json 不可读")
