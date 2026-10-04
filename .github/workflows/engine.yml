@@ -46,16 +46,20 @@ jobs:
           curl -L --fail --retry 3 -o python-support.tar.gz "$URL"
           tar -tzf python-support.tar.gz > /dev/null   # 完整性冒烟
 
-      - name: Extract device slice only (ios-arm64)
+      - name: Extract device slice + shared stdlib
         run: |
           mkdir extract
           tar -xzf python-support.tar.gz -C extract
-          # 只保留 Python.xcframework/ios-arm64/：simulator slice 与顶层 build/ 辅助目录不复制即剥离
+          # beeware 布局是双区的：
+          #   Python.xcframework/ios-arm64/…        平台专属（dylib/lib-dynload/_sysconfigdata）
+          #   Python.xcframework/lib/python3.14/    跨 slice 共享的纯 Python stdlib（os.py/encodings/…）
+          # 两区都必须保留——只取 ios-arm64 会丢掉整个纯 Python stdlib（2026-10-04 实证）
           mkdir -p engine/Python.xcframework
           cp -R extract/Python.xcframework/ios-arm64 engine/Python.xcframework/ios-arm64
+          cp -R extract/Python.xcframework/lib engine/Python.xcframework/lib
           rm -rf extract python-support.tar.gz
-          echo "=== engine/Python.xcframework/ios-arm64 ==="
-          ls -la engine/Python.xcframework/ios-arm64
+          echo "=== engine/Python.xcframework ==="
+          ls -la engine/Python.xcframework
           du -sh engine
 
       - name: ldid fakesign all Mach-O (TrollStore AMFI-friendly)
@@ -110,10 +114,21 @@ jobs:
           # 之前解出的 framework 挪入 bundle
           mv engine/Python.xcframework Engine.app/Frameworks/Python.xcframework
           rmdir engine
-          # stdlib 目录对齐 CPython 平台发现逻辑：sys.platlibdir='lib'，Py_Initialize 会在
-          # <PYTHONHOME>/lib/python3.14 找 stdlib——beeware 的 lib-arm64 必须重命名为 lib，
-          # 否则 import encodings 失败 → fatal abort 闪退（2026-10-04 真机 stderr 实证）
-          mv Engine.app/Frameworks/Python.xcframework/ios-arm64/lib-arm64 Engine.app/Frameworks/Python.xcframework/ios-arm64/lib
+          # 合并双区为 CPython prefix 语义的运行时布局（PYTHONHOME=ios-arm64 slice 根，
+          # CPython 恒定在 <prefix>/lib/python3.14 找 stdlib、<prefix>/lib/python3.14/lib-dynload 找 C 扩展）：
+          #   lib/python3.14 ← 共享纯 Python stdlib（xcframework/lib/python3.14）
+          #                  + 平台专属（lib-dynload/_sysconfigdata/build-details，来自 lib-arm64/python3.14）
+          SLICE="Engine.app/Frameworks/Python.xcframework/ios-arm64"
+          mkdir -p "$SLICE/lib"
+          cp -R Engine.app/Frameworks/Python.xcframework/lib/python3.14 "$SLICE/lib/python3.14"
+          mv "$SLICE/lib-arm64/python3.14/lib-dynload" "$SLICE/lib/python3.14/lib-dynload"
+          cp -R "$SLICE/lib-arm64/python3.14/." "$SLICE/lib/python3.14/"
+          rm -rf "$SLICE/lib-arm64" Engine.app/Frameworks/Python.xcframework/lib
+          # 打包冒烟：stdlib landmark 必须齐（缺失就让 CI 失败，不等设备端报错）
+          for f in "lib/python3.14/encodings/__init__.py" "lib/python3.14/os.py" "lib/python3.14/lib-dynload"; do
+            [ -e "$SLICE/$f" ] || { echo "❌ stdlib landmark 缺失: $f"; exit 1; }
+          done
+          echo "✅ stdlib landmarks OK"
           # manifest 契约（schema 1）见 Phase-0 引擎实验 plan（两端共用，勿改字段名/路径）
           # 路径前缀从 engine/ 变为 Engine.app/（tipa 解包后 Engine.app 即 TrollStore 安装目录）
           cat > Engine.app/manifest.json <<EOF

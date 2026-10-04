@@ -26,7 +26,9 @@ struct KlineApp: App {
     static let appVersion = "1.0.2"
 
     init() {
-        // 启动不再清空日志（Phase-0 排障需要跨闪退保留证据；体积由 trimIfNeeded 封顶）
+        // 日志滚动：上次会话归档为 debug_log.prev.txt（保留一份），本次清空重新记录；
+        // 排障取证通道：debug_log.txt（本次）/ debug_log.prev.txt（上次）/ py_stderr.log
+        DebugLogger.shared.rollOnLaunch()
         DebugLogger.shared.log("== App 启动 == 版本:\(KlineApp.appVersion)")
 
         // 启动本地 HTTP 服务器（A2 本地更新安装 + 🥈 远程更新触发）

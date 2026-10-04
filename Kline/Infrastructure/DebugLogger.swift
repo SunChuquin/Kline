@@ -59,6 +59,17 @@ nonisolated final class DebugLogger: @unchecked Sendable {
         }
     }
 
+    /// 启动滚动：本次 debug_log.txt → debug_log.prev.txt（覆盖上一份「上次」），
+    /// 当前日志清空重新开始——即「保上次、清上上次」，便于取证最近两次会话
+    func rollOnLaunch() {
+        queue.sync { [self] in
+            guard fm.fileExists(atPath: logURL.path) else { return }
+            let prev = logURL.deletingLastPathComponent().appendingPathComponent("debug_log.prev.txt")
+            if fm.fileExists(atPath: prev.path) { try? fm.removeItem(at: prev) }
+            try? fm.moveItem(at: logURL, to: prev)
+        }
+    }
+
     /// 超过上限时截断，避免日志无限增长
     private func trimIfNeeded() {
         let attrs = try? FileManager.default.attributesOfItem(atPath: logURL.path)
