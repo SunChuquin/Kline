@@ -493,7 +493,31 @@ final class PythonEngineHost: ObservableObject {
             }
             let dlopenMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
-            // 初始化前设置 PYTHONHOME（值随引擎包 manifest 走，不硬编码；指向 Engine.app 内 stdlib）
+            // PYTHONHOME 是 **prefix** 语义：CPython 恒定在 <prefix>/lib/python3.14 找 stdlib
+            // （platlibdir='lib'），我们无法改变它的查找方式，只能让布局与校验都对齐这个语义。
+            // 鲁棒性硬规则：Py_Initialize 的 fatal abort 进程级不可捕获，stdlib 预检不过
+            // 就必须在这里以可读错误返回，绝不触碰 init（否则就是闪退）。
+            let stdlibDir = homePath + "/lib/python3.14"
+            let landmarks = [
+                ("encodings 包", stdlibDir + "/encodings/__init__.py"),
+                ("os 模块", stdlibDir + "/os.py"),
+                ("C 扩展目录", stdlibDir + "/lib-dynload"),
+            ]
+            var missing: [String] = []
+            for (label, p) in landmarks where !self.fm.fileExists(atPath: p) {
+                missing.append("\(label)（缺 \(p)）")
+            }
+            guard missing.isEmpty else {
+                let msg = "stdlib 预检失败（home=\(homePath)）：" + missing.joined(separator: "；")
+                    + "。Py_Initialize 未执行（避免闪退）——请检查引擎包布局或版本"
+                self.appendOutput(msg)
+                self.endBusy()
+                DispatchQueue.main.async { completion(.failure(msg)) }
+                return
+            }
+            self.appendOutput("stdlib 预检通过：\(stdlibDir)")
+
+            // 初始化前设置 PYTHONHOME（值随引擎包 manifest 走，不硬编码；指向 Engine.app 内 stdlib prefix）
             setenv("PYTHONHOME", homePath, 1)
             self.appendOutput("PYTHONHOME=\(homePath)")
 

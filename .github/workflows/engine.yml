@@ -125,7 +125,7 @@ jobs:
             "apiVersion": 1,
             "layout": {
               "dylib": "Engine.app/Frameworks/Python.xcframework/ios-arm64/Python.framework/Python",
-              "home": "Engine.app/Frameworks/Python.xcframework/ios-arm64/lib/python3.14"
+              "home": "Engine.app/Frameworks/Python.xcframework/ios-arm64"
             }
           }
           EOF
