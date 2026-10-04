@@ -567,7 +567,9 @@ struct PythonEngineLabView: View {
     result = {'reqs': len(codes)}
     try:
         def _fetch(c):
-            with _opener.open('https://qt.gtimg.cn/q=' + c, timeout=10) as r:
+            # 明文 HTTP：绕开 TLS 握手环节（实测 443 握手被网络环境掐断超时），
+            # 吞吐测量的对象是「HTTP 请求并发」而非 TLS；腾讯快照支持明文
+            with _opener.open('http://qt.gtimg.cn/q=' + c, timeout=5) as r:
                 return len(r.read())
         t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=8) as ex:
