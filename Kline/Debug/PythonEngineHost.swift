@@ -234,11 +234,13 @@ final class PythonEngineHost: ObservableObject {
                 self.updateBusy("解压 tar.gz…")
                 try self.cleanAndRecreateStaging()
                 let tmpTar = self.stagingPath + "/.unpack.tar"
-                try EngineArchive.gunzip(srcPath: tarPath, dstPath: tmpTar)
-                try EngineArchive.untar(tarPath: tmpTar, into: self.stagingPath) { f in
+                let gzBytes = try EngineArchive.gunzip(srcPath: tarPath, dstPath: tmpTar)
+                let entries = try EngineArchive.untar(tarPath: tmpTar, into: self.stagingPath) { f in
                     DispatchQueue.main.async { self.extractProgress = f }
                 }
                 try? self.fm.removeItem(atPath: tmpTar)
+                self.appendOutput("解压完成：gunzip 输出 \(gzBytes) bytes，untar 解出 \(entries) 个 entry"
+                    + (self.fm.fileExists(atPath: self.stagingPath + "/engine") ? "" : "（⚠️ staging/engine 不存在）"))
 
                 // ④ 校验 staging/engine：manifest + apiVersion 配对 + dylib 存在
                 self.updateBusy("校验引擎包…")
@@ -261,6 +263,7 @@ final class PythonEngineHost: ObservableObject {
             } catch {
                 let msg = (error as? EngineFlowError)?.msg ?? error.localizedDescription
                 self.appendOutput("下载/激活失败：" + msg)
+                self.appendOutput("诊断 staging 树：\n" + Self.dumpTree(self.stagingPath, depth: 0, budget: 30))
                 // 失败清理 staging（旧 active 原样保留）
                 try? self.fm.removeItem(atPath: self.stagingPath)
                 self.endBusy()
@@ -294,6 +297,30 @@ final class PythonEngineHost: ObservableObject {
     private func cleanAndRecreateStaging() throws {
         if fm.fileExists(atPath: stagingPath) { try fm.removeItem(atPath: stagingPath) }
         try fm.createDirectory(atPath: stagingPath, withIntermediateDirectories: true)
+    }
+
+    /// 诊断：staging 目录树转储（限预算防刷屏；目录带 / 后缀，文件带字节数）
+    static func dumpTree(_ path: String, depth: Int, budget: Int) -> String {
+        guard budget > 0 else { return "…（超出预算截断）" }
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: path) else {
+            return "(目录不可枚举: \(path))"
+        }
+        guard !items.isEmpty else { return "(空目录: \((path as NSString).lastPathComponent))" }
+        var lines: [String] = []
+        for name in items.sorted() {
+            guard lines.count < budget else { lines.append("…"); break }
+            let p = path + "/" + name
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: p, isDirectory: &isDir)
+            if isDir.boolValue {
+                lines.append(String(repeating: "  ", count: depth) + name + "/")
+                lines.append(dumpTree(p, depth: depth + 1, budget: budget - lines.count))
+            } else {
+                let sz = (try? FileManager.default.attributesOfItem(atPath: p)[.size] as? Int) ?? 0
+                lines.append(String(repeating: "  ", count: depth) + name + " (\(sz) bytes)")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// 同步下载（workQueue 上用信号量等完成；进度经主线程回调）
@@ -551,8 +578,8 @@ enum EngineArchive {
 
     private static let chunkSize = 1 << 18   // 256KB
 
-    /// gzip 解码到目标文件（头部手工解析，payload 为 raw DEFLATE 流式解码）
-    static func gunzip(srcPath: String, dstPath: String) throws {
+    /// gzip 解码到目标文件（头部手工解析，payload 为 raw DEFLATE 流式解码），返回输出字节数
+    static func gunzip(srcPath: String, dstPath: String) throws -> Int {
         let fm = FileManager.default
         if fm.fileExists(atPath: dstPath) { try fm.removeItem(atPath: dstPath) }
         guard fm.createFile(atPath: dstPath, contents: nil),
@@ -585,11 +612,12 @@ enum EngineArchive {
         guard i <= b.count else { throw EngineFlowError(msg: "gzip 头越界") }
 
         var pending: Data? = (i < head.count) ? Data(head.dropFirst(i)) : nil
-        try deflateDecode(src: src, pending: &pending, dst: dst)
+        return try deflateDecode(src: src, pending: &pending, dst: dst)
     }
 
-    /// raw DEFLATE 流式解码（COMPRESSION_ZLIB 即 raw DEFLATE，无 zlib 头，与 gzip payload 匹配）
-    private static func deflateDecode(src: FileHandle, pending: inout Data?, dst: FileHandle) throws {
+    /// raw DEFLATE 流式解码（COMPRESSION_ZLIB 即 raw DEFLATE，无 zlib 头，与 gzip payload 匹配），返回写入字节数
+    private static func deflateDecode(src: FileHandle, pending: inout Data?, dst: FileHandle) throws -> Int {
+        var written = 0
         let dstCap = chunkSize
         let dstBuf = UnsafeMutablePointer<UInt8>.allocate(capacity: dstCap)
         defer { dstBuf.deallocate() }
@@ -629,6 +657,7 @@ enum EngineArchive {
             if stream.dst_size < dstCap {
                 let produced = dstCap - stream.dst_size
                 dst.write(Data(bytes: dstBuf, count: produced))
+                written += produced
                 stream.dst_ptr = dstBuf
                 stream.dst_size = dstCap
             }
@@ -637,11 +666,12 @@ enum EngineArchive {
                 throw EngineFlowError(msg: "DEFLATE 流异常终止")
             }
         }
+        return written
     }
 
-    /// 解包 tar 到目标目录（progress：已处理字节 / 总字节）
+    /// 解包 tar 到目标目录（progress：已处理字节 / 总字节），返回处理的 entry 数
     static func untar(tarPath: String, into destDir: String,
-                      progress: @escaping (Double) -> Void) throws {
+                      progress: @escaping (Double) -> Void) throws -> Int {
         let fm = FileManager.default
         try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
         let total = (try fm.attributesOfItem(atPath: tarPath)[.size] as? UInt64) ?? 0
@@ -651,6 +681,7 @@ enum EngineArchive {
         var offset: UInt64 = 0
         var longName: String?    // GNU 'L' 长名
         var paxPath: String?     // pax 'x' 扩展头 path 记录
+        var entryCount = 0
 
         while offset + 512 <= total {
             let header = try readAt(src, offset: offset, count: 512)
@@ -666,6 +697,7 @@ enum EngineArchive {
                 if !prefix.isEmpty { name = prefix + "/" + name0 }
             }
             offset += 512
+            entryCount += 1
 
             // typeflag（十六进制字面量，避免字符转换歧义）：0x30='0' 文件 0x35='5' 目录
             // 0x32='2' 软链 0x31='1' 硬链 0x4C='L' GNU 长名 0x78='x'/0x67='g' pax 头
@@ -705,6 +737,7 @@ enum EngineArchive {
             if total > 0 { progress(min(1, Double(offset) / Double(total))) }
         }
         progress(1)
+        return entryCount
     }
 
     /// 定位读一块 tar 数据
