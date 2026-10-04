@@ -1,0 +1,146 @@
+# Kline 独立 Python 引擎包（Phase-0 Stage A）
+# 手动触发：下载 beeware/Python-Apple-support 支持包 → 只保留真机 slice（剥离 simulator/build）
+# → 全部 Mach-O ad-hoc 重签 → 打包 KlineEngine-<ver>.tar.gz + sha256 sidecar → 发独立 Release
+# 注意：引擎包只手动产（不得被 push 触发）；tag=engine-<python_version>，与 build.yml 的 IPA latest Release 互不干扰
+# 契约：.trae/documents/python-engine/Phase-0引擎实验-plan.md（manifest v1）
+name: Engine Pack (Python standalone engine)
+
+on:
+  workflow_dispatch:
+    inputs:
+      beeware_tag:
+        description: 'beeware/Python-Apple-support release tag'
+        required: false
+        default: '3.14-b11'
+      python_version:
+        description: 'Python version inside the support package'
+        required: false
+        default: '3.14.7'
+
+# 发布 Release 需要写仓库权限（引擎包独立下载通道）
+permissions:
+  contents: write
+
+jobs:
+  engine:
+    name: Pack engine + publish Release
+    runs-on: macos-latest
+
+    env:
+      BEEWARE_TAG: ${{ inputs.beeware_tag }}
+      PYTHON_VERSION: ${{ inputs.python_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download BeeWare Python-Apple-support
+        run: |
+          BNUM="${BEEWARE_TAG#*-}"        # 3.14-b11 -> b11
+          PY_MM="${PYTHON_VERSION%.*}"    # 3.14.7  -> 3.14
+          # 文件名规则：Python-<major.minor>-iOS-support.<bN>.tar.gz
+          URL="https://github.com/beeware/Python-Apple-support/releases/download/${BEEWARE_TAG}/Python-${PY_MM}-iOS-support.${BNUM}.tar.gz"
+          echo "URL: $URL"
+          curl -L --fail --retry 3 -o python-support.tar.gz "$URL"
+          tar -tzf python-support.tar.gz > /dev/null   # 完整性冒烟
+
+      - name: Extract device slice only (ios-arm64)
+        run: |
+          mkdir extract
+          tar -xzf python-support.tar.gz -C extract
+          # 只保留 Python.xcframework/ios-arm64/：simulator slice 与顶层 build/ 辅助目录不复制即剥离
+          mkdir -p engine/Python.xcframework
+          cp -R extract/Python.xcframework/ios-arm64 engine/Python.xcframework/ios-arm64
+          rm -rf extract python-support.tar.gz
+          echo "=== engine/Python.xcframework/ios-arm64 ==="
+          ls -la engine/Python.xcframework/ios-arm64
+          du -sh engine
+
+      - name: Ad-hoc codesign all Mach-O
+        run: |
+          FW="engine/Python.xcframework/ios-arm64/Python.framework"
+          echo "=== original signature state (probe) ==="
+          codesign -dv "$FW" 2>&1 || echo "(framework has no signature yet -> expected)"
+          echo ""
+          # 1) framework 之外的独立 Mach-O（lib-dynload 扩展 .so、bin/ 工具链等）逐个 ad-hoc 签
+          MACHO_LIST=$(find engine/Python.xcframework/ios-arm64 -type f -not -path "*/Python.framework/*" \
+            -exec sh -c 'file "$1" | grep -q Mach-O && printf "%s\n" "$1"' _ {} \;)
+          echo "=== standalone Mach-O files ==="
+          echo "$MACHO_LIST"
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "  signing: $f"
+            codesign -f -s - "$f"
+          done <<< "$MACHO_LIST"
+          # 2) framework bundle 整体签（覆盖主二进制 Python.framework/Python）
+          codesign -f -s - "$FW"
+          echo ""
+          echo "=== verify (codesign -vv) ==="
+          codesign -vv "$FW"
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            codesign -vv "$f"
+          done <<< "$MACHO_LIST"
+          echo "=== signature after signing ==="
+          codesign -dv "$FW" 2>&1
+
+      - name: Write engine/manifest.json
+        run: |
+          # manifest 契约（schema 1）见 Phase-0 引擎实验 plan（两端共用，勿改字段名/路径）
+          cat > engine/manifest.json <<EOF
+          {
+            "schema": 1,
+            "engineId": "cpython",
+            "engineVersion": "${PYTHON_VERSION}",
+            "build": "beeware-${BEEWARE_TAG}",
+            "apiVersion": 1,
+            "layout": {
+              "dylib": "engine/Python.xcframework/ios-arm64/Python.framework/Python",
+              "home": "engine/Python.xcframework/ios-arm64/lib-arm64/python3.14"
+            }
+          }
+          EOF
+          cat engine/manifest.json
+          python3 -c "import json; json.load(open('engine/manifest.json'))"   # JSON 合法性冒烟
+
+      - name: Package tar.gz + sha256 sidecar
+        run: |
+          ASSET="KlineEngine-${PYTHON_VERSION}.tar.gz"
+          tar -czf "$ASSET" engine/
+          # sha256 不进包内（自引用），放同名 sidecar，内容即 shasum -a 256 原始输出
+          shasum -a 256 "$ASSET" | tee "${ASSET}.sha256"
+          ls -la "$ASSET" "${ASSET}.sha256"
+
+      - name: Publish engine Release (idempotent)
+        run: |
+          ASSET="KlineEngine-${PYTHON_VERSION}.tar.gz"
+          SIDE="${ASSET}.sha256"
+          TAG="engine-${PYTHON_VERSION}"
+          {
+            echo "Kline Python Engine ${PYTHON_VERSION}"
+            echo ""
+            echo "来源：beeware/Python-Apple-support \`${BEEWARE_TAG}\`（Python-${PYTHON_VERSION%.*}-iOS-support.${BEEWARE_TAG#*-}.tar.gz）"
+            echo "内容：Python.xcframework ios-arm64 真机 slice（剥离 simulator / build），全部 Mach-O 已 ad-hoc 重签"
+            echo ""
+            echo "manifest.json:"
+            echo '```json'
+            cat engine/manifest.json
+            echo '```'
+            echo ""
+            echo "sha256:"
+            echo '```'
+            cat "$SIDE"
+            echo '```'
+            echo ""
+            echo "构建：run #${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7}"
+          } > release_notes.md
+          # 幂等：Release 已存在则 --clobber 覆盖同名资产并刷新说明（与 build.yml 的 latest 模式一致），重复触发不报错
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" "$SIDE" --clobber
+            gh release edit "$TAG" --title "Kline Python Engine ${PYTHON_VERSION}" --notes-file release_notes.md
+          else
+            gh release create "$TAG" "$ASSET" "$SIDE" \
+              --title "Kline Python Engine ${PYTHON_VERSION}" \
+              --notes-file release_notes.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
