@@ -553,28 +553,31 @@ struct PythonEngineLabView: View {
 
     // MARK: 实验③ 并发吞吐（ThreadPoolExecutor + urllib，请求量保持小：约 20 次）
 
-    /// 脚本常量：8 线程并发请求腾讯快照（一股一请求，共 20 次，避免触发限流）
+    /// 脚本常量：8 线程并发请求腾讯快照（一股一请求，共 20 次，避免触发限流）。
+    /// 整体 try/except 自捕获：异常写进 py_out.json 的 error 字段（stderr 有缓冲不落盘，不可依赖）
     private static let exp3Script = """
-    import json, time, urllib.request
+    import json, time, traceback, urllib.request
     from concurrent.futures import ThreadPoolExecutor
     codes = ['sh600000','sz000001','sh000001','sh600036','sz000002','sh600519',
              'sz000858','sh601318','sh601988','sz000651','sh600030','sz002415',
              'sh600887','sz002304','sh601899','sh600900','sh601166','sh600016',
              'sz000333','sh600276']
-    def _fetch(c):
-        with urllib.request.urlopen('https://qt.gtimg.cn/q=' + c, timeout=10) as r:
-            return len(r.read())
-    t0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        sizes = list(ex.map(_fetch, codes))
-    t1 = time.perf_counter()
-    el = t1 - t0
-    open(__kline_out__, 'w').write(json.dumps({
-        'reqs': len(codes),
-        'ok': len(sizes),
-        'total_ms': el * 1000.0,
-        'rps': (len(codes) / el) if el > 0 else 0.0,
-    }))
+    result = {'reqs': len(codes)}
+    try:
+        def _fetch(c):
+            with urllib.request.urlopen('https://qt.gtimg.cn/q=' + c, timeout=10) as r:
+                return len(r.read())
+        t0 = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            sizes = list(ex.map(_fetch, codes))
+        t1 = time.perf_counter()
+        el = t1 - t0
+        result['ok'] = len(sizes)
+        result['total_ms'] = el * 1000.0
+        result['rps'] = (len(codes) / el) if el > 0 else 0.0
+    except Exception:
+        result['error'] = traceback.format_exc()
+    open(__kline_out__, 'w').write(json.dumps(result))
     """
 
     private func runExp3() {
@@ -586,11 +589,15 @@ struct PythonEngineLabView: View {
             switch r {
             case .success(let out):
                 if let obj = (try? JSONSerialization.jsonObject(with: out.data)) as? [String: Any] {
-                    host.appendOutput(String(format: "实验③ 完成：%d/%d 次成功，总耗时 %.0fms，吞吐 %.1f req/s",
-                                             obj["ok"] as? Int ?? 0,
-                                             obj["reqs"] as? Int ?? 0,
-                                             obj["total_ms"] as? Double ?? -1,
-                                             obj["rps"] as? Double ?? -1))
+                    if let err = obj["error"] as? String {
+                        host.appendOutput("实验③ 失败（脚本内异常）：\n" + err)
+                    } else {
+                        host.appendOutput(String(format: "实验③ 完成：%d/%d 次成功，总耗时 %.0fms，吞吐 %.1f req/s",
+                                                 obj["ok"] as? Int ?? 0,
+                                                 obj["reqs"] as? Int ?? 0,
+                                                 obj["total_ms"] as? Double ?? -1,
+                                                 obj["rps"] as? Double ?? -1))
+                    }
                 } else {
                     host.appendOutput("实验③ 输出解析失败（网络/SSL 异常见日志）")
                 }
