@@ -40,6 +40,16 @@
                ReferencedContainer = "container:Kline.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "D2C5C5200000000000000003"
+               BuildableName = "KlineTests.xctest"
+               BlueprintName = "KlineTests"
+               ReferencedContainer = "container:Kline.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

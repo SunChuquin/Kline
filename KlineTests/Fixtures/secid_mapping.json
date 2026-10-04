@@ -1,0 +1,3322 @@
+{
+  "notes": "file → 东财 secid 映射契约。Python 权威实现 live_db_builder.secid_for_file(:302)：用 file 前缀判定市场（SH#→1.*、SZ#/BJ#→0.*，不从 6 位 code 猜），SH#999999 走 SPECIAL_FILE_SECID 特例 → 1.000001；其余前缀（27#/62#/102# 扩展行情指数，含恒生系与 930/931/97x/98x 定制指数）返回 None —— 云端/PC 结构上不产这些标的的分片。Swift EastmoneyQuoteFetcher.secid(forFile:)(:149-162) 在前缀规则之后追加 Bundle 覆盖表 universe_secids.txt（东财接口其实有数据），读不到表时降级为仅前缀规则。两侧对 27#/62#/102# 语义不同属有意为之，见 knownDivergence（不硬凑一致）。本表无 hk# 前缀条目；恒生系以 27# 出现（27#HSI→100.HSI，其余→124.*）。universe_secids.txt 本身即 Swift 覆盖表原文。",
+  "specialFileSecid": {
+    "SH#999999": "1.000001"
+  },
+  "entries": [
+    {
+      "file": "102#970070",
+      "code": "970070",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980001",
+      "code": "980001",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980015",
+      "code": "980015",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980016",
+      "code": "980016",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980017",
+      "code": "980017",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980018",
+      "code": "980018",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980022",
+      "code": "980022",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980028",
+      "code": "980028",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980030",
+      "code": "980030",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980032",
+      "code": "980032",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980034",
+      "code": "980034",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980076",
+      "code": "980076",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980080",
+      "code": "980080",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980081",
+      "code": "980081",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#980092",
+      "code": "980092",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#987008",
+      "code": "987008",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#987016",
+      "code": "987016",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#987018",
+      "code": "987018",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#987022",
+      "code": "987022",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "102#987024",
+      "code": "987024",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSCSOE",
+      "code": "HSCSOE",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSHCI",
+      "code": "HSHCI",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSI",
+      "code": "HSI",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSIDI",
+      "code": "HSIDI",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSISC",
+      "code": "HSISC",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSSC50",
+      "code": "HSSC50",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "27#HSTECH",
+      "code": "HSTECH",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000171",
+      "code": "000171",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000806",
+      "code": "000806",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000807",
+      "code": "000807",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000811",
+      "code": "000811",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000812",
+      "code": "000812",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000813",
+      "code": "000813",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000815",
+      "code": "000815",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000821",
+      "code": "000821",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000824",
+      "code": "000824",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000825",
+      "code": "000825",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000859",
+      "code": "000859",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000861",
+      "code": "000861",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000918",
+      "code": "000918",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000919",
+      "code": "000919",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000922",
+      "code": "000922",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000925",
+      "code": "000925",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000936",
+      "code": "000936",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000941",
+      "code": "000941",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000945",
+      "code": "000945",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000948",
+      "code": "000948",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000949",
+      "code": "000949",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000977",
+      "code": "000977",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#000995",
+      "code": "000995",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#704843",
+      "code": "704843",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#716567",
+      "code": "716567",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930050",
+      "code": "930050",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930598",
+      "code": "930598",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930601",
+      "code": "930601",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930604",
+      "code": "930604",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930606",
+      "code": "930606",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930608",
+      "code": "930608",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930614",
+      "code": "930614",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930625",
+      "code": "930625",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930632",
+      "code": "930632",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930633",
+      "code": "930633",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930641",
+      "code": "930641",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930648",
+      "code": "930648",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930651",
+      "code": "930651",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930652",
+      "code": "930652",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930653",
+      "code": "930653",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930662",
+      "code": "930662",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930697",
+      "code": "930697",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930707",
+      "code": "930707",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930708",
+      "code": "930708",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930709",
+      "code": "930709",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930712",
+      "code": "930712",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930713",
+      "code": "930713",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930716",
+      "code": "930716",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930721",
+      "code": "930721",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930725",
+      "code": "930725",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930726",
+      "code": "930726",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930740",
+      "code": "930740",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930743",
+      "code": "930743",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930758",
+      "code": "930758",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930781",
+      "code": "930781",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930782",
+      "code": "930782",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930796",
+      "code": "930796",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930821",
+      "code": "930821",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930839",
+      "code": "930839",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930850",
+      "code": "930850",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930851",
+      "code": "930851",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930901",
+      "code": "930901",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930902",
+      "code": "930902",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930903",
+      "code": "930903",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930910",
+      "code": "930910",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930914",
+      "code": "930914",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930931",
+      "code": "930931",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930939",
+      "code": "930939",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930955",
+      "code": "930955",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930957",
+      "code": "930957",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930965",
+      "code": "930965",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930967",
+      "code": "930967",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930975",
+      "code": "930975",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930986",
+      "code": "930986",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#930997",
+      "code": "930997",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931000",
+      "code": "931000",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931008",
+      "code": "931008",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931009",
+      "code": "931009",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931021",
+      "code": "931021",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931024",
+      "code": "931024",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931033",
+      "code": "931033",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931039",
+      "code": "931039",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931052",
+      "code": "931052",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931066",
+      "code": "931066",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931068",
+      "code": "931068",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931071",
+      "code": "931071",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931079",
+      "code": "931079",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931087",
+      "code": "931087",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931088",
+      "code": "931088",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931132",
+      "code": "931132",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931139",
+      "code": "931139",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931140",
+      "code": "931140",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931141",
+      "code": "931141",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931151",
+      "code": "931151",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931152",
+      "code": "931152",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931159",
+      "code": "931159",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931160",
+      "code": "931160",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931165",
+      "code": "931165",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931166",
+      "code": "931166",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931186",
+      "code": "931186",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931187",
+      "code": "931187",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931230",
+      "code": "931230",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931233",
+      "code": "931233",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931235",
+      "code": "931235",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931238",
+      "code": "931238",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931239",
+      "code": "931239",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931241",
+      "code": "931241",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931243",
+      "code": "931243",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931247",
+      "code": "931247",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931248",
+      "code": "931248",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931250",
+      "code": "931250",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931268",
+      "code": "931268",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931271",
+      "code": "931271",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931372",
+      "code": "931372",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931380",
+      "code": "931380",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931393",
+      "code": "931393",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931395",
+      "code": "931395",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931402",
+      "code": "931402",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931403",
+      "code": "931403",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931404",
+      "code": "931404",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931406",
+      "code": "931406",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931409",
+      "code": "931409",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931412",
+      "code": "931412",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931442",
+      "code": "931442",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931447",
+      "code": "931447",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931455",
+      "code": "931455",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931456",
+      "code": "931456",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931461",
+      "code": "931461",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931463",
+      "code": "931463",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931468",
+      "code": "931468",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931469",
+      "code": "931469",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931470",
+      "code": "931470",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931476",
+      "code": "931476",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931480",
+      "code": "931480",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931481",
+      "code": "931481",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931484",
+      "code": "931484",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931487",
+      "code": "931487",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931494",
+      "code": "931494",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931495",
+      "code": "931495",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931521",
+      "code": "931521",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931524",
+      "code": "931524",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931526",
+      "code": "931526",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931529",
+      "code": "931529",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931554",
+      "code": "931554",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931573",
+      "code": "931573",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931574",
+      "code": "931574",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931575",
+      "code": "931575",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931580",
+      "code": "931580",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931582",
+      "code": "931582",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931586",
+      "code": "931586",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931587",
+      "code": "931587",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931588",
+      "code": "931588",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931589",
+      "code": "931589",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931590",
+      "code": "931590",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931591",
+      "code": "931591",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931594",
+      "code": "931594",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931596",
+      "code": "931596",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931637",
+      "code": "931637",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931643",
+      "code": "931643",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931663",
+      "code": "931663",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931695",
+      "code": "931695",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931696",
+      "code": "931696",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931719",
+      "code": "931719",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931733",
+      "code": "931733",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931743",
+      "code": "931743",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931752",
+      "code": "931752",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931755",
+      "code": "931755",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931775",
+      "code": "931775",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931778",
+      "code": "931778",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931785",
+      "code": "931785",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931787",
+      "code": "931787",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931790",
+      "code": "931790",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931798",
+      "code": "931798",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931823",
+      "code": "931823",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931848",
+      "code": "931848",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931855",
+      "code": "931855",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931865",
+      "code": "931865",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931866",
+      "code": "931866",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931892",
+      "code": "931892",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931897",
+      "code": "931897",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931946",
+      "code": "931946",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931992",
+      "code": "931992",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#931994",
+      "code": "931994",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932000",
+      "code": "932000",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932037",
+      "code": "932037",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932038",
+      "code": "932038",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932039",
+      "code": "932039",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932052",
+      "code": "932052",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932066",
+      "code": "932066",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932069",
+      "code": "932069",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932087",
+      "code": "932087",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932088",
+      "code": "932088",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932094",
+      "code": "932094",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932217",
+      "code": "932217",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932305",
+      "code": "932305",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932315",
+      "code": "932315",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932365",
+      "code": "932365",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932366",
+      "code": "932366",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932367",
+      "code": "932367",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932368",
+      "code": "932368",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932420",
+      "code": "932420",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932422",
+      "code": "932422",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932431",
+      "code": "932431",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#932456",
+      "code": "932456",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950049",
+      "code": "950049",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950096",
+      "code": "950096",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950105",
+      "code": "950105",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950161",
+      "code": "950161",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950162",
+      "code": "950162",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950180",
+      "code": "950180",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950228",
+      "code": "950228",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950333",
+      "code": "950333",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#950580",
+      "code": "950580",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#990001",
+      "code": "990001",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#CES100",
+      "code": "CES100",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H11052",
+      "code": "H11052",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H11054",
+      "code": "H11054",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H11057",
+      "code": "H11057",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H11059",
+      "code": "H11059",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H11146",
+      "code": "H11146",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H11153",
+      "code": "H11153",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30007",
+      "code": "H30007",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30015",
+      "code": "H30015",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30022",
+      "code": "H30022",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30035",
+      "code": "H30035",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30106",
+      "code": "H30106",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30171",
+      "code": "H30171",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30178",
+      "code": "H30178",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30182",
+      "code": "H30182",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30184",
+      "code": "H30184",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30192",
+      "code": "H30192",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30198",
+      "code": "H30198",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30199",
+      "code": "H30199",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30202",
+      "code": "H30202",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30217",
+      "code": "H30217",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30269",
+      "code": "H30269",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30270",
+      "code": "H30270",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30318",
+      "code": "H30318",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30352",
+      "code": "H30352",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30356",
+      "code": "H30356",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30365",
+      "code": "H30365",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30366",
+      "code": "H30366",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30455",
+      "code": "H30455",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30463",
+      "code": "H30463",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30533",
+      "code": "H30533",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30590",
+      "code": "H30590",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H30597",
+      "code": "H30597",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "62#H50069",
+      "code": "H50069",
+      "secid": null,
+      "rule": "override"
+    },
+    {
+      "file": "SH#999999",
+      "code": "999999",
+      "secid": "1.000001",
+      "rule": "special"
+    }
+  ],
+  "swiftOverrideTable": {
+    "102#970070": "0.970070",
+    "102#980001": "0.980001",
+    "102#980015": "0.980015",
+    "102#980016": "0.980016",
+    "102#980017": "0.980017",
+    "102#980018": "0.980018",
+    "102#980022": "0.980022",
+    "102#980028": "0.980028",
+    "102#980030": "0.980030",
+    "102#980032": "0.980032",
+    "102#980034": "0.980034",
+    "102#980076": "0.980076",
+    "102#980080": "0.980080",
+    "102#980081": "0.980081",
+    "102#980092": "0.980092",
+    "102#987008": "0.987008",
+    "102#987016": "0.987016",
+    "102#987018": "0.987018",
+    "102#987022": "0.987022",
+    "102#987024": "0.987024",
+    "27#HSCSOE": "124.HSCSOE",
+    "27#HSHCI": "124.HSHCI",
+    "27#HSI": "100.HSI",
+    "27#HSIDI": "124.HSIDI",
+    "27#HSISC": "124.HSISC",
+    "27#HSSC50": "124.HSSC50",
+    "27#HSTECH": "124.HSTECH",
+    "62#000171": "1.000171",
+    "62#000806": "1.000806",
+    "62#000807": "1.000807",
+    "62#000811": "1.000811",
+    "62#000812": "1.000812",
+    "62#000813": "1.000813",
+    "62#000815": "1.000815",
+    "62#000821": "1.000821",
+    "62#000824": "1.000824",
+    "62#000825": "1.000825",
+    "62#000859": "2.000859",
+    "62#000861": "2.000861",
+    "62#000918": "1.000918",
+    "62#000919": "1.000919",
+    "62#000922": "1.000922",
+    "62#000925": "1.000925",
+    "62#000936": "1.000936",
+    "62#000941": "1.000941",
+    "62#000945": "1.000945",
+    "62#000948": "1.000948",
+    "62#000949": "1.000949",
+    "62#000977": "1.000977",
+    "62#000995": "1.000995",
+    "62#704843": "2.704843",
+    "62#716567": "2.716567",
+    "62#930050": "2.930050",
+    "62#930598": "2.930598",
+    "62#930601": "2.930601",
+    "62#930604": "2.930604",
+    "62#930606": "2.930606",
+    "62#930608": "2.930608",
+    "62#930614": "2.930614",
+    "62#930625": "2.930625",
+    "62#930632": "2.930632",
+    "62#930633": "2.930633",
+    "62#930641": "2.930641",
+    "62#930648": "2.930648",
+    "62#930651": "2.930651",
+    "62#930652": "2.930652",
+    "62#930653": "2.930653",
+    "62#930662": "2.930662",
+    "62#930697": "2.930697",
+    "62#930707": "2.930707",
+    "62#930708": "2.930708",
+    "62#930709": "2.930709",
+    "62#930712": "2.930712",
+    "62#930713": "2.930713",
+    "62#930716": "2.930716",
+    "62#930721": "2.930721",
+    "62#930725": "2.930725",
+    "62#930726": "2.930726",
+    "62#930740": "2.930740",
+    "62#930743": "2.930743",
+    "62#930758": "2.930758",
+    "62#930781": "2.930781",
+    "62#930782": "2.930782",
+    "62#930796": "2.930796",
+    "62#930821": "2.930821",
+    "62#930839": "2.930839",
+    "62#930850": "2.930850",
+    "62#930851": "2.930851",
+    "62#930901": "2.930901",
+    "62#930902": "2.930902",
+    "62#930903": "2.930903",
+    "62#930910": "2.930910",
+    "62#930914": "2.930914",
+    "62#930931": "2.930931",
+    "62#930939": "2.930939",
+    "62#930955": "2.930955",
+    "62#930957": "2.930957",
+    "62#930965": "2.930965",
+    "62#930967": "2.930967",
+    "62#930975": "2.930975",
+    "62#930986": "2.930986",
+    "62#930997": "2.930997",
+    "62#931000": "2.931000",
+    "62#931008": "2.931008",
+    "62#931009": "2.931009",
+    "62#931021": "2.931021",
+    "62#931024": "2.931024",
+    "62#931033": "2.931033",
+    "62#931039": "2.931039",
+    "62#931052": "2.931052",
+    "62#931066": "2.931066",
+    "62#931068": "2.931068",
+    "62#931071": "2.931071",
+    "62#931079": "2.931079",
+    "62#931087": "2.931087",
+    "62#931088": "2.931088",
+    "62#931132": "2.931132",
+    "62#931139": "2.931139",
+    "62#931140": "2.931140",
+    "62#931141": "2.931141",
+    "62#931151": "2.931151",
+    "62#931152": "2.931152",
+    "62#931159": "2.931159",
+    "62#931160": "2.931160",
+    "62#931165": "2.931165",
+    "62#931166": "2.931166",
+    "62#931186": "2.931186",
+    "62#931187": "2.931187",
+    "62#931230": "2.931230",
+    "62#931233": "2.931233",
+    "62#931235": "2.931235",
+    "62#931238": "2.931238",
+    "62#931239": "2.931239",
+    "62#931241": "2.931241",
+    "62#931243": "2.931243",
+    "62#931247": "2.931247",
+    "62#931248": "2.931248",
+    "62#931250": "2.931250",
+    "62#931268": "2.931268",
+    "62#931271": "2.931271",
+    "62#931372": "2.931372",
+    "62#931380": "2.931380",
+    "62#931393": "2.931393",
+    "62#931395": "2.931395",
+    "62#931402": "2.931402",
+    "62#931403": "2.931403",
+    "62#931404": "2.931404",
+    "62#931406": "2.931406",
+    "62#931409": "2.931409",
+    "62#931412": "2.931412",
+    "62#931442": "2.931442",
+    "62#931447": "2.931447",
+    "62#931455": "2.931455",
+    "62#931456": "2.931456",
+    "62#931461": "2.931461",
+    "62#931463": "2.931463",
+    "62#931468": "2.931468",
+    "62#931469": "2.931469",
+    "62#931470": "2.931470",
+    "62#931476": "2.931476",
+    "62#931480": "2.931480",
+    "62#931481": "2.931481",
+    "62#931484": "2.931484",
+    "62#931487": "2.931487",
+    "62#931494": "2.931494",
+    "62#931495": "2.931495",
+    "62#931521": "2.931521",
+    "62#931524": "2.931524",
+    "62#931526": "2.931526",
+    "62#931529": "2.931529",
+    "62#931554": "2.931554",
+    "62#931573": "2.931573",
+    "62#931574": "2.931574",
+    "62#931575": "2.931575",
+    "62#931580": "2.931580",
+    "62#931582": "2.931582",
+    "62#931586": "2.931586",
+    "62#931587": "2.931587",
+    "62#931588": "2.931588",
+    "62#931589": "2.931589",
+    "62#931590": "2.931590",
+    "62#931591": "2.931591",
+    "62#931594": "2.931594",
+    "62#931596": "2.931596",
+    "62#931637": "2.931637",
+    "62#931643": "2.931643",
+    "62#931663": "2.931663",
+    "62#931695": "2.931695",
+    "62#931696": "2.931696",
+    "62#931719": "2.931719",
+    "62#931733": "2.931733",
+    "62#931743": "2.931743",
+    "62#931752": "2.931752",
+    "62#931755": "2.931755",
+    "62#931775": "2.931775",
+    "62#931778": "2.931778",
+    "62#931785": "2.931785",
+    "62#931787": "2.931787",
+    "62#931790": "2.931790",
+    "62#931798": "2.931798",
+    "62#931823": "2.931823",
+    "62#931848": "2.931848",
+    "62#931855": "2.931855",
+    "62#931865": "2.931865",
+    "62#931866": "2.931866",
+    "62#931892": "2.931892",
+    "62#931897": "2.931897",
+    "62#931946": "2.931946",
+    "62#931992": "2.931992",
+    "62#931994": "2.931994",
+    "62#932000": "2.932000",
+    "62#932037": "2.932037",
+    "62#932038": "2.932038",
+    "62#932039": "2.932039",
+    "62#932052": "2.932052",
+    "62#932066": "2.932066",
+    "62#932069": "2.932069",
+    "62#932087": "2.932087",
+    "62#932088": "2.932088",
+    "62#932094": "2.932094",
+    "62#932217": "2.932217",
+    "62#932305": "2.932305",
+    "62#932315": "2.932315",
+    "62#932365": "2.932365",
+    "62#932366": "2.932366",
+    "62#932367": "2.932367",
+    "62#932368": "2.932368",
+    "62#932420": "2.932420",
+    "62#932422": "2.932422",
+    "62#932431": "2.932431",
+    "62#932456": "2.932456",
+    "62#950049": "2.950049",
+    "62#950096": "2.950096",
+    "62#950105": "2.950105",
+    "62#950161": "2.950161",
+    "62#950162": "2.950162",
+    "62#950180": "2.950180",
+    "62#950228": "2.950228",
+    "62#950333": "2.950333",
+    "62#950580": "2.950580",
+    "62#990001": "2.990001",
+    "62#CES100": "2.CES100",
+    "62#H11052": "2.H11052",
+    "62#H11054": "2.H11054",
+    "62#H11057": "2.H11057",
+    "62#H11059": "2.H11059",
+    "62#H11146": "2.H11146",
+    "62#H11153": "2.H11153",
+    "62#H30007": "2.H30007",
+    "62#H30015": "2.H30015",
+    "62#H30022": "2.H30022",
+    "62#H30035": "2.H30035",
+    "62#H30106": "2.H30106",
+    "62#H30171": "2.H30171",
+    "62#H30178": "2.H30178",
+    "62#H30182": "2.H30182",
+    "62#H30184": "2.H30184",
+    "62#H30192": "2.H30192",
+    "62#H30198": "2.H30198",
+    "62#H30199": "2.H30199",
+    "62#H30202": "2.H30202",
+    "62#H30217": "2.H30217",
+    "62#H30269": "2.H30269",
+    "62#H30270": "2.H30270",
+    "62#H30318": "2.H30318",
+    "62#H30352": "2.H30352",
+    "62#H30356": "2.H30356",
+    "62#H30365": "2.H30365",
+    "62#H30366": "2.H30366",
+    "62#H30455": "2.H30455",
+    "62#H30463": "2.H30463",
+    "62#H30533": "2.H30533",
+    "62#H30590": "2.H30590",
+    "62#H30597": "2.H30597",
+    "62#H50069": "2.H50069",
+    "SH#999999": "1.000001"
+  },
+  "knownDivergence": {
+    "reason": "Python secid_for_file 对非 SH#/SZ#/BJ# 前缀一律返回 None（云端跳过、计入 missing_sample/coverage）；Swift 对同一条目查覆盖表得到 secid 并正常取数。同一 file 两侧映射结果不同，是生产端分工（PC 独占扩展行情指数）而非口径漂移。",
+    "entries": [
+      {
+        "file": "102#970070",
+        "python": null,
+        "swift": "0.970070"
+      },
+      {
+        "file": "102#980001",
+        "python": null,
+        "swift": "0.980001"
+      },
+      {
+        "file": "102#980015",
+        "python": null,
+        "swift": "0.980015"
+      },
+      {
+        "file": "102#980016",
+        "python": null,
+        "swift": "0.980016"
+      },
+      {
+        "file": "102#980017",
+        "python": null,
+        "swift": "0.980017"
+      },
+      {
+        "file": "102#980018",
+        "python": null,
+        "swift": "0.980018"
+      },
+      {
+        "file": "102#980022",
+        "python": null,
+        "swift": "0.980022"
+      },
+      {
+        "file": "102#980028",
+        "python": null,
+        "swift": "0.980028"
+      },
+      {
+        "file": "102#980030",
+        "python": null,
+        "swift": "0.980030"
+      },
+      {
+        "file": "102#980032",
+        "python": null,
+        "swift": "0.980032"
+      },
+      {
+        "file": "102#980034",
+        "python": null,
+        "swift": "0.980034"
+      },
+      {
+        "file": "102#980076",
+        "python": null,
+        "swift": "0.980076"
+      },
+      {
+        "file": "102#980080",
+        "python": null,
+        "swift": "0.980080"
+      },
+      {
+        "file": "102#980081",
+        "python": null,
+        "swift": "0.980081"
+      },
+      {
+        "file": "102#980092",
+        "python": null,
+        "swift": "0.980092"
+      },
+      {
+        "file": "102#987008",
+        "python": null,
+        "swift": "0.987008"
+      },
+      {
+        "file": "102#987016",
+        "python": null,
+        "swift": "0.987016"
+      },
+      {
+        "file": "102#987018",
+        "python": null,
+        "swift": "0.987018"
+      },
+      {
+        "file": "102#987022",
+        "python": null,
+        "swift": "0.987022"
+      },
+      {
+        "file": "102#987024",
+        "python": null,
+        "swift": "0.987024"
+      },
+      {
+        "file": "27#HSCSOE",
+        "python": null,
+        "swift": "124.HSCSOE"
+      },
+      {
+        "file": "27#HSHCI",
+        "python": null,
+        "swift": "124.HSHCI"
+      },
+      {
+        "file": "27#HSI",
+        "python": null,
+        "swift": "100.HSI"
+      },
+      {
+        "file": "27#HSIDI",
+        "python": null,
+        "swift": "124.HSIDI"
+      },
+      {
+        "file": "27#HSISC",
+        "python": null,
+        "swift": "124.HSISC"
+      },
+      {
+        "file": "27#HSSC50",
+        "python": null,
+        "swift": "124.HSSC50"
+      },
+      {
+        "file": "27#HSTECH",
+        "python": null,
+        "swift": "124.HSTECH"
+      },
+      {
+        "file": "62#000171",
+        "python": null,
+        "swift": "1.000171"
+      },
+      {
+        "file": "62#000806",
+        "python": null,
+        "swift": "1.000806"
+      },
+      {
+        "file": "62#000807",
+        "python": null,
+        "swift": "1.000807"
+      },
+      {
+        "file": "62#000811",
+        "python": null,
+        "swift": "1.000811"
+      },
+      {
+        "file": "62#000812",
+        "python": null,
+        "swift": "1.000812"
+      },
+      {
+        "file": "62#000813",
+        "python": null,
+        "swift": "1.000813"
+      },
+      {
+        "file": "62#000815",
+        "python": null,
+        "swift": "1.000815"
+      },
+      {
+        "file": "62#000821",
+        "python": null,
+        "swift": "1.000821"
+      },
+      {
+        "file": "62#000824",
+        "python": null,
+        "swift": "1.000824"
+      },
+      {
+        "file": "62#000825",
+        "python": null,
+        "swift": "1.000825"
+      },
+      {
+        "file": "62#000859",
+        "python": null,
+        "swift": "2.000859"
+      },
+      {
+        "file": "62#000861",
+        "python": null,
+        "swift": "2.000861"
+      },
+      {
+        "file": "62#000918",
+        "python": null,
+        "swift": "1.000918"
+      },
+      {
+        "file": "62#000919",
+        "python": null,
+        "swift": "1.000919"
+      },
+      {
+        "file": "62#000922",
+        "python": null,
+        "swift": "1.000922"
+      },
+      {
+        "file": "62#000925",
+        "python": null,
+        "swift": "1.000925"
+      },
+      {
+        "file": "62#000936",
+        "python": null,
+        "swift": "1.000936"
+      },
+      {
+        "file": "62#000941",
+        "python": null,
+        "swift": "1.000941"
+      },
+      {
+        "file": "62#000945",
+        "python": null,
+        "swift": "1.000945"
+      },
+      {
+        "file": "62#000948",
+        "python": null,
+        "swift": "1.000948"
+      },
+      {
+        "file": "62#000949",
+        "python": null,
+        "swift": "1.000949"
+      },
+      {
+        "file": "62#000977",
+        "python": null,
+        "swift": "1.000977"
+      },
+      {
+        "file": "62#000995",
+        "python": null,
+        "swift": "1.000995"
+      },
+      {
+        "file": "62#704843",
+        "python": null,
+        "swift": "2.704843"
+      },
+      {
+        "file": "62#716567",
+        "python": null,
+        "swift": "2.716567"
+      },
+      {
+        "file": "62#930050",
+        "python": null,
+        "swift": "2.930050"
+      },
+      {
+        "file": "62#930598",
+        "python": null,
+        "swift": "2.930598"
+      },
+      {
+        "file": "62#930601",
+        "python": null,
+        "swift": "2.930601"
+      },
+      {
+        "file": "62#930604",
+        "python": null,
+        "swift": "2.930604"
+      },
+      {
+        "file": "62#930606",
+        "python": null,
+        "swift": "2.930606"
+      },
+      {
+        "file": "62#930608",
+        "python": null,
+        "swift": "2.930608"
+      },
+      {
+        "file": "62#930614",
+        "python": null,
+        "swift": "2.930614"
+      },
+      {
+        "file": "62#930625",
+        "python": null,
+        "swift": "2.930625"
+      },
+      {
+        "file": "62#930632",
+        "python": null,
+        "swift": "2.930632"
+      },
+      {
+        "file": "62#930633",
+        "python": null,
+        "swift": "2.930633"
+      },
+      {
+        "file": "62#930641",
+        "python": null,
+        "swift": "2.930641"
+      },
+      {
+        "file": "62#930648",
+        "python": null,
+        "swift": "2.930648"
+      },
+      {
+        "file": "62#930651",
+        "python": null,
+        "swift": "2.930651"
+      },
+      {
+        "file": "62#930652",
+        "python": null,
+        "swift": "2.930652"
+      },
+      {
+        "file": "62#930653",
+        "python": null,
+        "swift": "2.930653"
+      },
+      {
+        "file": "62#930662",
+        "python": null,
+        "swift": "2.930662"
+      },
+      {
+        "file": "62#930697",
+        "python": null,
+        "swift": "2.930697"
+      },
+      {
+        "file": "62#930707",
+        "python": null,
+        "swift": "2.930707"
+      },
+      {
+        "file": "62#930708",
+        "python": null,
+        "swift": "2.930708"
+      },
+      {
+        "file": "62#930709",
+        "python": null,
+        "swift": "2.930709"
+      },
+      {
+        "file": "62#930712",
+        "python": null,
+        "swift": "2.930712"
+      },
+      {
+        "file": "62#930713",
+        "python": null,
+        "swift": "2.930713"
+      },
+      {
+        "file": "62#930716",
+        "python": null,
+        "swift": "2.930716"
+      },
+      {
+        "file": "62#930721",
+        "python": null,
+        "swift": "2.930721"
+      },
+      {
+        "file": "62#930725",
+        "python": null,
+        "swift": "2.930725"
+      },
+      {
+        "file": "62#930726",
+        "python": null,
+        "swift": "2.930726"
+      },
+      {
+        "file": "62#930740",
+        "python": null,
+        "swift": "2.930740"
+      },
+      {
+        "file": "62#930743",
+        "python": null,
+        "swift": "2.930743"
+      },
+      {
+        "file": "62#930758",
+        "python": null,
+        "swift": "2.930758"
+      },
+      {
+        "file": "62#930781",
+        "python": null,
+        "swift": "2.930781"
+      },
+      {
+        "file": "62#930782",
+        "python": null,
+        "swift": "2.930782"
+      },
+      {
+        "file": "62#930796",
+        "python": null,
+        "swift": "2.930796"
+      },
+      {
+        "file": "62#930821",
+        "python": null,
+        "swift": "2.930821"
+      },
+      {
+        "file": "62#930839",
+        "python": null,
+        "swift": "2.930839"
+      },
+      {
+        "file": "62#930850",
+        "python": null,
+        "swift": "2.930850"
+      },
+      {
+        "file": "62#930851",
+        "python": null,
+        "swift": "2.930851"
+      },
+      {
+        "file": "62#930901",
+        "python": null,
+        "swift": "2.930901"
+      },
+      {
+        "file": "62#930902",
+        "python": null,
+        "swift": "2.930902"
+      },
+      {
+        "file": "62#930903",
+        "python": null,
+        "swift": "2.930903"
+      },
+      {
+        "file": "62#930910",
+        "python": null,
+        "swift": "2.930910"
+      },
+      {
+        "file": "62#930914",
+        "python": null,
+        "swift": "2.930914"
+      },
+      {
+        "file": "62#930931",
+        "python": null,
+        "swift": "2.930931"
+      },
+      {
+        "file": "62#930939",
+        "python": null,
+        "swift": "2.930939"
+      },
+      {
+        "file": "62#930955",
+        "python": null,
+        "swift": "2.930955"
+      },
+      {
+        "file": "62#930957",
+        "python": null,
+        "swift": "2.930957"
+      },
+      {
+        "file": "62#930965",
+        "python": null,
+        "swift": "2.930965"
+      },
+      {
+        "file": "62#930967",
+        "python": null,
+        "swift": "2.930967"
+      },
+      {
+        "file": "62#930975",
+        "python": null,
+        "swift": "2.930975"
+      },
+      {
+        "file": "62#930986",
+        "python": null,
+        "swift": "2.930986"
+      },
+      {
+        "file": "62#930997",
+        "python": null,
+        "swift": "2.930997"
+      },
+      {
+        "file": "62#931000",
+        "python": null,
+        "swift": "2.931000"
+      },
+      {
+        "file": "62#931008",
+        "python": null,
+        "swift": "2.931008"
+      },
+      {
+        "file": "62#931009",
+        "python": null,
+        "swift": "2.931009"
+      },
+      {
+        "file": "62#931021",
+        "python": null,
+        "swift": "2.931021"
+      },
+      {
+        "file": "62#931024",
+        "python": null,
+        "swift": "2.931024"
+      },
+      {
+        "file": "62#931033",
+        "python": null,
+        "swift": "2.931033"
+      },
+      {
+        "file": "62#931039",
+        "python": null,
+        "swift": "2.931039"
+      },
+      {
+        "file": "62#931052",
+        "python": null,
+        "swift": "2.931052"
+      },
+      {
+        "file": "62#931066",
+        "python": null,
+        "swift": "2.931066"
+      },
+      {
+        "file": "62#931068",
+        "python": null,
+        "swift": "2.931068"
+      },
+      {
+        "file": "62#931071",
+        "python": null,
+        "swift": "2.931071"
+      },
+      {
+        "file": "62#931079",
+        "python": null,
+        "swift": "2.931079"
+      },
+      {
+        "file": "62#931087",
+        "python": null,
+        "swift": "2.931087"
+      },
+      {
+        "file": "62#931088",
+        "python": null,
+        "swift": "2.931088"
+      },
+      {
+        "file": "62#931132",
+        "python": null,
+        "swift": "2.931132"
+      },
+      {
+        "file": "62#931139",
+        "python": null,
+        "swift": "2.931139"
+      },
+      {
+        "file": "62#931140",
+        "python": null,
+        "swift": "2.931140"
+      },
+      {
+        "file": "62#931141",
+        "python": null,
+        "swift": "2.931141"
+      },
+      {
+        "file": "62#931151",
+        "python": null,
+        "swift": "2.931151"
+      },
+      {
+        "file": "62#931152",
+        "python": null,
+        "swift": "2.931152"
+      },
+      {
+        "file": "62#931159",
+        "python": null,
+        "swift": "2.931159"
+      },
+      {
+        "file": "62#931160",
+        "python": null,
+        "swift": "2.931160"
+      },
+      {
+        "file": "62#931165",
+        "python": null,
+        "swift": "2.931165"
+      },
+      {
+        "file": "62#931166",
+        "python": null,
+        "swift": "2.931166"
+      },
+      {
+        "file": "62#931186",
+        "python": null,
+        "swift": "2.931186"
+      },
+      {
+        "file": "62#931187",
+        "python": null,
+        "swift": "2.931187"
+      },
+      {
+        "file": "62#931230",
+        "python": null,
+        "swift": "2.931230"
+      },
+      {
+        "file": "62#931233",
+        "python": null,
+        "swift": "2.931233"
+      },
+      {
+        "file": "62#931235",
+        "python": null,
+        "swift": "2.931235"
+      },
+      {
+        "file": "62#931238",
+        "python": null,
+        "swift": "2.931238"
+      },
+      {
+        "file": "62#931239",
+        "python": null,
+        "swift": "2.931239"
+      },
+      {
+        "file": "62#931241",
+        "python": null,
+        "swift": "2.931241"
+      },
+      {
+        "file": "62#931243",
+        "python": null,
+        "swift": "2.931243"
+      },
+      {
+        "file": "62#931247",
+        "python": null,
+        "swift": "2.931247"
+      },
+      {
+        "file": "62#931248",
+        "python": null,
+        "swift": "2.931248"
+      },
+      {
+        "file": "62#931250",
+        "python": null,
+        "swift": "2.931250"
+      },
+      {
+        "file": "62#931268",
+        "python": null,
+        "swift": "2.931268"
+      },
+      {
+        "file": "62#931271",
+        "python": null,
+        "swift": "2.931271"
+      },
+      {
+        "file": "62#931372",
+        "python": null,
+        "swift": "2.931372"
+      },
+      {
+        "file": "62#931380",
+        "python": null,
+        "swift": "2.931380"
+      },
+      {
+        "file": "62#931393",
+        "python": null,
+        "swift": "2.931393"
+      },
+      {
+        "file": "62#931395",
+        "python": null,
+        "swift": "2.931395"
+      },
+      {
+        "file": "62#931402",
+        "python": null,
+        "swift": "2.931402"
+      },
+      {
+        "file": "62#931403",
+        "python": null,
+        "swift": "2.931403"
+      },
+      {
+        "file": "62#931404",
+        "python": null,
+        "swift": "2.931404"
+      },
+      {
+        "file": "62#931406",
+        "python": null,
+        "swift": "2.931406"
+      },
+      {
+        "file": "62#931409",
+        "python": null,
+        "swift": "2.931409"
+      },
+      {
+        "file": "62#931412",
+        "python": null,
+        "swift": "2.931412"
+      },
+      {
+        "file": "62#931442",
+        "python": null,
+        "swift": "2.931442"
+      },
+      {
+        "file": "62#931447",
+        "python": null,
+        "swift": "2.931447"
+      },
+      {
+        "file": "62#931455",
+        "python": null,
+        "swift": "2.931455"
+      },
+      {
+        "file": "62#931456",
+        "python": null,
+        "swift": "2.931456"
+      },
+      {
+        "file": "62#931461",
+        "python": null,
+        "swift": "2.931461"
+      },
+      {
+        "file": "62#931463",
+        "python": null,
+        "swift": "2.931463"
+      },
+      {
+        "file": "62#931468",
+        "python": null,
+        "swift": "2.931468"
+      },
+      {
+        "file": "62#931469",
+        "python": null,
+        "swift": "2.931469"
+      },
+      {
+        "file": "62#931470",
+        "python": null,
+        "swift": "2.931470"
+      },
+      {
+        "file": "62#931476",
+        "python": null,
+        "swift": "2.931476"
+      },
+      {
+        "file": "62#931480",
+        "python": null,
+        "swift": "2.931480"
+      },
+      {
+        "file": "62#931481",
+        "python": null,
+        "swift": "2.931481"
+      },
+      {
+        "file": "62#931484",
+        "python": null,
+        "swift": "2.931484"
+      },
+      {
+        "file": "62#931487",
+        "python": null,
+        "swift": "2.931487"
+      },
+      {
+        "file": "62#931494",
+        "python": null,
+        "swift": "2.931494"
+      },
+      {
+        "file": "62#931495",
+        "python": null,
+        "swift": "2.931495"
+      },
+      {
+        "file": "62#931521",
+        "python": null,
+        "swift": "2.931521"
+      },
+      {
+        "file": "62#931524",
+        "python": null,
+        "swift": "2.931524"
+      },
+      {
+        "file": "62#931526",
+        "python": null,
+        "swift": "2.931526"
+      },
+      {
+        "file": "62#931529",
+        "python": null,
+        "swift": "2.931529"
+      },
+      {
+        "file": "62#931554",
+        "python": null,
+        "swift": "2.931554"
+      },
+      {
+        "file": "62#931573",
+        "python": null,
+        "swift": "2.931573"
+      },
+      {
+        "file": "62#931574",
+        "python": null,
+        "swift": "2.931574"
+      },
+      {
+        "file": "62#931575",
+        "python": null,
+        "swift": "2.931575"
+      },
+      {
+        "file": "62#931580",
+        "python": null,
+        "swift": "2.931580"
+      },
+      {
+        "file": "62#931582",
+        "python": null,
+        "swift": "2.931582"
+      },
+      {
+        "file": "62#931586",
+        "python": null,
+        "swift": "2.931586"
+      },
+      {
+        "file": "62#931587",
+        "python": null,
+        "swift": "2.931587"
+      },
+      {
+        "file": "62#931588",
+        "python": null,
+        "swift": "2.931588"
+      },
+      {
+        "file": "62#931589",
+        "python": null,
+        "swift": "2.931589"
+      },
+      {
+        "file": "62#931590",
+        "python": null,
+        "swift": "2.931590"
+      },
+      {
+        "file": "62#931591",
+        "python": null,
+        "swift": "2.931591"
+      },
+      {
+        "file": "62#931594",
+        "python": null,
+        "swift": "2.931594"
+      },
+      {
+        "file": "62#931596",
+        "python": null,
+        "swift": "2.931596"
+      },
+      {
+        "file": "62#931637",
+        "python": null,
+        "swift": "2.931637"
+      },
+      {
+        "file": "62#931643",
+        "python": null,
+        "swift": "2.931643"
+      },
+      {
+        "file": "62#931663",
+        "python": null,
+        "swift": "2.931663"
+      },
+      {
+        "file": "62#931695",
+        "python": null,
+        "swift": "2.931695"
+      },
+      {
+        "file": "62#931696",
+        "python": null,
+        "swift": "2.931696"
+      },
+      {
+        "file": "62#931719",
+        "python": null,
+        "swift": "2.931719"
+      },
+      {
+        "file": "62#931733",
+        "python": null,
+        "swift": "2.931733"
+      },
+      {
+        "file": "62#931743",
+        "python": null,
+        "swift": "2.931743"
+      },
+      {
+        "file": "62#931752",
+        "python": null,
+        "swift": "2.931752"
+      },
+      {
+        "file": "62#931755",
+        "python": null,
+        "swift": "2.931755"
+      },
+      {
+        "file": "62#931775",
+        "python": null,
+        "swift": "2.931775"
+      },
+      {
+        "file": "62#931778",
+        "python": null,
+        "swift": "2.931778"
+      },
+      {
+        "file": "62#931785",
+        "python": null,
+        "swift": "2.931785"
+      },
+      {
+        "file": "62#931787",
+        "python": null,
+        "swift": "2.931787"
+      },
+      {
+        "file": "62#931790",
+        "python": null,
+        "swift": "2.931790"
+      },
+      {
+        "file": "62#931798",
+        "python": null,
+        "swift": "2.931798"
+      },
+      {
+        "file": "62#931823",
+        "python": null,
+        "swift": "2.931823"
+      },
+      {
+        "file": "62#931848",
+        "python": null,
+        "swift": "2.931848"
+      },
+      {
+        "file": "62#931855",
+        "python": null,
+        "swift": "2.931855"
+      },
+      {
+        "file": "62#931865",
+        "python": null,
+        "swift": "2.931865"
+      },
+      {
+        "file": "62#931866",
+        "python": null,
+        "swift": "2.931866"
+      },
+      {
+        "file": "62#931892",
+        "python": null,
+        "swift": "2.931892"
+      },
+      {
+        "file": "62#931897",
+        "python": null,
+        "swift": "2.931897"
+      },
+      {
+        "file": "62#931946",
+        "python": null,
+        "swift": "2.931946"
+      },
+      {
+        "file": "62#931992",
+        "python": null,
+        "swift": "2.931992"
+      },
+      {
+        "file": "62#931994",
+        "python": null,
+        "swift": "2.931994"
+      },
+      {
+        "file": "62#932000",
+        "python": null,
+        "swift": "2.932000"
+      },
+      {
+        "file": "62#932037",
+        "python": null,
+        "swift": "2.932037"
+      },
+      {
+        "file": "62#932038",
+        "python": null,
+        "swift": "2.932038"
+      },
+      {
+        "file": "62#932039",
+        "python": null,
+        "swift": "2.932039"
+      },
+      {
+        "file": "62#932052",
+        "python": null,
+        "swift": "2.932052"
+      },
+      {
+        "file": "62#932066",
+        "python": null,
+        "swift": "2.932066"
+      },
+      {
+        "file": "62#932069",
+        "python": null,
+        "swift": "2.932069"
+      },
+      {
+        "file": "62#932087",
+        "python": null,
+        "swift": "2.932087"
+      },
+      {
+        "file": "62#932088",
+        "python": null,
+        "swift": "2.932088"
+      },
+      {
+        "file": "62#932094",
+        "python": null,
+        "swift": "2.932094"
+      },
+      {
+        "file": "62#932217",
+        "python": null,
+        "swift": "2.932217"
+      },
+      {
+        "file": "62#932305",
+        "python": null,
+        "swift": "2.932305"
+      },
+      {
+        "file": "62#932315",
+        "python": null,
+        "swift": "2.932315"
+      },
+      {
+        "file": "62#932365",
+        "python": null,
+        "swift": "2.932365"
+      },
+      {
+        "file": "62#932366",
+        "python": null,
+        "swift": "2.932366"
+      },
+      {
+        "file": "62#932367",
+        "python": null,
+        "swift": "2.932367"
+      },
+      {
+        "file": "62#932368",
+        "python": null,
+        "swift": "2.932368"
+      },
+      {
+        "file": "62#932420",
+        "python": null,
+        "swift": "2.932420"
+      },
+      {
+        "file": "62#932422",
+        "python": null,
+        "swift": "2.932422"
+      },
+      {
+        "file": "62#932431",
+        "python": null,
+        "swift": "2.932431"
+      },
+      {
+        "file": "62#932456",
+        "python": null,
+        "swift": "2.932456"
+      },
+      {
+        "file": "62#950049",
+        "python": null,
+        "swift": "2.950049"
+      },
+      {
+        "file": "62#950096",
+        "python": null,
+        "swift": "2.950096"
+      },
+      {
+        "file": "62#950105",
+        "python": null,
+        "swift": "2.950105"
+      },
+      {
+        "file": "62#950161",
+        "python": null,
+        "swift": "2.950161"
+      },
+      {
+        "file": "62#950162",
+        "python": null,
+        "swift": "2.950162"
+      },
+      {
+        "file": "62#950180",
+        "python": null,
+        "swift": "2.950180"
+      },
+      {
+        "file": "62#950228",
+        "python": null,
+        "swift": "2.950228"
+      },
+      {
+        "file": "62#950333",
+        "python": null,
+        "swift": "2.950333"
+      },
+      {
+        "file": "62#950580",
+        "python": null,
+        "swift": "2.950580"
+      },
+      {
+        "file": "62#990001",
+        "python": null,
+        "swift": "2.990001"
+      },
+      {
+        "file": "62#CES100",
+        "python": null,
+        "swift": "2.CES100"
+      },
+      {
+        "file": "62#H11052",
+        "python": null,
+        "swift": "2.H11052"
+      },
+      {
+        "file": "62#H11054",
+        "python": null,
+        "swift": "2.H11054"
+      },
+      {
+        "file": "62#H11057",
+        "python": null,
+        "swift": "2.H11057"
+      },
+      {
+        "file": "62#H11059",
+        "python": null,
+        "swift": "2.H11059"
+      },
+      {
+        "file": "62#H11146",
+        "python": null,
+        "swift": "2.H11146"
+      },
+      {
+        "file": "62#H11153",
+        "python": null,
+        "swift": "2.H11153"
+      },
+      {
+        "file": "62#H30007",
+        "python": null,
+        "swift": "2.H30007"
+      },
+      {
+        "file": "62#H30015",
+        "python": null,
+        "swift": "2.H30015"
+      },
+      {
+        "file": "62#H30022",
+        "python": null,
+        "swift": "2.H30022"
+      },
+      {
+        "file": "62#H30035",
+        "python": null,
+        "swift": "2.H30035"
+      },
+      {
+        "file": "62#H30106",
+        "python": null,
+        "swift": "2.H30106"
+      },
+      {
+        "file": "62#H30171",
+        "python": null,
+        "swift": "2.H30171"
+      },
+      {
+        "file": "62#H30178",
+        "python": null,
+        "swift": "2.H30178"
+      },
+      {
+        "file": "62#H30182",
+        "python": null,
+        "swift": "2.H30182"
+      },
+      {
+        "file": "62#H30184",
+        "python": null,
+        "swift": "2.H30184"
+      },
+      {
+        "file": "62#H30192",
+        "python": null,
+        "swift": "2.H30192"
+      },
+      {
+        "file": "62#H30198",
+        "python": null,
+        "swift": "2.H30198"
+      },
+      {
+        "file": "62#H30199",
+        "python": null,
+        "swift": "2.H30199"
+      },
+      {
+        "file": "62#H30202",
+        "python": null,
+        "swift": "2.H30202"
+      },
+      {
+        "file": "62#H30217",
+        "python": null,
+        "swift": "2.H30217"
+      },
+      {
+        "file": "62#H30269",
+        "python": null,
+        "swift": "2.H30269"
+      },
+      {
+        "file": "62#H30270",
+        "python": null,
+        "swift": "2.H30270"
+      },
+      {
+        "file": "62#H30318",
+        "python": null,
+        "swift": "2.H30318"
+      },
+      {
+        "file": "62#H30352",
+        "python": null,
+        "swift": "2.H30352"
+      },
+      {
+        "file": "62#H30356",
+        "python": null,
+        "swift": "2.H30356"
+      },
+      {
+        "file": "62#H30365",
+        "python": null,
+        "swift": "2.H30365"
+      },
+      {
+        "file": "62#H30366",
+        "python": null,
+        "swift": "2.H30366"
+      },
+      {
+        "file": "62#H30455",
+        "python": null,
+        "swift": "2.H30455"
+      },
+      {
+        "file": "62#H30463",
+        "python": null,
+        "swift": "2.H30463"
+      },
+      {
+        "file": "62#H30533",
+        "python": null,
+        "swift": "2.H30533"
+      },
+      {
+        "file": "62#H30590",
+        "python": null,
+        "swift": "2.H30590"
+      },
+      {
+        "file": "62#H30597",
+        "python": null,
+        "swift": "2.H30597"
+      },
+      {
+        "file": "62#H50069",
+        "python": null,
+        "swift": "2.H50069"
+      }
+    ]
+  }
+}

@@ -58,8 +58,82 @@
 import Foundation
 import Combine
 
+// MARK: - 清单条目 → 各源代码
+
+/// 一条可对拍清单（`file` + 两源代码 + 量纲口径）
+/// （原定义于已下线的 DirectQuoteProbe.swift，2026-10-04 随探针收编至此，内容逐字保留）
+struct ProbeItem {
+    let file: String
+    let isIndex: Bool
+    /// 腾讯 / 新浪代码（`sh600000` / `sz000001`）
+    let marketCode: String
+    var tencentCode: String { marketCode }
+    var sinaCode: String { marketCode }
+    /// 源侧成交量是否**原样保留**（不做 ÷100 换手）：科创板 688xxx、沪市指数
+    let volIsRaw: Bool
+
+    /// `SH#600000` → ProbeItem；不可映射 → nil
+    /// 映射规则（2026-10-03 PC 全量对拍 299 只扩展行情实测）：
+    ///   · `SH#`/`SZ#` → `sh`/`sz`（上证指数伪代码 999999 → 000001）
+    ///   · `12#NDX` 等纳指系 → `usNDX`（us 前缀；当前 meta 无 12#，留作扩展）
+    ///   · `62#`/`102#` → **全段映射**：000 段→sh、其余→sz（腾讯市场码猜测值，仅当主源尝试）。
+    ///     其中 000/399/980 段腾讯有源；930/931/932/950/987/970/CN 等定制段腾讯无码，
+    ///     自动落东财 `emSecids`（2026-10-04 实测东财 2.<代码> 覆盖 233/235）
+    ///   · 其余 42#/46#（贵金属等）→ 两源皆无，nil
+    ///   · `27#HSI` 等恒生系 → `hkHSI`（hk 前缀；2026-10-04 复检：主库 vol = 源÷1e7 整数舍入、
+    ///     amo = 源×0.01，30 日×3 只验证精确稳定 → 可安全换算，由补缺口 1e-7 窗口吸附）
+    /// 兜底：错映射是**安全的**——补缺口自校准要求锚点日价格逐字段相等 + 量比吸附，对不上判异常丢弃
+    init?(file: String, type: String) {
+        let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        let prefix = parts[0].uppercased()
+        var code = String(parts[1])
+        guard !code.isEmpty else { return nil }
+        // 上证指数的通达信伪代码
+        if prefix == "SH" && code == "999999" { code = "000001" }
+        let market: String
+        switch prefix {
+        case "SH": market = "sh"
+        case "SZ": market = "sz"
+        case "27": market = "hk"                    // 恒生系指数（量纲 = 源÷1e7 舍入，可安全换算）
+        case "12": market = "us"                    // 纳斯达克系指数
+        case "62", "102":                           // 国证/中证扩展全段：000 段→sh，其余→sz
+            market = code.hasPrefix("000") ? "sh" : "sz"   // 000/399/980 段腾讯有源；定制段腾讯无码→落东财
+        default: return nil                         // 42#/46# 等两源皆无
+        }
+        let isIndex = type.contains("指数")
+        self.file = file
+        self.isIndex = isIndex
+        self.marketCode = market + code
+        // 688xxx（腾讯按「股」报量）与指数（量纲杂）原样保留；其余 ÷100 四舍五入
+        self.volIsRaw = code.hasPrefix("688") || isIndex
+    }
+
+    /// 东财 secid 候选（按序尝试，第二源兜底用）：
+    /// 中证/国证定制段（930/931/932/950/987/970 等）= `2.<代码>`（实测）；国证 980 段 = `0.<代码>`；
+    /// 沪/深 = `1.`/`0.`；恒生系 = `116.`；纳指系 = `100.`（后两者未实测，仅腾讯失败时兜底）
+    var emSecids: [String] {
+        let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return [] }
+        let prefix = parts[0].uppercased()
+        var code = String(parts[1])
+        if prefix == "SH" && code == "999999" { code = "000001" }
+        switch prefix {
+        case "SH": return ["1." + code]
+        case "SZ": return ["0." + code]
+        case "27": return ["116." + code]
+        case "12": return ["100." + code]
+        case "62", "102":
+            var list = ["2." + code]
+            if code.hasPrefix("980") { list = ["0." + code, "2." + code] }
+            return list
+        default: return []
+        }
+    }
+}
+
 /// 一只标的的补缺口作业（清单 + 可映射源代码 + 基准行）
-private struct GapJob {
+struct GapJob {
     let meta: MetaItem
     let item: ProbeItem
     /// 主库 `mainLatest` 当天那一根（自校准锚点）
@@ -67,7 +141,7 @@ private struct GapJob {
 }
 
 /// 源侧（腾讯）原始一根日线
-private struct SourceBar {
+struct SourceBar {
     let date: Int
     let open: Double
     let high: Double
@@ -80,7 +154,7 @@ private struct SourceBar {
 }
 
 /// 折算到**主库口径**后、待写入增量库的缺口行
-private struct GapBar {
+struct GapBar {
     let date: Int
     let open: Double
     let high: Double
@@ -106,7 +180,7 @@ private enum GapSource {
 }
 
 /// 单只取数结果
-private enum GapOutcome {
+enum GapOutcome {
     /// 有缺口行（含自校准系数，供汇总统计量纲分布）；priceOnly = 量额缺失只补价格
     case gap(bars: [GapBar], volRatio: Double, priceOnly: Bool)
     /// 接口返回的行全部 ≤ 主库最新日 → 本来就是最新的
@@ -140,6 +214,8 @@ final class GapBackfill: ObservableObject {
     /// 12 流正常 → 4 条连接分摊，每条 ≤6 流
     static let sessionCount = 4
     static let requestTimeout: TimeInterval = 20
+    /// 严格照抄 PC 端 live_db_builder.py（原 DirectQuoteProbe.userAgent，探针下线后收编于此）
+    static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     /// 每只请求的**最大**根数（实测 320 有效）。正常缺口用 `barsCount(from:to:)` 动态算，
     /// 只有缺口超过 310 个自然日时才会用到这个上限（保留旧行为）
     static let maxBars = 320
@@ -579,7 +655,7 @@ final class GapBackfill: ObservableObject {
     }
 
     /// 自校准 + 缺口行生成（与来源无关：价格逐字段相等 → 量额口径折算 → 只补价格路径）
-    private func calibrate(job: GapJob, rows: [SourceBar], mainLatest: Int) -> GapOutcome {
+    func calibrate(job: GapJob, rows: [SourceBar], mainLatest: Int) -> GapOutcome {
         // 基准当天那行（自校准锚点）；源侧没有该行 = 长期停牌、两边无重叠可校准日 → 跳过
         guard let anchor = rows.first(where: { $0.date == mainLatest }) else {
             return .anchorMissing
@@ -695,17 +771,23 @@ final class GapBackfill: ObservableObject {
         var out: [SourceBar] = []
         out.reserveCapacity(rows.count)
         for r in rows {
-            // 字段顺序：开-收-高-低（见文件头，写错即静默错值）
-            guard r.count >= 9,
-                  let ds = r[0] as? String,
-                  let date = Int(ds.replacingOccurrences(of: "-", with: "")),
-                  let open = Self.num(r[1]), let close = Self.num(r[2]),
-                  let high = Self.num(r[3]), let low = Self.num(r[4]),
-                  let vol = Self.num(r[5]), let amo = Self.num(r[8]) else { continue }
-            out.append(SourceBar(date: date, open: open, high: high, low: low,
-                                 close: close, vol: vol, amo: amo))
+            if let bar = Self.parseTencentRow(r) { out.append(bar) }
         }
         return (out, "")
+    }
+
+    /// 腾讯 newfqkline 响应中**单行** K 线解析（纯函数，供契约测试）：11 字段行数组
+    /// [0]日期 [1]开 [2]收 [3]高 [4]低 [5]量(手) [8]额(万元)，解析失败返回 nil
+    static func parseTencentRow(_ r: [Any]) -> SourceBar? {
+        // 字段顺序：开-收-高-低（见文件头，写错即静默错值）
+        guard r.count >= 9,
+              let ds = r[0] as? String,
+              let date = Int(ds.replacingOccurrences(of: "-", with: "")),
+              let open = Self.num(r[1]), let close = Self.num(r[2]),
+              let high = Self.num(r[3]), let low = Self.num(r[4]),
+              let vol = Self.num(r[5]), let amo = Self.num(r[8]) else { return nil }
+        return SourceBar(date: date, open: open, high: high, low: low,
+                         close: close, vol: vol, amo: amo)
     }
 
     /// 东财 push2his 日线（**第二源**）：62#/102# 定制段（930/931/932/950/987/970 等）只有东财有。
@@ -764,7 +846,7 @@ final class GapBackfill: ObservableObject {
     private func getDataOnce(_ url: URL, _ session: URLSession) -> Data? {
         var req = URLRequest(url: url)
         req.timeoutInterval = Self.requestTimeout
-        req.setValue(DirectQuoteProbe.userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         let sem = DispatchSemaphore(value: 0)
         var out: Data?
         session.dataTask(with: req) { data, response, error in

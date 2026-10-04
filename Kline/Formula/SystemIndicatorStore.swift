@@ -55,7 +55,7 @@ final class SystemIndicatorStore: ObservableObject {
     }
 
     /// 解析 .tdx 内容（KIND= / NAME= / SCOPE= / GROUP= / COORD= / FORMULA: 后为多行模板）
-    private func parse(content: String, id: String) -> SystemIndicatorDef? {
+    func parse(content: String, id: String) -> SystemIndicatorDef? {
         var name = id
         var scope = IndicatorScope.sub
         var group = ""

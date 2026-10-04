@@ -1,0 +1,284 @@
+{
+  "notes": "指标模板解析契约。name/scope/group/formulaTemplate 由 check_indicators.parse_tdx（与 SystemIndicatorStore.parse 同规则）计算：SCOPE=MAIN/主图 → main 否则 sub；formulaTemplate 为 FORMULA: 后各行以 '\\n' join（与 Swift formulaTemplate 一致）。kind 从内容中提取 KIND= 行（本 corpus 全部缺失 → null）。swiftExpected：KIND 缺失或 TECH → accepted；出现 KIND= 且非 TECH → rejected（头部预扫描，含未知取值）。",
+  "templates": [
+    {
+      "fileName": "BIAS-QL.tdx",
+      "kind": null,
+      "name": "BIAS-QL",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=6;\nM:=6;\nS:(CLOSE-MA(CLOSE,N))/MA(CLOSE,N)*100;\nMS:MA(S,M);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "BIAS.tdx",
+      "kind": null,
+      "name": "BIAS",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N1:=6;\nN2:=12;\nN3:=24;\nB1:(CLOSE-MA(CLOSE,N1))/MA(CLOSE,N1)*100;\nB2:(CLOSE-MA(CLOSE,N2))/MA(CLOSE,N2)*100;\nB3:(CLOSE-MA(CLOSE,N3))/MA(CLOSE,N3)*100;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "BIAS36.tdx",
+      "kind": null,
+      "name": "BIAS36",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "M:=6;\nA:MA(CLOSE,3)-MA(CLOSE,6);\nB:MA(CLOSE,6)-MA(CLOSE,12);\nMB:MA(A,M);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "BOLL.tdx",
+      "kind": null,
+      "name": "BOLL",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "M:=20;\nMID:MA(CLOSE,M);\nUB:MID+2*STD(CLOSE,M);\nLB:MID-2*STD(CLOSE,M);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "BRAR.tdx",
+      "kind": null,
+      "name": "BRAR",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=26;\nBR:SUM(MAX(0,HIGH-REF(CLOSE,1)),N)/SUM(MAX(0,REF(CLOSE,1)-LOW),N)*100;\nAR:SUM(HIGH-OPEN,N)/SUM(OPEN-LOW,N)*100;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "CCI.tdx",
+      "kind": null,
+      "name": "CCI",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=14;\nTYP:=(HIGH+LOW+CLOSE)/3;\nCCI:(TYP-MA(TYP,N))*1000/(15*AVEDEV(TYP,N));",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "CDJ.tdx",
+      "kind": null,
+      "name": "CDJ",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=3;\nM:=3;\nRSV:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;\nVALUE:=SMA(RSV,M,1);\nK:SMA(VALUE,M,1);\nD:SMA(K,M,1);\nJ:3*K-2*D;\nNOTEXT_Q:15,DOTLINE;\nNOTEXT_W:85,DOTLINE;\nNOTEXT_E:35,DOTLINE;\nNOTEXT_R:65,DOTLINE;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "CMK.tdx",
+      "kind": null,
+      "name": "CMK",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "N:=10;\nHLC:=REF(MA((H+L+C)/3,N),1);\nHV:=EMA(HHV(H,N),3);\nLV:=EMA(LLV(L,N),3);\nNOTEXT_STOR:EMA(2*HV-LV,3),COLORGRAY,DOTLINE;\nNOTEXT_MIDR:EMA(HLC+HV-LV,3),COLORGRAY,DOTLINE;\nNOTEXT_WEKR:EMA(HLC*2-LV,3),COLORGRAY,DOTLINE;\nNOTEXT_WEKS:EMA(HLC*2-HV,3),COLORGRAY,DOTLINE;\nNOTEXT_MIDS:EMA(HLC-HV+LV,3),COLORGRAY,DOTLINE;\nNOTEXT_STOS:EMA(2*LV-HV,3),COLORGRAY,DOTLINE;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "COL.tdx",
+      "kind": null,
+      "name": "COL",
+      "scope": "sub",
+      "group": "量能",
+      "formulaTemplate": "N:=20;\nM:=3;\nRSV:=(VOL-LLV(VOL,N))/(HHV(VOL,N)-LLV(VOL,N))*100;\nVALUE:=SMA(RSV,M,1);\nK:SMA(VALUE,M,1);\nD:SMA(K,M,1);\nJ:3*K-2*D;\nNOTEXT_Q:-5,DOTLINE;\nNOTEXT_W:105,DOTLINE;\nNOTEXT_E:35,DOTLINE;\nNOTEXT_R:65,DOTLINE;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "CR.tdx",
+      "kind": null,
+      "name": "CR",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=26;\nM1:=10;\nM2:=20;\nM#:=40;\nMID:=REF(HIGH+LOW,1)/2;\nCR:SUM(MAX(0,HIGH-MID),N)/SUM(MAX(0,MID-LOW),N)*100;\nMA1:REF(MA(CR,M1),M1/2.5+1);\nMA2:REF(MA(CR,M2),M2/2.5+1);\nMA3:REF(MA(CR,M3),M3/2.5+1);\nMA4:REF(MA(CR,M4),M4/2.5+1);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "DMI.tdx",
+      "kind": null,
+      "name": "DMI",
+      "scope": "sub",
+      "group": "趋向",
+      "formulaTemplate": "N:=14;\nM:=6;\nMTR:=SUM(MAX(MAX(HIGH-LOW,ABS(HIGH-REF(CLOSE,1))),ABS(REF(CLOSE,1)-LOW)),N);\nHD :=HIGH-REF(HIGH,1);\nLD :=REF(LOW,1)-LOW;\nDMP:=SUM(IF(HD>0&&HD>LD,HD,0),N);\nDMM:=SUM(IF(LD>0&&LD>HD,LD,0),N);\nPI: DMP*100/MTR;\nMI: DMM*100/MTR;\nX: MA(ABS(MI-PI)/(MI+PI)*100,M);\nXR:(X+REF(X,M))/2;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "EMA.tdx",
+      "kind": null,
+      "name": "EMA",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "E1:EMA(C,5);\nE2:EMA(C,10);\nE3:EMA(C,20);\nE4:EMA(C,60);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "GMMA.tdx",
+      "kind": null,
+      "name": "GMMA",
+      "scope": "main",
+      "group": "趋向",
+      "formulaTemplate": "S1:EMA(CLOSE,3),COLORC08080;\nS2:EMA(CLOSE,5),COLORC08080;\nS3:EMA(CLOSE,8),COLORC08080;\nS4:EMA(CLOSE,10),COLORC08080;\nS5:EMA(CLOSE,12),COLORC08080;\nS6:EMA(CLOSE,15),COLORC08080;\nL1:EMA(CLOSE,30),COLOR0080FF;\nL2:EMA(CLOSE,35),COLOR0080FF;\nL3:EMA(CLOSE,40),COLOR0080FF;\nL4:EMA(CLOSE,45),COLOR0080FF;\nL5:EMA(CLOSE,50),COLOR0080FF;\nL6:EMA(CLOSE,60),COLOR0080FF;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "KD.tdx",
+      "kind": null,
+      "name": "KD",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=9;\nM1:=3;\nM2:=3;\nRSV:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;\nK:SMA(RSV,M1,1);\nD:SMA(K,M2,1);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "KDJ.tdx",
+      "kind": null,
+      "name": "KDJ",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=9;\nM1:=3;\nM2:=3;\nRSV:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;\nK:SMA(RSV,M1,1);\nD:SMA(K,M2,1);\nJ:3*K-2*D;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "KQA.tdx",
+      "kind": null,
+      "name": "KQA",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "X1:=20;\nX2:=10;\nKH:REF(HHV(H,X1),1);\nKL:REF(LLV(L,X2),1);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "MA.tdx",
+      "kind": null,
+      "name": "MA",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "M1:MA(C,5);\nM2:MA(C,10);\nM3:MA(C,20);\nM4:MA(C,60);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "MACD.tdx",
+      "kind": null,
+      "name": "MACD",
+      "scope": "sub",
+      "group": "趋向",
+      "formulaTemplate": "SHORT:=12;\nLONG:=26;\nMID:=9;\nF:EMA(CLOSE,SHORT)-EMA(CLOSE,LONG);\nA:EMA(F,MID);\nM:(F-A)*2,COLORSTICK;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "MARSI.tdx",
+      "kind": null,
+      "name": "MARSI",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "M1:=10;\nM2:=6;\nDIF:=CLOSE-REF(CLOSE,1);\nVU:=IF(DIF>=0,DIF,0);\nVD:=IF(DIF<0,-DIF,0);\nMAU1:=MEMA(VU,M1);\nMAD1:=MEMA(VD,M1);\nMAU2:=MEMA(VU,M2);\nMAD2:=MEMA(VD,M2);\nR1:MA(100*MAU1/(MAU1+MAD1),M1);\nR2:MA(100*MAU2/(MAU2+MAD2),M2);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "MASS.tdx",
+      "kind": null,
+      "name": "MASS",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "DIFF:=H-L;\nE1:=EMA(DIFF,9);\nE2:=EMA(E1,9);\nM:SUM(E1/E2,25);\nMS:MA(M,6);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "OBV.tdx",
+      "kind": null,
+      "name": "OBV",
+      "scope": "sub",
+      "group": "量能",
+      "formulaTemplate": "M:=30;\nVA:=IF(CLOSE>REF(CLOSE,1),VOL,-VOL);\nO:SUM(IF(CLOSE=REF(CLOSE,1),0,VA),0);\nMO:MA(O,M);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "RSI.tdx",
+      "kind": null,
+      "name": "RSI",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N1:=6;\nN2:=12;\nN3:=24;\nLC:=REF(CLOSE,1);\nR1:SMA(MAX(CLOSE-LC,0),N1,1)/SMA(ABS(CLOSE-LC),N1,1)*100;\nR2:SMA(MAX(CLOSE-LC,0),N2,1)/SMA(ABS(CLOSE-LC),N2,1)*100;\nR3:SMA(MAX(CLOSE-LC,0),N3,1)/SMA(ABS(CLOSE-LC),N3,1)*100;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "SAR.tdx",
+      "kind": null,
+      "name": "SAR",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "SAR1:SAR(0.02,0.2);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "SDJ.tdx",
+      "kind": null,
+      "name": "SDJ",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=9;\nM:=3;\nLOWV:=LLV(LOW,N);\nHIGHV:=HHV(HIGH,N);\nRSV:=EMA((CLOSE-LOWV)/(HIGHV-LOWV)*100,M);\nK:EMA(RSV,M);\nD:MA(K,M);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "TRIX.tdx",
+      "kind": null,
+      "name": "TRIX",
+      "scope": "sub",
+      "group": "趋向",
+      "formulaTemplate": "N:=12;\nM:=9;\nMTR:=EMA(EMA(EMA(CLOSE,N),N),N);\nT:(MTR-REF(MTR,1))/REF(MTR,1)*100;\nMT:MA(T,M) ;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "VMACD.tdx",
+      "kind": null,
+      "name": "VMACD",
+      "scope": "sub",
+      "group": "量能",
+      "formulaTemplate": "SHORT:=12;\nLONG:=26;\nMID:=9;\nF:EMA(VOL,SHORT)-EMA(VOL,LONG);\nA:EMA(F,MID);\nM:F-A,COLORSTICK;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "VR.tdx",
+      "kind": null,
+      "name": "VR",
+      "scope": "sub",
+      "group": "量能",
+      "formulaTemplate": "N:=26;\nM:=9;\nTH:=SUM(IF(CLOSE>REF(CLOSE,1),VOL,0),N);\nTL:=SUM(IF(CLOSE<REF(CLOSE,1),VOL,0),N);\nTQ:=SUM(IF(CLOSE=REF(CLOSE,1),VOL,0),N);\nR:100*(TH*2+TQ)/(TL*2+TQ);\nMR:MA(R,M);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "VRSI.tdx",
+      "kind": null,
+      "name": "VRSI",
+      "scope": "sub",
+      "group": "量能",
+      "formulaTemplate": "N1:=6;\nN2:=12;\nN3:=24;\nLC:=REF(VOL,1);\nR1:SMA(MAX(VOL-LC,0),N1,1)/SMA(ABS(VOL-LC),N1,1)*100;\nR2:SMA(MAX(VOL-LC,0),N2,1)/SMA(ABS(VOL-LC),N2,1)*100;\nR3:SMA(MAX(VOL-LC,0),N3,1)/SMA(ABS(VOL-LC),N3,1)*100;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "WR.tdx",
+      "kind": null,
+      "name": "WR",
+      "scope": "sub",
+      "group": "超买超卖",
+      "formulaTemplate": "N:=10;\nN1:=6;\nW1:100*(HHV(HIGH,N)-CLOSE)/(HHV(HIGH,N)-LLV(LOW,N));\nW2:100*(HHV(HIGH,N1)-CLOSE)/(HHV(HIGH,N1)-LLV(LOW,N1));",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "XS.tdx",
+      "kind": null,
+      "name": "XS",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "N:=13;\nVAR2:=CLOSE*VOL;\nVAR3:=EMA((EMA(VAR2,3)/EMA(VOL,3)+EMA(VAR2,6)/EMA(VOL,6)+EMA(VAR2,12)/EMA(VOL,12)+EMA(VAR2,24)/EMA(VOL,24))/4,N);\nSU:1.06*VAR3;\nSD:VAR3*0.94;\nVAR4:=EMA(CLOSE,9);\nLU:EMA(VAR4*1.14,5);\nLD:EMA(VAR4*0.86,5);",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "XS2.tdx",
+      "kind": null,
+      "name": "XS2",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "N:=102;\nM:=7;\nAA:=MA((2*CLOSE+HIGH+LOW)/4,5);\nC1:AA*N/100;\nC2:AA*(200-N)/100;\nCC:=ABS((2*CLOSE+HIGH+LOW)/4-MA(CLOSE,20))/MA(CLOSE,20);\nDD:=DMA(CLOSE,CC);\nC3:(1+M/100)*DD;\nC4:(1-M/100)*DD;",
+      "swiftExpected": "accepted"
+    }
+  ]
+}

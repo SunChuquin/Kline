@@ -147,6 +147,11 @@ final class EastmoneyQuoteFetcher {
 
     /// file 前缀 / 特例表 / 覆盖表 → 东财 secid。映射不到返回 nil（调用方跳过并逐条记录）。
     func secid(forFile file: String) -> String? {
+        return Self.secid(forFile: file, overrides: overrideSecids)
+    }
+
+    /// 「查映射」纯函数版（无实例状态，供契约测试）：特例表 → 前缀规则 → 覆盖表，与实例方法同口径。
+    static func secid(forFile file: String, overrides: [String: String]) -> String? {
         // ① 特例表（SH#999999 上证指数 → 1.000001），必须先于前缀规则
         if let special = Self.specialFileSecid[file] { return special }
         let parts = file.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
@@ -158,7 +163,7 @@ final class EastmoneyQuoteFetcher {
         if prefix == "SH" { return "1." + code }
         if prefix == "SZ" || prefix == "BJ" { return "0." + code }
         // ③ 扩展行情指数（27#/62#/102#）→ 覆盖表；表缺失时此步必然 nil（已记降级日志）
-        return overrideSecids[file]
+        return overrides[file]
     }
 
     /// 读 Bundle 内覆盖表；读不到 → 降级为「只用前缀规则」并记一条明确日志（不静默、不崩）。
@@ -369,7 +374,7 @@ final class EastmoneyQuoteFetcher {
     }
 
     /// 解析单批响应 → {secid: 快照}；HTTP / JSON 异常 → failed（交给上层重试）。
-    private static func decodeChunk(data: Data?, response: URLResponse?, error: Error?) -> ChunkOutcome {
+    static func decodeChunk(data: Data?, response: URLResponse?, error: Error?) -> ChunkOutcome {
         if let error = error { return .failed(error.localizedDescription) }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard let data = data, (200..<300).contains(status) else { return .failed("HTTP \(status)") }
@@ -399,13 +404,13 @@ final class EastmoneyQuoteFetcher {
 // MARK: - 内部类型
 
 /// 单批请求结果（String 不满足 Error，故不用 Result）。
-private enum ChunkOutcome {
+enum ChunkOutcome {
     case ok([String: EMSnapshot])
     case failed(String)
 }
 
 /// 东财快照的原始字段（值可能为 '-' / null，故一律 Optional）。
-private struct EMSnapshot {
+struct EMSnapshot {
     let open: Double?
     let high: Double?
     let low: Double?

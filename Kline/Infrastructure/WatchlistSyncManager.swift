@@ -303,7 +303,7 @@ final class WatchlistSyncManager: ObservableObject {
     }
 
     /// 基期 bar ⊕ 新日线 → 当期 bar（`open` 取基期、`high/low` 取极值、`close` 取新值、`vol/amo` 累加）
-    private static func mergePeriodBar(file: String, daily: LiveUpsertBar, base: KlineItem?) -> LiveUpsertBar {
+    static func mergePeriodBar(file: String, daily: LiveUpsertBar, base: KlineItem?) -> LiveUpsertBar {
         guard let base = base else {
             return LiveUpsertBar(file: file, date: daily.date, open: daily.open, high: daily.high,
                                  low: daily.low, close: daily.close, vol: daily.vol, amo: daily.amo)
