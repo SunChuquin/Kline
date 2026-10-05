@@ -93,8 +93,11 @@ struct FavManageSheet: View {
 
             List {
                 Section("分组顺序与显隐（长按拖动排序）") {
-                    ForEach(Array(fav.groups.enumerated()), id: \.element.id) { i, _ in
-                        let g = fav.groups[i]
+                    // 行身份 = 分组 id（FavoritesGroup: Identifiable）。禁止用
+                    // Array(indices) 下标抓数组：删除/移动令 groups 变短后，残留行的
+                    // Binding 闭包仍持旧下标，`fav.groups[i]` 越界 → EXC_BREAKPOINT 闪退
+                    // （2026-10-05 崩溃报告实证，死帧在 Toggle 的 set 闭包）
+                    ForEach(fav.groups) { g in
                         let issue = fav.formulaIssue(groupID: g.id)
                         HStack(spacing: 10) {
                             Image(systemName: g.kind == .manual ? "folder.fill" : "function")
@@ -102,8 +105,12 @@ struct FavManageSheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 TextField("分组名",
                                           text: Binding(
-                                            get: { fav.groups[i].name },
-                                            set: { nv in fav.groups[i].name = nv }
+                                            get: { fav.groups.first(where: { $0.id == g.id })?.name ?? g.name },
+                                            set: { nv in
+                                                if let idx = fav.groups.firstIndex(where: { $0.id == g.id }) {
+                                                    fav.groups[idx].name = nv
+                                                }
+                                            }
                                           ))
                                     .onSubmit { fav.saveToDisk() }
                                 HStack(spacing: 8) {
@@ -138,9 +145,10 @@ struct FavManageSheet: View {
                             }
                             Spacer()
                             Toggle("", isOn: Binding(
-                                get: { !fav.groups[i].isHidden },
+                                get: { fav.groups.first(where: { $0.id == g.id })?.isHidden ?? false },
                                 set: { nv in
-                                    fav.groups[i].isHidden = !nv
+                                    guard let idx = fav.groups.firstIndex(where: { $0.id == g.id }) else { return }
+                                    fav.groups[idx].isHidden = !nv
                                     fav.saveToDisk()
                                 }
                             )).labelsHidden()
@@ -151,9 +159,9 @@ struct FavManageSheet: View {
                         fav.moveGroup(fromOffsets: from, toOffset: to)
                     }
                     .onDelete { idx in
-                        idx.forEach { i in
-                            fav.removeGroup(id: fav.groups[i].id)
-                        }
+                        // 先把下标解析成 id 再逐个删：removeGroup 令 groups 变短，
+                        // 继续用旧下标取 fav.groups[i] 会越界闪退
+                        idx.map { fav.groups[$0].id }.forEach { fav.removeGroup(id: $0) }
                     }
                 }
             }
