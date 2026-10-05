@@ -327,6 +327,31 @@ class TDXDatabase:
 def is_today(date_string):
     return datetime.strptime(date_string, '%Y%m%d').date() == date.today()
 
+
+# ---- 腾讯无源指数过滤（依据 2026-10-05《有源指数核对清单》逐只实测定稿）----
+# App 补缺口（GapBackfill）主源为腾讯 newfqkline；下列指数类标的腾讯无 K 线数据
+# （代码可识别但 day=[]，或 smartbox 按代码+名称双查无实体），缺口永远补不上 → 入库即剔除：
+#   · 27# 恒生系除 HSI/HSCEI/HSTECH 外 23 只（hk 助记码 day=[]）
+#   · 102# 980 段 980034/980080/980081 3 只（smartbox 无实体）
+#   · 62#/102# 定制段（非 000/980 段，930/931/932/950/990/CES/H 系/CN 系 + MSCI 704843/716567）
+# 合计 261 只；保留 157 只腾讯有源指数（类型标记不变）+ 3193 只沪深主板 = 3350 只
+TENCENT_HK_OK = {'HSI', 'HSCEI', 'HSTECH'}
+TENCENT_980_MISSING = {'980034', '980080', '980081'}
+
+
+def is_tencent_less(file_name: str) -> bool:
+    """file 名（如 `27#HSBIO`）→ 是否腾讯无源指数（True = 过滤不入库）"""
+    pfx, _, seg = file_name.partition('#')
+    if pfx == '27':
+        return seg not in TENCENT_HK_OK
+    if pfx in ('62', '102'):
+        if seg[:3] == '000':
+            return False                      # 62#000 段腾讯有源（sh）
+        if seg[:3] == '980':
+            return seg in TENCENT_980_MISSING  # 980 段仅 3 只无源
+        return True                           # 其余定制段（含 MSCI）腾讯全无源
+    return False
+
 def windows_sort_key(filename):
     """
     模拟 Windows 资源管理器的排序规则
@@ -608,7 +633,9 @@ class TDXDataGenerator:
                     content.pop(0)
                 content.pop(-1)
 
-                if not len(content) or file.split('#')[0] in ['42', '46', '12'] or file_name in ['62#H11014', '62#931265']:
+                if not len(content) or file.split('#')[0] in ['42', '46', '12'] \
+                        or is_tencent_less(file_name) \
+                        or file_name in ['62#H11014', '62#931265']:
                     result['skipped'] = True
                     result['skip_reason'] = '条件过滤'
                     return result

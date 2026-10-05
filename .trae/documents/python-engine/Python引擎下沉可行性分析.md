@@ -539,8 +539,10 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 | 实验 | 结果 | 证据与结论 |
 | --- | --- | --- |
 | 实验 1（运行时下载 dylib + dlopen） | **失败，且为结构性失败** | 引擎包（beeware 3.14.7，真机 slice）下载 → sha256 → 自研 gunzip（一次性解码 + ISIZE 校验）→ tar 解包 → 逐文件 sha256 全过 → 原子激活，链路全通；`dlopen` 对 **macOS codesign** 与 **ldid -S** 两种 ad-hoc 签名均报 `code signature invalid (errno=1)`（blob 自洽、内容逐字节一致——排除损坏）。结论：**iOS AMFI 对运行时下载的可执行代码一律拒绝，信任只在 TrollStore 安装时授予**。按本表判据：**「运行时获取引擎」路径作废** |
-| 实验 1′（分发架构改判） | 路径 B 立项 | 引擎改为**迷你 `Engine.app` .tipa**（内含 Python.xcframework + manifest + stub 可执行），经 TrollStore 安装授信后，主 App 从其安装路径 dlopen。保留了引擎独立版本轴与 §5.6 顺序保障（更新矩阵不变，只是「引擎下载」的落点从沙盒变为 TrollStore 安装）。**Engine.app 内 dlopen 可行性待真机验证**（App 自身可执行即同信任机制的活证，置信度高但未实测） |
-| 实验 2/3（冷启动/桥接/吞吐） | 待做 | 前置依赖实验 1′ 的 Engine.app 内 dlopen 成功 |
+| 实验 1′（分发架构改判） | **路径 B 成立，dlopen/init 全通** | 引擎改为**迷你 `Engine.app` .tipa**（内含 Python.xcframework + manifest），经 TrollStore 安装授信后，主 App 从其安装路径 dlopen：**dlopen 8.5~39ms、Py_Initialize 76~116ms**，Python 3.14.7 在 iPadOS 15.8.8 完整可用。**关键架构实证：Engine.app 内 dylib 可 dlopen，但其可执行文件 exec 被 AMFI SIGKILL**（dlopen 与 exec 是两条信任路径）——Python 执行隔离改走 **opener `--py` 子进程**（Kline.app 内受信 root 助手） |
+| 实验 2（150 根指标计算） | **通过** | 进程内 PyRun（GIL 修正后）：**150 根 MA5/MA10/EMA12 各一遍，纯计算 0.34ms**——Python 计算性能完全不是瓶颈；首帧红线维持（Py_Initialize 76~116ms 不可进首帧）。**本次踩坑：Py_Initialize 在 GCD 线程 A 执行后，PyRun 在线程 B 直接调 C API 会在 _PyObject_Malloc 段错误（.ips 崩溃报告实证）——每次调用必须 PyGILState_Ensure/Release** |
+| 实验 3（Python 并发吞吐） | **通过（带网络环境前提）** | 8 线程 urllib × 20 次腾讯快照：**20/20 成功，总 1174ms，吞吐 17.0 req/s**（HTTP 明文、直连、禁系统代理）。两个环境结论：①https 的 TLS 握手在用户网络被掐（TimeoutError: handshake operation timed out，关代理无效→明文 HTTP 即通）②urllib 默认读系统代理，必须 ProxyHandler({}) 显式禁用。**吞吐判据结论：Python/GIL/urllib 基线 17 req/s，与原生（4×24 路 h2 并发）差一个量级 → 候选 4 按 §4 第 3 道闸预判切分：网络层留 Swift（URLSession h2），口径解析层下沉 Python** |
+| 引擎包境内分发（新增议题） | 待定 | GitHub Release 直连在国内设备不可用（下载引擎包需开代理，与实验 3 网络环境问题同源）——候选：**gitee / cnb 镜像通道**（用户已提出，下一轮决策） |
 
 工程侧沉淀（本次踩坑，供后续复用）：Release 资产 `--clobber` 同名更新后，GitHub CDN/代理可能发旧文件（设备 sha256 不匹配）→ 下载 URL 必须带时间戳穿透参数；iOS 上无 tar/zip 公共 API，解包用「gzip 尾部 ISIZE 预分配 + `compression_decode_buffer` 一次性解码」防静默截断；`shasum` 输出双空格分隔，解析路径侧必须 trim。
 

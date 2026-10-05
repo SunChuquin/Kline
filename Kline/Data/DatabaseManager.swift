@@ -302,6 +302,35 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// 同步读取 meta 表的 id↔file 映射（只读、独立短连接，不碰 dbQueue 与共享句柄）。
+    /// 供 FavoritesStore schema 5 的磁盘翻译使用（file 是跨主库重建稳定的持久化键）；
+    /// 主库全量替换需重启 App，故 init 时读一次即可，无需订阅刷新。
+    func readFileMapsSync() -> (fileByMetaId: [Int: String], metaIdByFile: [String: Int]) {
+        var byId: [Int: String] = [:]
+        var byFile: [String: Int] = [:]
+        var handle: OpaquePointer?
+        let rc = sqlite3_open_v2(Self.writableDBPath, &handle, SQLITE_OPEN_READONLY, nil)
+        guard rc == SQLITE_OK else {
+            sqlite3_close(handle)
+            DebugLogger.shared.log("[DB] readFileMapsSync 打开失败 rc=\(rc) path=\(Self.writableDBPath)")
+            return (byId, byFile)
+        }
+        defer { sqlite3_close(handle) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "SELECT id, file FROM meta", -1, &statement, nil) == SQLITE_OK else {
+            DebugLogger.shared.log("[DB] readFileMapsSync 查询准备失败")
+            return (byId, byFile)
+        }
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = Int(sqlite3_column_int64(statement, 0))
+            let file = String(cString: sqlite3_column_text(statement, 1))
+            byId[id] = file
+            byFile[file] = id   // file 全库唯一（PC 侧实证 3611 无重复）
+        }
+        return (byId, byFile)
+    }
+
     /// 读取指定标的全量日线数据
     func fetchDailyData(metaId: Int) -> [KlineItem] {
         fetchPeriodTable(metaId: metaId, table: "daily")

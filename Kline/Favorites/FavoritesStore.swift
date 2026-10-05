@@ -9,6 +9,9 @@
 //  - 支持「指标公式自动分组」：用户编写通达信公式，打开分组时根据公式
 //    最新一期输出值是否 > 0 动态组成分组（结果可手动刷新）
 //  - schema 3：分组内固顶（pinnedMetaIDs，纯显示层）+ 全局备注（notes，key = String(metaID)）
+//  - schema 5：磁盘绑定键从 metaID 改为 file（如 "SH#600000"）——meta_id 在主库全量重建时
+//    会整体重排（2026-10-05 事故：自选/分组/置顶/备注全部失联），而 file 全库唯一且跨库稳定。
+//    内存模型仍用 metaID（UI 全以 metaID 为身份），翻译收敛在 loadFromDisk / saveToDisk 边界
 //  - 所有配置写入 Documents/Favorites/favorites.json，启动时自动加载
 //
 
@@ -79,6 +82,36 @@ private struct FavoritesRoot: Codable {
     var globalPinnedMetaIDs: [Int]? = nil
 }
 
+// MARK: - schema 5 磁盘结构（绑定键 = file）
+
+/// schema 5 分组磁盘结构：`manualFiles` / `pinnedFiles` 以 file 为键（跨主库重建稳定）。
+/// `cachedMatches` 是公式命中的派生缓存，v5 起不再持久化（App 打开分组时自动重算）。
+private struct FavoritesGroupV5: Codable {
+    var id: UUID
+    var name: String
+    var kind: FavoritesGroupKind
+    var isHidden: Bool
+    /// manual 分组：组内标的 file 有序列表（保持用户拖放顺序）
+    var manualFiles: [String]
+    /// 分组内固顶的 file（数组顺序 = 固顶顺序）
+    var pinnedFiles: [String]?
+    /// 旧档遗留的内嵌公式文本（仅迁移用）
+    var formula: String?
+    /// 选股公式库条目 id
+    var formulaID: String?
+    var updatedAt: Date?
+}
+
+private struct FavoritesRootV5: Codable {
+    var groups: [FavoritesGroupV5]
+    var selectedGroupID: UUID?
+    var schemaVersion: Int
+    /// 全局备注，key = file
+    var notesByFile: [String: String]? = nil
+    /// 行情页全局固顶标的 file（sorted 保持 JSON 稳定顺序）
+    var globalPinnedFiles: [String]? = nil
+}
+
 // MARK: - Store
 
 @MainActor
@@ -125,14 +158,28 @@ final class FavoritesStore: ObservableObject {
     /// 档结构版本：2 起公式分组只存 `formulaID` 引用（1 为内嵌 formula 文本的旧档）；
     /// 3 起新增「分组内固顶」与「全局备注」；
     /// 4 起新增「行情页全局固顶」（globalPinnedMetaIDs）—— 旧档 decode 自动 nil，
-    /// 启动时 needsSchemaRewrite 触发 saveToDisk 自动升级
-    private let currentSchema = 4
+    /// 启动时 needsSchemaRewrite 触发 saveToDisk 自动升级；
+    /// 5 起磁盘绑定键改为 file（meta_id 跨主库重建会重排，file 不会）——读档先试 v5
+    /// 结构、失败回落旧档（metaID 键），写档恒为 v5
+    private let currentSchema = 5
     /// 读到的档版本低于 `currentSchema` 时为 true：即使没有任何分组改动也要回写一次
     private var needsSchemaRewrite = false
+    /// metaID ↔ file 翻译表（init 时同步读一次 meta 表；主库全量替换需重启 App，无需刷新）。
+    /// 空表 = 主库不可用：此时写档被跳过，避免把翻译失败的自选清空落盘
+    private var fileByMetaId: [Int: String] = [:]
+    private var metaIdByFile: [String: Int] = [:]
 
     // MARK: - Lifecycle
 
     private init() {
+        // 先建翻译表（v5 磁盘键 ↔ 内存 metaID）；readFileMapsSync 自开只读短连接，
+        // 不依赖 DatabaseManager 的异步 metaList
+        let maps = DatabaseManager.shared.readFileMapsSync()
+        fileByMetaId = maps.fileByMetaId
+        metaIdByFile = maps.metaIdByFile
+        if fileByMetaId.isEmpty {
+            DebugLogger.shared.log("[FavoritesStore] meta 映射为空（主库缺失/损坏）——v5 翻译将产生空自选，且写档被跳过")
+        }
         // 立即读档；档不存在则写入默认的"我的自选"分组
         if loadFromDisk() {
             // 迁移发生在读档后、写档前，因此只写一次
@@ -231,27 +278,15 @@ final class FavoritesStore: ObservableObject {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let root = try decoder.decode(FavoritesRoot.self, from: data)
-            // 旧版本档（schemaVersion < 当前版本）打上回写标记：由 init 读档后无条件写回一次
-            if root.schemaVersion < currentSchema { needsSchemaRewrite = true }
-            self.groups = root.groups.sorted { (a, b) -> Bool in
-                // 保持原数组顺序（sorted 是稳定的）
-                return true
-            }
-            // 保持原顺序（上面 sorted 不改变顺序，这里显式按原存储顺序）
-            // （JSON 数组本身有顺序，decode 结果顺序已对）
-            if let sel = root.selectedGroupID,
-               sel == Self.allGroupID || groups.contains(where: { $0.id == sel }) {
-                self.selectedGroupID = sel
+            // 先试 schema 5（file 键）；decode 失败（旧档没有 manualFiles 等必填键）回落旧结构
+            if let v5 = try? decoder.decode(FavoritesRootV5.self, from: data) {
+                applyV5Root(v5)
             } else {
-                self.selectedGroupID = groups.first?.id
+                let root = try decoder.decode(FavoritesRoot.self, from: data)
+                // 旧版本档（schemaVersion < 当前版本）打上回写标记：由 init 读档后无条件写回一次
+                if root.schemaVersion < currentSchema { needsSchemaRewrite = true }
+                applyLegacyRoot(root)
             }
-            // schema 3 全局备注（旧档无该字段 → 空）
-            let loadedNotes = root.notes ?? [:]
-            if notes != loadedNotes { notes = loadedNotes }
-            // schema 4 行情页全局固顶（旧档无该字段 → 空）
-            let loadedGlobalPinned = Set(root.globalPinnedMetaIDs ?? [])
-            if pinnedMetaIDs != loadedGlobalPinned { pinnedMetaIDs = loadedGlobalPinned }
             return true
         } catch {
             DebugLogger.shared.log("[FavoritesStore] load failed \(error)")
@@ -259,14 +294,94 @@ final class FavoritesStore: ObservableObject {
         }
     }
 
+    /// schema 5 读档：file → metaID（查不到 = 标的已从主库移除，丢弃并计数）
+    private func applyV5Root(_ root: FavoritesRootV5) {
+        var droppedFiles = 0
+        groups = root.groups.map { g in
+            let ids = g.manualFiles.compactMap { f -> Int? in
+                guard let id = metaIdByFile[f] else { droppedFiles += 1; return nil }
+                return id
+            }
+            let pinned = g.pinnedFiles?.compactMap { f -> Int? in
+                guard let id = metaIdByFile[f] else { droppedFiles += 1; return nil }
+                return id
+            }
+            return FavoritesGroup(id: g.id, name: g.name, kind: g.kind,
+                                  manualMetaIDs: ids, formula: g.formula, formulaID: g.formulaID,
+                                  cachedMatches: nil, updatedAt: g.updatedAt,
+                                  isHidden: g.isHidden, pinnedMetaIDs: pinned)
+        }
+        if let sel = root.selectedGroupID,
+           sel == Self.allGroupID || groups.contains(where: { $0.id == sel }) {
+            selectedGroupID = sel
+        } else {
+            selectedGroupID = groups.first?.id
+        }
+        var notesOut: [String: String] = [:]
+        for (f, text) in root.notesByFile ?? [:] {
+            if let id = metaIdByFile[f] { notesOut[String(id)] = text } else { droppedFiles += 1 }
+        }
+        if notes != notesOut { notes = notesOut }
+        let globalPinned = Set((root.globalPinnedFiles ?? []).compactMap { metaIdByFile[$0] })
+        if pinnedMetaIDs != globalPinned { pinnedMetaIDs = globalPinned }
+        if droppedFiles > 0 {
+            DebugLogger.shared.log("[FavoritesStore] v5 载入：\(droppedFiles) 个 file 在当前主库无对应标的，已丢弃")
+        }
+    }
+
+    /// 旧档（≤ schema 4）读档：磁盘本来就是 metaID，直接沿用（要求主库与档同代；
+    /// needsSchemaRewrite 已置位，init 会在首次写档时经 saveToDisk 转成 v5 的 file 键）
+    private func applyLegacyRoot(_ root: FavoritesRoot) {
+        groups = root.groups
+        if let sel = root.selectedGroupID,
+           sel == Self.allGroupID || groups.contains(where: { $0.id == sel }) {
+            selectedGroupID = sel
+        } else {
+            selectedGroupID = groups.first?.id
+        }
+        // schema 3 全局备注（旧档无该字段 → 空）
+        let loadedNotes = root.notes ?? [:]
+        if notes != loadedNotes { notes = loadedNotes }
+        // schema 4 行情页全局固顶（旧档无该字段 → 空）
+        let loadedGlobalPinned = Set(root.globalPinnedMetaIDs ?? [])
+        if pinnedMetaIDs != loadedGlobalPinned { pinnedMetaIDs = loadedGlobalPinned }
+    }
+
     func saveToDisk() {
-        // 写档前兜底：内存里若还残留旧结构（如绕过 init 的写入路径），先迁移再写；
-        // 写出的 schemaVersion 恒为 currentSchema，即本次写入顺便把旧档升到 3
+        // 写档前兜底：内存里若还残留旧结构（如绕过 init 的写入路径），先迁移再写
         _ = migrateItemOpsIfNeeded()
-        let root = FavoritesRoot(groups: groups, selectedGroupID: selectedGroupID,
-                                 schemaVersion: currentSchema,
-                                 notes: notes.isEmpty ? nil : notes,
-                                 globalPinnedMetaIDs: pinnedMetaIDs.isEmpty ? nil : Array(pinnedMetaIDs).sorted())
+        // 翻译表为空 = 主库不可用，此时任何 metaID 都换不出 file：
+        // 宁可不写（保持磁盘旧档），也不能把翻译失败后的空自选落盘
+        guard !fileByMetaId.isEmpty else {
+            DebugLogger.shared.log("[FavoritesStore] save 跳过：meta 映射为空（主库不可用），保留磁盘旧档")
+            return
+        }
+        var dropped = 0
+        let groupsV5 = groups.map { g -> FavoritesGroupV5 in
+            let files = g.manualMetaIDs.compactMap { id -> String? in
+                guard let f = fileByMetaId[id] else { dropped += 1; return nil }
+                return f
+            }
+            let pinnedFiles = g.pinnedMetaIDs?.compactMap { id -> String? in
+                guard let f = fileByMetaId[id] else { dropped += 1; return nil }
+                return f
+            }
+            return FavoritesGroupV5(id: g.id, name: g.name, kind: g.kind, isHidden: g.isHidden,
+                                    manualFiles: files, pinnedFiles: pinnedFiles,
+                                    formula: g.formula, formulaID: g.formulaID, updatedAt: g.updatedAt)
+        }
+        var notesByFile: [String: String] = [:]
+        for (key, text) in notes {
+            if let id = Int(key), let f = fileByMetaId[id] { notesByFile[f] = text } else { dropped += 1 }
+        }
+        let globalFiles = pinnedMetaIDs.compactMap { fileByMetaId[$0] }.sorted()
+        if dropped > 0 {
+            DebugLogger.shared.log("[FavoritesStore] save：\(dropped) 项 metaID 在当前主库无对应 file，写档时丢弃")
+        }
+        let root = FavoritesRootV5(groups: groupsV5, selectedGroupID: selectedGroupID,
+                                   schemaVersion: currentSchema,
+                                   notesByFile: notesByFile.isEmpty ? nil : notesByFile,
+                                   globalPinnedFiles: globalFiles.isEmpty ? nil : globalFiles)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
