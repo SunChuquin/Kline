@@ -294,6 +294,17 @@ final class FavoritesStore: ObservableObject {
         }
     }
 
+    /// LAN同步热重载：对端覆盖 favorites.json 后重新读档（/sync/reload-config 调用）。
+    /// 复用既有 loadFromDisk 读档路径（先试 v5 结构、失败回落旧档）；读档失败（文件缺失/损坏）
+    /// 保留内存现状不清空；重载后刷新持仓高亮集合。
+    func reloadFromDisk() {
+        if loadFromDisk() {
+            updatePositionedMetaIDs()
+        } else {
+            DebugLogger.shared.log("[FavoritesStore] LAN同步热重载：读档失败，保留内存现状")
+        }
+    }
+
     /// schema 5 读档：file → metaID（查不到 = 标的已从主库移除，丢弃并计数）
     private func applyV5Root(_ root: FavoritesRootV5) {
         var droppedFiles = 0

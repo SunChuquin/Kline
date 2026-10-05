@@ -188,6 +188,14 @@ final class SimStore: ObservableObject {
         }
     }
 
+    /// LAN同步热重载：对端覆盖 sim.json 后重新读档（/sync/reload-config 调用）。
+    /// 复用既有 loadFromDisk 读档路径（整份替换各 @Published）；读档失败保留内存现状不清空。
+    func reloadFromDisk() {
+        if !loadFromDisk() {
+            DebugLogger.shared.log("[SimStore] LAN同步热重载：读档失败，保留内存现状")
+        }
+    }
+
     func saveToDisk() {
         let root = SimRoot(schemaVersion: currentSchema,
                            accounts: accounts,

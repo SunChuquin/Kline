@@ -27,6 +27,8 @@ struct ProfileDetailView: View {
     @State private var showLayoutEditor = false
     /// Python 引擎实验室（Phase-0 调试页；引擎不进 IPA，按需下载加载，不点不动作）
     @State private var showPythonLab = false
+    /// 联机同步（局域网设备间同步，全屏 overlay）
+    @State private var showLANSync = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @ObservedObject private var tradingLayoutStore = TradingLayoutStore.shared
     @ObservedObject private var pageLayoutStore = PageLayoutStore.shared
@@ -126,6 +128,26 @@ struct ProfileDetailView: View {
 
                     // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
                     LocalUpdateView()
+
+                    // 联机同步（局域网设备间同步：自选/模拟交易/布局/指标/增量库/主库）
+                    Button(action: { showLANSync = true }) {
+                        HStack(spacing: 10) {
+                            Text("联机同步")
+                                .font(.system(size: 16))
+                                .foregroundColor(Color.primary)
+                            Spacer(minLength: 12)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(.tertiaryLabel))
+                        }
+                        .padding(16)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .accessibilityIdentifier("profile.lansync.entry")
 
                     // Python 引擎实验室（低调调试入口；引擎不进 IPA，按需下载加载）
                     Button(action: { showPythonLab = true }) {
@@ -260,6 +282,12 @@ struct ProfileDetailView: View {
             // Python 引擎实验室：全屏页面（铺满，无遮罩），关闭走页内「返回」
             if showPythonLab {
                 ZStack { PythonEngineLabView(onClose: { showPythonLab = false }) }
+                    .transition(.opacity)
+                    .zIndex(1000)
+            }
+            // 联机同步：全屏页面（铺满，无遮罩），关闭走页内「返回」
+            if showLANSync {
+                ZStack { LANSyncView(onClose: { showLANSync = false }) }
                     .transition(.opacity)
                     .zIndex(1000)
             }

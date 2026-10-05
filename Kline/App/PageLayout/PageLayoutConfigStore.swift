@@ -154,6 +154,21 @@ final class PageLayoutConfigStore: ObservableObject {
         print("[PageLayoutConfigStore] 页面配置不可用，退硬编码布局：page=\(page)")
     }
 
+    /// LAN同步热重载：对端覆盖 / 新增 Layouts/*.json 后全量重载（/sync/reload-config 调用）。
+    /// 页面集合 = 已注册内置默认的页 ∪ Layouts 目录下现有 *.json，逐页走既有 reloadIfChanged
+    /// （mtime/文本有变才重解码，未变的页零开销）。
+    func reloadFromDisk() {
+        let layoutsDir = fileURL(for: Self.homePage).deletingLastPathComponent()
+        var pages = Set(builtInDefaults.keys)
+        let onDisk = (try? fm.contentsOfDirectory(atPath: layoutsDir.path)) ?? []
+        for name in onDisk where name.hasSuffix(".json") {
+            pages.insert(String(name.dropLast(".json".count)))
+        }
+        for page in pages.sorted() {
+            reloadIfChanged(page: page)
+        }
+    }
+
     /// 应用结果（同值不写：文本未变时不重新赋值 @Published）
     private func apply(page: String, file: PageLayoutFile?, text: String?) {
         files[page] = file

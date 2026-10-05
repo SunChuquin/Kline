@@ -10,6 +10,7 @@ import Network
 import SQLite3
 import UIKit
 import Darwin
+import CryptoKit
 
 /// 轻量 HTTP 服务器（Network.framework），前台监听 0.0.0.0:5051。
 ///
@@ -26,8 +27,15 @@ import Darwin
 final class KlineHTTPServer {
     static let shared = KlineHTTPServer()
 
-    /// 监听端口
-    let port: UInt16 = 5051
+    /// 监听端口：可用环境变量 KLINE_HTTP_PORT 覆盖（双模拟器联测时对端实例用 5052），缺省 5051。
+    /// probe() / TrollStore 安装 URL 均引用本属性，改这里即全局生效。
+    let port: UInt16 = {
+        if let s = ProcessInfo.processInfo.environment["KLINE_HTTP_PORT"],
+           let p = UInt16(s), p > 0 {
+            return p
+        }
+        return 5051
+    }()
 
     /// 公共 Downloads 目录（no-sandbox 生效时可读）
     private let downloadsPath = "/var/mobile/Media/Downloads"
@@ -166,6 +174,10 @@ final class KlineHTTPServer {
                     break
                 }
             }
+            // Bonjour 注册：同网段 Kline 实例经 _klinesync._tcp 发现本机（服务名 = 设备名）。
+            // 名称冲突由 mDNSResponder 自动改名兜底；注册失败经 .failed 回调只打日志，
+            // 不影响 HTTP 监听本身。放在 start 之前设置，restart() 重建路径同样生效。
+            listener.service = NWListener.Service(name: Self.deviceName(), type: "_klinesync._tcp")
             listener.start(queue: queue)
             self.listener = listener
         } catch {
@@ -184,6 +196,12 @@ final class KlineHTTPServer {
         var received = 0
         var isUpload = false
         var uploadTarget = ""
+        /// 沙盒原子写的最终目标（非空 = 先写 uploadTarget(<target>.part)，收完校验后 rename 到此；空 = /upload 直写）
+        var uploadFinalPath = ""
+        /// 可选完整性校验值（PUT/POST /sandbox/<rel>?sha256=<hex>，收完校验不符即弃 .part）
+        var uploadSha256: String?
+        /// 请求头 X-Kline-Pair 会话 token（仅 /sync/backup、/sync/reload-config 校验）
+        var pairToken = ""
         var uploadHandle: FileHandle?
         var bodyBuffer = Data()
         var done = false
@@ -204,8 +222,14 @@ final class KlineHTTPServer {
                     try? handle.close()
                     state.uploadHandle = nil
                     state.done = true
-                    DebugLogger.shared.log("上传完成: \(state.received) bytes")
-                    respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
+                    if state.uploadFinalPath.isEmpty {
+                        // /upload（IPA → 公共 Downloads）：保持原有直写语义，收完即完成
+                        DebugLogger.shared.log("上传完成: \(state.received) bytes")
+                        respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
+                    } else {
+                        // 沙盒写（PUT/POST /sandbox/<rel>）：原子收尾（可选 sha256 校验 → rename 到目标）
+                        finalizeSandboxUpload(state: state, connection: connection)
+                    }
                 }
             } else {
                 state.bodyBuffer.append(data)
@@ -213,7 +237,7 @@ final class KlineHTTPServer {
                 if state.received >= state.contentLength {
                     state.done = true
                     let requestLine = state.method + " " + state.path + " HTTP/1.1"
-                    dispatch(requestLine: requestLine, body: state.bodyBuffer, connection: connection)
+                    dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken, connection: connection)
                 }
             }
         }
@@ -246,8 +270,18 @@ final class KlineHTTPServer {
                         state.method = method
                         state.path = path
                         state.contentLength = contentLength
+                        // 提取 X-Kline-Pair 会话 token（LAN 同步改动性端点 /sync/backup、/sync/reload-config 校验用）
+                        for line in headerText.components(separatedBy: "\r\n").dropFirst() {
+                            let kv = line.split(separator: ":", maxSplits: 1)
+                            if kv.count == 2,
+                               kv[0].trimmingCharacters(in: .whitespaces).lowercased() == "x-kline-pair" {
+                                state.pairToken = kv[1].trimmingCharacters(in: .whitespaces)
+                            }
+                        }
 
-                        // 流式写盘目标：/upload → 公共 Downloads；POST/PUT /sandbox/<rel> → 沙盒 Documents
+                        // 流式写盘目标：/upload → 公共 Downloads（直写）；
+                        // POST/PUT /sandbox/<rel> → 沙盒 Documents（先写 <target>.part，收完原子 rename：
+                        // 中断只留残片，绝不把目标文件（如 tdx.db）写坏——直接写目标中断即损坏且无法恢复）
                         let isSandboxWrite = (method == "POST" || method == "PUT") && path.hasPrefix("/sandbox/")
                         if (method == "POST" || method == "PUT"), path == "/upload" || isSandboxWrite {
                             state.isUpload = true
@@ -261,7 +295,10 @@ final class KlineHTTPServer {
                                     respond(connection, status: 400, body: "bad path")
                                     return
                                 }
-                                targetPath = resolved
+                                // 原子写：实际落盘到 <target>.part；可选 sha256 校验参数留到收尾用
+                                state.uploadFinalPath = resolved
+                                state.uploadSha256 = Self.queryParam(rawPath, "sha256")
+                                targetPath = resolved + ".part"
                             }
                             state.uploadTarget = targetPath
                             // 确保父目录存在（PUT 沙盒子目录时，Documents 下可能没有目标目录）
@@ -290,7 +327,7 @@ final class KlineHTTPServer {
                         }
                         if state.received >= contentLength {
                             state.done = true
-                            dispatch(requestLine: requestLine, body: state.bodyBuffer, connection: connection)
+                            dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken, connection: connection)
                             return
                         }
                         readLoop()
@@ -299,6 +336,10 @@ final class KlineHTTPServer {
                 }
                 if isComplete || error != nil {
                     if let h = state.uploadHandle { try? h.close() }
+                    // 沙盒原子写中断：清掉 .part 残片（目标文件不受影响）；/upload 直写保持原样不删
+                    if state.isUpload, !state.uploadFinalPath.isEmpty {
+                        try? FileManager.default.removeItem(atPath: state.uploadTarget)
+                    }
                     connection.cancel()
                     return
                 }
@@ -308,9 +349,42 @@ final class KlineHTTPServer {
         readLoop()
     }
 
+    /// 沙盒 .part 上传收尾：可选 sha256 校验 → 原子 rename 到最终目标（同名覆盖）。
+    /// 校验不符 → 删 .part、目标保持原状 400；rename 失败 → 删 .part、500。
+    private func finalizeSandboxUpload(state: HTTPConnectionState, connection: NWConnection) {
+        let fm = FileManager.default
+        let tmp = state.uploadTarget
+        let target = state.uploadFinalPath
+        if let expected = state.uploadSha256, !expected.isEmpty {
+            let actual = Self.fileSHA256Hex(at: tmp) ?? ""
+            guard actual.lowercased() == expected.lowercased() else {
+                try? fm.removeItem(atPath: tmp)
+                DebugLogger.shared.log("沙盒上传 sha256 不符: \(target) expected=\(expected) actual=\(actual)")
+                respond(connection, status: 400, contentType: "application/json",
+                        body: "{\"error\":\"sha256 mismatch\"}")
+                return
+            }
+        }
+        do {
+            // 同名覆盖：moveItem 不允许目标已存在，先移除旧目标再 rename（窗口极小，
+            // 且 LAN 同步流程保证覆盖前已走 /sync/backup 快照）
+            if fm.fileExists(atPath: target) {
+                try fm.removeItem(atPath: target)
+            }
+            try fm.moveItem(atPath: tmp, toPath: target)
+            DebugLogger.shared.log("沙盒上传原子落盘: \(target) \(state.received) bytes")
+            respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
+        } catch {
+            try? fm.removeItem(atPath: tmp)
+            DebugLogger.shared.log("沙盒上传 rename 失败: \(target) \(error)")
+            respond(connection, status: 500, contentType: "application/json",
+                    body: "{\"error\":\"rename failed\"}")
+        }
+    }
+
     // MARK: - 路由
 
-    private func dispatch(requestLine: String, body: Data, connection: NWConnection) {
+    private func dispatch(requestLine: String, body: Data, pairToken: String, connection: NWConnection) {
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else {
             respond(connection, status: 400, body: "bad request")
@@ -438,12 +512,61 @@ final class KlineHTTPServer {
                 guard let self = self else { return }
                 self.rollbackPatchSessionAndRespond(connection: connection)
             }
+        case ("GET", "/sync/sha"):
+            // ?path=<rel>：流式计算 Documents 内文件的 sha256（LAN 同步传输完整性核对用）
+            let shaRel = Self.queryParam(rawPath, "path") ?? ""
+            guard !shaRel.isEmpty,
+                  let shaTarget = Self.resolveSandboxPath(shaRel, sandboxRoot: sandboxRoot),
+                  FileManager.default.fileExists(atPath: shaTarget) else {
+                respond(connection, status: 404, contentType: "application/json", body: "{\"error\":\"not found\"}")
+                return
+            }
+            var shaIsDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: shaTarget, isDirectory: &shaIsDir), shaIsDir.boolValue {
+                respond(connection, status: 400, contentType: "application/json", body: "{\"error\":\"not a file\"}")
+                return
+            }
+            guard let shaHex = Self.fileSHA256Hex(at: shaTarget) else {
+                respond(connection, status: 500, contentType: "application/json", body: "{\"error\":\"hash failed\"}")
+                return
+            }
+            respond(connection, status: 200, contentType: "application/json",
+                    body: "{\"path\":\"\(Self.jsonEsc(shaRel))\",\"sha256\":\"\(shaHex)\"}")
+        case ("POST", "/sync/request-pair"):
+            // 发起方请求配对：接收方前台弹确认（LANSyncPairing），同意 → 200 {"token":...}；
+            // 拒绝 / 60s 超时 → 403 {"error":"denied"}。响应在用户应答后才发出（连接保持等待）。
+            handleSyncRequestPair(body: body, connection: connection)
+        case ("POST", "/sync/backup"):
+            // 覆盖前备份（需会话 token）：把将被对端覆盖的文件/目录快照到 Documents/Backups/<ts>/
+            guard requirePairToken(pairToken, connection: connection) else { return }
+            handleSyncBackup(body: body, connection: connection)
+        case ("POST", "/sync/reload-config"):
+            // 配置/指标热重载（需会话 token）：主线程按 scope 重载各 Store
+            guard requirePairToken(pairToken, connection: connection) else { return }
+            handleSyncReloadConfig(body: body, connection: connection)
         case ("GET", "/sync/status"):
-            // 增量库当前状态（供推送脚本与排查使用）
+            // 增量库当前状态（既有 PC 推送脚本是本端点的消费者，原字段绝不能动）；
+            // LAN 同步在解析结果上合并 device / items 两个新增键（旧消费者不受新增键影响）
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                var obj: [String: Any] = [:]
+                if let data = LiveDataStore.shared.currentStatusJSON().data(using: .utf8),
+                   let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                    obj = parsed
+                }
+                obj["device"] = [
+                    "name": Self.deviceName(),
+                    "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
+                    "app": "Kline",
+                ]
+                // items 走 LANSyncItem 的 Codable 编码再转 Any 拼回：字段名与 LANSyncModels 契约强一致
+                if let itemsData = try? JSONEncoder().encode(LANSyncSupport.buildSyncInventory()),
+                   let itemsAny = try? JSONSerialization.jsonObject(with: itemsData) {
+                    obj["items"] = itemsAny
+                }
+                let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
                 self.respond(connection, status: 200, contentType: "application/json",
-                             body: LiveDataStore.shared.currentStatusJSON())
+                             body: String(data: data, encoding: .utf8) ?? "{}")
             }
         case ("GET", "/sync/probe"):
             // ?file=SH%23600519：在 App 自身连接上读回该标的的日线末日 / 最新季线 bar（只读核对用）
@@ -577,10 +700,22 @@ final class KlineHTTPServer {
         })
     }
 
-    /// DELETE /sandbox/<path>：删除沙盒内文件
+    /// DELETE /sandbox/<path>：删除沙盒内文件/目录（FileManager.removeItem 自带目录递归删除）。
+    /// 保护：Documents 根与 Backups/ 备份目录本身不可删（Backups/<时间戳> 子目录可删，防误删备份）。
     private func deleteSandboxPath(_ rel: String, connection: NWConnection) {
         guard let target = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot) else {
             respond(connection, status: 400, body: "bad path")
+            return
+        }
+        // resolveSandboxPath("") 会返回根本身，必须显式拦下（防整库误删）
+        if target == sandboxRoot {
+            respond(connection, status: 400, contentType: "application/json",
+                    body: "{\"error\":\"cannot delete documents root\"}")
+            return
+        }
+        if target == sandboxRoot + "/Backups" {
+            respond(connection, status: 400, contentType: "application/json",
+                    body: "{\"error\":\"cannot delete Backups\"}")
             return
         }
         DebugLogger.shared.log("沙盒DEL rel=[\(rel)] target=[\(target)] exists=\(FileManager.default.fileExists(atPath: target))")
@@ -591,6 +726,139 @@ final class KlineHTTPServer {
             DebugLogger.shared.log("沙盒DEL 失败: \(error)")
             respond(connection, status: 500, body: "delete failed")
         }
+    }
+
+    // MARK: - LAN 设备联机同步（服务端）
+
+    /// 本机名称（Bonjour 服务名与 /sync/status 的 device.name 共用）；空名回退 "Kline"
+    static func deviceName() -> String {
+        let n = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "Kline" : n
+    }
+
+    /// 会话 token 校验（/sync/backup、/sync/reload-config）。
+    /// 取舍：**不给** PUT/GET/DELETE /sandbox 加 token —— 既有 PC 流水线脚本
+    /// （pipeline-shard-patch-sync / A2 部署助手等）没有 token 概念，加校验会直接打断现有流程；
+    /// LAN 同步的写覆盖安全由「配对确认 + /sync/backup 覆盖前备份」保证。
+    private func requirePairToken(_ token: String, connection: NWConnection) -> Bool {
+        guard !token.isEmpty, LANSyncPairing.shared.isValidToken(token) else {
+            respond(connection, status: 401, contentType: "application/json",
+                    body: "{\"error\":\"unauthorized\"}")
+            return false
+        }
+        return true
+    }
+
+    /// POST /sync/request-pair：{"from":"设备名","items":["favorites","sim"]}
+    /// → 用户同意 200 {"token":...}；拒绝/60s 超时 403 {"error":"denied"}
+    private func handleSyncRequestPair(body: Data, connection: NWConnection) {
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let from = json["from"] as? String, !from.isEmpty else {
+            respond(connection, status: 400, contentType: "application/json", body: "{\"error\":\"bad body\"}")
+            return
+        }
+        let items = (json["items"] as? [String]) ?? []
+        LANSyncPairing.shared.requestPair(from: from, items: items) { [weak self] token in
+            guard let self = self else { connection.cancel(); return }
+            if let token {
+                self.respond(connection, status: 200, contentType: "application/json",
+                             body: "{\"token\":\"\(token)\"}")
+            } else {
+                self.respond(connection, status: 403, contentType: "application/json",
+                             body: "{\"error\":\"denied\"}")
+            }
+        }
+    }
+
+    /// 备份目录时间戳（yyyyMMdd-HHmmss）
+    private static func backupTimestamp() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return f.string(from: Date())
+    }
+
+    /// POST /sync/backup（需会话 token）：{"paths":[..],"dirs":[..]} → 把已存在的文件/目录
+    /// 复制到 Documents/Backups/<ts>/（相对结构保持不变），返回 {"ok","backupDir","backedUp"}。
+    private func handleSyncBackup(body: Data, connection: NWConnection) {
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            respond(connection, status: 400, contentType: "application/json", body: "{\"error\":\"bad body\"}")
+            return
+        }
+        let paths = (json["paths"] as? [String]) ?? []
+        let dirs = (json["dirs"] as? [String]) ?? []
+        // 白名单：与 LANSyncCategory 的可同步范围一致，防止借备份端点探测/搬运任意沙盒文件
+        let allowedPathPrefixes = ["Favorites/", "Simulation/", "Layouts/"]
+        let allowedExactPaths: Set<String> = ["tdx.db", "tdx_live.db", "tdx_live.manifest.json"]
+        let allowedDirs: Set<String> = ["indicator", "formula"]
+        let pathsAllowed = paths.allSatisfy { rel in
+            allowedExactPaths.contains(rel) || allowedPathPrefixes.contains { rel.hasPrefix($0) }
+        }
+        guard pathsAllowed, dirs.allSatisfy({ allowedDirs.contains($0) }) else {
+            respond(connection, status: 400, contentType: "application/json",
+                    body: "{\"error\":\"path not allowed\"}")
+            return
+        }
+        let fm = FileManager.default
+        let ts = Self.backupTimestamp()
+        let backupRoot = sandboxRoot + "/Backups/" + ts
+        try? fm.createDirectory(atPath: backupRoot, withIntermediateDirectories: true)
+        var backedUp = 0
+        // 单文件：保持相对结构复制（不存在的跳过——对端本来就没有这项，不算失败）
+        for rel in paths {
+            guard let target = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot),
+                  fm.fileExists(atPath: target) else { continue }
+            let dest = backupRoot + "/" + rel
+            try? fm.createDirectory(atPath: (dest as NSString).deletingLastPathComponent,
+                                    withIntermediateDirectories: true)
+            try? fm.removeItem(atPath: dest)   // 同一秒内重复请求时覆盖旧备份
+            if (try? fm.copyItem(atPath: target, toPath: dest)) != nil { backedUp += 1 }
+        }
+        // 目录：copyItem 递归整份快照（indicator / formula）
+        for rel in dirs {
+            guard let target = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot),
+                  fm.fileExists(atPath: target) else { continue }
+            let dest = backupRoot + "/" + rel
+            try? fm.removeItem(atPath: dest)
+            if (try? fm.copyItem(atPath: target, toPath: dest)) != nil { backedUp += 1 }
+        }
+        DebugLogger.shared.log("[LANSync] 备份完成 Backups/\(ts)，共 \(backedUp) 项")
+        let resp: [String: Any] = ["ok": true, "backupDir": "Backups/" + ts, "backedUp": backedUp]
+        let respData = (try? JSONSerialization.data(withJSONObject: resp)) ?? Data("{}".utf8)
+        respond(connection, status: 200, contentType: "application/json",
+                body: String(data: respData, encoding: .utf8) ?? "{}")
+    }
+
+    /// POST /sync/reload-config（需会话 token）：{"scopes":[...]} → 主线程按 scope 热重载各 Store；
+    /// scope 含 main 时由 LANSyncReload 发 LANSyncMainDBReplaced 通知（App 弹「主库已替换，请重启」）
+    private func handleSyncReloadConfig(body: Data, connection: NWConnection) {
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            respond(connection, status: 400, contentType: "application/json", body: "{\"error\":\"bad body\"}")
+            return
+        }
+        let scopes = (json["scopes"] as? [String]) ?? []
+        // 各 Store 均为主线程对象：与 /sync/reload 同款主线程跳转
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            LANSyncReload.apply(scopes: scopes)
+            let respData = (try? JSONSerialization.data(withJSONObject: ["ok": true, "reloaded": scopes]))
+                ?? Data("{}".utf8)
+            self.respond(connection, status: 200, contentType: "application/json",
+                         body: String(data: respData, encoding: .utf8) ?? "{}")
+        }
+    }
+
+    /// 流式计算文件 sha256（CryptoKit，每块 1MB，不整份载入内存——1.4GB 主库也稳）
+    static func fileSHA256Hex(at path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let chunk = handle.readData(ofLength: 1 << 20)
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - 处理函数
@@ -1243,6 +1511,8 @@ final class KlineHTTPServer {
         switch status {
         case 200: statusText = "OK"
         case 400: statusText = "Bad Request"
+        case 401: statusText = "Unauthorized"
+        case 403: statusText = "Forbidden"
         case 404: statusText = "Not Found"
         default: statusText = "Error"
         }
