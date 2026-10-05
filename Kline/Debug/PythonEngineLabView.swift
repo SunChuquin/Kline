@@ -555,6 +555,8 @@ struct PythonEngineLabView: View {
 
     /// 脚本常量：8 线程并发请求腾讯快照（一股一请求，共 20 次，避免触发限流）。
     /// 整体 try/except 自捕获：异常写进 py_out.json 的 error 字段（stderr 有缓冲不落盘，不可依赖）
+    /// 单请求自捕获 + 1 次重试：urllib 每请求新建 TCP（无连接复用/无 h2），20 连发偶发单点
+    /// 超时是服务端连接速率抖动，不该把整场实验炸掉——计入统计即可（对齐生产 GapBackfill 重试语义）
     private static let exp3Script = """
     import json, time, traceback, urllib.request
     from concurrent.futures import ThreadPoolExecutor
@@ -564,19 +566,25 @@ struct PythonEngineLabView: View {
              'sz000858','sh601318','sh601988','sz000651','sh600030','sz002415',
              'sh600887','sz002304','sh601899','sh600900','sh601166','sh600016',
              'sz000333','sh600276']
-    result = {'reqs': len(codes)}
+    result = {'reqs': len(codes), 'errors': []}
     try:
         def _fetch(c):
-            # 明文 HTTP：绕开 TLS 握手环节（实测 443 握手被网络环境掐断超时），
-            # 吞吐测量的对象是「HTTP 请求并发」而非 TLS；腾讯快照支持明文
-            with _opener.open('http://qt.gtimg.cn/q=' + c, timeout=5) as r:
-                return len(r.read())
+            last = None
+            for _attempt in range(2):
+                try:
+                    with _opener.open('http://qt.gtimg.cn/q=' + c, timeout=5) as r:
+                        return len(r.read())
+                except Exception as e:
+                    last = e
+                    time.sleep(0.2)
+            result['errors'].append(c + ':' + type(last).__name__)
+            return -1
         t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=8) as ex:
             sizes = list(ex.map(_fetch, codes))
         t1 = time.perf_counter()
         el = t1 - t0
-        result['ok'] = len(sizes)
+        result['ok'] = sum(1 for s in sizes if s >= 0)
         result['total_ms'] = el * 1000.0
         result['rps'] = (len(codes) / el) if el > 0 else 0.0
     except Exception:
@@ -596,11 +604,16 @@ struct PythonEngineLabView: View {
                     if let err = obj["error"] as? String {
                         host.appendOutput("实验③ 失败（脚本内异常）：\n" + err)
                     } else {
-                        host.appendOutput(String(format: "实验③ 完成：%d/%d 次成功，总耗时 %.0fms，吞吐 %.1f req/s",
-                                                 obj["ok"] as? Int ?? 0,
-                                                 obj["reqs"] as? Int ?? 0,
+                        let ok = obj["ok"] as? Int ?? 0
+                        let reqs = obj["reqs"] as? Int ?? 0
+                        let errors = obj["errors"] as? [String] ?? []
+                        host.appendOutput(String(format: "实验③ 完成：%d/%d 次成功（失败 %d，含重试），总耗时 %.0fms，吞吐 %.1f req/s",
+                                                 ok, reqs, reqs - ok,
                                                  obj["total_ms"] as? Double ?? -1,
                                                  obj["rps"] as? Double ?? -1))
+                        if !errors.isEmpty {
+                            host.appendOutput("重试后仍失败：" + errors.joined(separator: ", "))
+                        }
                     }
                 } else {
                     host.appendOutput("实验③ 输出解析失败（网络/SSL 异常见日志）")
