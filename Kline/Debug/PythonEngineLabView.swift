@@ -29,6 +29,7 @@ struct PythonEngineLabView: View {
 
     // 状态区（由「刷新状态」与各操作完成后刷新，避免每次渲染扫盘）
     @State private var engineStatus: PythonEngineStatus = .notInstalled
+    @State private var engineSourceText = "—"
     @State private var engineAppPathText = "—"
     @State private var manifestVersionText = "—"
     /// 当前运行中的实验编号（用于图标位转圈）
@@ -105,7 +106,9 @@ struct PythonEngineLabView: View {
 
                 infoRow(title: "当前状态", value: statusText(engineStatus), valueColor: statusColor(engineStatus))
                 Divider()
-                infoRow(title: "Engine.app", value: engineAppPathText)
+                infoRow(title: "引擎来源", value: engineSourceText)
+                Divider()
+                infoRow(title: "引擎路径", value: engineAppPathText)
                 Divider()
                 infoRow(title: "引擎版本", value: manifestVersionText)
                 Divider()
@@ -375,11 +378,16 @@ struct PythonEngineLabView: View {
 
     private func refreshStatus() {
         engineStatus = host.status()
-        if let p = host.locateEngineApp() {
-            engineAppPathText = p
+        let loc = host.locateEngineDir()
+        if let src = loc?.source {
+            switch src {
+            case .embedded:  engineSourceText = "内嵌（随包）"
+            case .engineApp: engineSourceText = "Engine.app"
+            }
         } else {
-            engineAppPathText = "—"
+            engineSourceText = "—"
         }
+        engineAppPathText = loc?.path ?? "—"
         if let m = host.engineManifest() {
             manifestVersionText = "v\(m.engineVersion)（\(m.build)，api=\(m.apiVersion)）"
         } else {

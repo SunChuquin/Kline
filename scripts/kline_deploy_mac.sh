@@ -125,6 +125,15 @@ else
   echo "==> 运行目标：真机 ${TARGET_ID}"
 fi
 
+# ---- 2.5 内嵌 Python 引擎缓存准备（模拟器与真机都嵌入；失败降级不阻断） ----
+
+if [ "${KLINE_SKIP_ENGINE_EMBED:-}" != "1" ]; then
+  echo "==> 准备内嵌 Python 引擎缓存"
+  if ! bash scripts/prepare_engine_cache.sh; then
+    echo "    ⚠️ 引擎缓存准备失败：本次构建不内嵌引擎（App 全功能可用），继续部署"
+  fi
+fi
+
 # ---- 3. 构建 ---------------------------------------------------------------
 
 echo "==> [1/4] xcodebuild 构建"

@@ -33,3 +33,6 @@ artifacts/
 # 本地构建 / 校验产物
 build_logs/
 Kline/tdx.db
+
+# Python 引擎缓存（prepare_engine_cache.sh 产物，不入库）
+EngineCache/

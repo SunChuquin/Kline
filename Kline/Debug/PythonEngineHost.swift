@@ -7,7 +7,11 @@
 //  （Engine.app 方案：沙盒 staging/active 下载激活链路已废弃——实测「运行时下载 dylib
 //   到沙盒再 dlopen」被 iOS AMFI 拒绝（code signature invalid，TrollStore 信任只在安装时
 //   授予），引擎改打包成迷你 Engine.app 的 .tipa，经 TrollStore 安装授信，
-//   主 App 从 Engine.app 安装路径 dlopen）
+//  主 App 从 Engine.app 安装路径 dlopen）
+//
+//  2026-10-05 起支持双来源：内嵌（macOS 构建路径，引擎树构建期拷入 Kline.app/KlineEngine/，
+//   manifest 优先命中）优先，Engine.app（TrollStore 安装，Windows/CI 路径）回退。
+//   apiVersion 配对校验与加载链路对两种来源一致。
 //
 //  硬约束：
 //  - 引擎不进 IPA：本文件不嵌入任何 Python 资源，只在用户点按钮时下载/安装/加载
@@ -30,7 +34,13 @@ enum PythonEngineStatus: Equatable {
     case notInstalled                       // Engine.app 未安装（Bundle/Application 下找不到）
     case installed                          // 已安装 + manifest 可读 + apiVersion 在区间 + dylib 存在
     case versionMismatch(apiVersion: Int)   // manifest 可读但 apiVersion 不在 [min, max]
-    case corrupted(reason: String)          // manifest 不可读或 dylib 缺失（TrollStore 内卸载引擎后重装）
+    case corrupted(reason: String)          // manifest 不可读或 dylib 缺失（文案按来源区分修复指引）
+}
+
+/// 引擎来源：内嵌（构建期拷入 Bundle.main/KlineEngine）优先，Engine.app（TrollStore 安装）回退
+enum PythonEngineSource: Equatable {
+    case embedded   // 随 App 打包（macOS 构建路径，真机/模拟器）
+    case engineApp  // 独立 Engine.app（TrollStore 安装，Windows/CI 构建路径）
 }
 
 /// Engine.app 内 manifest.json（schema v1，两端共用契约；layout 为相对仓库根的旧前缀，
@@ -193,7 +203,7 @@ final class PythonEngineHost: ObservableObject {
         DispatchQueue.main.async { self.isBusy = false; self.busyText = "" }
     }
 
-    // MARK: - Engine.app 定位与状态扫描
+    // MARK: - 引擎定位与状态扫描（内嵌优先，Engine.app 回退）
 
     /// 定位 Engine.app：枚举 /var/containers/Bundle/Application/ 下每个目录，
     /// 找 Engine.app 子目录并核对 Info.plist 的 CFBundleIdentifier（防撞名）。
@@ -213,14 +223,37 @@ final class PythonEngineHost: ObservableObject {
         return nil
     }
 
-    /// 状态机：notInstalled / installed / versionMismatch / corrupted
-    func status() -> PythonEngineStatus {
-        guard let appPath = locateEngineApp() else { return .notInstalled }
-        guard let m = readManifest(in: appPath) else {
-            return .corrupted(reason: "manifest.json 不可读")
+    /// 内嵌引擎目录判定：bundlePath/KlineEngine/manifest.json 存在即命中（bundlePath 注入以便单测）
+    static func embeddedEngineDir(bundlePath: String) -> String? {
+        let dir = (bundlePath as NSString).appendingPathComponent("KlineEngine")
+        return FileManager.default.fileExists(atPath: dir + "/manifest.json") ? dir : nil
+    }
+
+    /// 定位引擎目录：内嵌优先，回退 Engine.app 扫描
+    func locateEngineDir() -> (path: String, source: PythonEngineSource)? {
+        if let dir = Self.embeddedEngineDir(bundlePath: Bundle.main.bundlePath) {
+            return (dir, .embedded)
         }
-        guard fm.fileExists(atPath: Self.resolve(appPath, m.layout.dylib)) else {
-            return .corrupted(reason: "dylib 缺失")
+        if let app = locateEngineApp() { return (app, .engineApp) }
+        return nil
+    }
+
+    /// 损坏文案按来源参数化（同一种损坏，两来源给不同修复指引）
+    private func corruptedReason(_ base: String, source: PythonEngineSource) -> String {
+        switch source {
+        case .embedded:  return base + "——内嵌引擎异常，请重新构建部署"
+        case .engineApp: return base + "——请在 TrollStore 内卸载 Engine.app 后重装"
+        }
+    }
+
+    /// 状态机：notInstalled / installed / versionMismatch / corrupted（内嵌与 Engine.app 共用）
+    func status() -> PythonEngineStatus {
+        guard let loc = locateEngineDir() else { return .notInstalled }
+        guard let m = readManifest(in: loc.path) else {
+            return .corrupted(reason: corruptedReason("manifest.json 不可读", source: loc.source))
+        }
+        guard fm.fileExists(atPath: Self.resolve(loc.path, m.layout.dylib)) else {
+            return .corrupted(reason: corruptedReason("dylib 缺失", source: loc.source))
         }
         guard (Self.minEngineAPI...Self.maxEngineAPI).contains(m.apiVersion) else {
             return .versionMismatch(apiVersion: m.apiVersion)
@@ -228,10 +261,10 @@ final class PythonEngineHost: ObservableObject {
         return .installed
     }
 
-    /// 已安装 Engine.app 的 manifest（可读即返回，供 UI 显示版本/构建号）
+    /// 已定位引擎的 manifest（可读即返回，供 UI 显示版本/构建号）
     func engineManifest() -> EngineManifest? {
-        guard let appPath = locateEngineApp() else { return nil }
-        return readManifest(in: appPath)
+        guard let loc = locateEngineDir() else { return nil }
+        return readManifest(in: loc.path)
     }
 
     private func readManifest(in dir: String) -> EngineManifest? {
@@ -447,9 +480,9 @@ final class PythonEngineHost: ObservableObject {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    // MARK: - 加载（定位 Engine.app → dlopen + Py_Initialize）
+    // MARK: - 加载（定位引擎目录 → dlopen + Py_Initialize）
 
-    /// dlopen Engine.app 内引擎 dylib → dlsym 三个最简 C API 符号 → setenv PYTHONHOME → Py_Initialize。
+    /// dlopen 引擎目录内引擎 dylib → dlsym 三个最简 C API 符号 → setenv PYTHONHOME → Py_Initialize。
     /// 各阶段计时；句柄进程内不释放；Py_Finalize 不调用（进程内卸载不可靠）。
     func loadEngine(completion: @escaping (Result<EngineLoadResult, String>) -> Void) {
         workQueue.async { [weak self] in
@@ -463,7 +496,7 @@ final class PythonEngineHost: ObservableObject {
             case .installed:
                 break
             case .notInstalled:
-                DispatchQueue.main.async { completion(.failure("未安装 Engine.app（请先下载引擎包并用 TrollStore 安装）")) }
+                DispatchQueue.main.async { completion(.failure("引擎未就绪（无内嵌引擎且未安装 Engine.app）")) }
                 return
             case .versionMismatch(let v):
                 DispatchQueue.main.async {
@@ -472,18 +505,17 @@ final class PythonEngineHost: ObservableObject {
                 return
             case .corrupted(let r):
                 DispatchQueue.main.async {
-                    completion(.failure("引擎损坏：\(r)——请在 TrollStore 内卸载 Engine.app 后重装"))
+                    completion(.failure("引擎损坏：\(r)"))
                 }
                 return
             }
-            guard let appPath = self.locateEngineApp() else {
-                DispatchQueue.main.async { completion(.failure("Engine.app 定位失败")) }
+            // status() 已保证引擎目录可定位、manifest 可读，这里仅取路径与 manifest
+            guard let loc = self.locateEngineDir(),
+                  let m = self.readManifest(in: loc.path) else {
+                DispatchQueue.main.async { completion(.failure("引擎定位失败")) }
                 return
             }
-            guard let m = self.readManifest(in: appPath) else {
-                DispatchQueue.main.async { completion(.failure("manifest 读取失败")) }
-                return
-            }
+            let appPath = loc.path
             let dylibPath = Self.resolve(appPath, m.layout.dylib)
             let homePath = Self.resolve(appPath, m.layout.home)
 
@@ -648,8 +680,9 @@ final class PythonEngineHost: ObservableObject {
 
     /// 经 pyrunner 子进程执行脚本：进程内 PyRun_SimpleString 曾发生零 stderr 原生段错误
     /// （直接闪退），故 Python 执行全部挪到独立子进程——引擎崩溃只死 pyrunner，App 不受影响。
-    /// 前置只要求 Engine.app 已安装（pyrunner/dylib/home 都在其中）：解释器初始化由子进程自做，
-    /// 进程内 loadEngine 的成功状态不再是实验前置（loadEngine 保留，仅用于进程内 init 计时）。
+    /// 前置只要求引擎已就绪（内嵌 KlineEngine 或 Engine.app，dylib/home 都在其中）：
+    /// 解释器初始化由子进程自做，进程内 loadEngine 的成功状态不再是实验前置
+    /// （loadEngine 保留，仅用于进程内 init 计时）。
     ///
     /// spawn 说明：RootRunner.spawnDetached 以 root（persona 99 + uid/gid 0）detached 拉起
     /// pyrunner，不回读、不 waitpid，子进程孤儿化由 launchd 收养；App 进程内绝无任何
@@ -667,7 +700,7 @@ final class PythonEngineHost: ObservableObject {
             case .installed:
                 break
             case .notInstalled:
-                DispatchQueue.main.async { completion(.failure("未安装引擎")) }
+                DispatchQueue.main.async { completion(.failure("引擎未就绪（无内嵌引擎且未安装 Engine.app）")) }
                 return
             case .versionMismatch(let v):
                 DispatchQueue.main.async {
@@ -676,15 +709,17 @@ final class PythonEngineHost: ObservableObject {
                 return
             case .corrupted(let r):
                 DispatchQueue.main.async {
-                    completion(.failure("引擎损坏：\(r)——请在 TrollStore 内卸载 Engine.app 后重装"))
+                    completion(.failure("引擎损坏：\(r)"))
                 }
                 return
             }
-            guard let appPath = self.locateEngineApp(),
-                  let m = self.readManifest(in: appPath) else {
-                DispatchQueue.main.async { completion(.failure("Engine.app 定位失败")) }
+            // status() 已保证引擎目录可定位、manifest 可读，这里仅取路径与 manifest
+            guard let loc = self.locateEngineDir(),
+                  let m = self.readManifest(in: loc.path) else {
+                DispatchQueue.main.async { completion(.failure("引擎定位失败")) }
                 return
             }
+            let appPath = loc.path
             let dylibPath = Self.resolve(appPath, m.layout.dylib)
             let homePath = Self.resolve(appPath, m.layout.home)
             let scriptPath = Self.pyScriptPath
