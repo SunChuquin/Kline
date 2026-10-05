@@ -188,6 +188,12 @@ final class LANSyncDiscovery: ObservableObject {
                     self.log("解析服务失败（等服务重新广播）：\(serviceName) \(endpoint)")
                     return
                 }
+                // 自身服务过滤：本机暴露时 mDNS 会把自己也广播出来（TXT id 与本机唯一 ID
+                // 相同），不入列表
+                if peer.devid == LANSyncSupport.deviceUniqueID {
+                    self.log("忽略自身服务（防自扫）：\(peer.name) @ \(peer.host):\(peer.port)")
+                    return
+                }
                 // 服务可能在解析期间下线（.removed / stop() 已清空）
                 guard self.liveEndpoints.contains(endpoint) else { return }
                 self.endpointIDs[endpoint] = peer.id
@@ -251,7 +257,8 @@ final class LANSyncDiscovery: ObservableObject {
         private var timeoutWork: DispatchWorkItem?
 
         /// 解析成功：hostName 形如 "sunchukundeMac-mini.local."（剥尾点），
-        /// port 为 SRV 记录的真实监听端口（5051/5052）。
+        /// port 为 SRV 记录的真实监听端口（5051/5052），TXT "id" 为对端唯一 ID
+        ///（旧版对端无 TXT → nil；自身服务由上层按 devid 匹配过滤）。
         func netServiceDidResolveAddress(_ sender: NetService) {
             let host = (sender.hostName ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "."))
             guard !host.isEmpty, sender.port > 0, sender.port <= Int32(UInt16.max) else {
@@ -260,10 +267,13 @@ final class LANSyncDiscovery: ObservableObject {
             }
             let port = UInt16(sender.port)
             let id = "\(host):\(port)"
+            let txt = sender.txtRecordData().flatMap { NetService.dictionary(fromTXTRecord: $0) }
+            let devid = (txt?["id"] as? Data).flatMap { String(data: $0, encoding: .utf8) }
             finish(LANSyncPeer(id: id,
                                name: serviceName.isEmpty ? id : serviceName,
                                host: host,
-                               port: port))
+                               port: port,
+                               devid: devid))
         }
 
         func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
@@ -359,6 +369,9 @@ final class LANSyncAdvertiser: NSObject, NetServiceDelegate {
                                type: "_klinesync._tcp.",
                                name: name,
                                port: Int32(port))
+            // TXT 记录带本机唯一 ID（key "id"）：扫描方解析后据此排除自身服务
+            //（mDNS 不区分自己，本机暴露时扫描会扫到自己）
+            s.setTXTRecord(NetService.data(fromTXTRecord: ["id": Data(LANSyncSupport.deviceUniqueID.utf8)]))
             s.delegate = self
             s.schedule(in: .main, forMode: .common)
             s.publish()

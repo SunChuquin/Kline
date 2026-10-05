@@ -96,6 +96,8 @@ struct LANSyncPeerStatus: Codable, Equatable {
         let name: String
         let appVersion: String
         let app: String
+        /// 本机唯一 ID（新增字段，旧版对端无此键 → nil；手动直连防自连校验用）
+        let id: String?
     }
     let device: Device
     let items: [LANSyncItem]
@@ -116,4 +118,7 @@ struct LANSyncPeer: Identifiable, Equatable {
     let name: String
     let host: String
     let port: UInt16
+    /// 对端唯一 ID（Bonjour TXT "id" 解析所得；旧版对端 / 手动直连构造 → nil。
+    /// 扫描方据此排除自身服务）
+    var devid: String? = nil
 }

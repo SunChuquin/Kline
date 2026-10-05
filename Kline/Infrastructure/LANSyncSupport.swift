@@ -130,6 +130,19 @@ enum LANSyncReload {
 /// 扫描本地 Documents 生成 6 类可同步内容清单（GET /sync/status 的 items 段）。
 /// key = LANSyncCategory.rawValue，文件条目字段与 LANSyncModels 契约一致。
 enum LANSyncSupport {
+    /// 本机唯一 ID（首次使用时生成并持久化到 UserDefaults）：
+    /// 随 Bonjour TXT 记录广播（key "id"）+ /sync/status device.id 下发，
+    /// 扫描解析与手动直连据此识别并排除自身（mDNS 不区分自己，不排除会扫到自己）。
+    static let deviceUniqueID: String = {
+        let key = "lansync.device.uniqueID"
+        if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty {
+            return saved
+        }
+        let fresh = UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: key)
+        return fresh
+    }()
+
     static func buildSyncInventory() -> [LANSyncItem] {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return LANSyncCategory.allCases.map { category in

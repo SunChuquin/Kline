@@ -583,6 +583,7 @@ final class KlineHTTPServer {
                     "name": Self.deviceName(),
                     "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
                     "app": "Kline",
+                    "id": LANSyncSupport.deviceUniqueID,
                 ]
                 // 暴露态（发起方连接时校验：false = 已取消暴露，提示并从列表移除）
                 obj["exposed"] = LANSyncPairing.shared.isExposed

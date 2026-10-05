@@ -706,6 +706,12 @@ struct LANSyncView: View {
                 let status = try await LANSyncDiscovery.fetchStatus(host: target.host, port: target.port)
                 await MainActor.run {
                     self.connecting = false
+                    // 防自连：对端唯一 ID 与本机相同 = 连到了自己的服务端口
+                    if status.device.id == LANSyncSupport.deviceUniqueID {
+                        self.alertTitle = "不能连接本机"
+                        self.showAlert = true
+                        return
+                    }
                     if status.exposed == false {
                         // 对端已取消暴露：明确拒绝连接（而非放行到配对再 403）
                         self.discovery.removePeer(id: target.id)
