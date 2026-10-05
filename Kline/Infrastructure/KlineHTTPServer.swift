@@ -155,6 +155,12 @@ final class KlineHTTPServer {
                     self.bindRetry = 0
                     self.isRunning = true
                     DebugLogger.shared.log("KlineHTTPServer ready: 0.0.0.0:\(self.port)")
+                    // 仅拉取模型：监听本身不注册 Bonjour 广播（默认对外隐藏）。
+                    // 若用户在联机同步页开启了「暴露」，监听就绪后自动恢复 mDNS 广播
+                    //（覆盖 restart() 重建路径：restart 最终也会走到这里）。
+                    if LANSyncPairing.shared.isExposed {
+                        LANSyncAdvertiser.shared.publish(port: self.port, name: Self.deviceName())
+                    }
                 case .failed(let error):
                     self.isRunning = false
                     DebugLogger.shared.log("KlineHTTPServer failed: \(error)")
@@ -174,10 +180,9 @@ final class KlineHTTPServer {
                     break
                 }
             }
-            // Bonjour 注册：同网段 Kline 实例经 _klinesync._tcp 发现本机（服务名 = 设备名）。
-            // 名称冲突由 mDNSResponder 自动改名兜底；注册失败经 .failed 回调只打日志，
-            // 不影响 HTTP 监听本身。放在 start 之前设置，restart() 重建路径同样生效。
-            listener.service = NWListener.Service(name: Self.deviceName(), type: "_klinesync._tcp")
+            // 仅拉取模型：不再随监听自动注册 Bonjour 服务（监听即广播 = 对外持续暴露）。
+            // 本机是否可被发现由用户在联机同步页的「暴露」开关显式控制
+            //（LANSyncAdvertiser.publish / unpublish，见 LANSyncDiscovery.swift）。
             listener.start(queue: queue)
             self.listener = listener
         } catch {

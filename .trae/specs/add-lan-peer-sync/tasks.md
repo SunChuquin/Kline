@@ -25,6 +25,12 @@
 - [x] Task 5: 双模拟器联测（KlineUITests + 设备验证循环）
   - [x] 5.1 新增 `LANSyncUITests.swift`：同一 Mac 启动两台 iPad mini 5（5th gen）模拟器实例，验证互发现、推送 favorites、接收端确认框、热重载后模拟页数据一致（testPushFavoritesToManualPeer passed 52s；UD2 favorites.json 由 absent 变为与 UD1 sha256 一致）
   - [x] 5.2 按 kline-device-validation-loop 技能流程构建到模拟器并请用户在真机上人工验证（Bonjour 真机发现 + 指标公式镜像 + 主库整库拉取耗时）（App 已构建安装到两台 GUI 模拟器并运行；真机人工验证项已交付用户）
+- [x] Task 6: 按用户反馈重构为「手动扫描/暴露 + 仅拉取」模型（2026-10-05）
+  - [x] 6.1 删除监听即广播：KlineHTTPServer 不再自动注册 Bonjour，新增 LANSyncAdvertiser（NetService publish/unpublish）
+  - [x] 6.2 浏览改单次 scanOnce（4s 窗口自动停止），进页面不再自动扫描；UI 新增「暴露」开关（默认关，退出页面自动取消）与「扫描一次」按钮
+  - [x] 6.3 删除推送能力：LANSyncDirection/push 分支/上传 delegate/对端备份与对端重载调用全部移除，仅保留拉取（本机备份→下载→sha 校验→原子覆盖→本机热重载）
+  - [x] 6.4 配对改「暴露即授权」：对端暴露态自动签发 token（或 KLINE_EXPOSED/KLINE_AUTOPAIR），未暴露 403；删除对端确认弹窗
+  - [x] 6.5 UI 测试改 testPullFavoritesFromManualPeer 并回归通过（45.8s，sha256 marker→对端内容翻转验证）
 
 # Task Dependencies
 

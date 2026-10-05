@@ -3,14 +3,17 @@
 //  Kline
 //
 //  局域网设备联机同步 · UI 层（个人中心「联机同步」入口的全屏页面）。
+//  仅拉取模型：手动扫描 / 暴露，本机只能获取对端内容到本机（无推送）。
 //
 //  页面三态（页内 @State 切换，不做 NavigationStack，与个人中心全屏 overlay 模式一致）：
-//    devices   设备列表：本机服务状态（真实探测）+ Bonjour 已发现设备 + 手动 IP 直连兜底
-//    configure 同步配置：方向（推送/拉取）+ 6 类内容勾选（本机量 vs 对端量）+ 开始同步
-//    running   进度与结果：等待对端确认 / 传输进度 / 完成汇总 / 失败重试
+//    devices   设备列表：本机服务状态（真实探测）+「暴露」开关（默认关：不广播不授权）+
+//              「扫描一次」按钮（约 4s 窗口，结果保留）+ 已发现设备 + 手动 IP 直连兜底
+//    configure 同步配置：固定方向为拉取 + 6 类内容勾选（本机量 vs 对端量）+ 开始拉取
+//    running   进度与结果：建立同步会话 / 拉取进度 / 完成汇总 / 失败重试
 //
-//  本机作为接收方时的确认弹窗监听 LANSyncPairing.shared.pendingRequest（服务端路由置位，
-//  60s 无应答对端侧自动超时）；主库被对端替换监听 .lansyncMainDBReplaced 通知弹重启提示。
+//  暴露即授权：本机打开「暴露」开关后（LANSyncPairing.isExposed + LANSyncAdvertiser
+//  广播），对端发起拉取无需逐次确认；退出本页自动取消暴露（unpublish + isExposed=false）。
+//  主库被对端替换监听 .lansyncMainDBReplaced 通知弹重启提示。
 //  基础设施（LANSyncModels / Discovery / Transfer / Support / KlineHTTPServer）只读不改。
 //
 
@@ -30,9 +33,9 @@ struct LANSyncView: View {
 
     // MARK: - 基础设施
 
-    /// 设备发现（全局单例，onAppear start / onDisappear stop）
+    /// 设备发现（全局单例；点「扫描一次」触发 scanOnce，进页面不自动扫描）
     @ObservedObject private var discovery = LANSyncDiscovery.shared
-    /// 本机作为接收方的配对确认（服务端路由置 pendingRequest，UI 弹窗应答）
+    /// 本机暴露状态（isExposed；对端请求配对时服务端据此暴露即授权）
     @ObservedObject private var pairing = LANSyncPairing.shared
     /// 传输引擎（页面生命周期内一次会话）
     @StateObject private var transfer = LANSyncTransfer()
@@ -58,8 +61,6 @@ struct LANSyncView: View {
     @State private var remoteStatus: LANSyncPeerStatus?
     /// 本机 6 类清单（进入 configure 时构建一次）
     @State private var localInventory: [LANSyncItem] = []
-    /// 同步方向（默认推送：本机 → 对端）
-    @State private var direction: LANSyncDirection = .push
     /// 勾选的同步类别
     @State private var selected: Set<LANSyncCategory> = []
 
@@ -95,10 +96,14 @@ struct LANSyncView: View {
         .onAppear {
             KlineHTTPServer.shared.start()   // 确保本机监听在跑（幂等）
             probeServer()
-            discovery.start()
+            // 不自动扫描（默认隐藏且不扫描）；若实例以 KLINE_EXPOSED=1 启动（UI 测试），
+            // 开关已随 pairing.isExposed 显示为开，广播由 server 就绪回调恢复，无需在此补发
         }
         .onDisappear {
-            discovery.stop()
+            // 退出联机同步页即取消暴露：停止 mDNS 广播 + 关闭暴露授权（默认隐藏）
+            LANSyncAdvertiser.shared.unpublish()
+            pairing.isExposed = false
+            // 已发现的 peers 保留（下次进入页面可直接看到上次扫描结果）
         }
         // 主库被对端整库替换：SQLite 连接与内存缓存需重启 App 重建
         .onReceive(NotificationCenter.default.publisher(for: .lansyncMainDBReplaced)) { _ in
@@ -109,16 +114,6 @@ struct LANSyncView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(alertMessage)
-        }
-        // 接收方确认：对端发起同步请求时弹窗（deny() 对无挂起请求是幂等 no-op，
-        // 供系统侧关闭弹窗时兜底释放挂起的 completion）
-        .alert("联机同步请求", isPresented: pairingAlertPresented) {
-            Button("允许") { pairing.approve() }
-                .accessibilityIdentifier("lansync.pair.allow")
-            Button("拒绝", role: .destructive) { pairing.deny() }
-                .accessibilityIdentifier("lansync.pair.deny")
-        } message: {
-            Text(pairingAlertMessage)
         }
         // 主库被替换提示
         .alert("主库已替换", isPresented: $mainDBReplacedAlert) {
@@ -173,8 +168,10 @@ struct LANSyncView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionLabel("本机服务")
             localServiceCard
+            exposeCard
 
             sectionLabel("已发现设备")
+            scanButton
             if discovery.isBrowsing {
                 searchingRow
             }
@@ -185,6 +182,53 @@ struct LANSyncView: View {
             sectionLabel("手动直连")
             manualCard
         }
+    }
+
+    /// 暴露开关卡片：开 = 对外发布 mDNS 广播并自动接受对端拉取请求（暴露即授权）；
+    /// 关 = 本机对外隐藏（默认）。退出本页自动关闭。
+    private var exposeCard: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("允许对端获取本机内容")
+                    .font(.system(size: 16))
+                    .foregroundColor(Color.primary)
+                Text(pairing.isExposed ? "已暴露：对端可扫描到本机并拉取其内容" : "已隐藏：不广播、不接受同步")
+                    .font(.system(size: 12))
+                    .foregroundColor(pairing.isExposed ? .orange : Color(.tertiaryLabel))
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(
+                get: { pairing.isExposed },
+                set: { setExposed($0) }
+            ))
+            .labelsHidden()
+            .accessibilityIdentifier("lansync.expose.toggle")
+        }
+        .padding(16)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+    }
+
+    /// 扫描一次按钮：单次浏览约 4s 后自动停止，结果保留在列表
+    private var scanButton: some View {
+        Button(action: { discovery.scanOnce() }) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15))
+                Text(discovery.isBrowsing ? "扫描中…" : "扫描一次")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+            }
+            .foregroundColor(.blue)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(discovery.isBrowsing)
+        .accessibilityIdentifier("lansync.scan.once")
     }
 
     /// 区块小标题（与 Python 引擎实验室同款）
@@ -353,18 +397,7 @@ struct LANSyncView: View {
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(12)
 
-                sectionLabel("同步方向")
-                Picker("方向", selection: $direction) {
-                    Text("推送（本机 → 对端）")
-                        .tag(LANSyncDirection.push)
-                        .accessibilityIdentifier("lansync.direction.push")
-                    Text("拉取（对端 → 本机）")
-                        .tag(LANSyncDirection.pull)
-                        .accessibilityIdentifier("lansync.direction.pull")
-                }
-                .pickerStyle(.segmented)
-
-                sectionLabel("同步内容（本机 ↔ 对端）")
+                sectionLabel("获取内容（对端 → 本机）")
                 VStack(spacing: 0) {
                     ForEach(LANSyncCategory.allCases) { cat in
                         categoryRow(cat)
@@ -442,10 +475,10 @@ struct LANSyncView: View {
         .cornerRadius(12)
     }
 
-    /// 开始同步（无选中类别时禁用）
+    /// 开始拉取（无选中类别时禁用）：把对端勾选内容获取到本机
     private var startButton: some View {
         Button(action: startSync) {
-            Text("开始同步")
+            Text("开始拉取")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(Color.white)
                 .frame(maxWidth: .infinity, minHeight: 48)
@@ -476,11 +509,8 @@ struct LANSyncView: View {
         case .pairing:
             VStack(spacing: 12) {
                 ProgressView()
-                Text("等待对端确认…")
+                Text("正在建立同步会话…")
                     .font(.system(size: 17, weight: .semibold))
-                Text("请在对端设备上允许本次同步")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
                 Text(directionText)
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
@@ -524,7 +554,7 @@ struct LANSyncView: View {
                     .foregroundColor(Color.primary)
                     .accessibilityIdentifier("lansync.result.summary")
                 if let backup = transfer.backupDir {
-                    Text("已备份到 Documents/\(backup)")
+                    Text("已备份本机原文件到 Documents/\(backup)")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                 }
@@ -590,10 +620,9 @@ struct LANSyncView: View {
         }
     }
 
-    /// 方向与对端名（running 页各状态共用）
+    /// 固定方向（仅拉取）与对端名（running 页各状态共用）
     private var directionText: String {
-        let name = peer?.name ?? "对端"
-        return direction == .push ? "推送：本机 → \(name)" : "拉取：\(name) → 本机"
+        "拉取：\(peer?.name ?? "对端") → 本机"
     }
 
     // MARK: - 动作
@@ -665,34 +694,26 @@ struct LANSyncView: View {
         withAnimation(.easeOut(duration: 0.15)) { page = .configure }
     }
 
-    /// 发起同步：切进度页并交传输引擎执行（phase 状态由引擎发布）
+    /// 发起拉取：切进度页并交传输引擎执行（phase 状态由引擎发布）
     private func startSync() {
         guard let peer = peer, let remote = remoteStatus, !selected.isEmpty else { return }
         let cats = LANSyncCategory.allCases.filter { selected.contains($0) }
         withAnimation(.easeOut(duration: 0.15)) { page = .running }
         Task {
-            await transfer.run(direction: direction, categories: cats, peer: peer, remoteStatus: remote)
+            await transfer.run(categories: cats, peer: peer, remoteStatus: remote)
         }
     }
 
-    // MARK: - 接收方确认弹窗（本机作为接收方）
-
-    /// pendingRequest 非空时呈现；系统侧关闭弹窗时 deny() 兜底释放挂起的 completion
-    private var pairingAlertPresented: Binding<Bool> {
-        Binding(
-            get: { pairing.pendingRequest != nil },
-            set: { shown in
-                if !shown { pairing.deny() }
-            }
-        )
-    }
-
-    /// 弹窗正文：「设备 X 请求同步：自选、模拟交易…」（类别 rawValue 映射中文标题）
-    private var pairingAlertMessage: String {
-        guard let req = pairing.pendingRequest else { return "" }
-        let titles = req.items.compactMap { LANSyncCategory(rawValue: $0)?.title }
-        let text = titles.isEmpty ? req.items.joined(separator: "、") : titles.joined(separator: "、")
-        return "设备 \(req.from) 请求同步：\(text)"
+    /// 暴露开关动作：开 = 记录授权状态 + 发布 mDNS 广播（对端可扫描到并直接拉取）；
+    /// 关 = 停止广播 + 收回授权（进行中的会话 token 不回收，本会话内仍有效）。
+    private func setExposed(_ on: Bool) {
+        pairing.isExposed = on
+        if on {
+            LANSyncAdvertiser.shared.publish(port: KlineHTTPServer.shared.port,
+                                             name: KlineHTTPServer.deviceName())
+        } else {
+            LANSyncAdvertiser.shared.unpublish()
+        }
     }
 
     // MARK: - 私有小助手

@@ -9,33 +9,40 @@ import Foundation
 import Network
 import Combine
 
-/// 局域网设备联机同步——发现与连接层。
+/// 局域网设备联机同步——发现与连接层（仅拉取模型：手动扫描 / 暴露）。
 ///
-/// 两个职责：
-/// 1. **Bonjour 浏览**：NWBrowser 浏览同网段 `_klinesync._tcp` 服务（对端由 KlineHTTPServer
-///    在前台监听 5051 时注册），用 NetService（dnssd）把服务端点解析成 mDNS 主机名:端口。
+/// 三个职责：
+/// 1. **单次 Bonjour 扫描**（scanOnce）：点「扫描」按钮时浏览同网段 `_klinesync._tcp`
+///    服务约 4 秒后自动停止，结果保留在列表（不持续浏览、不清空）。App 启动 / 进页面
+///    都不注册广播、不启动浏览——本机默认对外隐藏。
+///    用 NetService（dnssd）把服务端点解析成 mDNS 主机名:端口。
 ///    ⚠️ 不能用「NWConnection 连上去读 remoteEndpoint」拿地址——Mac 开系统代理时该连接
 ///    被代理劫持，拿到的是代理地址（实测 127.0.0.1:10808），见 startResolve 注释。
-/// 2. **手动直连校验**：手动输入 `IP:端口` 时 GET `http://<host>:<port>/sync/status`
+/// 2. **暴露广播**（LANSyncAdvertiser）：用户在联机同步页打开「暴露」开关后才发布
+///    mDNS 服务（_klinesync._tcp），让同网段对端能扫描到本机；关闭开关或退出页面即
+///    unpublish。监听（KlineHTTPServer）本身不再自动注册 Bonjour。
+/// 3. **手动直连校验**：手动输入 `IP:端口` 时 GET `http://<host>:<port>/sync/status`
 ///    （5s 超时）校验对端是可同步的 Kline，并取回设备信息与 6 类内容清单
 ///    （LANSyncPeerStatus，契约见 LANSyncModels.swift）。
 ///
 /// 限制：
-/// - 对端服务仅前台可用（KlineHTTPServer 切后台即被系统冻结），浏览不到 / 连不上
-///   多为对端不在前台；浏览失败只记日志（DebugLogger），不崩溃，UI 靠手动直连兜底。
+/// - 对端服务仅前台可用（KlineHTTPServer 切后台即被系统冻结），且对端须已打开「暴露」
+///   开关才会广播；扫描不到 / 连不上多为对端不在前台或未暴露。扫描失败只记日志
+///   （DebugLogger），不崩溃，UI 靠手动直连兜底。
 /// - iOS 模拟器共享 Mac 网络栈，Bonjour 可用；同一 Mac 跑两个模拟器实例时端口可能
 ///   不同（对端会用 5052），因此手动直连是关键兜底路径。
 final class LANSyncDiscovery: ObservableObject {
     static let shared = LANSyncDiscovery()
 
-    /// Bonjour 服务类型（与 KlineHTTPServer 注册的服务一致）
+    /// Bonjour 服务类型（与 LANSyncAdvertiser 发布的服务一致）
     private static let serviceType = "_klinesync._tcp"
     /// 单次解析超时（秒）：NetService.resolve(withTimeout:) 的 SRV 解析上限
     static let resolveTimeout: TimeInterval = 5
 
-    /// 当前发现的对端设备（按 host:port 去重；只在主线程更新）
+    /// 当前发现的对端设备（按 host:port 去重；只在主线程更新）。
+    /// 单次扫描结束后结果保留，直到下次扫描开始才重建。
     @Published var peers: [LANSyncPeer] = []
-    /// 是否正在 Bonjour 浏览（只在主线程更新）
+    /// 是否正在扫描（只在主线程更新；扫描窗口约 4s，结束后自动复位）
     @Published var isBrowsing = false
 
     /// 浏览 / 解析共用的专属串行队列：browse 回调、解析连接回调、超时定时全部
@@ -56,12 +63,14 @@ final class LANSyncDiscovery: ObservableObject {
 
     private init() {}
 
-    // MARK: - Bonjour 浏览（start / stop）
+    // MARK: - 单次扫描（scanOnce / stopScan）
 
-    /// 开始浏览（幂等：已在浏览时重复调用直接忽略）
-    func start() {
+    /// 单次扫描：启动 Bonjour 浏览 `timeout` 秒后自动停止，结果保留在列表。
+    /// 由「扫描」按钮显式触发（App 启动 / 进页面都不扫描）；正在扫描时重复调用直接
+    /// 忽略（防重入）。
+    func scanOnce(timeout: TimeInterval = 4) {
         queue.async { [weak self] in
-            guard let self, self.browser == nil else { return }
+            guard let self, self.browser == nil else { return }   // 防重入：扫描中直接忽略
             let browser = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: .tcp)
             browser.browseResultsChangedHandler = { [weak self] _, changes in
                 self?.handleBrowseChanges(changes)
@@ -69,15 +78,17 @@ final class LANSyncDiscovery: ObservableObject {
             browser.stateUpdateHandler = { [weak self] state in
                 switch state {
                 case .failed(let error):
-                    // 浏览失败只记日志：常见于本地网络权限被拒 / Wi-Fi 隔离，不中断，
+                    // 扫描失败只记日志：常见于本地网络权限被拒 / Wi-Fi 隔离，不中断，
                     // UI 靠手动直连兜底
-                    self?.log("浏览失败：\(error)")
+                    self?.log("扫描失败：\(error)")
                 case .waiting(let error):
-                    self?.log("浏览等待中（网络不可用 / 本地网络权限？）：\(error)")
+                    self?.log("扫描等待中（网络不可用 / 本地网络权限？）：\(error)")
                 default:
                     break
                 }
             }
+            // 每次扫描重建结果：清掉上一轮残留（离线设备 / 陈旧条目），窗口内的发现
+            // 全量重新解析入库
             self.browser = browser
             self.liveEndpoints = []
             self.endpointIDs = [:]
@@ -85,26 +96,24 @@ final class LANSyncDiscovery: ObservableObject {
             self.workingPeers = []
             browser.start(queue: self.queue)
             DispatchQueue.main.async { self.isBrowsing = true }
+            log("开始单次扫描（\(Int(timeout))s 窗口）")
+            // 超时自动收口：停止浏览但保留结果（含仍在解析中的端点，解析完成后自然入库）
+            self.queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
+                self?.stopScan()
+            }
         }
     }
 
-    /// 停止浏览并清空结果（幂等）。对端离线后本端列表不应残留陈旧条目，故清空 peers。
-    func stop() {
-        queue.async { [weak self] in
-            guard let self, let browser = self.browser else { return }
-            browser.cancel()
-            self.browser = nil
-            self.liveEndpoints = []
-            self.endpointIDs = [:]
-            self.resolving = []
-            self.workingPeers = []
-            // 丢弃所有活跃解析器（主线程；解析回调里 liveEndpoints 已清空，结果自然被丢弃）
-            DispatchQueue.main.async { self.activeResolvers.removeAll() }
-            DispatchQueue.main.async {
-                self.isBrowsing = false
-                self.peers = []
-            }
-        }
+    /// 停止浏览但保留已发现结果（scanOnce 的超时收口，幂等）。
+    /// 只 cancel 浏览器与复位 isBrowsing；liveEndpoints / workingPeers / 解析中的
+    /// resolver 全部保留——窗口结束时可能还有端点在解析（resolve 上限 5s > 4s 窗口），
+    /// 让它们解析完自然进入列表。
+    private func stopScan() {
+        guard let browser = self.browser else { return }
+        browser.cancel()
+        self.browser = nil
+        DispatchQueue.main.async { self.isBrowsing = false }
+        log("扫描结束，已发现 \(self.workingPeers.count) 台设备")
     }
 
     // MARK: - 浏览结果处理
@@ -316,6 +325,61 @@ final class LANSyncDiscovery: ObservableObject {
         @unknown default:
             return host.debugDescription
         }
+    }
+}
+
+// MARK: - 暴露广播（mDNS publish）
+
+/// 本机「暴露」广播器：把 HTTP 监听端口以 Bonjour 服务 `_klinesync._tcp` 发布到
+/// 局域网，让同网段对端能扫描到本机。仅拉取模型下本机默认隐藏（不广播），
+/// 只有用户在联机同步页打开「暴露」开关（或 KLINE_EXPOSED=1 启动的测试实例）才发布；
+/// 关闭开关 / 退出联机同步页即 unpublish。发布失败只记日志（不影响 HTTP 监听本身）。
+final class LANSyncAdvertiser: NSObject, NetServiceDelegate {
+    static let shared = LANSyncAdvertiser()
+
+    /// 当前发布中的服务（强持有：delegate 回调要求 service 存活）；nil = 未发布
+    private var service: NetService?
+
+    private override init() {}
+
+    /// 发布（重复调用先撤掉旧服务再发新的；幂等恢复语义见 KlineHTTPServer.start 的
+    /// 就绪回调）。publish / unpublish 统一收口主线程执行，避免 service 属性跨线程竞态。
+    func publish(port: UInt16, name: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.stopCurrentService()   // 先撤旧（同线程同步执行，保证先停后发的顺序）
+            let s = NetService(domain: "local.",
+                               type: "_klinesync._tcp.",
+                               name: name,
+                               port: Int32(port))
+            s.delegate = self
+            s.schedule(in: .main, forMode: .common)
+            s.publish()
+            self.service = s
+            DebugLogger.shared.log("[LANSyncAdvertiser] 已发布 _klinesync._tcp：\(name):\(port)")
+        }
+    }
+
+    /// 停止广播（幂等：未发布时是 no-op）
+    func unpublish() {
+        DispatchQueue.main.async { [weak self] in
+            self?.stopCurrentService()
+        }
+    }
+
+    /// 主线程调用：停止当前发布中的服务并置 nil（幂等）
+    private func stopCurrentService() {
+        guard let s = service else { return }
+        s.stop()
+        s.remove(from: .main, forMode: .common)
+        service = nil
+        DebugLogger.shared.log("[LANSyncAdvertiser] 已停止广播")
+    }
+
+    /// 发布失败只记日志：常见于服务名冲突未解决 / mDNSResponder 异常；HTTP 监听不受
+    /// 影响，对端仍可手动直连 IP:端口。
+    func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
+        DebugLogger.shared.log("[LANSyncAdvertiser] 发布失败：\(errorDict)")
     }
 }
 

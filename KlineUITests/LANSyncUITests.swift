@@ -2,20 +2,22 @@
 //  LANSyncUITests.swift
 //  KlineUITests
 //
-//  「局域网设备联机同步」双模拟器联测（**替代人工双机点击**）：
+//  「局域网设备联机同步」双模拟器联测（**替代人工双机点击**，仅拉取模型）：
 //  UD1（发起方）：个人中心 → 联机同步 → 手动直连 127.0.0.1:5052（UD2 对端）→
-//  推送方向 → 勾选「自选」→ 开始同步 → 断言出现「同步完成」卡片而非「同步失败」。
+//  勾选「自选」→ 开始拉取 → 断言出现「同步完成」卡片而非「同步失败」。
 //
-//  对端 UD2 由外部脚本先行准备：KLINE_HTTP_PORT=5052 KLINE_AUTOPAIR=1 launch
-//  （App 启动即监听，autopair 由服务端路由直接签发 token，不弹确认）。
+//  对端 UD2 由外部脚本先行准备：
+//  SIMCTL_CHILD_KLINE_EXPOSED=1 SIMCTL_CHILD_KLINE_HTTP_PORT=5052 launch
+//  （App 启动即监听并自动暴露：isExposed=true + 恢复 mDNS 广播；暴露即授权，
+//  对端 /sync/request-pair 直接签发 token，无确认弹窗）。
 //  同步是否真正生效以两端 Documents/favorites.json 的 sha256 对比为准（外部脚本验证）。
 //
 //  元素定位全部基于 accessibilityIdentifier：
 //   - home.profileButton / tab.home            首页标题栏用户入口（进入个人中心）
 //   - profile.lansync.entry                    个人中心「联机同步」入口（ProfileDetailView）
 //   - lansync.local.status / .manual.field / .manual.connect   devices 页（LANSyncView）
-//   - lansync.direction.push / .category.favorites / .start    configure 页
-//   - lansync.pair.allow / .pair.deny          接收方配对确认弹窗（本机作为接收方时的兜底）
+//   - lansync.expose.toggle / .scan.once       devices 页暴露开关 / 扫描一次按钮
+//   - lansync.category.favorites / .start      configure 页（方向已固定为拉取，无方向控件）
 //   - lansync.result.summary / .done.button    完成卡片（本次联测补的 identifier）
 //   - lansync.fail.message                     失败卡片错误文本（打进 XCTFail 消息）
 //
@@ -28,8 +30,8 @@ import XCTest
 
 final class LANSyncUITests: XCTestCase {
 
-    /// 等待同步完成/失败结论的上限：本机回环（127.0.0.1）传 favorites 一个小文件，
-    /// 正常几秒内完成；配对等待 + 传输余量给 60s（任务规格值）
+    /// 等待拉取完成/失败结论的上限：本机回环（127.0.0.1）传 favorites 一个小文件，
+    /// 正常几秒内完成；配对 + 传输余量给 60s（任务规格值）
     private static let verdictTimeout: TimeInterval = 60
 
     override func setUpWithError() throws {
@@ -80,9 +82,9 @@ final class LANSyncUITests: XCTestCase {
         usleep(300_000)
     }
 
-    // MARK: - 用例：手动直连推送「自选」到对端（双模拟器联测 UD1 侧）
+    // MARK: - 用例：从手动直连对端拉取「自选」到本机（双模拟器联测 UD1 侧）
 
-    func testPushFavoritesToManualPeer() throws {
+    func testPullFavoritesFromManualPeer() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -125,13 +127,13 @@ final class LANSyncUITests: XCTestCase {
         }
         connect.tap()
 
-        // 5) configure 页就绪：方向分段控件出现。
+        // 5) configure 页就绪：内容勾选行出现（方向固定为拉取，无方向控件）。
         //    若连接失败会弹 alert（无法连接 / 对端不可同步），读 alert 文本打进断言消息。
-        let push = app.descendants(matching: .any)["lansync.direction.push"].firstMatch
+        let fav = app.buttons["lansync.category.favorites"].firstMatch
         var connectAlert: String? = nil
         let connectDeadline = Date().addingTimeInterval(15)
         while Date() < connectDeadline {
-            if push.exists { break }
+            if fav.exists { break }
             let alert = app.alerts.firstMatch
             if alert.exists { connectAlert = alert.label; break }
             usleep(500_000)
@@ -141,31 +143,25 @@ final class LANSyncUITests: XCTestCase {
             XCTFail("手动直连后未进入配置页，弹出提示：「\(alertText)」\(detail.isEmpty ? "" : " / \(detail)")")
             return
         }
-        XCTAssertTrue(push.waitForExistence(timeout: 5), "连接成功但配置页未出现（lansync.direction.push 不存在）")
-        print("LAN 已进入 configure 页")
-
-        // 6) 方向：推送（本机 → 对端）
-        push.tap()
-        usleep(300_000)
-
-        // 7) 勾选「自选」（favorites）
-        let fav = reveal("lansync.category.favorites", in: app) {
+        _ = reveal("lansync.category.favorites", in: app) {
             $0.buttons["lansync.category.favorites"].firstMatch
         }
+        print("LAN 已进入 configure 页")
+
+        // 6) 勾选「自选」（favorites）
         fav.tap()
         print("LAN 已勾选 favorites")
 
-        // 8) 开始同步
+        // 7) 开始拉取（对端已暴露，自动授权，无需在其上确认）
         let start = reveal("lansync.start", in: app) {
             $0.buttons["lansync.start"].firstMatch
         }
         snap(app, "lansync.beforeStart")
         start.tap()
 
-        // 9) 轮询结论（≤60s）：完成卡片 / 失败卡片 / 兜底接收方配对弹窗（正常 autopair 不弹）
+        // 8) 轮询结论（≤60s）：完成卡片 / 失败卡片（对端暴露即授权，不存在确认弹窗分支）
         let summary = app.staticTexts["lansync.result.summary"].firstMatch
         let failMsg = app.staticTexts["lansync.fail.message"].firstMatch
-        let allow = app.buttons["lansync.pair.allow"].firstMatch
         let deadline = Date().addingTimeInterval(Self.verdictTimeout)
         var doneSummary: String? = nil
         var failureText: String? = nil
@@ -175,19 +171,13 @@ final class LANSyncUITests: XCTestCase {
                 failureText = failMsg.label
                 break
             }
-            if allow.exists && allow.isHittable {
-                print("LAN 出现接收方配对弹窗（预期 autopair 不弹），兜底点允许")
-                allow.tap()
-                usleep(500_000)
-                continue
-            }
             if summary.exists && !summary.label.isEmpty {
                 doneSummary = summary.label
                 break
             }
             tick += 1
             if tick % 20 == 0 {   // 每 10s 打一次进度，便于看链路卡在哪
-                print("LAN tick=\(tick / 2)s 等待同步结论中…")
+                print("LAN tick=\(tick / 2)s 等待拉取结论中…")
             }
             usleep(500_000)
         }
@@ -195,17 +185,17 @@ final class LANSyncUITests: XCTestCase {
         print("LAN resultSummary = \(doneSummary ?? "<未出现>")")
         print("LAN failureText = \(failureText ?? "<无>")")
 
-        // 10) 断言：完成而非失败（失败时把错误文本带出来）
+        // 9) 断言：完成而非失败（失败时把错误文本带出来）
         if let failure = failureText {
-            XCTFail("同步失败卡片出现：\(failure)")
+            XCTFail("拉取失败卡片出现：\(failure)")
             return
         }
         guard let finalSummary = doneSummary else {
-            XCTFail("同步未在 \(Int(Self.verdictTimeout))s 内出结论（既无完成卡片也无失败卡片，可能卡在配对/传输）")
+            XCTFail("拉取未在 \(Int(Self.verdictTimeout))s 内出结论（既无完成卡片也无失败卡片，可能卡在配对/传输）")
             return
         }
         XCTAssertTrue(app.buttons["lansync.done.button"].firstMatch.waitForExistence(timeout: 5),
                       "完成汇总已出现但「完成」按钮不存在（done 卡片渲染不完整）")
-        print("LAN 同步完成，汇总：\(finalSummary)")
+        print("LAN 拉取完成，汇总：\(finalSummary)")
     }
 }

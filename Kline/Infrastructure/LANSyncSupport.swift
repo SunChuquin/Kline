@@ -3,7 +3,7 @@
 //  Kline
 //
 //  局域网设备联机同步 · 服务端支撑（KlineHTTPServer 的路由实现依赖本文件）：
-//  1. LANSyncPairing —— 配对代理：对端请求配对时前台弹确认，同意后签发仅本会话有效的 token
+//  1. LANSyncPairing —— 配对代理：暴露即授权（本机开启「暴露」后对端请求配对直接签发 token）
 //  2. LANSyncReload  —— 配置/指标热重载：对端文件覆盖落盘后按 scope 重载各 Store
 //  3. LANSyncSupport —— 本机 6 类可同步内容清单构建（GET /sync/status 的 items 段）
 //
@@ -23,78 +23,46 @@ extension Notification.Name {
 
 // MARK: - 配对代理
 
-/// 配对流程：
-///   对端 POST /sync/request-pair → requestPair(from:items:) → pendingRequest 置位
-///   （LANSyncView 监听此值弹确认框）→ 用户 approve()/deny()（或 60s 超时）
-///   → 回调 completion(nil / token)；token 存入 sessionTokens，
-///   后续 /sync/backup、/sync/reload-config 请求头 X-Kline-Pair 携带并由 isValidToken 校验。
-/// KLINE_AUTOPAIR=1（UI 测试双模拟器联测）时跳过确认直接签发。
+/// 配对流程（仅拉取模型 · 暴露即授权，无逐次确认弹窗）：
+///   本机在联机同步页打开「暴露」开关 → isExposed = true（同时 LANSyncAdvertiser 发布
+///   mDNS 广播）；对端 POST /sync/request-pair → requestPair(from:items:completion:)
+///   同步判定：isExposed（或 KLINE_AUTOPAIR=1，UI 测试用）→ 立即签发仅本会话有效的
+///   token 回调；未暴露 → 回调 nil（发起方收到 403，提示"对端未开启暴露"）。
+///   token 存入 sessionTokens，后续 /sync/backup、/sync/reload-config 请求头
+///   X-Kline-Pair 携带并由 isValidToken 校验。
 final class LANSyncPairing: ObservableObject {
     static let shared = LANSyncPairing()
 
-    /// 前台待确认的配对请求（nil = 无挂起请求；LANSyncView 监听此值弹确认框）
-    @Published var pendingRequest: PairRequest?
-
-    /// 一次配对请求（id 供 SwiftUI 识别用）
-    struct PairRequest: Identifiable {
-        let id = UUID()
-        let from: String
-        let items: [String]
-    }
-
-    /// 挂起的 completion + 超时任务（approve/deny/超时三者谁先触发即清空）
-    private var pendingCompletion: ((String?) -> Void)?
-    private var pendingTimeout: DispatchWorkItem?
+    /// 本机是否对外暴露（发布 mDNS 广播 + 自动接受配对请求）。
+    /// 默认 false：App 启动即隐藏、不可被同步；由联机同步页「暴露」开关读写，
+    /// 退出联机同步页置回 false。仅主线程写（UI 事件），跨线程读 Bool 可容忍弱一致。
+    @Published var isExposed: Bool
 
     /// 本会话有效 token 集合（进程存续期间有效）。
-    /// 签发在主线程、校验在监听队列 → 读写均经 tokenLock 串行化。
+    /// 签发在调用线程、校验在监听队列 → 读写均经 tokenLock 串行化。
     private(set) var sessionTokens: Set<String> = []
     private let tokenLock = NSLock()
 
-    private init() {}
+    private init() {
+        // UI 测试专用：以 KLINE_EXPOSED=1（SIMCTL_CHILD_ 前缀透传）启动的实例
+        // 启动即自动暴露（广播恢复由 KlineHTTPServer.start 就绪回调完成），无需进页面
+        isExposed = ProcessInfo.processInfo.environment["KLINE_EXPOSED"] == "1"
+    }
 
     // MARK: 请求配对（服务端路由调用，可能来自监听队列）
 
-    /// 对端请求配对：主线程置 pendingRequest 弹确认；60s 无应答自动拒绝并回调 nil；
-    /// KLINE_AUTOPAIR=1（UI 测试）时立即签发并回调 token，不弹确认。
-    /// 同一时间只处理一个配对请求：已有挂起请求时后来者直接拒绝。
+    /// 对端请求配对：暴露即授权 —— isExposed（或 KLINE_AUTOPAIR=1，UI 测试双模拟器
+    /// 联测兼容）立即签发 token 回调；否则回调 nil（对端未暴露，服务端路由回 403）。
+    /// 同步判定，无挂起状态、无超时定时器。
     func requestPair(from: String, items: [String], completion: @escaping (String?) -> Void) {
-        // UI 测试专用：环境变量 KLINE_AUTOPAIR=1 跳过确认直接签发
-        if ProcessInfo.processInfo.environment["KLINE_AUTOPAIR"] == "1" {
-            DebugLogger.shared.log("[LANSyncPairing] autopair：直接签发 token（from=\(from)）")
+        let autoPair = ProcessInfo.processInfo.environment["KLINE_AUTOPAIR"] == "1"
+        if isExposed || autoPair {
+            DebugLogger.shared.log("[LANSyncPairing] 已暴露（autopair=\(autoPair)），签发 token（from=\(from)）")
             completion(issueToken())
-            return
+        } else {
+            DebugLogger.shared.log("[LANSyncPairing] 未暴露，拒绝配对请求 from=\(from)")
+            completion(nil)
         }
-        // 路由在监听队列执行，@Published 必须回主线程改（否则触发 Combine 运行时警告）
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { completion(nil); return }
-            guard self.pendingRequest == nil else {
-                DebugLogger.shared.log("[LANSyncPairing] 已有挂起请求，拒绝后来者 from=\(from)")
-                completion(nil)
-                return
-            }
-            self.pendingRequest = PairRequest(from: from, items: items)
-            self.pendingCompletion = completion
-            // 60s 无应答自动拒绝（approve/deny 时取消该任务）
-            let timeout = DispatchWorkItem { [weak self] in
-                self?.resolve(token: nil, reason: "60s 超时自动拒绝")
-            }
-            self.pendingTimeout = timeout
-            DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: timeout)
-            DebugLogger.shared.log("[LANSyncPairing] 收到配对请求 from=\(from) items=\(items.joined(separator: ","))")
-        }
-    }
-
-    // MARK: 用户应答（UI 在主线程调用）
-
-    /// 同意配对：签发 UUID token 存入会话集合，并回调挂起的 completion
-    func approve() {
-        resolve(token: issueToken(), reason: "用户同意")
-    }
-
-    /// 拒绝配对：回调挂起的 completion(nil)
-    func deny() {
-        resolve(token: nil, reason: "用户拒绝")
     }
 
     // MARK: token 校验（服务端路由调用，来自监听队列）
@@ -107,17 +75,6 @@ final class LANSyncPairing: ObservableObject {
     }
 
     // MARK: 私有
-
-    /// 结束当前挂起请求：清 pendingRequest、取消超时任务，并回调 completion（主线程）
-    private func resolve(token: String?, reason: String) {
-        guard let completion = pendingCompletion else { return }
-        pendingCompletion = nil
-        pendingTimeout?.cancel()
-        pendingTimeout = nil
-        pendingRequest = nil
-        DebugLogger.shared.log("[LANSyncPairing] 配对结束（\(reason)）→ \(token == nil ? "拒绝" : "签发 token")")
-        completion(token)
-    }
 
     /// 签发新 token 并写入会话集合
     private func issueToken() -> String {
