@@ -127,18 +127,24 @@ final class PythonEngineHostSourceTests: XCTestCase {
         }
         XCTAssertEqual(res.engineVersion, "3.14.7")
 
-        // ② 进程内跑一句 pass（不碰 __kline_out__，仅验证解释器可用）
-        var runResult: Result<Double, String>?
-        let ran = XCTestExpectation(description: "runScript(pass) 成功")
-        host.runScript("pass\n") { r in
-            runResult = r
+        // ② 进程内跑脚本并回读 sys.version（对齐实验室实验①的本质链路：
+        // wrappedScript 注入 __kline_out__，脚本体写 JSON，Swift 读回断言版本号）
+        var captureResult: Result<(data: Data, totalMs: Double), String>?
+        let ran = XCTestExpectation(description: "runScriptCapturingOutput(sys.version) 成功")
+        host.runScriptCapturingOutput(
+            "import sys, json\nopen(__kline_out__, 'w').write(json.dumps({'version': sys.version}))\n"
+        ) { r in
+            captureResult = r
             ran.fulfill()
         }
         wait(for: [ran], timeout: 60)
-        let run = try XCTUnwrap(runResult, "runScript 未回调")
-        guard case .success = run else {
-            XCTFail("runScript(pass) 失败：\(run)")
+        let capture = try XCTUnwrap(captureResult, "runScriptCapturingOutput 未回调")
+        guard case .success(let payload) = capture else {
+            XCTFail("runScriptCapturingOutput 失败：\(capture)")
             return
         }
+        let obj = try JSONSerialization.jsonObject(with: payload.data) as? [String: String]
+        let version = try XCTUnwrap(obj?["version"], "输出 JSON 缺 version 字段")
+        XCTAssertTrue(version.contains("3.14"), "sys.version 应为 3.14.x，实际：\(version)")
     }
 }
