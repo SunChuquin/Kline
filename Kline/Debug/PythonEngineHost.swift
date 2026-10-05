@@ -140,6 +140,7 @@ final class PythonEngineHost: ObservableObject {
     private typealias Py_FinalizeFn = @convention(c) () -> Void
     private typealias PyGILState_EnsureFn = @convention(c) () -> Int32
     private typealias PyGILState_ReleaseFn = @convention(c) (Int32) -> Void
+    private typealias PyEval_SaveThreadFn = @convention(c) () -> UnsafeMutableRawPointer?
     private var pyHandle: UnsafeMutableRawPointer?
     private var pyInitFn: Py_InitializeFn?
     private var pyRunFn: PyRun_SimpleStringFn?
@@ -502,11 +503,12 @@ final class PythonEngineHost: ObservableObject {
                   let symRun = dlsym(handle, "PyRun_SimpleString"),
                   let symFin = dlsym(handle, "Py_Finalize"),
                   let symGilE = dlsym(handle, "PyGILState_Ensure"),
-                  let symGilR = dlsym(handle, "PyGILState_Release") else {
+                  let symGilR = dlsym(handle, "PyGILState_Release"),
+                  let symSave = dlsym(handle, "PyEval_SaveThread") else {
                 self.appendOutput("dlsym 失败：缺少 Python C API 符号")
                 self.endBusy()
                 DispatchQueue.main.async {
-                    completion(.failure("dlsym 缺少 Py_Initialize / PyRun_SimpleString / Py_Finalize / PyGILState_*"))
+                    completion(.failure("dlsym 缺少 Py_Initialize / PyRun_SimpleString / Py_Finalize / PyGILState_* / PyEval_SaveThread"))
                 }
                 return
             }
@@ -552,10 +554,16 @@ final class PythonEngineHost: ObservableObject {
             let finFn = unsafeBitCast(symFin, to: Py_FinalizeFn.self)
             let gilE = unsafeBitCast(symGilE, to: PyGILState_EnsureFn.self)
             let gilR = unsafeBitCast(symGilR, to: PyGILState_ReleaseFn.self)
+            let saveFn = unsafeBitCast(symSave, to: PyEval_SaveThreadFn.self)
 
             self.updateBusy("Py_Initialize…")
             let t1 = CFAbsoluteTimeGetCurrent()
             initFn()   // 经函数指针调用，版本无关
+            // Py_Initialize 返回时调用线程持有 GIL（CPython 3.7+ 文档明文）。不还回去的话，
+            // 后续 PyRun 若被 GCD 派到别的线程，PyGILState_Ensure 会永远等一个不会释放的 GIL
+            // → 串行 workQueue 死锁（2026-10-05 实验①②卡死实证；同线程重入则侥幸能跑，故时好时坏）。
+            // 标准嵌入姿势：init 后立刻 SaveThread 交还 GIL，之后统一走 PyGILState_Ensure/Release。
+            saveFn()
             let initMs = (CFAbsoluteTimeGetCurrent() - t1) * 1000
 
             self.pyHandle = handle          // 永不 dlclose
