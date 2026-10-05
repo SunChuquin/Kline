@@ -15,4 +15,6 @@
 - [x] 6 类内容多选可独立勾选；勾选主库时展示体积/耗时/需重启警示
 - [x] 配置、指标与增量库拉取后无需杀进程即生效；主库替换后提示重启 App
 - [x] 双 iPad mini 5（5th gen）模拟器联测通过：对端暴露 → 手动直连拉取 favorites → 本机备份 → sha256 翻转验证（marker 1dfe… → 对端 b6f6…）+ 热重载（passed 45.8s）
+- [x] 取消暴露即彻底断连：未暴露时 PUT/POST/DELETE/GET /sandbox、/sync/sha、request-pair 全 403（curl 实测 403×4 + pipeline 头 200 + exposed=False）；取消暴露吊销全部 token（进行中的拉取当场中断）
+- [x] 连接时校验对端 exposed 字段：false → 提示「对端已取消暴露」并从扫描列表移除陈旧条目（mDNS 缓存滞后防御）
 - [x] 全部改动构建通过（xcodebuild 非沙箱模式），UI 测试跑在 iPad mini 5 模拟器上

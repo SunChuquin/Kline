@@ -285,10 +285,17 @@ final class LANSyncDiscovery: ObservableObject {
         commitPeers()
     }
 
-    private func removePeer(id: String) {
+    /// 主动移除一个对端（连接时发现其已取消暴露 → 从扫描列表清除陈旧条目）
+    func removePeer(id: String) {
+        queue.async { [weak self] in
+            self?.removePeerLocked(id: id)
+        }
+    }
+
+    private func removePeerLocked(id: String) {
         guard let idx = workingPeers.firstIndex(where: { $0.id == id }) else { return }
         let peer = workingPeers.remove(at: idx)
-        log("设备离线：\(peer.name) @ \(peer.host):\(peer.port)")
+        log("移除对端（已取消暴露）：\(peer.name) @ \(peer.host):\(peer.port)")
         commitPeers()
     }
 

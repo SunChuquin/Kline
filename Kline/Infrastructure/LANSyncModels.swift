@@ -85,6 +85,8 @@ struct LANSyncPeerStatus: Codable, Equatable {
     }
     let device: Device
     let items: [LANSyncItem]
+    /// 对端当前暴露态（新增字段，旧版对端无此键 → nil；连接时 false 即「已取消暴露」）
+    let exposed: Bool?
 
     func item(_ category: LANSyncCategory) -> LANSyncItem? {
         items.first { $0.key == category.rawValue }

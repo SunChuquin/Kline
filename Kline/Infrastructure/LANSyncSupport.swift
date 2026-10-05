@@ -67,11 +67,21 @@ final class LANSyncPairing: ObservableObject {
 
     // MARK: token 校验（服务端路由调用，来自监听队列）
 
-    /// 会话 token 校验（/sync/backup、/sync/reload-config 请求头 X-Kline-Pair）
+    /// 会话 token 校验（/sync/backup、/sync/reload-config、沙盒读门禁）
     func isValidToken(_ t: String) -> Bool {
         tokenLock.lock()
         defer { tokenLock.unlock() }
         return sessionTokens.contains(t)
+    }
+
+    /// 吊销全部会话 token（取消暴露时调用）：
+    /// 已配对拉取方的后续读请求立即 403，进行中的拉取当场中断——
+    /// 「取消暴露后不能再被访问，直至再次暴露（重新配对签发新 token）」。
+    func revokeAllTokens() {
+        tokenLock.lock()
+        sessionTokens.removeAll()
+        tokenLock.unlock()
+        DebugLogger.shared.log("[LANSyncPairing] 已取消暴露，吊销全部会话 token")
     }
 
     // MARK: 私有

@@ -205,8 +205,10 @@ final class KlineHTTPServer {
         var uploadFinalPath = ""
         /// 可选完整性校验值（PUT/POST /sandbox/<rel>?sha256=<hex>，收完校验不符即弃 .part）
         var uploadSha256: String?
-        /// 请求头 X-Kline-Pair 会话 token（仅 /sync/backup、/sync/reload-config 校验）
+        /// 请求头 X-Kline-Pair 会话 token（/sync/backup、/sync/reload-config、沙盒读门禁校验）
         var pairToken = ""
+        /// 请求头 X-Kline-Client: pipeline（PC 流水线脚本标识，沙盒写门禁豁免用）
+        var pipelineClient = false
         var uploadHandle: FileHandle?
         var bodyBuffer = Data()
         var done = false
@@ -242,7 +244,8 @@ final class KlineHTTPServer {
                 if state.received >= state.contentLength {
                     state.done = true
                     let requestLine = state.method + " " + state.path + " HTTP/1.1"
-                    dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken, connection: connection)
+                    dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken,
+                             pipelineClient: state.pipelineClient, connection: connection)
                 }
             }
         }
@@ -275,12 +278,17 @@ final class KlineHTTPServer {
                         state.method = method
                         state.path = path
                         state.contentLength = contentLength
-                        // 提取 X-Kline-Pair 会话 token（LAN 同步改动性端点 /sync/backup、/sync/reload-config 校验用）
+                        // 提取 X-Kline-Pair 会话 token（/sync/backup、/sync/reload-config、沙盒读门禁校验用）
+                        // 与 X-Kline-Client: pipeline（PC 流水线脚本标识，沙盒写门禁豁免）
                         for line in headerText.components(separatedBy: "\r\n").dropFirst() {
                             let kv = line.split(separator: ":", maxSplits: 1)
-                            if kv.count == 2,
-                               kv[0].trimmingCharacters(in: .whitespaces).lowercased() == "x-kline-pair" {
-                                state.pairToken = kv[1].trimmingCharacters(in: .whitespaces)
+                            guard kv.count == 2 else { continue }
+                            let key = kv[0].trimmingCharacters(in: .whitespaces).lowercased()
+                            let value = kv[1].trimmingCharacters(in: .whitespaces)
+                            if key == "x-kline-pair" {
+                                state.pairToken = value
+                            } else if key == "x-kline-client", value.lowercased() == "pipeline" {
+                                state.pipelineClient = true
                             }
                         }
 
@@ -289,6 +297,14 @@ final class KlineHTTPServer {
                         // 中断只留残片，绝不把目标文件（如 tdx.db）写坏——直接写目标中断即损坏且无法恢复）
                         let isSandboxWrite = (method == "POST" || method == "PUT") && path.hasPrefix("/sandbox/")
                         if (method == "POST" || method == "PUT"), path == "/upload" || isSandboxWrite {
+                            // 沙盒写门禁：未暴露且非 PC 流水线 → 403（取消暴露后本机不可被写入）
+                            if isSandboxWrite,
+                               !allowSandboxWrite(pairToken: state.pairToken,
+                                                  pipelineHeader: state.pipelineClient,
+                                                  connection: connection) {
+                                state.done = true
+                                return
+                            }
                             state.isUpload = true
                             let targetPath: String
                             if path == "/upload" {
@@ -332,7 +348,8 @@ final class KlineHTTPServer {
                         }
                         if state.received >= contentLength {
                             state.done = true
-                            dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken, connection: connection)
+                            dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken,
+                                     pipelineClient: state.pipelineClient, connection: connection)
                             return
                         }
                         readLoop()
@@ -389,7 +406,8 @@ final class KlineHTTPServer {
 
     // MARK: - 路由
 
-    private func dispatch(requestLine: String, body: Data, pairToken: String, connection: NWConnection) {
+    private func dispatch(requestLine: String, body: Data, pairToken: String,
+                          pipelineClient: Bool = false, connection: NWConnection) {
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else {
             respond(connection, status: 400, body: "bad request")
@@ -519,6 +537,8 @@ final class KlineHTTPServer {
             }
         case ("GET", "/sync/sha"):
             // ?path=<rel>：流式计算 Documents 内文件的 sha256（LAN 同步传输完整性核对用）
+            // 读门禁：未暴露且无有效会话 → 403（取消暴露后内容元信息也不可读）
+            guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
             let shaRel = Self.queryParam(rawPath, "path") ?? ""
             guard !shaRel.isEmpty,
                   let shaTarget = Self.resolveSandboxPath(shaRel, sandboxRoot: sandboxRoot),
@@ -564,6 +584,8 @@ final class KlineHTTPServer {
                     "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
                     "app": "Kline",
                 ]
+                // 暴露态（发起方连接时校验：false = 已取消暴露，提示并从列表移除）
+                obj["exposed"] = LANSyncPairing.shared.isExposed
                 // items 走 LANSyncItem 的 Codable 编码再转 Any 拼回：字段名与 LANSyncModels 契约强一致
                 if let itemsData = try? JSONEncoder().encode(LANSyncSupport.buildSyncInventory()),
                    let itemsAny = try? JSONSerialization.jsonObject(with: itemsData) {
@@ -583,11 +605,18 @@ final class KlineHTTPServer {
         case ("GET", "/opener-log"):
             handleOpenerLog(connection: connection)
         case ("GET", "/sandbox"), ("GET", "/sandbox/"):
+            // 沙盒列目录门禁：未暴露且无有效会话/流水线标识 → 403
+            guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
             listSandboxDirectory(sandboxRoot, connection: connection)
         case ("DELETE", let p) where p.hasPrefix("/sandbox/"):
+            // 沙盒删除门禁（写类操作）：未暴露且非 PC 流水线 → 403
+            guard allowSandboxWrite(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
             deleteSandboxPath(String(p.dropFirst("/sandbox/".count)), connection: connection)
         default:
             if method == "GET", path.hasPrefix("/sandbox/") {
+                // 沙盒读文件门禁：未暴露且无有效会话/流水线标识 → 403
+                //（/download/<file> 公共下载保持开放，供 PC 脚本取 IPA/导出，不含敏感配置）
+                guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
                 serveSandboxPath(String(path.dropFirst("/sandbox/".count)), connection: connection)
             } else if method == "GET", path.hasPrefix("/download/") {
                 let filename = String(path.dropFirst("/download/".count))
@@ -752,6 +781,43 @@ final class KlineHTTPServer {
             return false
         }
         return true
+    }
+
+    // MARK: 沙盒访问门禁（隐私要求：未暴露的本机不可被局域网读写）
+
+    /// 本机是否处于「允许被局域网访问」状态：
+    /// 已暴露（用户打开「暴露」开关）或 KLINE_AUTOPAIR=1（UI 测试实例）。
+    var isLANAccessible: Bool {
+        LANSyncPairing.shared.isExposed
+            || ProcessInfo.processInfo.environment["KLINE_AUTOPAIR"] == "1"
+    }
+
+    /// 沙盒写操作（PUT/POST/DELETE /sandbox）门禁：
+    ///   - 已暴露 / AUTOPAIR → 放行（暴露即授权；旧版 Kline 客户端也走此路径）
+    ///   - PC 流水线脚本（X-Kline-Client: pipeline，见 TrollRestore/push_live_usb.py）→ 放行
+    ///   - 其余（含未暴露时旧版客户端的推送）→ 403：用户取消暴露后本机不可被写入
+    private func allowSandboxWrite(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
+        if isLANAccessible || pipelineHeader {
+            return true
+        }
+        DebugLogger.shared.log("[LAN门禁] 未暴露，拒绝沙盒写请求")
+        respond(connection, status: 403, contentType: "application/json",
+                body: "{\"error\":\"not exposed\"}")
+        return false
+    }
+
+    /// 沙盒读操作（GET /sandbox、GET /sync/sha）门禁：
+    /// 在写门禁条件之上，额外放行「持有效会话 token」的已配对拉取方——
+    /// 取消暴露即吊销全部 token（revokeAllTokens），进行中的拉取立即中断。
+    private func allowSandboxRead(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
+        let tokenValid = !pairToken.isEmpty && LANSyncPairing.shared.isValidToken(pairToken)
+        if isLANAccessible || pipelineHeader || tokenValid {
+            return true
+        }
+        DebugLogger.shared.log("[LAN门禁] 未暴露且无有效会话，拒绝沙盒读请求")
+        respond(connection, status: 403, contentType: "application/json",
+                body: "{\"error\":\"not exposed\"}")
+        return false
     }
 
     /// POST /sync/request-pair：{"from":"设备名","items":["favorites","sim"]}

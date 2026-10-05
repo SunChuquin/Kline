@@ -100,9 +100,11 @@ struct LANSyncView: View {
             // 开关已随 pairing.isExposed 显示为开，广播由 server 就绪回调恢复，无需在此补发
         }
         .onDisappear {
-            // 退出联机同步页即取消暴露：停止 mDNS 广播 + 关闭暴露授权（默认隐藏）
+            // 退出联机同步页即取消暴露：停止 mDNS 广播 + 关闭暴露授权 + 吊销全部会话 token
+            //（默认隐藏；已配对拉取方的后续请求立即 403）
             LANSyncAdvertiser.shared.unpublish()
             pairing.isExposed = false
+            pairing.revokeAllTokens()
             // 已发现的 peers 保留（下次进入页面可直接看到上次扫描结果）
         }
         // 主库被对端整库替换：SQLite 连接与内存缓存需重启 App 重建
@@ -639,7 +641,8 @@ struct LANSyncView: View {
         }
     }
 
-    /// 连接对端：取 /sync/status，成功进入配置页，失败按错误类型提示
+    /// 连接对端：取 /sync/status，成功进入配置页，失败按错误类型提示。
+    /// 对端 exposed == false（已取消暴露）→ 提示并从扫描列表移除陈旧条目（mDNS 缓存滞后）。
     private func connect(peer target: LANSyncPeer) {
         guard !connecting else { return }
         connecting = true
@@ -648,7 +651,14 @@ struct LANSyncView: View {
                 let status = try await LANSyncDiscovery.fetchStatus(host: target.host, port: target.port)
                 await MainActor.run {
                     self.connecting = false
-                    enterConfigure(peer: target, status: status)
+                    if status.exposed == false {
+                        // 对端已取消暴露：明确拒绝连接（而非放行到配对再 403）
+                        self.discovery.removePeer(id: target.id)
+                        self.alertTitle = "对端已取消暴露"
+                        self.showAlert = true
+                        return
+                    }
+                    self.enterConfigure(peer: target, status: status)
                 }
             } catch {
                 await MainActor.run {
@@ -705,7 +715,8 @@ struct LANSyncView: View {
     }
 
     /// 暴露开关动作：开 = 记录授权状态 + 发布 mDNS 广播（对端可扫描到并直接拉取）；
-    /// 关 = 停止广播 + 收回授权（进行中的会话 token 不回收，本会话内仍有效）。
+    /// 关 = 停止广播 + 收回授权 + 吊销全部会话 token（已配对的拉取方立即 403 中断，
+    /// 直至再次暴露重新配对——「取消暴露后不能再被连接和访问」）。
     private func setExposed(_ on: Bool) {
         pairing.isExposed = on
         if on {
@@ -713,6 +724,7 @@ struct LANSyncView: View {
                                              name: KlineHTTPServer.deviceName())
         } else {
             LANSyncAdvertiser.shared.unpublish()
+            pairing.revokeAllTokens()
         }
     }
 

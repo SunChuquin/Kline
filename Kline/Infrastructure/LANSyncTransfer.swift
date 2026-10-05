@@ -296,7 +296,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             try await self.download(request: req, toPart: partPath)
             // ② 本文件 sha 与对端声明值比对（防传输损坏）
             let localSha = try Self.streamSHA256(path: partPath)
-            let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: file.rel)
+            let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: file.rel, token: token)
             guard localSha == remoteSha else {
                 throw SyncError(message: "sha256 校验不符：\(file.rel)（本地 \(localSha.prefix(8))… / 对端 \(remoteSha.prefix(8))…）")
             }
@@ -306,8 +306,9 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     }
 
     /// 对端计算源文件 sha：GET /sync/sha?path=<rel> → {"path":…,"sha256":"…"}
-    private func fetchPeerSHA(peer: LANSyncPeer, rel: String) async throws -> String {
-        let req = try makeRequest(peer, method: "GET", path: "/sync/sha", query: ["path": rel])
+    /// （带会话 token：对端沙盒读门禁要求暴露态 / 流水线标识 / 有效 token 之一）
+    private func fetchPeerSHA(peer: LANSyncPeer, rel: String, token: String) async throws -> String {
+        let req = try makeRequest(peer, method: "GET", path: "/sync/sha", query: ["path": rel], token: token)
         let (data, resp) = try await send(req)
         guard (200..<300).contains(resp.statusCode) else {
             throw SyncError(message: "对端 sha 查询失败 HTTP \(resp.statusCode)：\(rel)")
