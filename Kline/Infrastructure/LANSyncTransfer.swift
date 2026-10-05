@@ -147,8 +147,11 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             self.backupDir = nil
         }
 
-        // 每次传输独立会话：单请求 60s（局域网足够），资源总超时 3600s（1.4GB 慢速 WiFi）
+        // 每次传输独立会话：单请求 60s（局域网足够），资源总超时 3600s（1.4GB 慢速 WiFi）。
+        // ⚠️ 禁系统代理（同 LANSyncDiscovery.fetchStatus）：局域网对端不在代理例外名单，
+        // 走代理必失败；1.4GB 主库更不能过代理。
         let cfg = URLSessionConfiguration.default
+        cfg.connectionProxyDictionary = [:]
         cfg.timeoutIntervalForRequest = 60
         cfg.timeoutIntervalForResource = 3600
         cfg.waitsForConnectivity = false

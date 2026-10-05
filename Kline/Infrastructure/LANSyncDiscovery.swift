@@ -13,9 +13,9 @@ import Combine
 ///
 /// 两个职责：
 /// 1. **Bonjour 浏览**：NWBrowser 浏览同网段 `_klinesync._tcp` 服务（对端由 KlineHTTPServer
-///    在前台监听 5051 时注册），把浏览结果解析成 IP:端口。浏览结果只含 service endpoint
-///    （内嵌 mDNS 主机名，URLSession 用不了），解析须真实发起一条临时 TCP 连接，
-///    .ready 后读 `currentPath.remoteEndpoint` 得到对端地址与端口。
+///    在前台监听 5051 时注册），用 NetService（dnssd）把服务端点解析成 mDNS 主机名:端口。
+///    ⚠️ 不能用「NWConnection 连上去读 remoteEndpoint」拿地址——Mac 开系统代理时该连接
+///    被代理劫持，拿到的是代理地址（实测 127.0.0.1:10808），见 startResolve 注释。
 /// 2. **手动直连校验**：手动输入 `IP:端口` 时 GET `http://<host>:<port>/sync/status`
 ///    （5s 超时）校验对端是可同步的 Kline，并取回设备信息与 6 类内容清单
 ///    （LANSyncPeerStatus，契约见 LANSyncModels.swift）。
@@ -30,8 +30,8 @@ final class LANSyncDiscovery: ObservableObject {
 
     /// Bonjour 服务类型（与 KlineHTTPServer 注册的服务一致）
     private static let serviceType = "_klinesync._tcp"
-    /// 单次解析超时（秒）：强制 IPv4 一轮 + 默认参数兜底一轮
-    private static let resolveTimeout: TimeInterval = 3
+    /// 单次解析超时（秒）：NetService.resolve(withTimeout:) 的 SRV 解析上限
+    static let resolveTimeout: TimeInterval = 5
 
     /// 当前发现的对端设备（按 host:port 去重；只在主线程更新）
     @Published var peers: [LANSyncPeer] = []
@@ -48,6 +48,9 @@ final class LANSyncDiscovery: ObservableObject {
     private var endpointIDs: [NWEndpoint: String] = [:]
     /// 解析中的端点（防止重复发起解析连接）
     private var resolving: Set<NWEndpoint> = []
+    /// 活跃的 NetService 解析器（主线程访问）。
+    /// ⚠️ NetServiceDelegate 回调要求 service（及其 delegate）存活，必须强持有。
+    private var activeResolvers: [NWEndpoint: ServiceResolver] = [:]
     /// peers 的队列侧工作副本：先在队列上合并去重，再快照到主线程发布
     private var workingPeers: [LANSyncPeer] = []
 
@@ -95,6 +98,8 @@ final class LANSyncDiscovery: ObservableObject {
             self.endpointIDs = [:]
             self.resolving = []
             self.workingPeers = []
+            // 丢弃所有活跃解析器（主线程；解析回调里 liveEndpoints 已清空，结果自然被丢弃）
+            DispatchQueue.main.async { self.activeResolvers.removeAll() }
             DispatchQueue.main.async {
                 self.isBrowsing = false
                 self.peers = []
@@ -150,76 +155,111 @@ final class LANSyncDiscovery: ObservableObject {
         }
     }
 
-    // MARK: - 服务端点 → IP:端口 解析
+    // MARK: - 服务端点 → 主机名:端口 解析（NetService / dnssd）
 
-    /// 解析 Bonjour 服务端点为 IP:端口。
+    /// 解析 Bonjour 服务端点为主机名与端口。
     ///
-    /// 策略：先用**强制 IPv4** 的参数连接（家庭局域网里 IPv6 多为链路本地地址且带作用域
-    /// 后缀，HTTP 直连用不了，优先拿 IPv4）；失败（含超时 / 纯 IPv6 设备）再用默认参数
-    /// 兜底连一次。两轮都失败则放弃，等服务重新广播（.added / .changed）再试。
+    /// 为什么不用「NWConnection 连上去读 currentPath.remoteEndpoint」：Mac 开系统代理
+    /// （如 SOCKS @127.0.0.1:10808）时该连接会被代理劫持，remoteEndpoint 返回的是
+    /// **代理地址**而非对端地址（实测 UD1 发现 UD2 显示 127.0.0.1:10808），Network.framework
+    /// 也没有可用的禁代理开关。改用 NetService（dnssd 封装）做 SRV 解析：拿到 mDNS
+    /// 主机名 + 真实端口，全程不建 socket、不过代理；后续 URLSession 已禁代理直连。
+    /// 解析失败则放弃，等服务重新广播（.added / .changed）再试。
     private func startResolve(_ endpoint: NWEndpoint, serviceName: String) {
         guard !resolving.contains(endpoint) else { return }
         resolving.insert(endpoint)
-        resolve(endpoint, serviceName: serviceName, forceIPv4: true)
-    }
-
-    private func resolve(_ endpoint: NWEndpoint, serviceName: String, forceIPv4: Bool) {
-        // 服务可能在上一轮解析中下线（.removed / stop() 已清空）
-        guard liveEndpoints.contains(endpoint) else {
-            resolving.remove(endpoint)
-            return
-        }
-        // 默认参数连接：连接能 ready 的远端地址必然可用（IPv4/IPv6 由系统选路），
-        // ready 后从 currentPath.remoteEndpoint 取实际 host:port。
-        let params: NWParameters = .tcp
-        let connection = NWConnection(to: endpoint, using: params)
-        var finished = false
-        // 收口：任何路径只走一次；解析连接即用即弃，拿到端点立即 cancel
-        func finish(_ peer: LANSyncPeer?) {
-            guard !finished else { return }
-            finished = true
-            connection.cancel()
-            resolving.remove(endpoint)
-            if let peer {
-                // 服务可能在解析期间下线
-                guard liveEndpoints.contains(endpoint) else { return }
-                endpointIDs[endpoint] = peer.id
-                upsertPeer(peer)
-            } else if forceIPv4 {
-                resolve(endpoint, serviceName: serviceName, forceIPv4: false)
-            } else {
-                log("解析服务失败（等服务重新广播）：\(serviceName) \(endpoint)")
-            }
-        }
-        connection.stateUpdateHandler = { [weak self] state in
+        let resolver = ServiceResolver(endpoint: endpoint, serviceName: serviceName) { [weak self] endpoint, peer in
             guard let self else { return }
-            switch state {
-            case .ready:
-                guard let remote = connection.currentPath?.remoteEndpoint,
-                      case let .hostPort(host, port) = remote else {
-                    self.log("连接已就绪但拿不到远端端点：\(serviceName)")
-                    finish(nil)
+            // 回调在主线程（NetService delegate / 超时兜底都在主线程收口）：
+            // 先解除对 resolver 的强持有，再转 queue 处理结果
+            DispatchQueue.main.async { self.activeResolvers.removeValue(forKey: endpoint) }
+            self.queue.async {
+                self.resolving.remove(endpoint)
+                guard let peer else {
+                    self.log("解析服务失败（等服务重新广播）：\(serviceName) \(endpoint)")
                     return
                 }
-                let hostText = Self.hostText(host)
-                let portValue = port.rawValue
-                let id = "\(hostText):\(portValue)"
-                finish(LANSyncPeer(id: id,
-                                   name: serviceName.isEmpty ? id : serviceName,
-                                   host: hostText,
-                                   port: portValue))
-            case .failed(let error):
-                self.log("解析连接失败（\(serviceName)，forceIPv4=\(forceIPv4)）：\(error)")
-                finish(nil)
-            case .waiting(let error):
-                // 强制 IPv4 而设备无 IPv4 路由时常见：不在此收口，等超时后走兜底轮
-                self.log("解析连接等待（\(serviceName)，forceIPv4=\(forceIPv4)）：\(error)")
-            default:
-                break
+                // 服务可能在解析期间下线（.removed / stop() 已清空）
+                guard self.liveEndpoints.contains(endpoint) else { return }
+                self.endpointIDs[endpoint] = peer.id
+                self.upsertPeer(peer)
             }
         }
-        connection.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + Self.resolveTimeout) { finish(nil) }
+        // NetService 必须挂在 RunLoop 上异步解析（delegate 回调随主 RunLoop 回来）；
+        // ⚠️ resolver 必须被强持有：局部变量出作用域即释放，NetServiceDelegate 回调将
+        // 永远不会到来（实测表现为 devices 页始终无设备）。存入 activeResolvers 持有。
+        DispatchQueue.main.async {
+            self.activeResolvers[endpoint] = resolver
+            resolver.start()
+        }
+    }
+
+    /// 单个 Bonjour 服务的解析器：包装 NetService 的 delegate 回调为一次性结果回调。
+    /// 5s 超时自动收口；resolve / stop 都在主线程执行（schedule 在主 RunLoop）。
+    private final class ServiceResolver: NSObject, NetServiceDelegate {
+        private let endpoint: NWEndpoint
+        private let serviceName: String
+        private let onResult: (NWEndpoint, LANSyncPeer?) -> Void
+        private var service: NetService?
+        /// 收口标志：resolve 成功 / 失败 / 超时只走一次
+        private var finished = false
+
+        init(endpoint: NWEndpoint, serviceName: String,
+             onResult: @escaping (NWEndpoint, LANSyncPeer?) -> Void) {
+            self.endpoint = endpoint
+            self.serviceName = serviceName
+            self.onResult = onResult
+        }
+
+        func start() {
+            let service = NetService(domain: "local.",
+                                     type: LANSyncDiscovery.serviceType + ".",
+                                     name: serviceName)
+            service.delegate = self
+            service.schedule(in: .main, forMode: .common)
+            service.resolve(withTimeout: LANSyncDiscovery.resolveTimeout)
+            self.service = service
+            // ⚠️ 超时兜底：NetService.resolve(withTimeout:) 超时后**静默停止**，既不回调
+            // netServiceDidResolveAddress 也不回调 didNotResolve，必须自己兜底收口
+            timeoutWork = DispatchWorkItem { [weak self] in self?.finish(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + LANSyncDiscovery.resolveTimeout + 1,
+                                          execute: timeoutWork!)
+        }
+
+        private func finish(_ peer: LANSyncPeer?) {
+            guard !finished else { return }
+            finished = true
+            timeoutWork?.cancel()
+            if let service {
+                service.stop()
+                service.remove(from: .main, forMode: .common)
+            }
+            self.service = nil
+            onResult(endpoint, peer)
+        }
+
+        /// 超时兜底任务（主线程）
+        private var timeoutWork: DispatchWorkItem?
+
+        /// 解析成功：hostName 形如 "sunchukundeMac-mini.local."（剥尾点），
+        /// port 为 SRV 记录的真实监听端口（5051/5052）。
+        func netServiceDidResolveAddress(_ sender: NetService) {
+            let host = (sender.hostName ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            guard !host.isEmpty, sender.port > 0, sender.port <= Int32(UInt16.max) else {
+                finish(nil)
+                return
+            }
+            let port = UInt16(sender.port)
+            let id = "\(host):\(port)"
+            finish(LANSyncPeer(id: id,
+                               name: serviceName.isEmpty ? id : serviceName,
+                               host: host,
+                               port: port))
+        }
+
+        func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
+            finish(nil)
+        }
     }
 
     // MARK: - peers 合并与发布
@@ -303,8 +343,12 @@ extension LANSyncDiscovery {
         guard let url = URL(string: "http://\(hostPart):\(port)/sync/status") else {
             throw URLError(.badURL)
         }
-        // 固定路径无需百分号编码；无缓存会话，请求级 5s 超时
+        // 固定路径无需百分号编码；无缓存会话，请求级 5s 超时。
+        // ⚠️ 禁系统代理：对端 host（如 sunchukundeMac-mini.local / 192.168.x.x）不在
+        // 代理例外名单（通常只有 localhost/127.0.0.0/8）时，请求会被 HTTP/SOCKS 代理
+        // 劫持 → 局域网直连全部失败（「无法连接」）。联机同步必须点对点直连。
         let cfg = URLSessionConfiguration.ephemeral
+        cfg.connectionProxyDictionary = [:]
         cfg.timeoutIntervalForRequest = 5
         cfg.timeoutIntervalForResource = 8
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
