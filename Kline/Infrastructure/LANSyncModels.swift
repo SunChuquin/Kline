@@ -65,10 +65,24 @@ struct LANSyncFileEntry: Codable, Equatable {
     let mod: TimeInterval
 }
 
-/// 一个类别的清单（files 可为空 = 该设备没有此类内容）
+/// 类别内的一个子项（细粒度选择用，随 /sync/status 的 items[].children 带出）：
+/// - 文件类（layouts/indicators）：key = Documents 相对路径（如 "Layouts/首页.json"、
+///   "indicator/Day/MACD.tdx"）、name = 去扩展名 / 去根目录的显示名、size = 字节、count = nil
+/// - 自选分组：key = 组名、name = 组名、size = 0、count = 组内 metaID 数
+struct LANSyncChild: Codable, Equatable {
+    let key: String
+    let name: String
+    let size: Int64
+    let count: Int?
+}
+
+/// 一个类别的清单（files 可为空 = 该设备没有此类内容；
+/// children 仅在有细粒度子项语义的类别出现，旧版对端 / 整类类别无此键 → decode 为 nil）
 struct LANSyncItem: Codable, Equatable {
     let key: String
     let files: [LANSyncFileEntry]
+    /// 细粒度子项清单（可选：旧版对端无此键 → nil，UI 退回整类选择行为）
+    let children: [LANSyncChild]?
 
     var category: LANSyncCategory? { LANSyncCategory(rawValue: key) }
     var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }

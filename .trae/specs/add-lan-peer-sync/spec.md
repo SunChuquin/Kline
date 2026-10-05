@@ -76,10 +76,21 @@
 
 主动方 SHALL 只能把对端的指定内容拉取到本机，覆盖本机前 SHALL 自动备份； SHALL 支持 6 类内容多选：自选 favorites.json、模拟 sim.json、页面布局 Layouts/*.json、指标公式（indicator / formula/picker / formula/strategy *.tdx，整目录镜像）、增量库 tdx_live.db(+manifest)、主库 tdx.db。
 
+**细粒度选择**（用户 2026-10-05 要求）：除增量库 / 主库 / 模拟（单文件）外，其余类别 SHALL 支持子项级选择：
+- 自选：选择具体**分组**（按组名匹配；合并语义 = 同名组整组替换但保留本机组 id（selectedGroupID 不断链）、新组追加、未选组与全局 notes / selectedGroupID 不动；formulaID 原样带入）
+- 页面布局：选择具体布局文件
+- 指标公式：选择具体 *.tdx 文件（子项选择 = 纯增改，**不**清理本机多余文件；整类选择才做整目录镜像）
+- 旧版对端无 children 清单 → 回落为仅整类选择（向后兼容）
+
 #### Scenario: 拉取自选
 
 - **WHEN** 用户连接对端、勾选「自选」并开始拉取
 - **THEN** 本机 favorites.json 先备份到 Backups/<时间戳>/，再被对端内容原子替换，自选页立即热重载；对端文件不变
+
+#### Scenario: 拉取指定分组
+
+- **WHEN** 用户展开「自选」勾选某个分组并开始拉取
+- **THEN** 该分组按名合并进本机自选（同名替换保 id / 新组追加），本机其他分组不受影响；对端文件不变
 
 #### Scenario: 主库拉取
 

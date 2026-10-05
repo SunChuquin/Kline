@@ -17,4 +17,5 @@
 - [x] 双 iPad mini 5（5th gen）模拟器联测通过：对端暴露 → 手动直连拉取 favorites → 本机备份 → sha256 翻转验证（marker 1dfe… → 对端 b6f6…）+ 热重载（passed 45.8s）
 - [x] 取消暴露即彻底断连：未暴露时 PUT/POST/DELETE/GET /sandbox、/sync/sha、request-pair 全 403（curl 实测 403×4 + pipeline 头 200 + exposed=False）；取消暴露吊销全部 token（进行中的拉取当场中断）
 - [x] 连接时校验对端 exposed 字段：false → 提示「对端已取消暴露」并从扫描列表移除陈旧条目（mDNS 缓存滞后防御）
+- [x] 细粒度选择：/sync/status 的 items 带 children 清单（curl 实测 favorites=分组、layouts=文件、sim/live/main=None）；UI 三态勾选（未选/整类/子项，混合态图标）；自选子项合并 = 同名组替换保本机 id + 新组追加 + notes/selectedGroupID 不动；指标子项选择不做镜像清理（仅整类才清理）；旧对端无 children 回落整类（UI 测试整类路径回归 passed 49s）
 - [x] 全部改动构建通过（xcodebuild 非沙箱模式），UI 测试跑在 iPad mini 5 模拟器上

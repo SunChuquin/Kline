@@ -8,7 +8,9 @@
 //  页面三态（页内 @State 切换，不做 NavigationStack，与个人中心全屏 overlay 模式一致）：
 //    devices   设备列表：本机服务状态（真实探测）+「暴露」开关（默认关：不广播不授权）+
 //              「扫描一次」按钮（约 4s 窗口，结果保留）+ 已发现设备 + 手动 IP 直连兜底
-//    configure 同步配置：固定方向为拉取 + 6 类内容勾选（本机量 vs 对端量）+ 开始拉取
+//    configure 同步配置：固定方向为拉取 + 6 类内容勾选（本机量 vs 对端量）+ 开始拉取；
+//              细粒度选择：自选可选具体分组、页面布局/指标公式可选具体文件（子项来自
+//              对端 status.items[].children，旧版对端无此键 → 退回整类勾选行为）
 //    running   进度与结果：建立同步会话 / 拉取进度 / 完成汇总 / 失败重试
 //
 //  暴露即授权：本机打开「暴露」开关后（LANSyncPairing.isExposed + LANSyncAdvertiser
@@ -55,14 +57,23 @@ struct LANSyncView: View {
 
     // MARK: - configure 页状态
 
+    /// 类别选择粒度：未选 / 整类全选 / 自定义子项集合（细粒度）
+    private enum CategoryPick: Equatable {
+        case none
+        case all
+        case custom(Set<String>)
+    }
+
     /// 当前对端（连接成功后写入）
     @State private var peer: LANSyncPeer?
-    /// 对端 /sync/status 快照（设备信息 + 6 类清单）
+    /// 对端 /sync/status 快照（设备信息 + 6 类清单 + 细粒度子项）
     @State private var remoteStatus: LANSyncPeerStatus?
     /// 本机 6 类清单（进入 configure 时构建一次）
     @State private var localInventory: [LANSyncItem] = []
-    /// 勾选的同步类别
-    @State private var selected: Set<LANSyncCategory> = []
+    /// 各类别的选择粒度（缺省 = .none）
+    @State private var picks: [LANSyncCategory: CategoryPick] = [:]
+    /// 展开（显示子项行）的类别集合
+    @State private var expandedCats: Set<LANSyncCategory> = []
 
     // MARK: - 弹窗状态
 
@@ -403,6 +414,12 @@ struct LANSyncView: View {
                 VStack(spacing: 0) {
                     ForEach(LANSyncCategory.allCases) { cat in
                         categoryRow(cat)
+                        // 展开的子项清单（细粒度选择：分组 / 具体文件）
+                        if expandedCats.contains(cat) {
+                            ForEach(children(of: cat), id: \.key) { child in
+                                childRow(cat, child)
+                            }
+                        }
                         if let last = LANSyncCategory.allCases.last, cat != last {
                             Divider().padding(.leading, 16)
                         }
@@ -412,7 +429,7 @@ struct LANSyncView: View {
                 .cornerRadius(12)
 
                 // 主库警示：勾选 main 时出现
-                if selected.contains(.main) {
+                if case .all = pick(of: .main) {
                     mainDBWarning
                 }
 
@@ -426,39 +443,77 @@ struct LANSyncView: View {
         }
     }
 
-    /// 单类内容勾选行：勾选圈 + 类别名 + 本机量 vs 对端量
+    /// 单类内容行：勾选圈（点 = 整类全选/全不选切换，混合态 → 整类全选）+ 类别名 +
+    /// 本机量 vs 对端量 +（对端提供子项时）展开箭头
     private func categoryRow(_ cat: LANSyncCategory) -> some View {
         let local = localInventory.first { $0.key == cat.rawValue }
         let remote = remoteStatus?.item(cat)
-        let checked = selected.contains(cat)
-        return Button(action: {
-            if checked {
-                selected.remove(cat)
-            } else {
-                selected.insert(cat)
+        let pick = pick(of: cat)
+        return HStack(spacing: 0) {
+            // 勾选圈（整类全选/全不选切换）
+            Button(action: { toggleCategoryPick(cat) }) {
+                HStack(spacing: 12) {
+                    Image(systemName: pickIconName(pick))
+                        .font(.system(size: 20))
+                        .foregroundColor(pick == .none ? Color(.tertiaryLabel) : .blue)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(cat.title)
+                            .font(.system(size: 16))
+                            .foregroundColor(Color.primary)
+                        Text("本机 \(sideSummary(local)) ｜ 对端 \(sideSummary(remote))")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 12)
+                }
+                .padding(.leading, 16)
+                .frame(minHeight: 56)
+                .contentShape(Rectangle())
             }
-        }) {
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("lansync.category.\(cat.rawValue)")
+
+            // 子项展开箭头（仅对端提供 children 时显示；旧版对端无此键 → 行为与旧版一致）
+            if !children(of: cat).isEmpty {
+                Button(action: { toggleExpanded(cat) }) {
+                    Image(systemName: expandedCats.contains(cat) ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(.tertiaryLabel))
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 56)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("lansync.expand.\(cat.rawValue)")
+            }
+        }
+    }
+
+    /// 子项行：勾选圈 + 名称 + 对端量（count 个 / 字节）
+    private func childRow(_ cat: LANSyncCategory, _ child: LANSyncChild) -> some View {
+        let checked = childChecked(child, of: cat)
+        return Button(action: { toggleChildPick(cat, key: child.key) }) {
             HStack(spacing: 12) {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .foregroundColor(checked ? .blue : Color(.tertiaryLabel))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(cat.title)
-                        .font(.system(size: 16))
-                        .foregroundColor(Color.primary)
-                    Text("本机 \(sideSummary(local)) ｜ 对端 \(sideSummary(remote))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 12)
+                Text(child.name)
+                    .font(.system(size: 14))
+                    .foregroundColor(Color.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(childQuantity(child))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 56)
+            .padding(.leading, 48)
+            .padding(.trailing, 16)
+            .frame(minHeight: 40)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("lansync.category.\(cat.rawValue)")
+        .accessibilityIdentifier("lansync.child.\(cat.rawValue).\(child.key)")
     }
 
     /// 主库警示块（黄色）
@@ -477,19 +532,19 @@ struct LANSyncView: View {
         .cornerRadius(12)
     }
 
-    /// 开始拉取（无选中类别时禁用）：把对端勾选内容获取到本机
+    /// 开始拉取（无选中内容时禁用）：把对端勾选内容获取到本机（整类或子项集合）
     private var startButton: some View {
         Button(action: startSync) {
             Text("开始拉取")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(Color.white)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(selected.isEmpty ? Color.blue.opacity(0.35) : Color.blue)
+                .background(hasAnyPick ? Color.blue : Color.blue.opacity(0.35))
                 .cornerRadius(12)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(selected.isEmpty)
+        .disabled(!hasAnyPick)
         .accessibilityIdentifier("lansync.start")
     }
 
@@ -700,17 +755,29 @@ struct LANSyncView: View {
         self.peer = newPeer
         self.remoteStatus = status
         localInventory = LANSyncSupport.buildSyncInventory()
-        selected = []
+        picks = [:]
+        expandedCats = []
         withAnimation(.easeOut(duration: 0.15)) { page = .configure }
     }
 
-    /// 发起拉取：切进度页并交传输引擎执行（phase 状态由引擎发布）
+    /// 发起拉取：切进度页并交传输引擎执行（phase 状态由引擎发布）。
+    /// 把各类别的选择粒度转成传输引擎的选择模型（整类 / 子项集合）。
     private func startSync() {
-        guard let peer = peer, let remote = remoteStatus, !selected.isEmpty else { return }
-        let cats = LANSyncCategory.allCases.filter { selected.contains($0) }
+        guard let peer = peer, let remote = remoteStatus else { return }
+        let sels: [LANSyncCategorySelection] = LANSyncCategory.allCases.compactMap { cat in
+            switch pick(of: cat) {
+            case .none:
+                return nil
+            case .all:
+                return LANSyncCategorySelection(category: cat, mode: .all, childKeys: [])
+            case .custom(let keys):
+                return LANSyncCategorySelection(category: cat, mode: .children, childKeys: keys)
+            }
+        }
+        guard !sels.isEmpty else { return }
         withAnimation(.easeOut(duration: 0.15)) { page = .running }
         Task {
-            await transfer.run(categories: cats, peer: peer, remoteStatus: remote)
+            await transfer.run(selections: sels, peer: peer, remoteStatus: remote)
         }
     }
 
@@ -729,6 +796,89 @@ struct LANSyncView: View {
     }
 
     // MARK: - 私有小助手
+
+    /// 是否有任何选中内容（开始按钮可用性）
+    private var hasAnyPick: Bool {
+        picks.values.contains { pick in
+            switch pick {
+            case .all: return true
+            case .custom(let keys): return !keys.isEmpty
+            case .none: return false
+            }
+        }
+    }
+
+    /// 该类别当前的选择粒度（缺省 = 未选）
+    private func pick(of cat: LANSyncCategory) -> CategoryPick {
+        picks[cat] ?? .none
+    }
+
+    /// 对端提供的该类别子项清单（旧版对端 / 整类类别为 []，不显示展开箭头）
+    private func children(of cat: LANSyncCategory) -> [LANSyncChild] {
+        remoteStatus?.item(cat)?.children ?? []
+    }
+
+    /// 类别勾选圈动作：整类全选 ↔ 全不选切换（混合态 / 未选 → 整类全选）
+    private func toggleCategoryPick(_ cat: LANSyncCategory) {
+        picks[cat] = (pick(of: cat) == .all) ? .none : .all
+    }
+
+    /// 子项勾选动作：在自定义集合中增删；空集归一为未选、全集归一为整类全选
+    private func toggleChildPick(_ cat: LANSyncCategory, key: String) {
+        let allKeys = Set(children(of: cat).map(\.key))
+        switch pick(of: cat) {
+        case .none:
+            picks[cat] = .custom([key])                    // 未选 → 勾第一个子项
+        case .all:
+            picks[cat] = .custom(allKeys.subtracting([key]))  // 全选 → 取消该子项
+        case .custom(var set):
+            if set.contains(key) {
+                set.remove(key)
+            } else {
+                set.insert(key)
+            }
+            if set.isEmpty {
+                picks[cat] = .none
+            } else if set == allKeys {
+                picks[cat] = .all
+            } else {
+                picks[cat] = .custom(set)
+            }
+        }
+    }
+
+    /// 子项当前是否勾选（整类 = 全勾；自定义 = 在集合内）
+    private func childChecked(_ child: LANSyncChild, of cat: LANSyncCategory) -> Bool {
+        switch pick(of: cat) {
+        case .all: return true
+        case .custom(let keys): return keys.contains(child.key)
+        case .none: return false
+        }
+    }
+
+    /// 展开 / 收起子项清单
+    private func toggleExpanded(_ cat: LANSyncCategory) {
+        if expandedCats.contains(cat) {
+            expandedCats.remove(cat)
+        } else {
+            expandedCats.insert(cat)
+        }
+    }
+
+    /// 类别勾选圈图标：整类=实心勾 / 混合态（部分子项选中）=空心勾 / 未选=空圈
+    private func pickIconName(_ pick: CategoryPick) -> String {
+        switch pick {
+        case .all: return "checkmark.circle.fill"
+        case .custom: return "checkmark.circle"
+        case .none: return "circle"
+        }
+    }
+
+    /// 子项对端量文案：分组 → "N 个"；文件 → 字节数
+    private func childQuantity(_ child: LANSyncChild) -> String {
+        if let count = child.count { return "\(count) 个" }
+        return byteText(child.size)
+    }
 
     /// 类别清单人性化摘要：单文件 → 字节 + 修改时间；多文件 → N 个文件 / X MB；空 → 「—」
     private func sideSummary(_ item: LANSyncItem?) -> String {

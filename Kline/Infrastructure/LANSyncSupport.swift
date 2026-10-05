@@ -133,8 +133,70 @@ enum LANSyncSupport {
     static func buildSyncInventory() -> [LANSyncItem] {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return LANSyncCategory.allCases.map { category in
-            LANSyncItem(key: category.rawValue, files: files(for: category, docs: docs))
+            let entries = files(for: category, docs: docs)
+            // children：细粒度子项清单（favorites=分组、layouts/indicators=文件；其余类别 nil）
+            return LANSyncItem(key: category.rawValue, files: entries,
+                               children: children(for: category, files: entries, docs: docs))
         }
+    }
+
+    /// 单类的子项清单（细粒度选择用；无子项语义的类别返回 nil）：
+    /// - favorites：favorites.json 内每个分组一个子项（key=组名、size=0、count=组内 metaID 数）；
+    ///   解析失败 / 文件不存在 → nil（对端按旧契约只看到整类）
+    /// - layouts：每个 json 文件一个子项（key=相对路径、name=去扩展名文件名、size=字节）
+    /// - indicators：每个 tdx 文件一个子项（key=相对路径、name=去掉根目录后的相对路径、size=字节）
+    /// - sim / live / main：nil（保持整类语义）
+    private static func children(for category: LANSyncCategory,
+                                 files: [LANSyncFileEntry],
+                                 docs: URL) -> [LANSyncChild]? {
+        switch category {
+        case .favorites:
+            return favoritesChildren(docs: docs)
+        case .layouts:
+            return files.map { LANSyncChild(key: $0.path, name: displayBasename($0.path), size: $0.size, count: nil) }
+        case .indicators:
+            return files.map { LANSyncChild(key: $0.path, name: displayRelative($0.path), size: $0.size, count: nil) }
+        case .sim, .live, .main:
+            return nil
+        }
+    }
+
+    /// 自选分组子项：解析 Documents/Favorites/favorites.json，每个分组一个 child。
+    private static func favoritesChildren(docs: URL) -> [LANSyncChild]? {
+        let full = docs.appendingPathComponent("Favorites/favorites.json").path
+        guard let data = FileManager.default.contents(atPath: full),
+              let root = try? JSONDecoder().decode(InventoryFavoritesRoot.self, from: data) else { return nil }
+        return root.groups.map { g in
+            LANSyncChild(key: g.name, name: g.name, size: 0, count: g.itemCount)
+        }
+    }
+
+    /// favorites.json 轻量解码结构（只取构建 children 需要的字段；与 FavoritesStore 的
+    /// 完整结构解耦——kind 是 enum、档结构有 v5/旧档两代，独立 struct 兼容两者且避免
+    /// 跨文件复用类型）。
+    private struct InventoryFavoritesGroup: Decodable {
+        let name: String
+        let manualFiles: [String]?      // v5 磁盘结构：组内标的 file 列表
+        let manualMetaIDs: [Int]?       // 旧档（≤ schema 4）：组内标的 metaID 列表
+        /// 组内 metaID 数（v5 用 manualFiles 数量、旧档用 manualMetaIDs 数量）
+        var itemCount: Int { manualFiles?.count ?? manualMetaIDs?.count ?? 0 }
+    }
+
+    private struct InventoryFavoritesRoot: Decodable {
+        let groups: [InventoryFavoritesGroup]
+    }
+
+    /// 布局文件显示名：去扩展名文件名（"Layouts/首页.json" → "首页"）
+    private static func displayBasename(_ rel: String) -> String {
+        ((rel as NSString).lastPathComponent as NSString).deletingPathExtension
+    }
+
+    /// 指标文件显示名：去掉根目录后的相对路径
+    /// （"indicator/Day/MA.tdx" → "Day/MA.tdx"，"formula/picker/X.tdx" → "picker/X.tdx"）
+    private static func displayRelative(_ rel: String) -> String {
+        let parts = rel.split(separator: "/")
+        guard parts.count > 1 else { return rel }
+        return parts.dropFirst().joined(separator: "/")
     }
 
     /// 单类的文件清单（该类文件均不存在时返回 []）

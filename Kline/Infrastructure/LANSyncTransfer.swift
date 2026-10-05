@@ -6,20 +6,26 @@
 //
 //  主动触发方只能把对端内容拉到本机；代码层面不存在向对端写文件的路径
 //  （无 PUT 上传、无对端 /sync/backup、无对端 DELETE 清理、无对端 reload 调用）。
-//  run(categories:peer:remoteStatus:) 严格按序执行，任何一步失败即
+//  run(selections:peer:remoteStatus:) 严格按序执行，任何一步失败即
 //  phase = .failed(原因)，已完成的文件保留、不回滚：
 //
 //    1. 计算文件计划  源端 = 对端 /sync/status 清单快照（remoteStatus）。源端为空的
-//                     类别跳过，结果里注明「对端无此内容」。
+//                     类别跳过，结果里注明「对端无此内容」。整类模式 = 对端清单全量；
+//                     子项模式 = 文件类按相对路径过滤、自选走分组合并路径。
 //    2. 配对          POST /sync/request-pair（对端已开启「暴露」即自动授权）→
 //                     会话 token；403 = 对端未暴露，无法获取其内容。
 //    3. 覆盖前备份    本机将覆盖的文件/目录直接复制到 Documents/Backups/<yyyyMMdd-HHmmss>/
-//                     （indicators 两个根目录整份快照），保持相对结构，记录 backupDir。
+//                     （indicators 仅整类模式做两个根目录整份快照），保持相对结构，记录 backupDir。
 //    4. 逐文件拉取    GET /sandbox/<rel> → 本地 <rel>.part（downloadTask 流式落盘）
 //                     → 本文件 sha 与对端 GET /sync/sha 声明值比对（防传输损坏）
 //                     → 相符后原子替换覆盖本地；失败重试 ≤2 次（指数退避 1s/2s），
 //                     sha 失败删除 .part 保留本机原文件。
-//                     indicators 拉完后整目录镜像：本机多余 *.tdx 直接删除。
+//                     indicators 整类模式拉完后整目录镜像：本机多余 *.tdx 直接删除；
+//                     子项模式纯增改不删。
+//                     自选子项模式例外：对端整份 favorites.json 下载到临时文件（下载+sha
+//                     同流程，不覆盖本机）→ 按组名合并进本机 favorites.json（同名组替换但
+//                     保留本机组 id、本机没有的组名原样新增、未选组/notes/selectedGroupID/
+//                     schemaVersion 不动）→ 原子替换落盘。
 //    5. 完成后生效    本机生效：needsConfigReload 类 → 主线程 LANSyncReload.apply(scopes:)；
 //                     live → LiveDataStore.shared.notifyExternalWrite()；
 //                     main → needsRestart = true 并发 lansyncMainDBReplaced 通知
@@ -31,7 +37,8 @@
 //    - 两端 App 必须都在前台（KlineHTTPServer 仅前台可用），且对端须已打开「暴露」。
 //    - 大文件全程流式：下载 downloadTask，sha256 用 FileHandle 每次读 1MB 喂
 //      CryptoKit（禁止 readDataToEndOfFile）。
-//    - 同步语义 = 文件级整份替换（无合并）；indicators 为整目录镜像（多余 *.tdx 删除）。
+//    - 同步语义 = 文件级整份替换（无合并）；唯一例外是自选子项模式 = 分组合并（见上）；
+//      indicators 整类模式为整目录镜像（多余 *.tdx 删除）。
 //    - rel 路径拼 URL 逐段 percentEncode（中文指标名），"/" 不编码。
 //    - 进度 / 速率经会话 delegate 回调采样（最近 ~1s 窗口），UI 更新统一切主线程。
 //    - LANSyncSupport.buildSyncInventory() / LANSyncReload.apply(scopes:) /
@@ -49,6 +56,18 @@ import Combine
 private struct SyncError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
+}
+
+// MARK: - 细粒度选择模型
+
+/// 单个类别的拉取选择：整类全量 或 子项集合（细粒度）。
+/// childKeys 语义：文件类（layouts/indicators）= Documents 相对路径；
+/// 自选（favorites）= 分组名；整类模式忽略。
+struct LANSyncCategorySelection: Equatable {
+    enum Mode: Equatable { case all, children }
+    let category: LANSyncCategory
+    let mode: Mode
+    let childKeys: Set<String>
 }
 
 // MARK: - 传输引擎
@@ -103,15 +122,18 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
     private struct PlanCategory {
         let category: LANSyncCategory
+        let mode: LANSyncCategorySelection.Mode
         let files: [PlanFile]
         let skipped: Bool            // 对端无此内容
+        /// 自选子项模式：选中的分组名（分组合并语义）；其余类别为空
+        let favoriteGroupNames: Set<String>
     }
 
     // MARK: - 入口
 
-    /// 异步执行一次拉取：把 peer 上选中类别的内容拉到本机。
+    /// 异步执行一次拉取：把 peer 上选中类别的内容拉到本机（细粒度：每类别可选整类或子项集合）。
     /// remoteStatus 为连接对端时 /sync/status 返回的清单快照（计划的数据源）。
-    func run(categories: [LANSyncCategory],
+    func run(selections: [LANSyncCategorySelection],
              peer: LANSyncPeer,
              remoteStatus: LANSyncPeerStatus) async {
         // 可重入保护：配对中 / 传输中再次调用直接忽略（防双击）
@@ -152,19 +174,19 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
         do {
             // ---- 步骤 1：计算文件计划（源端 = 对端快照）----
-            let plan = buildPlan(categories: categories, remoteStatus: remoteStatus)
+            let plan = buildPlan(selections: selections, remoteStatus: remoteStatus)
             let plannedFiles = plan.flatMap(\.files)
             totalBytes = plannedFiles.reduce(0) { $0 + $1.size }
             DebugLogger.shared.log("LANSync 计划: 拉取 \(plannedFiles.count) 文件 / \(totalBytes) bytes ← \(peer.name)(\(peer.host):\(peer.port))")
 
             // 对端全部选中类别源端都为空 → 无事可做，不打扰对端，直接汇总收尾
             guard !plannedFiles.isEmpty else {
-                finishDone(plan: plan, files: 0, mirrorDeleted: 0)
+                finishDone(plan: plan, files: 0, outcome: TransferOutcome())
                 return
             }
 
             // ---- 步骤 2：配对（phase 已是 .pairing；对端未暴露 → 403 失败）----
-            let token = try await pair(peer: peer, categories: categories)
+            let token = try await pair(peer: peer, categories: selections.map(\.category))
             DebugLogger.shared.log("LANSync 配对成功: \(peer.name)")
 
             // ---- 步骤 3：备份本机将被覆盖的原文件 ----
@@ -174,13 +196,13 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
             // ---- 步骤 4：逐文件拉取 ----
             publishOnMain { self.phase = .transferring }
-            let mirrorDeleted = try await transferFiles(plan: plan, peer: peer, token: token)
+            let outcome = try await transferFiles(plan: plan, peer: peer, token: token)
 
             // ---- 步骤 5：完成后本机生效 ----
             await applyEffects(plan: plan)
 
             // ---- 步骤 6：汇总 ----
-            finishDone(plan: plan, files: plannedFiles.count, mirrorDeleted: mirrorDeleted)
+            finishDone(plan: plan, files: plannedFiles.count, outcome: outcome)
         } catch {
             DebugLogger.shared.log("LANSync 失败: \(error)")
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -192,13 +214,31 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
     /// 源端 = 对端 status 快照。对端清单里该类别 files 为空 → skipped = true
     /// （传输阶段跳过、结果注明）。
-    private func buildPlan(categories: [LANSyncCategory],
+    /// 整类模式 = 对端清单全量（现行为）；子项模式：文件类按相对路径过滤，
+    /// 自选走分组合并路径（计划里保留对端 favorites.json 整份条目，供下载+备份+进度统计）。
+    private func buildPlan(selections: [LANSyncCategorySelection],
                            remoteStatus: LANSyncPeerStatus) -> [PlanCategory] {
         let sourceItems = remoteStatus.items
-        return categories.map { cat in
-            let files = (sourceItems.first { $0.key == cat.rawValue }?.files ?? [])
-                .map { PlanFile(rel: $0.path, size: $0.size, category: cat) }
-            return PlanCategory(category: cat, files: files, skipped: files.isEmpty)
+        return selections.map { sel in
+            let remoteFiles = sourceItems.first { $0.key == sel.category.rawValue }?.files ?? []
+            switch (sel.category, sel.mode) {
+            case (.favorites, .children):
+                // 自选子项模式：分组合并路径（对端整份 favorites.json 下载后按组名合并写回）
+                let files = remoteFiles.map { PlanFile(rel: $0.path, size: $0.size, category: sel.category) }
+                return PlanCategory(category: sel.category, mode: .children, files: files,
+                                    skipped: files.isEmpty, favoriteGroupNames: sel.childKeys)
+            case (.layouts, .children), (.indicators, .children):
+                // 文件类子项模式：按子项 key（Documents 相对路径）过滤对端清单
+                let files = remoteFiles.filter { sel.childKeys.contains($0.path) }
+                    .map { PlanFile(rel: $0.path, size: $0.size, category: sel.category) }
+                return PlanCategory(category: sel.category, mode: .children, files: files,
+                                    skipped: files.isEmpty, favoriteGroupNames: [])
+            default:
+                // 整类模式（sim/live/main 无子项语义，任何模式都按整类处理）
+                let files = remoteFiles.map { PlanFile(rel: $0.path, size: $0.size, category: sel.category) }
+                return PlanCategory(category: sel.category, mode: .all, files: files,
+                                    skipped: files.isEmpty, favoriteGroupNames: [])
+            }
         }
     }
 
@@ -234,8 +274,10 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         let docs = docsPath
         let files = plan.flatMap(\.files).filter { fm.fileExists(atPath: docs + "/" + $0.rel) }
         var mirrorRoots: [String] = []
-        if let ind = plan.first(where: { $0.category == .indicators }), !ind.files.isEmpty {
-            // 整目录镜像：本机两个根目录整份快照（存在才备份）
+        if let ind = plan.first(where: { $0.category == .indicators }),
+           !ind.files.isEmpty, ind.mode == .all {
+            // 整目录镜像（仅整类模式；子项模式纯增改不删，只备份实际覆盖的选中文件）：
+            // 本机两个根目录整份快照（存在才备份）
             mirrorRoots = ["indicator", "formula"].filter { fm.fileExists(atPath: docs + "/" + $0) }
         }
         guard !files.isEmpty || !mirrorRoots.isEmpty else { return nil }   // 没有会被覆盖的内容
@@ -260,22 +302,34 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
     // MARK: - 步骤 4：逐文件拉取
 
-    /// 逐文件拉取 + indicators 整目录镜像清理。返回清理掉的多余文件数。
+    /// 传输结果（结果汇总用）
+    private struct TransferOutcome {
+        var mirrorDeleted = 0              // indicators 整类镜像清理掉的多余文件数
+        var favoritesNotes: [String] = []  // 自选分组合并结果注明（合并/新增/对端缺组）
+    }
+
+    /// 逐文件拉取 + favorites 分组合并 + indicators 整类镜像清理。
     private func transferFiles(plan: [PlanCategory],
                                peer: LANSyncPeer,
-                               token: String) async throws -> Int {
-        var mirrorDeleted = 0
+                               token: String) async throws -> TransferOutcome {
+        var outcome = TransferOutcome()
         for cat in plan {
             guard !cat.files.isEmpty else { continue }   // 对端无此内容：已在结果注明
+            // 自选子项模式：不走整文件覆盖，下载对端整份 favorites.json 后按组名合并写回
+            if cat.category == .favorites && cat.mode == .children {
+                outcome.favoritesNotes += try await mergeFavoriteGroups(peer: peer, token: token, cat: cat)
+                continue
+            }
             for file in cat.files {
                 publishOnMain { self.currentFile = file.rel }
                 try await pullFile(peer: peer, file: file, token: token)
             }
-            if cat.category.isDirectoryMirror {
-                mirrorDeleted += try mirrorCleanup(cat: cat)
+            // 整目录镜像清理仅在整类模式执行；子项模式纯增改不删
+            if cat.category.isDirectoryMirror && cat.mode == .all {
+                outcome.mirrorDeleted += try mirrorCleanup(cat: cat)
             }
         }
-        return mirrorDeleted
+        return outcome
     }
 
     /// 拉取单文件：GET /sandbox/<rel> → 本地 <rel>.part → 与对端 /sync/sha 声明值比对
@@ -344,6 +398,113 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         return deleted
     }
 
+    // MARK: - favorites 分组合并（自选子项模式）
+
+    /// 自选分组合并结果
+    private struct FavoritesMergeResult {
+        var replacedGroups = 0            // 同名组被对端内容替换（保留本机组 id）
+        var appendedGroups = 0            // 本机没有的组名，对端组原样新增
+        var missingNames: [String] = []   // 对端清单里找不到的选中组名（跳过，不整体失败）
+    }
+
+    /// 自选子项模式（分组合并）：
+    /// 1. 下载对端整份 favorites.json 到临时文件（复用 pullFile 的下载+sha+重试流程，不覆盖本机）
+    /// 2. 按组名合并进本机 favorites.json（语义见 mergeFavoritesJSON），原子替换落盘
+    /// 3. 完成后沿用现有 favorites reloadFromDisk 生效路径（applyEffects 按类别触发）
+    /// 返回结果注明文案（合并/新增/对端缺组）。
+    private func mergeFavoriteGroups(peer: LANSyncPeer, token: String, cat: PlanCategory) async throws -> [String] {
+        guard let fav = cat.files.first else { return [] }
+        publishOnMain { self.currentFile = fav.rel }
+        let peerData = try await downloadPeerFavorites(peer: peer, rel: fav.rel, token: token)
+        let localPath = docsPath + "/" + fav.rel
+        let result = try Self.mergeFavoritesJSON(localPath: localPath,
+                                                 peerData: peerData,
+                                                 selectedNames: cat.favoriteGroupNames)
+        var notes: [String] = []
+        if result.replacedGroups > 0 || result.appendedGroups > 0 {
+            var s = "自选合并 \(result.replacedGroups) 个分组"
+            if result.appendedGroups > 0 { s += " / 新增 \(result.appendedGroups) 个分组" }
+            notes.append(s)
+        }
+        if !result.missingNames.isEmpty {
+            notes.append("对端无此自选分组：" + result.missingNames.joined(separator: "、"))
+        }
+        return notes
+    }
+
+    /// 下载对端 favorites.json 到临时文件并校验 sha（复用 pullFile 的下载+校验+重试流程；
+    /// 落系统临时目录，绝不覆盖本机文件）。
+    private func downloadPeerFavorites(peer: LANSyncPeer, rel: String, token: String) async throws -> Data {
+        let tempPath = NSTemporaryDirectory() + "lansync-peer-favorites.json"
+        defer { try? fm.removeItem(atPath: tempPath) }
+        try await withRetry(rel, "下载") {
+            try? self.fm.removeItem(atPath: tempPath)   // 上次尝试的残留
+            let req = try self.makeRequest(peer, method: "GET",
+                                           path: "/sandbox/" + Self.encodePathSegments(rel),
+                                           token: token)
+            try await self.download(request: req, toPart: tempPath)
+            let localSha = try Self.streamSHA256(path: tempPath)
+            let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: rel, token: token)
+            guard localSha == remoteSha else {
+                throw SyncError(message: "sha256 校验不符：\(rel)（本地 \(localSha.prefix(8))… / 对端 \(remoteSha.prefix(8))…）")
+            }
+        }
+        return try Data(contentsOf: URL(fileURLWithPath: tempPath))
+    }
+
+    /// 按组名把对端 groups 合入本机 favorites.json。用 JSONSerialization 直改根字典，
+    /// 只动 "groups"，其余根字段（notes / selectedGroupID / schemaVersion / 全局固顶）原样保留：
+    /// - 同名组 → 用对端组内容整体替换，但保留本机组 id（selectedGroupID 引用本地 id 不断链）
+    /// - 本机没有的组名 → 对端组原样新增（含对端 id；UUID 冲突概率忽略）
+    /// - 未选中的组一律不动
+    /// - formulaID 原样带入：引用对端公式库条目 id，本机公式库可能没有该条目，
+    ///   打开该分组刷新选股时结果自然为空（不报错、不断链）
+    /// - 本机文件缺失 → 以对端根为底、groups 仅保留选中组（全新安装首次同步场景）
+    /// - 本机文件存在但解析失败 → 抛错终止（不基于损坏档做合并；本机原文件已在步骤 3 备份）
+    /// - 全部选中组在对端缺失 → 零改动、不写盘
+    private static func mergeFavoritesJSON(localPath: String, peerData: Data,
+                                           selectedNames: Set<String>) throws -> FavoritesMergeResult {
+        guard let peerRoot = try JSONSerialization.jsonObject(with: peerData) as? [String: Any],
+              let peerGroups = peerRoot["groups"] as? [[String: Any]] else {
+            throw SyncError(message: "对端 favorites.json 解析失败，无法合并分组")
+        }
+        let localURL = URL(fileURLWithPath: localPath)
+        var root: [String: Any]
+        var localGroups: [[String: Any]] = []
+        if let localRaw = try? Data(contentsOf: localURL),
+           let parsed = try? JSONSerialization.jsonObject(with: localRaw) as? [String: Any] {
+            root = parsed
+            localGroups = parsed["groups"] as? [[String: Any]] ?? []
+        } else if FileManager.default.fileExists(atPath: localPath) {
+            // 本机档存在但解析失败：不基于损坏档合并（原文件已在步骤 3 备份，可人工恢复）
+            throw SyncError(message: "本机 favorites.json 解析失败，无法合并分组")
+        } else {
+            // 本机没有 favorites.json：以对端根为底（无本机内容可保留）
+            root = peerRoot
+        }
+        var result = FavoritesMergeResult()
+        for name in selectedNames.sorted() {   // 排序保证合并顺序确定
+            guard let peerGroup = peerGroups.first(where: { ($0["name"] as? String) == name }) else {
+                result.missingNames.append(name)
+                continue
+            }
+            if let idx = localGroups.firstIndex(where: { ($0["name"] as? String) == name }) {
+                var g = peerGroup
+                g["id"] = localGroups[idx]["id"]   // 保留本机组 id：selectedGroupID 引用不断链
+                localGroups[idx] = g
+                result.replacedGroups += 1
+            } else {
+                localGroups.append(peerGroup)      // 本机没有的组名：对端组原样新增
+                result.appendedGroups += 1
+            }
+        }
+        guard result.replacedGroups > 0 || result.appendedGroups > 0 else { return result }
+        root["groups"] = localGroups
+        let out = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try out.write(to: localURL, options: .atomic)
+        return result
+    }
+
     // MARK: - 步骤 5：完成后生效（本机）
 
     /// 只对实际拉取了文件的类别生效（与 KlineHTTPServer 各 reload 分支同语义）。
@@ -369,7 +530,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
     // MARK: - 步骤 6：汇总
 
-    private func finishDone(plan: [PlanCategory], files: Int, mirrorDeleted: Int) {
+    private func finishDone(plan: [PlanCategory], files: Int, outcome: TransferOutcome) {
         var parts: [String] = []
         if files > 0 {
             let mb = Double(transferred) / 1_048_576
@@ -377,10 +538,11 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         } else {
             parts.append("对端没有可拉取的内容")
         }
+        parts += outcome.favoritesNotes
         if let b = backupDir {
             parts.append("已备份本机原文件：\(b)")
         }
-        if mirrorDeleted > 0 { parts.append("镜像清理多余指标 \(mirrorDeleted) 个") }
+        if outcome.mirrorDeleted > 0 { parts.append("镜像清理多余指标 \(outcome.mirrorDeleted) 个") }
         let skipped = plan.filter(\.skipped).map { $0.category.title }
         if !skipped.isEmpty { parts.append("对端无此内容：" + skipped.joined(separator: "、")) }
         let cats = plan.filter { !$0.files.isEmpty }.map(\.category)
