@@ -24,7 +24,8 @@
   - [x] 3.3 `xcodebuild test -only-testing:KlineTests` 全绿（含新用例），xcresult 取证
     - 2026-10-07 实测：iPad mini 5th gen（54291852，GUI 可见）**37/37 全绿（0 fail 0 skip）**，testNumpyImportAndCompute Passed 0.56s；xcresult: /tmp/kline_numpy_test.xcresult
 - [ ] Task 4: 真机发布与验证（用户执行）
-  - [ ] 4.1 手动触发 engine.yml 出新 .tipa（engine-3.14.7 tag --clobber + sha256 sidecar）
+  - [x] 4.1 手动触发 engine.yml 出新 .tipa（engine-3.14.7 tag --clobber + sha256 sidecar）
+    - 2026-10-07 实证：build-numpy-wheel.yml run 37507451005 发 `numpy-wheel-2.5.3` Release（双 wheel + sidecar）；engine.yml run 37508185511 全绿，`KlineEngine-3.14.7.tipa` 28,386,228 字节 sha256 `bf0b490e…`；下载后解包验证 19 个 numpy .so + __init__.py 就位（路径 ios-arm64/lib/python3.14/site-packages/）
   - [ ] 4.2 用户经 TrollStore 更新 Engine.app → App 内 PyBridge 冒烟确认 numpy 可用（沙盒日志取证）
 - [ ] Task 5: 文档回填 + 提交
   - [ ] 5.1 可行性分析 §8.1 第 8 条标记完成 + 体积实测记录（.tipa 前后对比）
