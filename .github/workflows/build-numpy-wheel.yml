@@ -51,7 +51,7 @@ jobs:
           NINJA_DIR="$(dirname "$(which ninja)")"
           echo "PATH=${NINJA_DIR}:$PATH" >> "$GITHUB_ENV"   # 后续步骤 host PATH 带 ninja
           echo "CIBW=$RUNNER_TEMP/cibw-venv/bin" >> "$GITHUB_ENV"
-          cibuildwheel --version
+          "${CIBW}/cibuildwheel" --print-build-identifiers || true   # 冒烟：CLI 可执行（无 --version 参数）
           ninja --version
 
       - name: Download numpy sdist + verify sha256
