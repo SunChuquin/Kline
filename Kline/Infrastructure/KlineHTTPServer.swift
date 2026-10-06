@@ -1,4 +1,4 @@
-//
+﻿//
 //  KlineHTTPServer.swift
 //  Kline
 //
@@ -803,7 +803,7 @@ final class KlineHTTPServer {
         guard case let .hostPort(host, _) = endpoint else { return false }
         switch host {
         case .ipv4(let v4):
-            return v4 == .loopback || v4.rawValue.hasPrefix("127.")
+            return v4 == .loopback || v4.rawValue.first == 127
         case .ipv6(let v6):
             return v6 == .loopback
         default:
@@ -817,7 +817,7 @@ final class KlineHTTPServer {
     ///   - PC 流水线脚本（X-Kline-Client: pipeline）→ 放行（兜底，覆盖隧道源非回环的未知场景）
     ///   - 其余（局域网来源且未暴露）→ 403：取消暴露后局域网不可写入本机
     private func allowSandboxWrite(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
-        if Self.isLoopbackConnection(connection.remoteAddress)
+        if Self.isLoopbackConnection(connection.endpoint)
             || isLANAccessible || pipelineHeader {
             return true
         }
@@ -832,7 +832,7 @@ final class KlineHTTPServer {
     /// 取消暴露即吊销全部 token（revokeAllTokens），进行中的拉取立即中断。
     private func allowSandboxRead(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
         let tokenValid = !pairToken.isEmpty && LANSyncPairing.shared.isValidToken(pairToken)
-        if Self.isLoopbackConnection(connection.remoteAddress)
+        if Self.isLoopbackConnection(connection.endpoint)
             || isLANAccessible || pipelineHeader || tokenValid {
             return true
         }
