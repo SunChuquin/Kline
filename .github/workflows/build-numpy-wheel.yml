@@ -54,8 +54,6 @@ jobs:
           cp "$RUNNER_TEMP/cibw-venv/bin/ninja" "$RUNNER_TEMP/ninjabin/ninja"
           echo "CIBW=$RUNNER_TEMP/cibw-venv/bin" >> "$GITHUB_ENV"
           echo "NINJA_BIN=$RUNNER_TEMP/ninjabin" >> "$GITHUB_ENV"
-          # GITHUB_ENV 只对后续步骤生效——本步骤冒烟用字面路径
-          "$RUNNER_TEMP/cibw-venv/bin/cibuildwheel" --print-build-identifiers || true   # 冒烟：CLI 可执行（无 --version 参数）
           "$RUNNER_TEMP/ninjabin/ninja" --version
 
       - name: Download numpy sdist + verify sha256
