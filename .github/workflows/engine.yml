@@ -19,6 +19,10 @@ on:
         description: 'Python version inside the support package'
         required: false
         default: '3.14.7'
+      numpy_version:
+        description: 'numpy version baked into site-packages（wheel 取自 numpy-wheel-<ver> Release）'
+        required: false
+        default: '2.5.3'
 
 # 发布 Release 需要写仓库权限（引擎包独立下载通道）
 permissions:
@@ -32,6 +36,8 @@ jobs:
     env:
       BEEWARE_TAG: ${{ inputs.beeware_tag }}
       PYTHON_VERSION: ${{ inputs.python_version }}
+      NUMPY_VERSION: ${{ inputs.numpy_version }}
+      NUMPY_WHEEL_TAG: numpy-wheel-${{ inputs.numpy_version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +67,17 @@ jobs:
           echo "=== engine/Python.xcframework ==="
           ls -la engine/Python.xcframework
           du -sh engine
+
+      - name: Download numpy wheel + verify sha256
+        run: |
+          # wheel 由 build-numpy-wheel.yml 产出发 numpy-wheel-<ver> prerelease（固定 URL + sha256 校验）
+          WHL="numpy-${NUMPY_VERSION}-cp314-cp314-ios_13_0_arm64_iphoneos.whl"
+          BASE="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${NUMPY_WHEEL_TAG}"
+          echo "URL: ${BASE}/${WHL}"
+          curl --http1.1 -L --fail --retry 3 -O "${BASE}/${WHL}"
+          curl --http1.1 -L --fail --retry 3 -O "${BASE}/${WHL}.sha256"
+          shasum -a 256 -c "${WHL}.sha256"
+          echo "NUMPY_WHEEL=${GITHUB_WORKSPACE}/${WHL}" >> "$GITHUB_ENV"
 
       - name: ldid fakesign all Mach-O (TrollStore AMFI-friendly)
         run: |
@@ -185,6 +202,16 @@ jobs:
           EOF
           cat Engine.app/manifest.json
           python3 -c "import json; json.load(open('Engine.app/manifest.json'))"   # JSON 合法性冒烟
+          # numpy wheel 装入 site-packages（manifest build 字段由脚本追加 numpy 标记）。
+          # 必须在双区合并后、ldid 前：装入的 .so 随后续 ldid 全签一次覆盖。
+          bash scripts/install_numpy_into_engine.sh Engine.app "$NUMPY_WHEEL"
+          # 结构冒烟：numpy 全部 .so 必须是 iphoneos 平台 arm64（防误装 simulator wheel）
+          SITE="Engine.app/Frameworks/Python.xcframework/ios-arm64/lib/python3.14/site-packages"
+          for so in $(find "$SITE/numpy" -name '*.so'); do
+            vtool -show-build "$so" | grep -qE '^[[:space:]]*platform IOS$' \
+              || { echo "❌ .so 平台标记不符（应为 iphoneos）: $so"; exit 1; }
+          done
+          echo "✅ numpy .so 平台冒烟通过（iphoneos，$(find "$SITE/numpy" -name '*.so' | wc -l | tr -d ' ') 个）"
           # stub 必须签（TrollStore 安装校验 bundle 主可执行）；framework Mach-O 已在前面签过，这里幂等重签兜底
           echo "=== ldid -S every Mach-O under Engine.app/ ==="
           find Engine.app -type f -exec sh -c 'file "$1" | grep -q Mach-O && printf "%s\n" "$1"' _ {} \; | while IFS= read -r f; do
@@ -227,6 +254,7 @@ jobs:
             echo ""
             echo "来源：beeware/Python-Apple-support \`${BEEWARE_TAG}\`（Python-${PYTHON_VERSION%.*}-iOS-support.${BEEWARE_TAG#*-}.tar.gz）"
             echo "内容：Engine.app = Info.plist + Engine stub 可执行（仅满足安装校验，永不运行）+ Python.xcframework ios-arm64 真机 slice + manifest.json，全部 Mach-O 已 ldid ad-hoc 重签"
+            echo "numpy：${NUMPY_VERSION}（cibuildwheel 自建 iOS wheel，allow-noblas 纯 C 回退；site-packages 逐文件进 files.sha256）"
             echo ""
             echo "安装：用 TrollStore 安装本 .tipa 授信 Engine.app → 主 App 从 Engine.app 安装路径 dlopen Python"
             echo "（旧 tar.gz 方式已废弃：运行时下载 dylib 再 dlopen 会被 iOS AMFI 以 code signature invalid 拒绝）"

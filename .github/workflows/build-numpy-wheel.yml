@@ -1,0 +1,148 @@
+# numpy iOS wheel 自建（cibuildwheel）
+# 背景：PyPI 从未发布 numpy iOS wheel（iOS 是 Tier 3 平台，仅构建支持不承诺发布）、
+# mobile-forge 已不支持 Python 3.14+（2026-10-06 证伪）——唯一路径是 cibuildwheel 自建。
+# 方案（本机 12 轮实证通过，2026-10-06/07）：
+#   numpy 2.5.3 sdist + PR#28759 补丁（scripts/patch_numpy_ios.py 移植到 2.5.3）
+#   + CIBW_BUILD_FRONTEND --no-build-isolation（meson-python/Cython 预装进 cross build env）
+#   + host PATH 提供 ninja（xbuild-tools 发现阶段在 host 进程查 PATH）
+#   + CIBW_BEFORE_BUILD 清 build-dir（跨 arch 复用 build/ 会串编译器：meson 缓存模拟器
+#     编译器导致真机链接 iOS-simulator clang 失败——实证 build_dev1.log）
+#   + allow-noblas=true（纯 C 回退，兼容 iOS 13+，不用 Accelerate ILP64 的 16.4+ 限制）
+# 产物：numpy-<ver>-cp314-cp314-ios_13_0_arm64_iphoneos.whl（Engine.app 真机 site-packages 用）
+#       numpy-<ver>-cp314-cp314-ios_13_0_arm64_iphonesimulator.whl（模拟器 KlineTests 用）
+# 发独立 prerelease Release（tag numpy-wheel-<ver>），engine.yml 固定 URL + sha256 下载安装。
+# 注意：本 workflow 只手动触发；部署目标 13.0 来自 beeware platform-config（与引擎包一致）
+name: numpy iOS wheel (cibuildwheel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      numpy_version:
+        description: 'numpy version (PyPI sdist；NUMPY_SDIST_SHA256 必须同步更新)'
+        required: false
+        default: '2.5.3'
+
+# 发布 Release 需要写仓库权限
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    name: Build numpy iOS wheels (device + simulator)
+    runs-on: macos-latest
+
+    env:
+      NUMPY_VERSION: ${{ inputs.numpy_version }}
+      # PyPI numpy-2.5.3 sdist sha256（2026-10-06 实测记录；升级 numpy 版本必须同步换）
+      NUMPY_SDIST_SHA256: df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cibuildwheel + ninja (host PATH)
+        run: |
+          python3 -m pip install --upgrade pip
+          # ninja：xbuild-tools 发生在 host 进程（CIBW_ENVIRONMENT 的 PATH 只作用于构建环境内部）；
+          # PyPI ninja 的 macOS wheel 直接可用（此前失败的是装进 iOS cross env 的场景）
+          python3 -m pip install "cibuildwheel==4.3.0" ninja
+          NINJA_DIR="$(python3 -c 'import pathlib, sys; print(pathlib.Path(sys.executable).parent)')"
+          echo "NINJA_DIR=${NINJA_DIR}" >> "$GITHUB_ENV"
+          cibuildwheel --version
+          ninja --version
+
+      - name: Download numpy sdist + verify sha256
+        run: |
+          # pypi.io 是 PyPI 官方文件重定向域名；--http1.1 规避偶发 HTTP/2 framing 问题
+          curl --http1.1 -L --fail --retry 3 -o "numpy-${NUMPY_VERSION}.tar.gz" \
+            "https://pypi.io/packages/source/n/numpy/numpy-${NUMPY_VERSION}.tar.gz"
+          echo "${NUMPY_SDIST_SHA256}  numpy-${NUMPY_VERSION}.tar.gz" | shasum -a 256 -c -
+          tar -tzf "numpy-${NUMPY_VERSION}.tar.gz" > /dev/null   # 完整性冒烟
+
+      - name: Apply iOS patch (PR#28759 backport)
+        run: |
+          tar -xzf "numpy-${NUMPY_VERSION}.tar.gz"
+          python3 scripts/patch_numpy_ios.py "numpy-${NUMPY_VERSION}"
+
+      - name: Build wheels (device + simulator)
+        run: |
+          cd "numpy-${NUMPY_VERSION}"
+          # host PATH 前插 ninja 目录：xbuild-tools=["ninja"]（pyproject 补丁段）在 host 进程发现
+          export PATH="${NINJA_DIR}:$PATH"
+          # CIBW_ENVIRONMENT 的 PATH 同样带 ninja：meson 在构建环境内调用 ninja
+          CIBW_PLATFORM=ios \
+          CIBW_ARCHS="arm64_iphoneos arm64_iphonesimulator" \
+          CIBW_BUILD="cp314-*" \
+          CIBW_TEST_SKIP="*" \
+          CIBW_BUILD_FRONTEND="pip;args:--no-build-isolation" \
+          CIBW_BEFORE_BUILD="rm -rf build && pip install 'meson-python>=0.20.0' 'Cython>=3.1.0'" \
+          CIBW_ENVIRONMENT="PATH=${NINJA_DIR}:\$PATH" \
+          CIBW_CONFIG_SETTINGS="setup-args=-Dallow-noblas=true build-dir=build" \
+          cibuildwheel --output-dir ../wheelhouse .
+          ls -la ../wheelhouse
+
+      - name: Smoke — every .so must be arm64 + correct platform
+        run: |
+          # 结构冒烟：解包逐一验证架构（lipo）与 Mach-O 平台标记（vtool）。
+          # CI 无法直接执行 iOS .so（beeware 包无可执行 python），运行时冒烟由
+          # KlineTests（模拟器）与真机 PyBridge 冒烟承担。
+          rm -rf smoke && mkdir smoke
+          EXPECT_DEV=0
+          EXPECT_SIM=0
+          for w in wheelhouse/*.whl; do
+            case "$w" in
+              *iphoneos*)      WANT_PLATFORM='platform IOS' ;;
+              *iphonesimulator*) WANT_PLATFORM='platform IOSSIMULATOR' ;;
+              *) echo "❌ 意外 wheel 文件名: $w"; exit 1 ;;
+            esac
+            d="smoke/$(basename "$w" .whl)"
+            unzip -q "$w" -d "$d"
+            [ -f "$d/numpy/__init__.py" ] || { echo "❌ numpy/__init__.py 缺失: $w"; exit 1; }
+            SO_LIST="$(find "$d" -name '*.so')"
+            [ -n "$SO_LIST" ] || { echo "❌ wheel 内无任何 .so: $w"; exit 1; }
+            echo "$SO_LIST" | while IFS= read -r so; do
+              lipo -info "$so" | grep -q 'architecture: arm64$' || { echo "❌ 非 arm64: $so"; exit 1; }
+              vtool -show-build "$so" | grep -qE "^[[:space:]]*${WANT_PLATFORM}$" || { echo "❌ 平台标记不符（期望 ${WANT_PLATFORM}）: $so"; exit 1; }
+            done
+            case "$w" in
+              *iphoneos*)      EXPECT_DEV=1 ;;
+              *iphonesimulator*) EXPECT_SIM=1 ;;
+            esac
+            echo "✅ $(basename "$w"): 架构/平台冒烟通过（$(echo "$SO_LIST" | wc -l | tr -d ' ') 个 .so）"
+          done
+          [ "$EXPECT_DEV" = "1" ] && [ "$EXPECT_SIM" = "1" ] || { echo "❌ 缺少 device 或 simulator wheel"; exit 1; }
+
+      - name: Publish wheel Release (idempotent)
+        run: |
+          TAG="numpy-wheel-${NUMPY_VERSION}"
+          for w in wheelhouse/*.whl; do
+            shasum -a 256 "$w" | tee "${w}.sha256"
+          done
+          {
+            echo "numpy ${NUMPY_VERSION} iOS wheels（cibuildwheel 自建，CPython 3.14 / 部署目标 iOS 13.0）"
+            echo ""
+            echo "来源：PyPI sdist \`numpy-${NUMPY_VERSION}.tar.gz\`（sha256 \`${NUMPY_SDIST_SHA256:0:12}…\`）"
+            echo "补丁：PR#28759（iOS 支持）移植（\`scripts/patch_numpy_ios.py\`）+ \`allow-noblas=true\` 纯 C 回退"
+            echo "工具链：cibuildwheel 4.3.0 + meson-python（--no-build-isolation）+ ninja（host PATH）"
+            echo ""
+            echo "消费方：\`engine.yml\` 取 iphoneos wheel 装入 Engine.app site-packages（固定 URL + sha256 校验）；"
+            echo "iphonesimulator wheel 供本地 KlineTests 模拟器验证。"
+            echo ""
+            echo "sha256:"
+            echo '```'
+            cat wheelhouse/*.sha256
+            echo '```'
+            echo ""
+            echo "构建：run #${GITHUB_RUN_NUMBER} · commit ${GITHUB_SHA:0:7}"
+          } > release_notes.md
+          # 幂等：已存在则 --clobber 覆盖；prerelease 不抢占 /releases/latest 端点
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" wheelhouse/*.whl wheelhouse/*.sha256 --clobber
+            gh release edit "$TAG" --prerelease --title "numpy ${NUMPY_VERSION} iOS wheels" --notes-file release_notes.md
+          else
+            gh release create "$TAG" wheelhouse/*.whl wheelhouse/*.sha256 \
+              --prerelease \
+              --title "numpy ${NUMPY_VERSION} iOS wheels" \
+              --notes-file release_notes.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
