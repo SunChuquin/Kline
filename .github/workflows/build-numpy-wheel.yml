@@ -41,12 +41,16 @@ jobs:
 
       - name: Install cibuildwheel + ninja (host PATH)
         run: |
-          python3 -m pip install --upgrade pip
+          # runner 的 python3 是 Homebrew 的（PEP 668 externally-managed，pip 全局装被拒）→ venv 隔离
+          python3 -m venv "$RUNNER_TEMP/cibw-venv"
+          source "$RUNNER_TEMP/cibw-venv/bin/activate"
+          python -m pip install --upgrade pip
           # ninja：xbuild-tools 发生在 host 进程（CIBW_ENVIRONMENT 的 PATH 只作用于构建环境内部）；
           # PyPI ninja 的 macOS wheel 直接可用（此前失败的是装进 iOS cross env 的场景）
-          python3 -m pip install "cibuildwheel==4.3.0" ninja
-          NINJA_DIR="$(python3 -c 'import pathlib, sys; print(pathlib.Path(sys.executable).parent)')"
-          echo "NINJA_DIR=${NINJA_DIR}" >> "$GITHUB_ENV"
+          python -m pip install "cibuildwheel==4.3.0" ninja
+          NINJA_DIR="$(dirname "$(which ninja)")"
+          echo "PATH=${NINJA_DIR}:$PATH" >> "$GITHUB_ENV"   # 后续步骤 host PATH 带 ninja
+          echo "CIBW=$RUNNER_TEMP/cibw-venv/bin" >> "$GITHUB_ENV"
           cibuildwheel --version
           ninja --version
 
@@ -66,8 +70,8 @@ jobs:
       - name: Build wheels (device + simulator)
         run: |
           cd "numpy-${NUMPY_VERSION}"
-          # host PATH 前插 ninja 目录：xbuild-tools=["ninja"]（pyproject 补丁段）在 host 进程发现
-          export PATH="${NINJA_DIR}:$PATH"
+          # host PATH 已由 GITHUB_ENV 注入（venv bin 带 ninja + cibuildwheel）：
+          # xbuild-tools=["ninja"]（pyproject 补丁段）在 host 进程发现
           # CIBW_ENVIRONMENT 的 PATH 同样带 ninja：meson 在构建环境内调用 ninja
           CIBW_PLATFORM=ios \
           CIBW_ARCHS="arm64_iphoneos arm64_iphonesimulator" \
@@ -75,9 +79,9 @@ jobs:
           CIBW_TEST_SKIP="*" \
           CIBW_BUILD_FRONTEND="pip;args:--no-build-isolation" \
           CIBW_BEFORE_BUILD="rm -rf build && pip install 'meson-python>=0.20.0' 'Cython>=3.1.0'" \
-          CIBW_ENVIRONMENT="PATH=${NINJA_DIR}:\$PATH" \
+          CIBW_ENVIRONMENT="PATH=${CIBW}:\$PATH" \
           CIBW_CONFIG_SETTINGS="setup-args=-Dallow-noblas=true build-dir=build" \
-          cibuildwheel --output-dir ../wheelhouse .
+          "${CIBW}/cibuildwheel" --output-dir ../wheelhouse .
           ls -la ../wheelhouse
 
       - name: Smoke — every .so must be arm64 + correct platform
