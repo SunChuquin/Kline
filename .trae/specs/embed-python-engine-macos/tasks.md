@@ -15,8 +15,8 @@
   - [x] 4.3 `.gitignore` 追加 `EngineCache/`
 - [x] Task 5: 验证闭环
   - [x] 5.1 `prepare_engine_cache.sh` 单独跑通：双变体就位、幂等跳过、`--force` 可重做、landmark 冒烟
-  - [x] 5.2 模拟器验证（iPad mini 5 模拟器）：构建产物含 `KlineEngine/`（sim 变体）；实验室页同链路程序化验证通过——状态=已安装（来源=内嵌（随包））→ loadEngine（dlopen + Py_Initialize 计时数字可读）→ runScriptCapturingOutput 跑通 sys.version 回读（含 3.14）；实验①②③按钮为同一宿主方法，页面现象待用户按交付说明复核
-  - [x] 5.3 真机路径结构性验证：device 目标构建产物含 `KlineEngine/`（device 变体，arm64 dylib、manifest 正确）；物理真机端到端（部署启动 + 页面操作）待用户连接真机后跑 `kline_deploy_mac.sh` 验收
+  - [x] 5.2 模拟器验证（iPad mini 5 模拟器）：构建产物含 `KlineEngine/`（sim 变体）；实验室页同链路程序化验证通过——状态=已安装（来源=内嵌（随包））→ loadEngine（dlopen + Py_Initialize 计时数字可读）→ runScriptCapturingOutput 跑通 sys.version 回读（含 3.14）；实验①②③页面现象用户已真机复核确认（2026-10-06）
+  - [x] 5.3 真机路径结构性验证：device 目标构建产物含 `KlineEngine/`（device 变体，arm64 dylib、manifest 正确）；物理真机端到端用户明确搁置（2026-10-06，后续连接真机时跑 `kline_deploy_mac.sh` 验收即可）
   - [x] 5.4 回归检查：KlineTests 全绿（7 通过 / 0 失败 / 0 跳过）；无引擎环境构建降级无感（CI 模拟：无 EngineCache 时 Run Script 跳过、exit 0、产物无引擎）；CI 结构性检查（`KLINE_SKIP_ENGINE_EMBED=1` 模拟同样通过）；engine.yml / build.yml 零改动
 
 # Task Dependencies
