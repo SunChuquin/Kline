@@ -46,6 +46,8 @@ struct LocalUpdateView: View {
     @State private var remoteState: RemoteState = .idle
     /// 远程最新构建号（检查成功后写入，用于标题「最新#N」）
     @State private var remoteBuildNumber: Int? = nil
+    /// 远程 Kline.ipa 的官方 sha256（assets[].digest，下载落地后完整性校验用）
+    @State private var remoteIPASHA256: String? = nil
     /// 下载进度 0~100（下载中显示在圆圈里）
     @State private var downloadPercent = 0
 
@@ -273,6 +275,7 @@ struct LocalUpdateView: View {
             }
             let cur = GitHubUpdateService.currentBuildNumber
             self.remoteBuildNumber = info?.buildNumber
+            self.remoteIPASHA256 = info?.ipaSHA256
             if let n = info?.buildNumber, let c = cur, n > c {
                 self.remoteState = .outdated
                 DebugLogger.shared.log("发现新版本 #\(n)（当前 #\(c)）")
@@ -289,7 +292,7 @@ struct LocalUpdateView: View {
         archiveCurrentIPA()
         downloadPercent = 0
         remoteState = .downloading
-        GitHubUpdateService.downloadLatestIPA(progress: { p in
+        GitHubUpdateService.downloadLatestIPA(expectedSHA256: remoteIPASHA256, progress: { p in
             let pct = Int((p * 100).rounded())
             self.downloadPercent = min(100, max(0, pct))
         }) { _, err in

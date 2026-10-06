@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CryptoKit
 
 // MARK: - 远程更新（GitHub Release 最新构建 IPA）
 
@@ -15,6 +16,8 @@ struct GitHubReleaseInfo {
     var buildNumber: Int?
     /// 发布时间本地化短格式（如 "09-16 08:30"）
     var publishedText: String?
+    /// Kline.ipa 资产的官方 sha256（GitHub API assets[].digest，"sha256:hex" 去前缀；缺失为 nil）
+    var ipaSHA256: String?
 }
 
 /// GitHub Release 查询与 IPA 下载（公开仓库，无需鉴权）。
@@ -74,6 +77,17 @@ enum GitHubUpdateService {
                         break
                     }
                 }
+                // Kline.ipa 资产的官方 sha256（assets[].digest 形如 "sha256:hex..."）：
+                // 下载完成后据此做完整性校验（防 CDN 缓存旧包/代理截断——TrollStore 解包失败的根因）
+                var ipaSHA256: String?
+                if let assets = obj["assets"] as? [[String: Any]] {
+                    for a in assets where (a["name"] as? String) == "Kline.ipa" {
+                        if let digest = a["digest"] as? String, digest.hasPrefix("sha256:") {
+                            ipaSHA256 = String(digest.dropFirst("sha256:".count)).lowercased()
+                        }
+                        break
+                    }
+                }
                 var publishedText: String?
                 if let iso = obj["published_at"] as? String,
                    let d = ISO8601DateFormatter().date(from: iso) {
@@ -81,14 +95,19 @@ enum GitHubUpdateService {
                     f.dateFormat = "MM-dd HH:mm"
                     publishedText = f.string(from: d)
                 }
-                completion(GitHubReleaseInfo(buildNumber: num, publishedText: publishedText), nil)
+                completion(GitHubReleaseInfo(buildNumber: num, publishedText: publishedText, ipaSHA256: ipaSHA256), nil)
             }
         }.resume()
     }
 
     /// 下载最新 IPA 到沙盒 Documents/Downloads（App 容器内，必然可写）。
+    /// - URL 带时间戳穿透参数：--clobber 同名资产后 GitHub CDN 边缘可能仍回旧包/混合内容
+    ///   （引擎 .tipa 链路同款教训），`?t=` 强制回源。
+    /// - 落地后完整性校验：ZIP 魔数 + sha256（expectedSHA256 来自 release assets[].digest），
+    ///   不合格即删除报错，绝不把坏包递给 TrollStore（此前「failed to extract ipa file」的根因）。
     /// progress 在主线程回调 0~1；completion:(sizeBytes, errorMessage) 互斥，主线程回调。
-    static func downloadLatestIPA(progress: @escaping (Double) -> Void,
+    static func downloadLatestIPA(expectedSHA256: String? = nil,
+                                  progress: @escaping (Double) -> Void,
                                   completion: @escaping (Int64?, String?) -> Void) {
         let target = targetIpaPath
         let parent = (target as NSString).deletingLastPathComponent
@@ -99,9 +118,13 @@ enum GitHubUpdateService {
             try? FileManager.default.removeItem(atPath: target)
         }
 
+        // 稳定地址加时间戳穿透（重定向到 CDN 签名 URL，query 透传）
+        let busted = latestIpaURL.absoluteString + "?t=\(Int(Date().timeIntervalSince1970))"
+        let url = URL(string: busted) ?? latestIpaURL
+
         // ephemeral 会话：不缓存 IPA；downloadTask 直接落盘临时文件
         let session = URLSession(configuration: .ephemeral)
-        let task = session.downloadTask(with: latestIpaURL) { tmpURL, resp, err in
+        let task = session.downloadTask(with: url) { tmpURL, resp, err in
             session.finishTasksAndInvalidate()
             DispatchQueue.main.async {
                 if let err = err {
@@ -122,6 +145,12 @@ enum GitHubUpdateService {
                         try FileManager.default.copyItem(at: tmp, to: targetURL)
                         try? FileManager.default.removeItem(at: tmp)   // 拷贝成功后清理临时文件
                     }
+                    // 完整性校验：不过关删除文件并报可读错误（调用方保持 .failed，可重试）
+                    if let problem = Self.integrityProblem(at: target, expectedSHA256: expectedSHA256) {
+                        try? FileManager.default.removeItem(atPath: target)
+                        completion(nil, problem)
+                        return
+                    }
                     let size = (try? FileManager.default.attributesOfItem(atPath: target))?[.size] as? Int64 ?? 0
                     completion(size, nil)
                 } catch {
@@ -138,5 +167,40 @@ enum GitHubUpdateService {
             }
         }
         task.resume()
+    }
+
+    /// 下载落地文件的完整性校验：返回 nil = 通过；否则返回可读问题文案。
+    /// ① ZIP 魔数 PK\x03\x04（拦代理劫持返回的 HTML 错误页）；② 大小下限；③ sha256 精确比对。
+    static func integrityProblem(at path: String, expectedSHA256: String?) -> String? {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return "下载文件不可读" }
+        defer { try? fh.close() }
+        guard let head = try? fh.read(upToCount: 4), head.count == 4 else {
+            return "下载文件过小（可能是空响应或代理错误页）"
+        }
+        guard head.prefix(2) == Data("PK".utf8) else {
+            return "下载内容不是 IPA（ZIP 魔数不符——疑似代理劫持/CDN 错误页）"
+        }
+        let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int64 ?? 0
+        guard size > 1_000_000 else {
+            return "下载文件异常（\(size) 字节，疑似截断）"
+        }
+        guard let expected = expectedSHA256?.lowercased(), !expected.isEmpty else { return nil }
+        guard let actual = Self.fileSHA256(path: path) else { return "sha256 计算失败" }
+        guard actual == expected else {
+            return "sha256 不匹配（期望 \(expected.prefix(12))…，实际 \(actual.prefix(12))…——下载不完整，请重试）"
+        }
+        return nil
+    }
+
+    /// 文件 sha256（CryptoKit 流式，写法对齐 PythonEngineHost.fileSHA256）
+    static func fileSHA256(path: String) -> String? {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? fh.close() }
+        var hasher = SHA256()
+        while true {
+            guard let chunk = try? fh.read(upToCount: 1 << 20), !chunk.isEmpty else { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
