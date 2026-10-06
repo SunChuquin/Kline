@@ -43,16 +43,19 @@ jobs:
         run: |
           # runner 的 python3 是 Homebrew 的（PEP 668 externally-managed，pip 全局装被拒）→ venv 隔离
           python3 -m venv "$RUNNER_TEMP/cibw-venv"
-          source "$RUNNER_TEMP/cibw-venv/bin/activate"
-          python -m pip install --upgrade pip
+          "$RUNNER_TEMP/cibw-venv/bin/python" -m pip install --upgrade pip
           # ninja：xbuild-tools 发生在 host 进程（CIBW_ENVIRONMENT 的 PATH 只作用于构建环境内部）；
           # PyPI ninja 的 macOS wheel 直接可用（此前失败的是装进 iOS cross env 的场景）
-          python -m pip install "cibuildwheel==4.3.0" ninja
-          NINJA_DIR="$(dirname "$(which ninja)")"
-          echo "PATH=${NINJA_DIR}:$PATH" >> "$GITHUB_ENV"   # 后续步骤 host PATH 带 ninja
+          "$RUNNER_TEMP/cibw-venv/bin/python" -m pip install "cibuildwheel==4.3.0" ninja
+          # ninja 单独放独立目录：venv bin 里有 python，插到 host PATH 头部会干扰
+          # cibuildwheel 的 python 检测（"python available on PATH doesn't match our
+          # installed instance"——2026-10-07 run 37506650278 实证）
+          mkdir -p "$RUNNER_TEMP/ninjabin"
+          cp "$RUNNER_TEMP/cibw-venv/bin/ninja" "$RUNNER_TEMP/ninjabin/ninja"
           echo "CIBW=$RUNNER_TEMP/cibw-venv/bin" >> "$GITHUB_ENV"
+          echo "NINJA_BIN=$RUNNER_TEMP/ninjabin" >> "$GITHUB_ENV"
           "${CIBW}/cibuildwheel" --print-build-identifiers || true   # 冒烟：CLI 可执行（无 --version 参数）
-          ninja --version
+          "${NINJA_BIN}/ninja" --version
 
       - name: Download numpy sdist + verify sha256
         run: |
@@ -70,16 +73,16 @@ jobs:
       - name: Build wheels (device + simulator)
         run: |
           cd "numpy-${NUMPY_VERSION}"
-          # host PATH 已由 GITHUB_ENV 注入（venv bin 带 ninja + cibuildwheel）：
-          # xbuild-tools=["ninja"]（pyproject 补丁段）在 host 进程发现
-          # CIBW_ENVIRONMENT 的 PATH 同样带 ninja：meson 在构建环境内调用 ninja
+          # host PATH 前插独立 ninja 目录（无 python 干扰）：xbuild-tools=["ninja"]（pyproject
+          # 补丁段）在 host 进程发现；CIBW_ENVIRONMENT 的 PATH 同样带 ninja（meson 构建环境内调用）
+          export PATH="${NINJA_BIN}:$PATH"
           CIBW_PLATFORM=ios \
           CIBW_ARCHS="arm64_iphoneos arm64_iphonesimulator" \
           CIBW_BUILD="cp314-*" \
           CIBW_TEST_SKIP="*" \
           CIBW_BUILD_FRONTEND="pip;args:--no-build-isolation" \
           CIBW_BEFORE_BUILD="rm -rf build && pip install 'meson-python>=0.20.0' 'Cython>=3.1.0'" \
-          CIBW_ENVIRONMENT="PATH=${CIBW}:\$PATH" \
+          CIBW_ENVIRONMENT="PATH=${NINJA_BIN}:\$PATH" \
           CIBW_CONFIG_SETTINGS="setup-args=-Dallow-noblas=true build-dir=build" \
           "${CIBW}/cibuildwheel" --output-dir ../wheelhouse .
           ls -la ../wheelhouse
