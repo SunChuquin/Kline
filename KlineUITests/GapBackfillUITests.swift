@@ -155,6 +155,13 @@ final class GapBackfillUITests: XCTestCase {
         //    硬失败的文案固定是前缀「失败：」，只认前缀。
         XCTAssertFalse(verdictLabel.hasPrefix("失败"),
                        "补缺口失败：\(verdictLabel)")
+        // 节假日 / 已补齐时走「无缺口早退」单只探测（2026-10-06 国庆实测：源侧最新 = 主库 20260930），
+        // 属**合法成功态**，此时不会出现「缺口已补」「口径异常 0」「缺口覆盖」等缺口态文案
+        // → 断言无缺口结论成立即收，跳过缺口态断言（否则每个休市日必挂）。
+        if verdictLabel.contains("无缺口") {
+            print("GAP 无缺口早退（非交易日或已补齐），跳过缺口态断言：\(verdictLabel)")
+            return
+        }
         XCTAssertTrue(verdictLabel.contains("缺口已补"),
                       "结论未出现「缺口已补」：\(verdictLabel)")
         XCTAssertTrue(verdictLabel.contains("口径异常 0"),
