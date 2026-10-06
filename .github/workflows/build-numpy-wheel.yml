@@ -120,9 +120,8 @@ jobs:
       - name: Publish wheel Release (idempotent)
         run: |
           TAG="numpy-wheel-${NUMPY_VERSION}"
-          for w in wheelhouse/*.whl; do
-            shasum -a 256 "$w" | tee "${w}.sha256"
-          done
+          # sidecar 用裸文件名（engine.yml 在 cwd 校验，不依赖 wheelhouse/ 目录层级）
+          (cd wheelhouse && for w in *.whl; do shasum -a 256 "$w" > "${w}.sha256"; done)
           {
             echo "numpy ${NUMPY_VERSION} iOS wheels（cibuildwheel 自建，CPython 3.14 / 部署目标 iOS 13.0）"
             echo ""

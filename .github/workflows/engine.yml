@@ -76,7 +76,8 @@ jobs:
           echo "URL: ${BASE}/${WHL}"
           curl --http1.1 -L --fail --retry 3 -O "${BASE}/${WHL}"
           curl --http1.1 -L --fail --retry 3 -O "${BASE}/${WHL}.sha256"
-          shasum -a 256 -c "${WHL}.sha256"
+          # sidecar 历史格式含 wheelhouse/ 路径前缀——校验前剥离为裸文件名（在 cwd 校验）
+          awk '{n=$2; sub(/.*\//, "", n); print $1 "  " n}' "${WHL}.sha256" | shasum -a 256 -c -
           echo "NUMPY_WHEEL=${GITHUB_WORKSPACE}/${WHL}" >> "$GITHUB_ENV"
 
       - name: ldid fakesign all Mach-O (TrollStore AMFI-friendly)
