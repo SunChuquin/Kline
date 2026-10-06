@@ -793,15 +793,35 @@ final class KlineHTTPServer {
             || ProcessInfo.processInfo.environment["KLINE_AUTOPAIR"] == "1"
     }
 
+    /// 连接是否来自本机回环（127.0.0.1 / ::1）。
+    /// USB 转发（pymobiledevice3/itunes 隧道）在设备侧由 usbmuxd 以回环身份连入，
+    /// PC 部署助手 / 取日志 / 差分推送流水线全部经此通道；TrollStore 安装回读也走设备内
+    /// 127.0.0.1。这些都不是「局域网访问」，不应受暴露开关约束（用户明确要求：
+    /// 取消暴露只挡局域网联机同步，不限制 PC 工具链）。
+    /// 外部 LAN 设备的 TCP 源地址不可能是 127.0.0.1，伪造不了回环判据。
+    static func isLoopbackConnection(_ endpoint: NWEndpoint?) -> Bool {
+        guard case let .hostPort(host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let v4):
+            return v4 == .loopback || v4.rawValue.hasPrefix("127.")
+        case .ipv6(let v6):
+            return v6 == .loopback
+        default:
+            return false
+        }
+    }
+
     /// 沙盒写操作（PUT/POST/DELETE /sandbox）门禁：
-    ///   - 已暴露 / AUTOPAIR → 放行（暴露即授权；旧版 Kline 客户端也走此路径）
-    ///   - PC 流水线脚本（X-Kline-Client: pipeline，见 TrollRestore/push_live_usb.py）→ 放行
-    ///   - 其余（含未暴露时旧版客户端的推送）→ 403：用户取消暴露后本机不可被写入
+    ///   - 本机回环连接（USB 转发的 PC 工具链 / TrollStore 本地下载）→ 放行
+    ///   - 已暴露 / AUTOPAIR → 放行（暴露即授权）
+    ///   - PC 流水线脚本（X-Kline-Client: pipeline）→ 放行（兜底，覆盖隧道源非回环的未知场景）
+    ///   - 其余（局域网来源且未暴露）→ 403：取消暴露后局域网不可写入本机
     private func allowSandboxWrite(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
-        if isLANAccessible || pipelineHeader {
+        if Self.isLoopbackConnection(connection.remoteAddress)
+            || isLANAccessible || pipelineHeader {
             return true
         }
-        DebugLogger.shared.log("[LAN门禁] 未暴露，拒绝沙盒写请求")
+        DebugLogger.shared.log("[LAN门禁] 非本机来源且未暴露，拒绝沙盒写请求")
         respond(connection, status: 403, contentType: "application/json",
                 body: "{\"error\":\"not exposed\"}")
         return false
@@ -812,10 +832,11 @@ final class KlineHTTPServer {
     /// 取消暴露即吊销全部 token（revokeAllTokens），进行中的拉取立即中断。
     private func allowSandboxRead(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
         let tokenValid = !pairToken.isEmpty && LANSyncPairing.shared.isValidToken(pairToken)
-        if isLANAccessible || pipelineHeader || tokenValid {
+        if Self.isLoopbackConnection(connection.remoteAddress)
+            || isLANAccessible || pipelineHeader || tokenValid {
             return true
         }
-        DebugLogger.shared.log("[LAN门禁] 未暴露且无有效会话，拒绝沙盒读请求")
+        DebugLogger.shared.log("[LAN门禁] 非本机来源且未暴露且无有效会话，拒绝沙盒读请求")
         respond(connection, status: 403, contentType: "application/json",
                 body: "{\"error\":\"not exposed\"}")
         return false
