@@ -298,6 +298,8 @@ class DatabaseManager: ObservableObject {
             DispatchQueue.main.async {
                 self.metaList = results
                 self.isLoaded = true
+                // 就绪时刻落日志：排障「冷启动窗口内的补缺口触发」用（启动 → 就绪的时差）
+                DebugLogger.shared.log("[DB] 主库 metaList 就绪：\(results.count) 只")
             }
         }
     }

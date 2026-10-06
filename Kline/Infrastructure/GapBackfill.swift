@@ -230,6 +230,11 @@ final class GapBackfill: ObservableObject {
     // MARK: 内部
 
     private let queue = DispatchQueue(label: "com.sunck.kline.gapbackfill")
+    /// 「等待主库打开」的就绪订阅（run() 撞上主库加载窗口时挂上，续跑即置 nil）。
+    /// 背景：冷启动后主库 metaList 约 1.5-2s 才就绪，期间 TdxSync 时刻表冷启动补跑
+    /// （如已过 17:30 档）或用户手点补缺口都会撞空 → 此前直接报「metaList 为空」失败
+    /// 且状态粘滞。现在改为等待就绪后自动续跑一次。
+    private var readyCancellable: AnyCancellable?
     /// 多 Session = 多条独立 h2 连接（原因见 `sessionCount` 注释）
     private let sessions: [URLSession] = (0..<GapBackfill.sessionCount).map { _ in
         let cfg = URLSessionConfiguration.ephemeral
@@ -253,10 +258,34 @@ final class GapBackfill: ObservableObject {
         // @Published metaList 只能在主线程读
         let metas = DatabaseManager.shared.metaList
         guard !metas.isEmpty else {
-            DebugLogger.shared.log("[GapBackfill] metaList 为空，中止（等待主库打开）")
-            state = .failed
-            statusText = "主库 metaList 为空（等待主库打开）"
-            verdictText = "失败：主库 metaList 为空"
+            // 主库还在加载（冷启动窗口 ~1.5-2s）：不报失败，等 isLoaded 就绪后自动续跑。
+            // （TdxSync 17:30 档冷启动补跑 / 用户手点都会撞上这个窗口）
+            if !DatabaseManager.shared.isLoaded, readyCancellable == nil {
+                DebugLogger.shared.log("[GapBackfill] 主库未就绪，挂就绪订阅待自动续跑")
+                state = .running
+                statusText = "等待主库打开…"
+                coverageText = "—"
+                fetchText = "—"
+                verdictText = "—"
+                readyCancellable = DatabaseManager.shared.$isLoaded
+                    .receive(on: DispatchQueue.main)
+                    .filter { $0 }
+                    .sink { [weak self] _ in
+                        guard let self, self.readyCancellable != nil else { return }
+                        self.readyCancellable = nil
+                        DebugLogger.shared.log("[GapBackfill] 主库就绪，自动续跑补缺口")
+                        // 先复位防重入门闩再续跑：等待分支置的 .running 会被 run() 入口的
+                        // guard 拦截；同步执行无 await，不会被并发点击插队
+                        self.state = .idle
+                        self.run()
+                    }
+            } else if DatabaseManager.shared.isLoaded {
+                // 主库已打开但 meta 仍为空：真异常（meta 表无数据），照旧报失败
+                DebugLogger.shared.log("[GapBackfill] metaList 为空（主库已打开），中止")
+                state = .failed
+                statusText = "主库 metaList 为空（meta 表无数据）"
+                verdictText = "失败：主库 metaList 为空"
+            }
             return
         }
         let mainLatest = metas.compactMap { $0.lastDate }.max() ?? 0
