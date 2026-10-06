@@ -121,11 +121,19 @@ final class PythonEngineHostSourceTests: XCTestCase {
         }
         wait(for: [loaded], timeout: 60)
         let load = try XCTUnwrap(loadResult, "loadEngine 未回调")
-        guard case .success(let res) = load else {
-            XCTFail("内嵌引擎加载失败：\(load)")
-            return
+        if case .failure(let msg) = load {
+            // 测试顺序依赖：PyBridge 契约测试的 ensureReady 可能已在本用例前加载引擎，
+            // 进程内只能初始化一次 → 本用例收到「引擎已加载」失败。此时引擎必然已就绪，
+            // 经 manifest 校验版本后继续 ② PyRun 链路断言；其他失败仍视为真失败。
+            guard msg.contains("引擎已加载"),
+                  let manifest = host.engineManifest() else {
+                XCTFail("内嵌引擎加载失败：\(load)")
+                return
+            }
+            XCTAssertEqual(manifest.engineVersion, "3.14.7")
+        } else if case .success(let res) = load {
+            XCTAssertEqual(res.engineVersion, "3.14.7")
         }
-        XCTAssertEqual(res.engineVersion, "3.14.7")
 
         // ② 进程内跑脚本并回读 sys.version（对齐实验室实验①的本质链路：
         // wrappedScript 注入 __kline_out__，脚本体写 JSON，Swift 读回断言版本号）

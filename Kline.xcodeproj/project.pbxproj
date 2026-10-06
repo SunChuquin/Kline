@@ -122,6 +122,7 @@
 				D2C5C4A82FE4F6CD00D5918E /* Sources */,
 				D2C5C4A92FE4F6CD00D5918E /* Frameworks */,
 				D2C5C4AA2FE4F6CD00D5918E /* Resources */,
+				E1E2E3E40000000000000003 /* Copy PyScripts */,
 				E1E2E3E40000000000000002 /* Embed Python Engine */,
 			);
 			buildRules = (
@@ -292,7 +293,28 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# 内嵌 Python 引擎（macOS 构建路径专用；CI 无 EngineCache 结构性跳过）\nif [ \"$KLINE_SKIP_ENGINE_EMBED\" = \"1\" ]; then\n  echo \"KlineEngine: KLINE_SKIP_ENGINE_EMBED=1，跳过内嵌\"\n  exit 0\nfi\ncase \"${PLATFORM_NAME:-}\" in\n  iphoneos)        VARIANT=\"${SRCROOT}/EngineCache/device\" ;;\n  iphonesimulator) VARIANT=\"${SRCROOT}/EngineCache/sim\" ;;\n  *) echo \"KlineEngine: 平台 ${PLATFORM_NAME:-未知} 不支持引擎内嵌，跳过\"; exit 0 ;;\nesac\nif [ ! -f \"$VARIANT/manifest.json\" ]; then\n  echo \"KlineEngine: 变体缓存不存在（$VARIANT），跳过内嵌（可运行 scripts/prepare_engine_cache.sh 就位）\"\n  exit 0\nfi\nDEST=\"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/KlineEngine\"\nrm -rf \"$DEST\"\ncp -R \"$VARIANT\" \"$DEST\"\necho \"KlineEngine: 已内嵌 $VARIANT → $DEST\"\n";
+			shellScript = "# 内嵌 Python 引擎（macOS 构建路径专用；CI 无 EngineCache 结构性跳过）\nif [ \"$KLINE_SKIP_ENGINE_EMBED\" = \"1\" ]; then\n  echo \"KlineEngine: KLINE_SKIP_ENGINE_EMBED=1，跳过内嵌\"\n  rm -rf \"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/KlineEngine\"\n  exit 0\nfi\ncase \"${PLATFORM_NAME:-}\" in\n  iphoneos)        VARIANT=\"${SRCROOT}/EngineCache/device\" ;;\n  iphonesimulator) VARIANT=\"${SRCROOT}/EngineCache/sim\" ;;\n  *) echo \"KlineEngine: 平台 ${PLATFORM_NAME:-未知} 不支持引擎内嵌，跳过\"; exit 0 ;;\nesac\nif [ ! -f \"$VARIANT/manifest.json\" ]; then\n  echo \"KlineEngine: 变体缓存不存在（$VARIANT），跳过内嵌（可运行 scripts/prepare_engine_cache.sh 就位）\"\n  exit 0\nfi\nDEST=\"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/KlineEngine\"\nrm -rf \"$DEST\"\ncp -R \"$VARIANT\" \"$DEST\"\necho \"KlineEngine: 已内嵌 $VARIANT → $DEST\"\n";
+			showEnvVarsInLog = 0;
+		};
+		E1E2E3E40000000000000003 /* Copy PyScripts */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Kline/PyScripts",
+			);
+			name = "Copy PyScripts";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# 业务 Python 脚本 → bundle 根的 PyScripts/（同步组把资源平铺进 bundle 根，无法靠 Resources 阶段保目录结构）\nDEST=\"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/PyScripts\"\nrm -rf \"$DEST\"\ncp -R \"${SRCROOT}/Kline/PyScripts\" \"$DEST\"\necho \"PyScripts: 已拷贝 → $DEST\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

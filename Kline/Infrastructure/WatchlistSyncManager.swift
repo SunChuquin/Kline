@@ -255,14 +255,83 @@ final class WatchlistSyncManager: ObservableObject {
 
     // MARK: - 当期季/年 bar（主库当期 bar ⊕ 新日线）
 
+    // Python 路径低频日志标记（仅 dbQueue 串行访问，无竞态）：未就绪 / 首次成功各记一次，避免刷屏。
+    private static var pyNotReadyLogged = false
+    private static var pySuccessLogged = false
+
     /// 受影响标的的**当期**季/年 bar（键 = `quarterly` / `yearly`）。
-    /// 基期取**主库**该标的当期最新一根 bar（`date >= 当期日历起始`，其 `date` 即该周期首个交易日），
-    /// 与新日线合并：`open` 取周期首行、`high/low` 取极值、`close` 取末行、`vol/amo` 累加。
-    /// 主库无当期 bar → 直接用新日线聚合（`date` 取新日线日期）。
-    /// - Note: 需在主库 `dbQueue` 上执行；**只读主库**，不碰增量库窗口内的几天（否则会写坏完整周期值）。
+    /// Python 优先：引擎已加载时经 `period_aggregate.py`（op="merge"）合并，成功即采用；
+    /// 任何失败（未就绪 / 超时 / 脚本报错 / 解码失败）→ 记日志后**原样降级** Swift 路径（零行为变化）。
+    /// - Note: 需在主库 `dbQueue` 上执行（后台线程，才可安全同步等待 Python）；
+    ///   **只读主库**，不碰增量库窗口内的几天（否则会写坏完整周期值）。
     private static func currentPeriodBars(db: OpaquePointer?, dailyBars: [LiveUpsertBar],
                                           metaIdByFile: [String: Int],
                                           quarterStart: Int, yearStart: Int) -> [String: [LiveUpsertBar]] {
+        guard let db = db, !dailyBars.isEmpty, !metaIdByFile.isEmpty else { return [:] }
+        if let out = currentPeriodBarsViaPython(db: db, dailyBars: dailyBars, metaIdByFile: metaIdByFile,
+                                                quarterStart: quarterStart, yearStart: yearStart) {
+            return out
+        }
+        return currentPeriodBarsSwift(db: db, dailyBars: dailyBars, metaIdByFile: metaIdByFile,
+                                      quarterStart: quarterStart, yearStart: yearStart)
+    }
+
+    /// Python 路径（`period_aggregate.py` op="merge"）：成功返回结果；任何失败记日志并返回 nil（调用方降级 Swift）。
+    /// 基期 bar 仍从主库查询（Python 只做纯合并，不做 IO），基期口径与 Swift 路径完全一致。
+    private static func currentPeriodBarsViaPython(db: OpaquePointer, dailyBars: [LiveUpsertBar],
+                                                   metaIdByFile: [String: Int],
+                                                   quarterStart: Int, yearStart: Int) -> [String: [LiveUpsertBar]]? {
+        guard KlinePythonBridge.shared.isReady else {
+            if !pyNotReadyLogged {
+                pyNotReadyLogged = true
+                DebugLogger.shared.log("[PyBridge] period_aggregate 跳过：引擎未就绪 → 当期季/年合并走 Swift（一次性记录）；后台触发引擎加载（本会话一次）")
+            }
+            // 惰性激活：会话内一次后台 ensureReady；就绪后下次聚合起走 Python，失败维持 Swift 现状
+            KlinePythonBridge.shared.ensureOnce()
+            return nil
+        }
+        let quarterBase = basePeriodBars(db: db, table: "quarterly", start: quarterStart, metaIdByFile: metaIdByFile)
+        let yearBase = basePeriodBars(db: db, table: "yearly", start: yearStart, metaIdByFile: metaIdByFile)
+        // targets：daily 字段逐一从 LiveUpsertBar 取；基期缺失 → NSNull（脚本按 null 处理 = daily 原样）
+        let targets: [[String: Any]] = dailyBars.map { bar in
+            var bases: [String: Any] = ["quarterly": NSNull(), "yearly": NSNull()]
+            if let q = quarterBase[bar.file] { bases["quarterly"] = pyBaseDict(q) }
+            if let y = yearBase[bar.file] { bases["yearly"] = pyBaseDict(y) }
+            return ["file": bar.file,
+                    "daily": ["date": bar.date, "open": bar.open, "high": bar.high,
+                              "low": bar.low, "close": bar.close, "vol": bar.vol, "amo": bar.amo],
+                    "bases": bases]
+        }
+        let input: [String: Any] = ["op": "merge", "periods": ["quarterly", "yearly"], "targets": targets]
+
+        let t0 = Date()
+        switch KlinePythonBridge.shared.blockingCall(script: "period_aggregate", input: input, timeout: 2.0) {
+        case .failure(let e):
+            DebugLogger.shared.log("[PyBridge] period_aggregate 失败（\(pyErrorText(e))，耗时 \(msSince(t0))ms）"
+                + "→ 当期季/年合并降级 Swift")
+            return nil
+        case .success(let data):
+            guard let out = decodePeriodBars(data: data) else {
+                DebugLogger.shared.log("[PyBridge] period_aggregate 输出解码失败（result 缺失或行字段/类型不符，"
+                    + "耗时 \(msSince(t0))ms）→ 当期季/年合并降级 Swift")
+                return nil
+            }
+            if !pySuccessLogged {
+                pySuccessLogged = true
+                DebugLogger.shared.log("[PyBridge] period_aggregate 首次成功：季 \(out["quarterly"]?.count ?? 0) 行"
+                    + " / 年 \(out["yearly"]?.count ?? 0) 行（\(dailyBars.count) 只），耗时 \(msSince(t0))ms（一次性记录）")
+            }
+            return out
+        }
+    }
+
+    /// Swift 降级路径：基期取**主库**该标的当期最新一根 bar（`date >= 当期日历起始`，其 `date` 即该周期首个交易日），
+    /// 与新日线经 `mergePeriodBar` 合并：`open` 取周期首行、`high/low` 取极值、`close` 取末行、`vol/amo` 累加。
+    /// 主库无当期 bar → 直接用新日线聚合（`date` 取新日线日期）。
+    /// - Note: 原 `currentPeriodBars` 实现原样搬移（Python 路径的降级分支，零行为变化）。
+    private static func currentPeriodBarsSwift(db: OpaquePointer?, dailyBars: [LiveUpsertBar],
+                                               metaIdByFile: [String: Int],
+                                               quarterStart: Int, yearStart: Int) -> [String: [LiveUpsertBar]] {
         guard let db = db, !dailyBars.isEmpty, !metaIdByFile.isEmpty else { return [:] }
         let quarterBase = basePeriodBars(db: db, table: "quarterly", start: quarterStart, metaIdByFile: metaIdByFile)
         let yearBase = basePeriodBars(db: db, table: "yearly", start: yearStart, metaIdByFile: metaIdByFile)
@@ -271,6 +340,60 @@ final class WatchlistSyncManager: ObservableObject {
             out[period] = dailyBars.map { mergePeriodBar(file: $0.file, daily: $0, base: base[$0.file]) }
         }
         return out
+    }
+
+    // MARK: - Python 路径工具（period_aggregate 输入/输出适配）
+
+    /// KlineItem → period_aggregate 的 base bar 对象（volume/turnover → vol/amo）
+    private static func pyBaseDict(_ item: KlineItem) -> [String: Any] {
+        ["date": item.date, "open": item.open, "high": item.high,
+         "low": item.low, "close": item.close, "vol": item.volume, "amo": item.turnover]
+    }
+
+    /// 解码 period_aggregate op="merge" 输出（顶层 dict 且 ok==true 由桥接层已校验）；
+    /// 任何字段缺失 / 类型不符 → nil（调用方降级 Swift）。
+    private static func decodePeriodBars(data: Data) -> [String: [LiveUpsertBar]]? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = root["result"] as? [String: Any] else { return nil }
+        var out: [String: [LiveUpsertBar]] = [:]
+        for period in ["quarterly", "yearly"] {
+            guard let rows = result[period] as? [[String: Any]] else { return nil }
+            var bars: [LiveUpsertBar] = []
+            bars.reserveCapacity(rows.count)
+            for row in rows {
+                guard let bar = pyRowBar(row) else { return nil }
+                bars.append(bar)
+            }
+            out[period] = bars
+        }
+        return out
+    }
+
+    /// 单行输出 → LiveUpsertBar（file 字符串、date 整数、6 个数值字段逐一严格校验）
+    private static func pyRowBar(_ row: [String: Any]) -> LiveUpsertBar? {
+        guard let file = row["file"] as? String,
+              let date = row["date"] as? Int,
+              let open = row["open"] as? Double,
+              let high = row["high"] as? Double,
+              let low = row["low"] as? Double,
+              let close = row["close"] as? Double,
+              let vol = row["vol"] as? Double,
+              let amo = row["amo"] as? Double else { return nil }
+        return LiveUpsertBar(file: file, date: date, open: open, high: high,
+                             low: low, close: close, vol: vol, amo: amo)
+    }
+
+    /// PyBridgeError → 可读文本（scriptError 可能含 Python traceback，截断防刷屏）
+    private static func pyErrorText(_ e: PyBridgeError) -> String {
+        switch e {
+        case .engineNotReady(let msg): return "引擎未就绪：\(msg)"
+        case .timeout: return "超时（2.0s）"
+        case .scriptError(let msg): return "脚本失败：" + String(msg.prefix(300))
+        }
+    }
+
+    private static func msSince(_ t0: Date) -> Int {
+        Int(Date().timeIntervalSince(t0) * 1000)
     }
 
     /// 主库某周期表「当期」的最新一根 bar（键 = file）：**一次 SQL** 取回全部受影响标的

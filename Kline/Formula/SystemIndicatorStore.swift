@@ -109,6 +109,8 @@ final class SystemIndicatorStore: ObservableObject {
     private func loadAllPeriods() {
         let fm = FileManager.default
         var result: [String: [String: SystemIndicatorDef]] = [:]
+        // 校准输入收集（纯追加，不影响解析行为）：本轮实际解析过的 .tdx 原文，按周期组织
+        var calibContents: [String: [(id: String, content: String)]] = [:]
         for period in KlinePeriod.allCases {
             let dir = Self.writableDir(for: period)
             if !fm.fileExists(atPath: dir) {
@@ -123,6 +125,7 @@ final class SystemIndicatorStore: ObservableObject {
                     let id = (f as NSString).deletingPathExtension
                     let path = dir + "/" + f
                     let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                    calibContents[period.folderName, default: []].append((id: id, content: content))
                     if let def = parse(content: content, id: id) {
                         section[id] = def
                     }
@@ -131,6 +134,8 @@ final class SystemIndicatorStore: ObservableObject {
             result[period.folderName] = section
         }
         defs = result
+        // 触发点：本轮加载完成后异步派发权威校准（不阻塞、不等待；reloadAllPeriods 经由本函数同样覆盖）
+        calibrateWithPythonIfNeeded(calibContents)
     }
 
     /// 复制内置模板到指定周期目录
@@ -272,5 +277,147 @@ final class SystemIndicatorStore: ObservableObject {
         var all = defs
         all[period.folderName] = section
         defs = all
+    }
+
+    // MARK: - Python 后台权威校准（候选 1：指标模板解析）
+
+    /// 校准防重入：loadAllPeriods/reloadAllPeriods 可能连续触发，简单串行化——in-flight 期间新轮次直接跳过
+    private let calibrateLock = NSLock()
+    private var calibrateInFlight = false
+
+    /// 后台权威校准：把本轮 Swift 解析过的 .tdx 原文交给 Python（template_parse.py）对拍并修正 defs。
+    /// - 同步路径零依赖：仅异步派发；isReady 为纯只读检查，引擎未就绪（如首帧）静默跳过，绝不触发引擎初始化；
+    /// - 输入条目顺序与 keys 平行数组一致，脚本契约保证输出顺序与输入一致，按索引对齐回周期；
+    /// - 失败（超时/脚本错误/解码失败）只记日志，defs 保持 Swift 解析结果持续服务。
+    private func calibrateWithPythonIfNeeded(_ contents: [String: [(id: String, content: String)]]) {
+        calibrateLock.lock()
+        if calibrateInFlight {
+            calibrateLock.unlock()
+            return
+        }
+        calibrateInFlight = true
+        calibrateLock.unlock()
+
+        DispatchQueue.global().async { [weak self] in
+            guard let self else { return }
+            // 前置：引擎未就绪只读跳过（首启必然走到，静默不刷日志）；惰性激活后台加载一次
+            guard KlinePythonBridge.shared.isReady else {
+                KlinePythonBridge.shared.ensureOnce()
+                self.calibrateLock.lock()
+                self.calibrateInFlight = false
+                self.calibrateLock.unlock()
+                return
+            }
+            var items: [[String: Any]] = []
+            var keys: [(period: String, id: String)] = []
+            for (period, list) in contents {
+                for entry in list {
+                    items.append(["id": entry.id, "content": entry.content])
+                    keys.append((period: period, id: entry.id))
+                }
+            }
+            let t0 = CFAbsoluteTimeGetCurrent()
+            KlinePythonBridge.shared.call(script: "template_parse", input: ["items": items], timeout: 5.0) { [weak self] r in
+                guard let self else { return }
+                self.calibrateLock.lock()
+                self.calibrateInFlight = false
+                self.calibrateLock.unlock()
+                // defs 为 @Published：对拍与变更一律回主线程（call 的早期前置失败可能同步回调在后台线程）
+                let work = { self.applyTemplateCalibration(result: r, keys: keys,
+                                                           inputCount: items.count,
+                                                           elapsed: CFAbsoluteTimeGetCurrent() - t0) }
+                if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
+            }
+        }
+    }
+
+    /// 把 Python 校准结果对拍进 defs（必须在主线程执行）：以 Python accepted 结果为权威
+    private func applyTemplateCalibration(result: Result<Data, PyBridgeError>,
+                                          keys: [(period: String, id: String)],
+                                          inputCount: Int,
+                                          elapsed: TimeInterval) {
+        let data: Data
+        switch result {
+        case .failure(let e):
+            let reason: String
+            switch e {
+            case .engineNotReady(let m): reason = "引擎未就绪：\(m)"
+            case .timeout:               reason = "超时"
+            case .scriptError(let m):    reason = "脚本错误：\(m)"
+            }
+            DebugLogger.shared.log("[PyBridge] 模板校准失败（\(Int(elapsed * 1000))ms），沿用 Swift 解析结果——\(reason)")
+            return
+        case .success(let d):
+            data = d
+        }
+        guard let obj = try? JSONSerialization.jsonObject(with: data),
+              let dict = obj as? [String: Any],
+              let entries = dict["result"] as? [[String: Any]] else {
+            DebugLogger.shared.log("[PyBridge] 模板校准失败（\(Int(elapsed * 1000))ms），沿用 Swift 解析结果——输出解码失败")
+            return
+        }
+        guard entries.count == keys.count else {
+            DebugLogger.shared.log("[PyBridge] 模板校准失败（\(Int(elapsed * 1000))ms），沿用 Swift 解析结果——结果条数 \(entries.count) ≠ 输入 \(keys.count)")
+            return
+        }
+        var all = defs
+        var diffCount = 0
+        var details: [String] = []
+        for (i, e) in entries.enumerated() {
+            let period = keys[i].period
+            let id = keys[i].id
+            guard all[period] != nil else { continue }
+            let accepted = (e["accepted"] as? Bool) ?? false
+            let existing = all[period]?[id]
+            if accepted {
+                guard let name = e["name"] as? String,
+                      let scopeStr = e["scope"] as? String,
+                      let template = e["formulaTemplate"] as? String else {
+                    details.append("[\(period)] \(id)：Python 条目字段缺失（防御跳过，不做变更）")
+                    continue
+                }
+                let group = e["group"] as? String ?? ""
+                let coord = e["coord"] as? Int
+                let scope: IndicatorScope = (scopeStr == "main") ? .main : .sub
+                guard let def = existing else {
+                    // Swift parse 返回 nil（拒载）而 Python 通过 → 补挂定义
+                    diffCount += 1
+                    all[period]?[id] = SystemIndicatorDef(id: id, name: name, scope: scope, group: group,
+                                                          coord: coord, formulaTemplate: template)
+                    details.append("[\(period)] \(id)：Swift 无此定义而 Python 通过 → 新增")
+                    continue
+                }
+                var fieldDiffs: [String] = []
+                if def.name != name { fieldDiffs.append("name「\(def.name)」→「\(name)」") }
+                if def.scope != scope { fieldDiffs.append("scope \(def.scope)→\(scope)") }
+                if def.group != group { fieldDiffs.append("group「\(def.group)」→「\(group)」") }
+                if def.coord != coord { fieldDiffs.append("coord \(String(describing: def.coord))→\(String(describing: coord))") }
+                if def.formulaTemplate != template {
+                    fieldDiffs.append("formulaTemplate \(Self.preview(def.formulaTemplate))→\(Self.preview(template))")
+                }
+                if !fieldDiffs.isEmpty {
+                    diffCount += 1
+                    all[period]?[id] = SystemIndicatorDef(id: def.id, name: name, scope: scope, group: group,
+                                                          coord: coord, formulaTemplate: template)
+                    details.append("[\(period)] \(id)：\(fieldDiffs.joined(separator: "；"))")
+                }
+            } else if existing != nil {
+                // Python 拒载而 Swift defs 中存在 → 移除
+                diffCount += 1
+                all[period]?.removeValue(forKey: id)
+                details.append("[\(period)] \(id)：Python 拒载而 Swift 存在 → 移除")
+            }
+        }
+        if diffCount > 0 { defs = all }
+        DebugLogger.shared.log(String(format: "[PyBridge] 模板校准完成：输入 %d 条，差异 %d 条（%.0fms）",
+                                      inputCount, diffCount, elapsed * 1000))
+        for d in details {
+            DebugLogger.shared.log("[PyBridge] 模板校准差异——\(d)")
+        }
+    }
+
+    /// 差异日志的长文本预览（模板全文防刷屏，超 120 字截断）
+    private static func preview(_ s: String) -> String {
+        s.count > 120 ? "\(s.prefix(120))…（共\(s.count)字）" : s
     }
 }

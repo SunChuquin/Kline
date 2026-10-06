@@ -513,6 +513,15 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 
 候选 2 只有「解析层 + 内置函数库」下沉，**「首帧近似 + 分块增量调度」明确留原生**（§3.2）。
 
+**阶段 1 试点批完成记录（2026-10-06，iPad mini 5th gen 模拟器 / iOS 26.5）**：经用户决策，阶段 1 首批收窄为**试点批**——候选 3（周期聚合）+ 候选 1（指标模板解析）先下沉，打通「生产桥接层 + 业务脚本随 bundle 分发 + 契约测试复用 golden + §5.3 降级矩阵」全链路；**numpy（候选 13）拆为第二批**，进入条件 = 试点批验收通过。实现与验证：
+
+- **生产桥接层** `Kline/Python/KlinePythonBridge.swift`：`ensureReady()`（后台串行队列一次初始化，状态非 `.installed` 不尝试，绝不同步触发）/ `call(script:input:timeout:)`（Bundle.main/PyScripts 定位脚本、UUID 临时文件 JSON in/out、base64 输入防注入包装、超时看门狗）/ `blockingCall`（禁主线程）。失败路径三类（引擎未就绪 / 超时 / 脚本报错）均 DebugLogger 可检索，调用方 Swift 降级。
+- **业务脚本** `Kline/PyScripts/`：`period_aggregate.py`（aggregate/merge 双操作，桶键=周期日历起始日，镜像 `src/tdx_parser.py` + `live_db_builder.aggregate_full_periods` 口径）、`template_parse.py`（逐条镜像 `SystemIndicatorStore.parse`，KIND≠TECH 拒载语义）。
+- **调用点切换**：`WatchlistSyncManager.currentPeriodBars` Python 优先 + Swift 原路径降级；`SystemIndicatorStore` 加载完成后台 Python 重解析对拍校准（同步路径零改动，差异以 Python 为准并记录明细）。**激活时机 = 惰性激活（ensureOnce）**：调用点发现引擎未就绪时会话内一次性后台触发加载（模拟器实测 43ms），首启早期先走 Swift 降级，就绪后自动切 Python——既满足「绝不同步阻塞首帧」，又保证试点候选在真实启动路径上实际生效（沙盒日志实证：`跳过 → 后台触发加载 → 加载成功（43ms）`三段记录）。
+- **验证结果**：有引擎构建 KlineTests **36/36 全绿**（PyBridge 契约 ×2 套件 vs golden + 引擎冒烟，xcresult 实证）；降级构建（`KLINE_SKIP_ENGINE_EMBED=1`）**36 tests / 4 skipped / 0 failures**（桥接契约 3 用例 + 冒烟 1 用例 XCTSkip，其余 32 个纯 Swift 路径全绿 = 聚合/模板行为与现状一致）。
+- **打包修正**：同步组把 `.py` 平铺进 bundle 根 → 新增 Copy PyScripts 构建阶段保住 `PyScripts/` 目录；Embed Python Engine 阶段跳过分支补 `rm -rf`（修复增量构建引擎残留）。
+- **待办**：真机（TrollStore 路径）端到端验证待用户执行；UI 测试 3 个既有失败与本批无关（相关提交 71dbe89 / 855aa6a / 7db0d7f 远早于本批，已取证）。
+
 ### 6.4 收益不对称的提醒
 
 - 「避免造轮子」是本项目**最被高估**的收益：承载口径的 Python 全为标准库，兑现它要付 numpy/pandas 的体积与交叉编译代价，且与「剥离以缩小 IPA」互相冲突。**唯一的例外是候选 12 形态识别**——TA-Lib 的 61 个形态函数是真正意义上的「不造轮子」。
@@ -558,6 +567,9 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 4. **§4 新增第三道反向闸「并发吞吐」**，Phase-0 实验 2 同步加测（§7）。
 5. **§5.6 新增「引擎获取顺序与原子替换」（用户决策）**：PC 部署助手与 App 内个人中心两条通道均采用「先下引擎（临时区 + sha256 校验）→ 后更 App → 首启原子激活」顺序，从根源消除「App 新/引擎缺」与「半成品覆盖在用引擎」两类坏状态；降级矩阵从常态兜底退为异常兜底（§5.3）。
 6. **首帧红线确认（用户决策）**：「引擎不进首帧」按默认红线执行；仅当 Phase-0 实验 2 实测「150 根 + 桥接往返」落在阈值内（引擎常驻预热、近似计算不依赖 numpy）方可重估，将候选 2 的首帧调度一并下沉（§3.2 阈值化条件）。
+7. **阶段 1 试点批落地（2026-10-06）**：候选 3（周期聚合）+ 候选 1（模板解析）下沉完成——桥接层 / 业务脚本 / 调用点切换 / 契约测试 ×2 全链路打通，模拟器双轮验证（有引擎 36/36 全绿；无引擎 4 skip 0 fail，纯 Swift 降级路径与现状一致）。实现与验证明细见 §6.3 试点批完成记录。
+8. **numpy 拆为第二批（用户决策，2026-10-06）**：接受 §3.6.2 数十 MB 体积代价，进入条件 = 试点批验收通过；届时启动 mobile-forge wheel 链路评估。
+9. **候选 14（补缺口 GapBackfill）暂不立项**（用户决策，2026-10-06）：继续走既有 Swift 实现与测试闭环，不进 §3.1 表。
 
 ### 8.2 待确认事项（下一轮讨论输入）
 

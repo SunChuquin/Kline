@@ -641,6 +641,26 @@ final class PythonEngineHost: ObservableObject {
         }
     }
 
+    /// 生产桥接执行通道：GIL 保障的进程内 PyRun（无 UI busy、不刷实验室输出；失败仅记 DebugLogger）。
+    /// 供 KlinePythonBridge 复用；语义与 runScript 一致（workQueue 串行 + PyGILState_Ensure/Release）。
+    func runPyBridge(_ script: String, completion: @escaping (Result<Double, String>) -> Void) {
+        workQueue.async { [weak self] in
+            guard let self = self, self.pyHandle != nil, let run = self.pyRunFn else {
+                DispatchQueue.main.async { completion(.failure("引擎未加载")) }
+                return
+            }
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let gil = self.pyGilEnsureFn.map { $0() } ?? -1
+            let rc = script.withCString { run($0) }
+            if let rel = self.pyGilReleaseFn, gil >= 0 { rel(gil) }
+            let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+            DispatchQueue.main.async {
+                completion(rc == 0 ? .success(ms)
+                                   : .failure("PyRun_SimpleString 返回 \(rc)（脚本执行异常）"))
+            }
+        }
+    }
+
     /// 结果捕获执行：输出文件路径经 base64 传给脚本（防拼接注入），
     /// 脚本体把 JSON 写到 Documents/py_out.json，Swift 读回。
     func runScriptCapturingOutput(_ body: String,
