@@ -8,7 +8,7 @@
 import SwiftUI
 import UIKit
 
-/// 「本地更新」卡片组（个人中心内）：只保留两条状态行，行高固定 48，
+/// 「本地更新」卡片组（个人中心内）：只保留三条状态行，行高固定 48，
 /// 任何状态与点击都只替换右侧状态图标（图标位固定 24x24），
 /// 不新增文本 / 额外行 / 列表，**布局永不变形**。
 ///
@@ -17,6 +17,10 @@ import UIKit
 /// 2. 检查新版（最新#N 当前 #M）：**页面打开即自动检查一次**，之后也可点这一行复检；
 ///    未检查 = 灰「=」，检查中 = 黄「…」，下载中 = 黄「圆圈+百分比数字」，
 ///    已是最新 = 绿勾，有新版或失败 = 红叉（点击 = 下载并安装 / 重试）。
+/// 3. 更新引擎（最新#N 当前 #M）：引擎包（KlineEngine .tipa）独立通道，结构同 2——
+///    远程构建号取引擎 Release（prerelease 固定 tag）说明里的「构建：run #N」，
+///    当前构建号取已安装 Engine.app Info.plist 的 CFBundleVersion（engine.yml 注入）。
+///    点击有新版 = 下载 .tipa（sidecar + Release digest 双校验）→ 拉起 TrollStore 安装。
 ///
 /// 下载新版前会把沙盒内现有的 Kline.ipa 归档为 Kline_<当前构建号>.ipa（可回退手动安装），
 /// 归档只保留版本号最大的 10 个，避免磁盘被历史 IPA 占满。
@@ -28,7 +32,7 @@ struct LocalUpdateView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
-    /// 第二行的远程更新状态
+    /// 第二行的远程更新状态（引擎行复用同一组语义）
     private enum RemoteState {
         case idle          // 未检查
         case checking      // 检查中
@@ -50,6 +54,15 @@ struct LocalUpdateView: View {
     @State private var remoteIPASHA256: String? = nil
     /// 下载进度 0~100（下载中显示在圆圈里）
     @State private var downloadPercent = 0
+
+    /// 引擎行（更新引擎）：状态结构完全对齐 App 行
+    @State private var engineState: RemoteState = .idle
+    /// 远程引擎 Release 构建号（说明里「构建：run #N」）
+    @State private var engineRemoteBuildNumber: Int? = nil
+    /// 远程 .tipa 的官方 sha256（assets[].digest，与 sidecar 双校验）
+    @State private var engineTipaSHA256: String? = nil
+    /// 引擎包下载进度 0~100（采样自 PythonEngineHost.downloadProgress）
+    @State private var engineDownloadPercent = 0
 
     // MARK: - 数据同步（增量行情库自动拉取）
 
@@ -91,6 +104,8 @@ struct LocalUpdateView: View {
             refreshServerStatus()
             // 页面打开即自动检查一次 Git 最新版本；已在检查/下载中则不打断
             if !remoteBusy { checkGitHubUpdate() }
+            // 引擎行同款：页面打开自动检查一次引擎 Release
+            if !engineBusy { checkEngineUpdate() }
             // 编辑框回填当前配置（文本可能被规范化，如 "9:5" → "09:05"）
             syncSourceText = TdxSyncConfig.sourceText(syncConfig.sourceURLs)
             syncScheduleText = TdxSyncConfig.scheduleText(syncConfig.scheduleTimes)
@@ -134,6 +149,14 @@ struct LocalUpdateView: View {
                           action: onRemoteRowTap) {
                     remoteStatusIcon
                 }
+
+                Divider()
+
+                statusRow(title: engineTitle,
+                          enabled: engineTappable,
+                          action: onEngineRowTap) {
+                    engineStatusIcon
+                }
             }
             .background(Color(.secondarySystemBackground))
             .cornerRadius(12)
@@ -171,7 +194,19 @@ struct LocalUpdateView: View {
     /// 检查新版行：灰「=」未检查 / 黄「…」检查中 / 黄进度圈 下载中 / 绿勾最新 / 红叉有新版或失败
     @ViewBuilder
     private var remoteStatusIcon: some View {
-        switch remoteState {
+        remoteStateIcon(remoteState, percent: downloadPercent)
+    }
+
+    /// 引擎行图标：与 App 行同一套状态语义
+    @ViewBuilder
+    private var engineStatusIcon: some View {
+        remoteStateIcon(engineState, percent: engineDownloadPercent)
+    }
+
+    /// 状态图标构造器（App 行 / 引擎行共用）
+    @ViewBuilder
+    private func remoteStateIcon(_ state: RemoteState, percent: Int) -> some View {
+        switch state {
         case .idle:
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 18))
@@ -181,7 +216,7 @@ struct LocalUpdateView: View {
                 .font(.system(size: 18))
                 .foregroundColor(.yellow)
         case .downloading:
-            downloadProgressIcon
+            downloadProgressIcon(percent)
         case .latest:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
@@ -194,15 +229,15 @@ struct LocalUpdateView: View {
     }
 
     /// 下载进度：圆圈包着百分比数字（0~100），占位与其它状态图标一致（24x24）
-    private var downloadProgressIcon: some View {
+    private func downloadProgressIcon(_ percent: Int) -> some View {
         ZStack {
             Circle()
                 .stroke(Color.yellow.opacity(0.3), lineWidth: 2)
             Circle()
-                .trim(from: 0, to: CGFloat(downloadPercent) / 100)
+                .trim(from: 0, to: CGFloat(percent) / 100)
                 .stroke(Color.yellow, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(downloadPercent)")
+            Text("\(percent)")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .foregroundColor(.yellow)
                 .lineLimit(1)
@@ -216,6 +251,13 @@ struct LocalUpdateView: View {
         return "检查新版（最新\(latest) 当前 \(current)）"
     }
 
+    /// 引擎行标题：远程构建号取引擎 Release，当前取已装 Engine.app 的 CFBundleVersion
+    private var engineTitle: String {
+        let latest = engineRemoteBuildNumber.map { "#\($0)" } ?? "#?"
+        let current = PythonEngineHost.shared.installedEngineBuildNumber.map { "#\($0)" } ?? "#?"
+        return "更新引擎（最新\(latest) 当前 \(current)）"
+    }
+
     /// 检查/下载进行中
     private var remoteBusy: Bool {
         switch remoteState {
@@ -226,6 +268,15 @@ struct LocalUpdateView: View {
 
     /// 进行中不可点；其余状态都可点（最新时再点 = 复检）
     private var remoteTappable: Bool { !remoteBusy }
+
+    private var engineBusy: Bool {
+        switch engineState {
+        case .checking, .downloading: return true
+        default: return false
+        }
+    }
+
+    private var engineTappable: Bool { !engineBusy }
 
     // MARK: - 在线服务（自动探测；离线点击重连）
 
@@ -312,6 +363,74 @@ struct LocalUpdateView: View {
             KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
             self.remoteState = .latest
             DebugLogger.shared.log("已下载最新 IPA，已拉起 TrollStore 安装")
+        }
+    }
+
+    // MARK: - 更新引擎（引擎 Release 固定 tag → 下载 .tipa → TrollStore 安装）
+
+    private func onEngineRowTap() {
+        switch engineState {
+        case .idle, .latest, .failed: checkEngineUpdate()
+        case .outdated:               downloadAndInstallEngine()
+        case .checking, .downloading: break
+        }
+    }
+
+    private func checkEngineUpdate() {
+        engineState = .checking
+        GitHubUpdateService.fetchEngineRelease { info, err in
+            if let err = err {
+                self.engineState = .failed
+                DebugLogger.shared.log("检查引擎更新失败：\(err)")
+                return
+            }
+            guard let n = info?.buildNumber else {
+                // Release 说明无「构建：run #N」可解析——远程状态未知，按失败处理（可点重试）
+                self.engineState = .failed
+                DebugLogger.shared.log("引擎 Release 构建号解析失败（notes 缺 run #N）")
+                return
+            }
+            self.engineRemoteBuildNumber = n
+            self.engineTipaSHA256 = info?.ipaSHA256
+            let cur = PythonEngineHost.shared.installedEngineBuildNumber
+            // 未安装 Engine.app（或内嵌引擎）时视为有新版：提示下载安装
+            if let c = cur, n <= c {
+                self.engineState = .latest
+                DebugLogger.shared.log("引擎已是最新（远程 #\(n)，当前 #\(c)）")
+            } else {
+                self.engineState = .outdated
+                DebugLogger.shared.log("发现新引擎 #\(n)（当前 \(cur.map { "#\($0)" } ?? "未安装")）")
+            }
+        }
+    }
+
+    private func downloadAndInstallEngine() {
+        engineDownloadPercent = 0
+        engineState = .downloading
+        // 进度采样：PythonEngineHost.downloadTipa 内部维护 downloadProgress（主线程 0~1）
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { t in
+            self.engineDownloadPercent = min(100, max(0, Int((PythonEngineHost.shared.downloadProgress * 100).rounded())))
+            if self.engineState != .downloading { t.invalidate() }
+        }
+        PythonEngineHost.shared.downloadTipa(from: GitHubUpdateService.engineTipaURL) { result in
+            poll.invalidate()
+            switch result {
+            case .failure(let msg):
+                self.engineState = .failed
+                DebugLogger.shared.log("下载引擎包失败：\(msg)")
+            case .success(let path):
+                // Release digest 复核（与 sidecar 校验互为独立来源，双保险——对齐 App IPA 链路）
+                if let problem = GitHubUpdateService.integrityProblem(at: path, expectedSHA256: self.engineTipaSHA256) {
+                    try? FileManager.default.removeItem(atPath: path)
+                    self.engineState = .failed
+                    DebugLogger.shared.log("引擎包完整性校验失败：\(problem)")
+                    return
+                }
+                // 与 App 行同一条安装链路：本地 HTTP /sandbox 路由 + opener 守护 + apple-magnifier URL
+                PythonEngineHost.shared.installViaTrollStore()
+                self.engineState = .latest
+                DebugLogger.shared.log("已下载引擎包并通过校验，已拉起 TrollStore 安装")
+            }
         }
     }
 

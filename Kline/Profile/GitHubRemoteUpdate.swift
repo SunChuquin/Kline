@@ -37,6 +37,20 @@ enum GitHubUpdateService {
         URL(string: "https://github.com/\(repoOwner)/\(repoName)/releases/latest/download/Kline.ipa")!
     }
 
+    // MARK: 引擎包 Release（prerelease 固定 tag，与 App 的 latest 通道互不干扰）
+    // 版本钉死：tag/资产名与 PythonEngineHost.tipaFileName 及 engine.yml 默认值同步升级（三处）
+
+    /// 引擎 Release 固定 tag（prerelease 不会出现在 /releases/latest，绝不干扰 App 更新检查）
+    static var engineReleaseURL: URL {
+        URL(string: "https://api.github.com/repos/\(repoOwner)/\(repoName)/releases/tags/engine-3.14.7")!
+    }
+    /// 引擎 .tipa 资产名（同 PythonEngineHost.tipaFileName）
+    static let engineTipaName = "KlineEngine-3.14.7.tipa"
+    /// 引擎 .tipa 稳定下载地址（Release 固定 tag 资产，公开免鉴权）
+    static var engineTipaURL: URL {
+        URL(string: "https://github.com/\(repoOwner)/\(repoName)/releases/download/engine-3.14.7/\(engineTipaName)")!
+    }
+
     /// 当前已安装版本的构建号（CFBundleVersion = CI 注入的 GitHub run number）
     static var currentBuildNumber: Int? {
         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String).flatMap(Int.init)
@@ -50,9 +64,21 @@ enum GitHubUpdateService {
         return docs + "/Downloads/Kline.ipa"
     }
 
-    /// 查询最新 release。completion 在主线程回调：(info, errorMessage) 互斥，主线程无需再切。
+    /// 查询最新 App release。completion 在主线程回调：(info, errorMessage) 互斥，主线程无需再切。
     static func fetchLatestRelease(completion: @escaping (GitHubReleaseInfo?, String?) -> Void) {
-        var req = URLRequest(url: latestReleaseURL, timeoutInterval: 15)
+        fetchRelease(url: latestReleaseURL, assetName: "Kline.ipa", completion: completion)
+    }
+
+    /// 查询引擎包 release（固定 tag；构建号取说明里的「构建：run #N」）
+    static func fetchEngineRelease(completion: @escaping (GitHubReleaseInfo?, String?) -> Void) {
+        fetchRelease(url: engineReleaseURL, assetName: engineTipaName, completion: completion)
+    }
+
+    /// 通用 release 查询：构建号从 body/title/tag 依序找首个 "#N"；
+    /// sha256 取指定资产 assets[].digest（"sha256:hex" 去前缀）。
+    private static func fetchRelease(url: URL, assetName: String,
+                                     completion: @escaping (GitHubReleaseInfo?, String?) -> Void) {
+        var req = URLRequest(url: url, timeoutInterval: 15)
         req.httpMethod = "GET"
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         URLSession.shared.dataTask(with: req) { data, resp, err in
@@ -77,13 +103,13 @@ enum GitHubUpdateService {
                         break
                     }
                 }
-                // Kline.ipa 资产的官方 sha256（assets[].digest 形如 "sha256:hex..."）：
+                // 指定资产的官方 sha256（assets[].digest 形如 "sha256:hex..."）：
                 // 下载完成后据此做完整性校验（防 CDN 缓存旧包/代理截断——TrollStore 解包失败的根因）
-                var ipaSHA256: String?
+                var assetSHA256: String?
                 if let assets = obj["assets"] as? [[String: Any]] {
-                    for a in assets where (a["name"] as? String) == "Kline.ipa" {
+                    for a in assets where (a["name"] as? String) == assetName {
                         if let digest = a["digest"] as? String, digest.hasPrefix("sha256:") {
-                            ipaSHA256 = String(digest.dropFirst("sha256:".count)).lowercased()
+                            assetSHA256 = String(digest.dropFirst("sha256:".count)).lowercased()
                         }
                         break
                     }
@@ -95,7 +121,7 @@ enum GitHubUpdateService {
                     f.dateFormat = "MM-dd HH:mm"
                     publishedText = f.string(from: d)
                 }
-                completion(GitHubReleaseInfo(buildNumber: num, publishedText: publishedText, ipaSHA256: ipaSHA256), nil)
+                completion(GitHubReleaseInfo(buildNumber: num, publishedText: publishedText, ipaSHA256: assetSHA256), nil)
             }
         }.resume()
     }

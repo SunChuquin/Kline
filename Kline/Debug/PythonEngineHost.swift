@@ -223,6 +223,15 @@ final class PythonEngineHost: ObservableObject {
         return nil
     }
 
+    /// 已安装 Engine.app 的构建号（Info.plist CFBundleVersion = engine.yml 注入的 run number）。
+    /// 内嵌引擎（模拟器调试，无 Engine.app）或未安装时为 nil。
+    var installedEngineBuildNumber: Int? {
+        guard let app = locateEngineApp(),
+              let info = NSDictionary(contentsOfFile: app + "/Info.plist"),
+              let v = info["CFBundleVersion"] as? String else { return nil }
+        return Int(v)
+    }
+
     /// 内嵌引擎目录判定：bundlePath/KlineEngine/manifest.json 存在即命中（bundlePath 注入以便单测）
     static func embeddedEngineDir(bundlePath: String) -> String? {
         let dir = (bundlePath as NSString).appendingPathComponent("KlineEngine")
