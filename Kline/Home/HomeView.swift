@@ -49,18 +49,24 @@ struct HomeView: View {
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,
                                     onOpenAlertRecords: onOpenAlertRecords,
                                     onOpenLayoutEditor: onOpenLayoutEditor,
+                                    onOpenLANSync: { overlayTarget = .lanSync },
+                                    onOpenPythonLab: { overlayTarget = .pythonLab },
                                     onProfile: onProfile)
                 case .c:
                     HomeLayoutCView(model: model, onSelectTab: onSelectTab, onSearch: onSearch,
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,
                                     onOpenAlertRecords: onOpenAlertRecords,
                                     onOpenLayoutEditor: onOpenLayoutEditor,
+                                    onOpenLANSync: { overlayTarget = .lanSync },
+                                    onOpenPythonLab: { overlayTarget = .pythonLab },
                                     onProfile: onProfile)
                 case .d:
                     HomeLayoutDView(model: model, onSelectTab: onSelectTab, onSearch: onSearch,
                                     onOpenFormula: onOpenFormula, onOpenCondOrder: onOpenCondOrder,
                                     onOpenAlertRecords: onOpenAlertRecords,
                                     onOpenLayoutEditor: onOpenLayoutEditor,
+                                    onOpenLANSync: { overlayTarget = .lanSync },
+                                    onOpenPythonLab: { overlayTarget = .pythonLab },
                                     onProfile: onProfile)
                 }
             }
@@ -102,6 +108,8 @@ struct HomeView: View {
         case .alertRecords: onOpenAlertRecords()
         case .training: TrainingSetupRouter.shared.isPresented = true
         case .layoutEditor: onOpenLayoutEditor()
+        case .lanSync: overlayTarget = .lanSync
+        case .pythonLab: overlayTarget = .pythonLab
         }
     }
 

@@ -32,6 +32,10 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     case training
     /// 布局编辑器（PageLayoutEditorView）
     case layoutEditor
+    /// 联机同步（局域网设备间同步，LANSyncView）
+    case lanSync
+    /// Python 引擎实验室（PythonEngineLabView，调试页）
+    case pythonLab
 
     var id: String { rawValue }
 
@@ -47,6 +51,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .alertRecords: return "触发记录"
         case .training: return "单人训练"
         case .layoutEditor: return "布局编辑"
+        case .lanSync: return "联机同步"
+        case .pythonLab: return "引擎实验室"
         }
     }
 
@@ -62,6 +68,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .alertRecords: return "条件单触发历史"
         case .training: return "逐根复盘历史行情"
         case .layoutEditor: return "自定义四档页面布局"
+        case .lanSync: return "局域网设备间同步"
+        case .pythonLab: return "Python 引擎下载与调试"
         }
     }
 
@@ -77,6 +85,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .alertRecords: return "clock.arrow.circlepath"
         case .training: return "graduationcap"
         case .layoutEditor: return "square.grid.3x3"
+        case .lanSync: return "arrow.triangle.2.circlepath.circle"
+        case .pythonLab: return "terminal"
         }
     }
 
@@ -92,6 +102,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .alertRecords: return .pink
         case .training: return .green
         case .layoutEditor: return .indigo
+        case .lanSync: return .cyan
+        case .pythonLab: return .mint
         }
     }
 
@@ -101,7 +113,8 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
         case .tech: return .tech
         case .picker: return .picker
         case .strategy: return .strategy
-        case .search, .condOrder, .profile, .alertRecords, .training, .layoutEditor: return nil
+        case .search, .condOrder, .profile, .alertRecords, .training, .layoutEditor,
+             .lanSync, .pythonLab: return nil
         }
     }
 }
@@ -116,12 +129,16 @@ enum HomeOverlayTarget: Identifiable, Equatable {
     case formula(FormulaKind)
     case condOrder
     case alertRecords
+    case lanSync
+    case pythonLab
 
     var id: String {
         switch self {
         case .formula(let kind): return "formula.\(kind.rawValue)"
         case .condOrder: return "condOrder"
         case .alertRecords: return "alertRecords"
+        case .lanSync: return "lanSync"
+        case .pythonLab: return "pythonLab"
         }
     }
 }
@@ -145,6 +162,12 @@ struct HomeOverlays: ViewModifier {
                             SimCondListView(accountID: nil, onClose: { target = nil })
                         case .alertRecords:
                             AlertRecordView(onClose: { target = nil })
+                        case .lanSync:
+                            // 联机同步：全屏页面（铺满，无遮罩），关闭走页内「返回」
+                            LANSyncView(onClose: { target = nil })
+                        case .pythonLab:
+                            // Python 引擎实验室：全屏页面（铺满，无遮罩），关闭走页内「返回」
+                            PythonEngineLabView(onClose: { target = nil })
                         }
                     }
                     .transition(.opacity)

@@ -20,6 +20,8 @@ struct HomeLayoutDView: View {
     let onOpenCondOrder: () -> Void
     let onOpenAlertRecords: () -> Void
     let onOpenLayoutEditor: () -> Void
+    let onOpenLANSync: () -> Void
+    let onOpenPythonLab: () -> Void
     let onProfile: () -> Void
 
     var body: some View {
@@ -78,6 +80,8 @@ struct HomeLayoutDView: View {
         case .alertRecords: onOpenAlertRecords()
         case .training: TrainingSetupRouter.shared.isPresented = true
         case .layoutEditor: onOpenLayoutEditor()
+        case .lanSync: onOpenLANSync()
+        case .pythonLab: onOpenPythonLab()
         }
     }
 
@@ -90,5 +94,6 @@ struct HomeLayoutDView: View {
 #Preview {
     HomeLayoutDView(model: HomePageModel(), onSelectTab: { _ in }, onSearch: {},
                     onOpenFormula: { _ in }, onOpenCondOrder: {},
-                    onOpenAlertRecords: {}, onOpenLayoutEditor: {}, onProfile: {})
+                    onOpenAlertRecords: {}, onOpenLayoutEditor: {},
+                    onOpenLANSync: {}, onOpenPythonLab: {}, onProfile: {})
 }
