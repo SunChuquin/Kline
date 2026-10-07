@@ -1,4 +1,4 @@
-﻿//
+//
 //  KlineHTTPServer.swift
 //  Kline
 //
@@ -433,6 +433,13 @@ final class KlineHTTPServer {
             handleInstall(body: body, connection: connection)
         case ("POST", "/install-local"):
             handleInstallLocal(body: body, connection: connection)
+        case ("POST", "/install-engine"):
+            // 引擎部署全自动通道：body 校验通过后整体跳主线程——isBusy 主线程发布，
+            // downloadTipa / fetchEngineRelease 回调也都在主线程（对齐 merge-bucket 模式）
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.handleInstallEngine(body: body, connection: connection)
+            }
         case ("POST", "/spawnroot-test"):
             handleSpawnRootTest(connection: connection)
         case ("POST", "/sync/reload"):
@@ -1004,6 +1011,84 @@ final class KlineHTTPServer {
         respond(connection, status: 200, contentType: "application/json", body: "{\"ok\":true}")
     }
 
+    /// POST /install-engine：引擎部署全自动通道（电脑侧部署助手触发，本函数整体在主线程）。
+    /// body: {"url": "<Engine .tipa 的 https 直链>"}。
+    /// 链路：下载 tipa + sidecar（sidecar sha256 校验内建在 downloadTipa）→
+    /// Release 官方 digest 复核（双保险）→ installViaTrollStore（opener --engine 守护 +
+    /// apple-magnifier URL，装完自动把主 App 拉回前台）。
+    /// 响应：200 {"ok":true,"engineBuild":<安装前构建号|null>}；400 bad body / not a tipa url；
+    /// 409 busy；502 下载失败或 digest mismatch（坏包已删，绝不交给 TrollStore）。
+    private func handleInstallEngine(body: Data, connection: NWConnection) {
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let urlString = json["url"] as? String, !urlString.isEmpty,
+              let url = URL(string: urlString) else {
+            respond(connection, status: 400, contentType: "application/json", body: "{\"error\":\"bad body\"}")
+            return
+        }
+        // 剥掉 query 后必须以 .tipa 结尾（下载侧会自加缓存穿透参数，这里只认纯资源地址）
+        let noQuery = url.absoluteString.split(separator: "?").first.map(String.init) ?? url.absoluteString
+        guard noQuery.hasSuffix(".tipa") else {
+            respond(connection, status: 400, contentType: "application/json",
+                    body: "{\"error\":\"not a tipa url\"}")
+            return
+        }
+        // 引擎下载/安装串行：busy 主线程发布，与 downloadTipa 内部的 busy 检查双保险
+        guard !PythonEngineHost.shared.isBusy else {
+            respond(connection, status: 409, contentType: "application/json", body: "{\"error\":\"busy\"}")
+            return
+        }
+        // 快照安装前构建号（响应带回）：电脑侧轮询 statusJSON 看 engineBuild 变化即知 Engine.app 就位
+        let preBuild = PythonEngineHost.shared.installedEngineBuildNumber
+        DebugLogger.shared.log("[install-engine] url=\(urlString) preBuild=\(preBuild.map(String.init) ?? "nil")")
+        PythonEngineHost.shared.downloadTipa(from: url) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .failure(let msg):
+                DebugLogger.shared.log("[install-engine] 下载失败：\(msg)")
+                // 换行折平：jsonEsc 不转义 \n，残留会把响应 JSON 撕裂（失败信息可能含多行原因）
+                let safe = Self.jsonEsc(msg)
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .replacingOccurrences(of: "\r", with: " ")
+                self.respond(connection, status: 502, contentType: "application/json",
+                             body: "{\"error\":\"\(safe)\"}")
+            case .success(let path):
+                self.verifyDigestThenInstall(path: path, preBuild: preBuild, connection: connection)
+            }
+        }
+    }
+
+    /// install-engine 中段：Release 官方 digest 复核（downloadTipa 已过 sidecar 校验，这里是
+    /// 第二道）。GitHub API 抖动不阻断本地可信链路——release 不可达/digest 缺失时记日志继续装
+    /// （502 的 digest mismatch 场景指 digest 可得但不匹配）；不匹配即删坏包，绝不交给 TrollStore。
+    private func verifyDigestThenInstall(path: String, preBuild: Int?, connection: NWConnection) {
+        GitHubUpdateService.fetchEngineRelease { [weak self] info, err in
+            guard let self = self else { return }
+            if err != nil || info?.ipaSHA256 == nil {
+                DebugLogger.shared.log("[install-engine] digest 复核跳过（release 不可达）：\(err ?? "digest 缺失")")
+                self.installEngineAndRespond(preBuild: preBuild, connection: connection)
+                return
+            }
+            if let expected = info?.ipaSHA256,
+               let problem = GitHubUpdateService.integrityProblem(at: path, expectedSHA256: expected) {
+                try? FileManager.default.removeItem(atPath: path)
+                DebugLogger.shared.log("[install-engine] digest mismatch，坏包已删除：\(path)（\(problem)）")
+                self.respond(connection, status: 502, contentType: "application/json",
+                             body: "{\"error\":\"digest mismatch\"}")
+                return
+            }
+            DebugLogger.shared.log("[install-engine] digest 复核通过 → 拉起 TrollStore 安装")
+            self.installEngineAndRespond(preBuild: preBuild, connection: connection)
+        }
+    }
+
+    /// install-engine 收尾：installViaTrollStore（拉起 opener --engine 守护 + TrollStore）并回 200。
+    private func installEngineAndRespond(preBuild: Int?, connection: NWConnection) {
+        PythonEngineHost.shared.installViaTrollStore()
+        let buildJSON = preBuild.map(String.init) ?? "null"
+        respond(connection, status: 200, contentType: "application/json",
+                body: "{\"ok\":true,\"engineBuild\":\(buildJSON)}")
+    }
+
     /// 构造「本地 HTTP 文件 → TrollStore 安装」的 URL Scheme
     static func trollStoreInstallURL(localFile: String, port: UInt16) -> String {
         let downloadURL = "http://127.0.0.1:\(port)/download/\(localFile.percentEncodedForQuery)"
@@ -1014,7 +1099,10 @@ final class KlineHTTPServer {
     /// 装完检测到版本与当前不同后自动拉起新版 Kline），再打开 apple-magnifier URL。
     /// 当前版本号作为首个 argv 传给 opener，供其判定"已装新版本"。
     /// /install-local 与 App 内远程更新（LocalUpdateView）共用此链路。
-    func triggerTrollStoreInstall(trollURL: String) {
+    /// engineBuild 有值时切 opener --engine 模式（引擎部署全自动通道）：盯 Engine.app
+    /// （com.sunck.KlineEngine）的安装，确认后拉回主 App；nil 保持默认模式（盯 Kline.app
+    /// 自更新），/install-local 等既有调用方零感知。
+    func triggerTrollStoreInstall(trollURL: String, engineBuild: Int? = nil) {
         let curVer = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
         // 等待窗口给足 600s：用户走完「打开 TrollStore → 下载 IPA → Install」可能远超旧默认 90s，
         // 到点自退后就再没人把新版拉到前台（表现为"装完了但没自动打开"）
@@ -1022,10 +1110,14 @@ final class KlineHTTPServer {
         // 让 opener 的诊断日志同时落到 App 沙盒（root 可写；跨版本升级容器路径不变，便于事后回看）
         let openerLog = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
             + "/opener_log.txt"
-        DebugLogger.shared.log("triggerTrollStoreInstall trollURL=\(trollURL) curVer=\(curVer)")
+        DebugLogger.shared.log("triggerTrollStoreInstall trollURL=\(trollURL) curVer=\(curVer) engineMode=\(engineBuild != nil)")
+        // 两种模式首参语义一致：「与该构建号不同即视为新包已装」。--engine 带引擎构建号，
+        // 默认模式带 App 自身版本号
+        let args = engineBuild.map { ["--engine", String($0), maxWait, openerLog] }
+            ?? [curVer, maxWait, openerLog]
         let srOpen = RootRunner.spawnDetached(
             executable: Bundle.main.bundlePath + "/opener",
-            arguments: [curVer, maxWait, openerLog])
+            arguments: args)
         DebugLogger.shared.log("triggerTrollStoreInstall spawned opener => sr=\(srOpen) maxWait=\(maxWait)s")
         if srOpen != 0 {
             DebugLogger.shared.log("⚠️ opener spawn 失败（sr=\(srOpen)）：装完不会自动打开新版")
@@ -1590,8 +1682,14 @@ final class KlineHTTPServer {
         let b = info?["CFBundleVersion"] as? String ?? "?"
         let dn = info?["CFBundleDisplayName"] as? String ?? "Kline"
         let bid = Bundle.main.bundleIdentifier ?? "?"
+        // engineBuild：已装 Engine.app 的构建号（未装/仅内嵌引擎时为 null，等价 NSNull 序列化；
+        // 手写拼接须显式给 null——Int? 直接塞字典字面量 nil 会整键缺失）。电脑侧部署助手
+        // 轮询此字段确认引擎包就位（与 /install-engine 响应里的 preBuild 快照配对判断）
+        let eb = PythonEngineHost.shared.installedEngineBuildNumber
+        let engineBuildJSON = eb.map { "\"engineBuild\":\($0)" } ?? "\"engineBuild\":null"
         return "{\"status\":\"ok\",\"app\":\"Kline\",\"displayName\":\"\(Self.jsonEsc(dn))\","
-            + "\"version\":\"\(Self.jsonEsc(v)) (\(Self.jsonEsc(b)))\",\"bundle\":\"\(Self.jsonEsc(bid))\"}"
+            + "\"version\":\"\(Self.jsonEsc(v)) (\(Self.jsonEsc(b)))\",\"bundle\":\"\(Self.jsonEsc(bid))\","
+            + engineBuildJSON + "}"
     }
 
     private static func jsonEsc(_ s: String) -> String {

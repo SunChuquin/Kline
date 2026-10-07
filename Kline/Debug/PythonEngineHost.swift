@@ -364,7 +364,13 @@ final class PythonEngineHost: ObservableObject {
         // 拉起 TrollStore 前先申请后台执行时间：否则 App 切后台被挂起后，
         // TrollStore 从 127.0.0.1 取文件连得上却收不到数据，安装卡死
         keepServingForInstall()
-        KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL)
+        // 传引擎构建号让 opener 走 --engine 守护（盯 Engine.app，装完自动把主 App 拉回前台）；
+        // 构建号不可得（内嵌引擎/未装）时传 nil，triggerTrollStoreInstall 自动退回默认模式
+        let engineBuild = installedEngineBuildNumber
+        if engineBuild == nil {
+            DebugLogger.shared.log("[PyEngine] engine 构建号不可得，opener 退回默认模式")
+        }
+        KlineHTTPServer.shared.triggerTrollStoreInstall(trollURL: trollURL, engineBuild: engineBuild)
         appendOutput("已拉起 TrollStore 安装（\(Self.tipaFileName)）；装完回本页点「刷新状态」→「加载引擎」")
     }
 

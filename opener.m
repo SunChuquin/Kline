@@ -121,6 +121,87 @@ static int runPyMode(int argc, char **argv) {
     return rc;
 }
 
+// engine 模式：引擎部署全自动通道的「装完自动打开」守护，骨架镜像默认模式（App 自更新），
+// 但盯的是 Engine.app（引擎 .tipa 经 TrollStore 安装）：
+//   opener --engine <curBuild> <maxWait> [extraLog]
+// 与默认模式的差异只有三处：PATTERN 扫 Engine.app、bundleID 比对 com.sunck.KlineEngine、
+// 确认新版本后打开的是**主 App**（com.sunck.Kline）——TrollStore 装 Engine.app 不终止 Kline，
+// 装完把主 App 拉回前台即可继续引擎加载链路。双轮确认/超时自退语义与默认模式一致。
+static int runEngineMode(int argc, char **argv) {
+    if (argc < 4) { logmsg("engine mode: argc<4"); return 3; }
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    loadLSFrameworks();   // 确认后要 open 主 App，同样先把 LSApplicationWorkspace 拉进进程
+    const char *curStr = argv[2];
+    int maxWait = atoi(argv[3]);
+    if (maxWait <= 0) maxWait = 90;   // 非法/缺省兜底（默认模式同款窗口；atoi=0 会第一轮就"超时"）
+    if (argc >= 5) { snprintf(gExtraLog, sizeof gExtraLog, "%s", argv[4]); }
+    // curBuild 转 long 做数值比对（parseVersion 现成）；cur=0（非法/未知）视为
+    // 「不知道当前版本」——任何已装版本都算不同，直接进入确认流程。App 侧拿不到引擎
+    // 构建号时会传 App 自身版本号兜底，数值上不等于引擎 run number，行为一致。
+    long cur = strtol(curStr, NULL, 10);
+    const char *PATTERN = "/private/var/containers/Bundle/Application/*/Engine.app/Info.plist";
+    char log[256];
+    snprintf(log, sizeof log, "engine start cur=%s maxWait=%d extraLog=%s",
+             curStr, maxWait, gExtraLog[0] ? gExtraLog : "(none)");
+    logmsg(log);
+
+    int pendingConfirm = 0;   // 上一轮已见到"版本不同"，本轮再确认一次才真正打开
+    int waited = 0;
+    for (;;) {
+        glob_t g; memset(&g, 0, sizeof g);
+        int sawDifferent = 0;
+        if (glob(PATTERN, 0, NULL, &g) == 0) {
+            for (size_t i = 0; i < g.gl_pathc; i++) {
+                const char *p = g.gl_pathv[i];
+                CFStringRef ps = CFStringCreateWithCString(kCFAllocatorDefault, p, kCFStringEncodingUTF8);
+                CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, ps, kCFURLPOSIXPathStyle, false);
+                CFReadStreamRef rs = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+                if (rs && CFReadStreamOpen(rs)) {
+                    CFPropertyListRef pl = CFPropertyListCreateWithStream(kCFAllocatorDefault, rs, 0,
+                                                                          kCFPropertyListImmutable, NULL, NULL);
+                    if (pl) {
+                        CFStringRef bid = (CFStringRef)CFDictionaryGetValue((CFDictionaryRef)pl, CFSTR("CFBundleIdentifier"));
+                        CFStringRef ver = (CFStringRef)CFDictionaryGetValue((CFDictionaryRef)pl, CFSTR("CFBundleVersion"));
+                        if (bid && ver && CFStringCompare(bid, CFSTR("com.sunck.KlineEngine"), 0) == kCFCompareEqualTo) {
+                            long v = parseVersion(ver);
+                            // 与默认模式同款判定：只要"与当前不同"（不必更高）即算装好了新引擎包
+                            if (v != cur) {
+                                sawDifferent = 1;
+                                if (pendingConfirm) {
+                                    snprintf(log, sizeof log, "engine version confirmed (v=%ld cur=%ld) -> open Kline", v, cur);
+                                    logmsg(log);
+                                    int r = openApp("com.sunck.Kline");
+                                    snprintf(log, sizeof log, "open ret=%d", r); logmsg(log);
+                                    CFReadStreamClose(rs); CFRelease(rs);
+                                    CFRelease(url); CFRelease(ps); CFRelease(pl);
+                                    globfree(&g);
+                                    [pool drain];
+                                    return r == 0 ? 0 : 3;
+                                }
+                                snprintf(log, sizeof log, "engine version detected (v=%ld cur=%ld) -> confirm next tick", v, cur);
+                                logmsg(log);
+                            }
+                        }
+                        CFRelease(pl);
+                    }
+                    CFReadStreamClose(rs); CFRelease(rs);
+                }
+                CFRelease(url); CFRelease(ps);
+            }
+        }
+        globfree(&g);
+        // 双轮确认（同默认模式）：安装过程中可能出现瞬时读数，提前打开会烧掉唯一的守护
+        if (!sawDifferent && pendingConfirm) { logmsg("engine version reverted -> wait again"); }
+        pendingConfirm = sawDifferent;
+        if (++waited >= maxWait) break;
+        sleep(1);
+    }
+    snprintf(log, sizeof log, "engine timeout after %ds (cur=%s)", maxWait, curStr);
+    logmsg(log);
+    [pool drain];
+    return 1;
+}
+
 static int copyRec(const char *src, const char *dst) {
     struct stat st;
     if (lstat(src, &st) != 0) {
@@ -182,6 +263,10 @@ int main(int argc, char **argv) {
     // py 模式分发：不涉及 LaunchServices/更新守护，直接执行并返回
     if (argc >= 2 && strcmp(argv[1], "--py") == 0) {
         return runPyMode(argc, argv);
+    }
+    // engine 模式分发：盯 Engine.app 安装（引擎部署全自动通道），确认后把主 App 拉回前台
+    if (argc >= 2 && strcmp(argv[1], "--engine") == 0) {
+        return runEngineMode(argc, argv);
     }
     // 小结：用 autoreleasepool 包裹主逻辑，避免 ObjC 泄漏
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
