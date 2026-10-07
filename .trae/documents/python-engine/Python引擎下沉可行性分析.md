@@ -569,6 +569,12 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 6. **首帧红线确认（用户决策）**：「引擎不进首帧」按默认红线执行；仅当 Phase-0 实验 2 实测「150 根 + 桥接往返」落在阈值内（引擎常驻预热、近似计算不依赖 numpy）方可重估，将候选 2 的首帧调度一并下沉（§3.2 阈值化条件）。
 7. **阶段 1 试点批落地（2026-10-06）**：候选 3（周期聚合）+ 候选 1（模板解析）下沉完成——桥接层 / 业务脚本 / 调用点切换 / 契约测试 ×2 全链路打通，模拟器双轮验证（有引擎 36/36 全绿；无引擎 4 skip 0 fail，纯 Swift 降级路径与现状一致）。实现与验证明细见 §6.3 试点批完成记录。
 8. **numpy 拆为第二批（用户决策，2026-10-06）**：接受 §3.6.2 数十 MB 体积代价，进入条件 = 试点批验收通过；届时启动 mobile-forge wheel 链路评估。
+   **第二批基建落地（2026-10-07）**：进入条件满足后启动，范围钉死「只做 numpy 基建」（spec: `.trae/specs/add-numpy-engine-batch2/`）。
+   - **来源评估证伪与定案**：mobile-forge（beeware mobile wheels）已半退役、不支持 Python 3.14+（引擎为 CPython 3.14.7）；PyPI 从未发布 numpy iOS wheel（iOS 为 Tier 3，仅构建支持不承诺发布）。唯一路径 = **cibuildwheel 4.3.0 自建**：PyPI `numpy-2.5.3.tar.gz`（sdist sha256 `df2d5874…`）+ PR#28759 iOS 补丁移植（`scripts/patch_numpy_ios.py`：long double cross 探测绕过 / darwin→ios 平台分支 / ILP64 SDK 检查 / `[tool.cibuildwheel.ios]` 配置）。
+   - **本机 12 轮构建实证**（CI 三轮网络修复）：`allow-noblas=true` 纯 C 回退（兼容 iOS 13+，不链 Accelerate）；ninja 须在 host PATH（xbuild-tools）；跨 arch 复用 build-dir 会污染；CI runner 需 venv 装 cibuildwheel 且 ninja 独立目录（venv bin 含 python 干扰其检测）。
+   - **产物**：`numpy-wheel-2.5.3` prerelease（iphoneos 5.4MB / iphonesimulator 5.5MB 双 wheel + sidecar）；engine.yml 装 wheel 到 site-packages（19 个 .so）→ vtool 平台冒烟 → ldid 全签一次覆盖；manifest build 标记 `beeware-3.14-b11+numpy-2.5.3`（`scripts/install_numpy_into_engine.sh` CI/本地单一来源）。
+   - **体积实测**：KlineEngine .tipa 22.0MB → **28.4MB**（+6.4MB，压缩态；远小于 §3.6.2 预估的数十 MB——wheel 内纯 C 回退无 OpenBLAS 二进制）。模拟器 KlineTests 37/37 全绿（含 numpy import + mean/dot/max 冒烟）。
+   - **App 内引擎更新通道**：本地更新面板新增「更新引擎」行（构建号：远程取 Release 说明 run #N，当前取 Engine.app CFBundleVersion；下载走 sidecar + Release digest 双 sha256 校验 → TrollStore 安装）。真机实证：`发现新引擎 #9（当前 #7）` → 下载 24s → 双校验通过 → TrollStore 拉起。
 9. **候选 14（补缺口 GapBackfill）暂不立项**（用户决策，2026-10-06）：继续走既有 Swift 实现与测试闭环，不进 §3.1 表。
 
 ### 8.2 待确认事项（下一轮讨论输入）

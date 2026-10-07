@@ -26,10 +26,12 @@
 - [ ] Task 4: 真机发布与验证（用户执行）
   - [x] 4.1 手动触发 engine.yml 出新 .tipa（engine-3.14.7 tag --clobber + sha256 sidecar）
     - 2026-10-07 实证：build-numpy-wheel.yml run 37507451005 发 `numpy-wheel-2.5.3` Release（双 wheel + sidecar）；engine.yml run 37508185511 全绿，`KlineEngine-3.14.7.tipa` 28,386,228 字节 sha256 `bf0b490e…`；下载后解包验证 19 个 numpy .so + __init__.py 就位（路径 ios-arm64/lib/python3.14/site-packages/）
-  - [ ] 4.2 用户经 TrollStore 更新 Engine.app → App 内 PyBridge 冒烟确认 numpy 可用（沙盒日志取证）
-- [ ] Task 5: 文档回填 + 提交
-  - [ ] 5.1 可行性分析 §8.1 第 8 条标记完成 + 体积实测记录（.tipa 前后对比）
-  - [ ] 5.2 checklist 逐项核验勾选；git commit + push
+  - [x] 4.2 用户经 TrollStore 更新 Engine.app → App 内 PyBridge 冒烟确认 numpy 可用（沙盒日志取证）
+    - 2026-10-07 真机实证（iPad mini 4，klinehttp 拉日志）：App #501「更新引擎」行自动检查 `发现新引擎 #9（当前 #7）` → 下载 24s → sidecar sha256 + Release digest 双校验通过（tipa 28,386,228 字节与 Release 一致）→ opener 拉起 TrollStore（完整 28MB 流式送装）；装后引擎加载正常（dlopen 24.2ms / Py_Initialize 112.2ms）。numpy 标记终验：更新引擎行应显示绿勾 `最新#9 当前 #9`（Python Engine Lab 显示 v3.14.7（beeware-3.14-b11+numpy-2.5.3，api=1））
+- [x] Task 5: 文档回填 + 提交
+  - [x] 5.1 可行性分析 §8.1 第 8 条标记完成 + 体积实测记录（.tipa 前后对比）
+    - 已回填：mobile-forge/PyPI 证伪 + cibuildwheel 自建定案 + 12 轮实证坑 + 体积实测 22.0MB→28.4MB（+6.4MB，远小于预估数十 MB——allow-noblas 纯 C 回退无 OpenBLAS）+ 真机更新通道实证
+  - [x] 5.2 checklist 逐项核验勾选；git commit + push
 
 # Task Dependencies
 
