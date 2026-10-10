@@ -132,6 +132,19 @@ struct SourceBar {
     let amo: Double
 }
 
+/// 基准行缺失名单条目（「基准缺失名单」弹层用，与 perform() 筛选同口径）
+struct GapBaselineMissingItem: Identifiable, Hashable {
+    let file: String
+    let code: String
+    let name: String
+    /// 主库 meta.last_date（0 = 无）
+    let lastDate: Int
+    /// 缺失原因一句话
+    let cause: String
+
+    var id: String { file }
+}
+
 /// 折算到**主库口径**后、待写入增量库的缺口行
 struct GapBar {
     let date: Int
@@ -614,6 +627,48 @@ final class GapBackfill: ObservableObject {
         verdictText = "无缺口：主库 \(mainLatest) → 今日 \(today) 无可补标的"
             + "（不可映射 \(unmappable) · 基准行缺 \(noBaseline) · 腾讯无源段 \(noSource)）"
         DebugLogger.shared.log("[GapBackfill] 无可补作业，结束")
+    }
+
+    // MARK: - 基准缺失名单（按需查询，不发网络请求）
+
+    /// 复算「基准行缺失」名单（与 [perform] 作业筛选同口径）：
+    /// ① `meta.last_date ≠ 主库最新日`（长期停牌 / 退市 / 缺行）；
+    /// ② last_date 对上但主库日线里没有最新日那一行（无从自校准）。
+    /// 主线程调用；主库查询走 dbQueue（复用补缺口同款「一次 SQL 取全市场」），结果回主线程。
+    func queryBaselineMissing(completion: @escaping (Result<(mainLatest: Int, items: [GapBaselineMissingItem]), String>) -> Void) {
+        let metas = DatabaseManager.shared.metaList
+        guard !metas.isEmpty else {
+            completion(.failure("主库 metaList 为空（主库未就绪）"))
+            return
+        }
+        let mainLatest = metas.compactMap { $0.lastDate }.max() ?? 0
+        guard mainLatest > 0 else {
+            completion(.failure("主库 meta 无 last_date"))
+            return
+        }
+        var metaIdByFile: [String: Int] = [:]
+        for m in metas { metaIdByFile[m.file] = m.id }
+        DatabaseManager.shared.performOnDBQueue({ db in
+            DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
+                                          fromDate: mainLatest, toDate: mainLatest)
+        }, completion: { baseline in
+            var items: [GapBaselineMissingItem] = []
+            for m in metas {
+                let last = m.lastDate ?? 0
+                if last != mainLatest {
+                    items.append(GapBaselineMissingItem(
+                        file: m.file, code: m.displayCode, name: m.name, lastDate: last,
+                        cause: "主库停更于 \(last == 0 ? "-" : String(last))"))
+                } else if baseline[m.file]?.first(where: { $0.date == mainLatest }) == nil {
+                    items.append(GapBaselineMissingItem(
+                        file: m.file, code: m.displayCode, name: m.name, lastDate: last,
+                        cause: "缺主库 \(mainLatest) 那行"))
+                }
+            }
+            items.sort { $0.file < $1.file }
+            DebugLogger.shared.log("[GapBackfill] 基准缺失名单：\(items.count) 只 / 主库 \(metas.count) 只，主库最新 \(mainLatest)")
+            completion(.success((mainLatest, items)))
+        })
     }
 
     // MARK: - 单只取数与自校准（并发执行）

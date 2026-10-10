@@ -86,6 +86,13 @@ struct LocalUpdateView: View {
     @State private var mergeAlertMessage = ""
     @State private var mergeResultText: String?
 
+    /// 基准缺失名单（补缺口区入口行 → 弹层）
+    @State private var showBaselineMissingSheet = false
+    @State private var baselineMissingLoading = false
+    @State private var baselineMissingMainLatest = 0
+    @State private var baselineMissingItems: [GapBaselineMissingItem] = []
+    @State private var baselineMissingError: String?
+
     /// 数据源地址编辑框内容（", " 分隔多个源）
     @State private var syncSourceText = ""
     /// 更新时刻编辑框内容（", " 分隔多个时刻）
@@ -122,6 +129,35 @@ struct LocalUpdateView: View {
             Button("合并") { performMerge() }
         } message: {
             Text(mergeAlertMessage)
+        }
+        // 基准缺失名单（补缺口区入口行）
+        .sheet(isPresented: $showBaselineMissingSheet) {
+            BaselineMissingSheet(mainLatest: baselineMissingMainLatest,
+                                 items: baselineMissingItems)
+        }
+        .alert("基准缺失名单", isPresented: .init(
+            get: { baselineMissingError != nil },
+            set: { if !$0 { baselineMissingError = nil } })) {
+            Button("好", role: .cancel) { }
+        } message: {
+            Text(baselineMissingError ?? "")
+        }
+    }
+
+    /// 查询基准缺失名单（主库 meta + 主库最新日日线，不发网络请求），成功后弹名单
+    private func loadBaselineMissing() {
+        guard !baselineMissingLoading else { return }
+        baselineMissingLoading = true
+        gapBackfill.queryBaselineMissing { result in
+            baselineMissingLoading = false
+            switch result {
+            case .failure(let message):
+                baselineMissingError = message
+            case .success(let outcome):
+                baselineMissingMainLatest = outcome.mainLatest
+                baselineMissingItems = outcome.items
+                showBaselineMissingSheet = true
+            }
         }
     }
 
@@ -950,6 +986,32 @@ struct LocalUpdateView: View {
             .disabled(!gapBackfillTappable)
             .accessibilityIdentifier("gapBackfill.run")
 
+            Divider()
+
+            // 基准缺失名单：看哪些标的缺自校准锚点（本轮补缺口跳过的那批）
+            Button(action: loadBaselineMissing) {
+                HStack(spacing: 10) {
+                    Text("基准缺失名单")
+                        .font(.system(size: 16))
+                        .foregroundColor(.primary)
+                    Spacer(minLength: 12)
+                    if baselineMissingLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "list.bullet.rectangle")
+                            .font(.system(size: 18))
+                            .foregroundColor(.blue)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(baselineMissingLoading)
+            .accessibilityIdentifier("gapBackfill.baselineMissing")
+
             ForEach(Array(gapBackfill.detailLines.enumerated()), id: \.offset) { index, line in
                 Divider()
                 Text(line)
@@ -1322,5 +1384,53 @@ struct LocalUpdateView: View {
         }
         let normalized = TdxSyncConfig.scheduleText(times)
         if normalized != syncScheduleText { syncScheduleText = normalized }
+    }
+}
+
+/// 「基准缺失名单」弹层：主库最新日没有自校准锚点（基准行）的标的清单。
+/// 本轮补缺口会整批跳过这些标的（不发请求），非数据损坏；复牌/补上该日后自动恢复。
+private struct BaselineMissingSheet: View {
+    let mainLatest: Int
+    let items: [GapBaselineMissingItem]
+
+    @Environment(\.presentationMode) private var presentationMode
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text(summaryText)) {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(item.name)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.primary)
+                                Text(item.code)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color(.secondaryLabel))
+                                Spacer(minLength: 8)
+                                Text(item.cause)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color(.secondaryLabel))
+                                    .lineLimit(1)
+                            }
+                            Text(item.file)
+                                .font(.system(size: 11))
+                                .foregroundColor(Color(.tertiaryLabel))
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("基准缺失名单")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(trailing: Button("完成") { presentationMode.wrappedValue.dismiss() })
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private var summaryText: String {
+        "共 \(items.count) 只 · 主库最新 \(mainLatest == 0 ? "-" : String(mainLatest)) · 缺自校准锚点，补缺口本轮跳过"
     }
 }
