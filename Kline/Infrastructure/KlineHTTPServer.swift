@@ -576,6 +576,18 @@ final class KlineHTTPServer {
             // 配置/指标热重载（门禁：token / 环回 / pipeline，见 allowSyncAction——USB 通道不依赖暴露）
             guard allowSyncAction(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
             handleSyncReloadConfig(body: body, connection: connection)
+        case ("POST", "/sync/live-reset"):
+            // 清空增量库（门禁：token / 环回 / pipeline，见 allowSyncAction）：
+            // PC 推送「沙盒无增量库 = 清空设备增量库」——关闭连接 → 删文件 → 热降级「仅主库」，无需重启
+            guard allowSyncAction(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { connection.cancel(); return }
+                LiveDataStore.shared.closeAndRemove { removed in
+                    let removedJSON = removed.map { "\"\(Self.jsonEsc($0))\"" }.joined(separator: ",")
+                    self.respond(connection, status: 200, contentType: "application/json",
+                                 body: "{\"ok\":true,\"removed\":[\(removedJSON)]}")
+                }
+            }
         case ("GET", "/sync/status"):
             // 增量库当前状态（既有 PC 推送脚本是本端点的消费者，原字段绝不能动）；
             // LAN 同步在解析结果上合并 device / items 两个新增键（旧消费者不受新增键影响）

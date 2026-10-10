@@ -475,6 +475,33 @@ final class LiveDataStore: ObservableObject {
         checkForChanges(reason: "外部写入")
     }
 
+    /// 关闭增量库连接并删除文件（PC 推送「沙盒无增量库 = 清空设备增量库」语义）。
+    /// 关闭 → 删 tdx_live.db(-wal/-shm) 与 manifest → 走既有重载路径降级「仅主库」并发布
+    /// 内容变化（订阅方自增 dataVersion / 清指标缓存，立即生效，无需重启）；
+    /// 之后的写入按既有「本地增量库不存在时按 schema 新建」路径重建。
+    /// completion 在主线程回调，参数为实际删除的文件名列表。
+    func closeAndRemove(completion: (([String]) -> Void)? = nil) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            _closeLocked()
+            let fm = FileManager.default
+            let dbPath = Self.writableDBPath
+            let candidates = [dbPath, dbPath + "-wal", dbPath + "-shm",
+                              (dbPath as NSString).deletingLastPathComponent + "/tdx_live.manifest.json"]
+            var removed: [String] = []
+            for candidate in candidates where fm.fileExists(atPath: candidate) {
+                try? fm.removeItem(atPath: candidate)
+                removed.append((candidate as NSString).lastPathComponent)
+            }
+            DebugLogger.shared.log("[Live] 收到清空请求 → 已删除: \(removed.joined(separator: ", "))")
+            let summary = _reloadLocked(reason: "PC 推送清空增量库")
+            _publishSummary(summary, notify: true)
+            if let completion = completion {
+                DispatchQueue.main.async { completion(removed) }
+            }
+        }
+    }
+
     // MARK: - 前台监视
 
     /// 前台每 interval 秒检查一次指纹；另在回前台时立即检查一次（幂等，重复调用只生效一次）

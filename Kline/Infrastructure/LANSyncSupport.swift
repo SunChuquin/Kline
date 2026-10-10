@@ -113,6 +113,9 @@ enum LANSyncReload {
             case "indicators":
                 // 指标公式目录镜像后重载全部周期定义（复用既有入口，与自定义指标增删改同款）
                 SystemIndicatorStore.shared.reloadAllPeriods()
+            case "live":
+                // 增量库整文件替换 / 清空后：立即指纹检查，按需热重载（内容变了才发布）
+                LiveDataStore.shared.notifyExternalWrite()
             case "main":
                 // 主库整库替换不做热重载（SQLite 连接/内存缓存需重启重建）：
                 // 只发通知，由 App 弹「主库已替换，请重启」提示
