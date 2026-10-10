@@ -94,6 +94,7 @@ sys.path.insert(0, HERE)
 
 import live_db_builder as L        # noqa: E402  只读 URI / 日期口径 / 分片落盘（表结构契约）
 import txt_changes as TC           # noqa: E402  变更分类（全项目唯一一份，Task 1）
+from tdx_parser import is_tencent_less   # noqa: E402  腾讯无源指数过滤（与 tdx_parser 入库规则同源）
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -625,11 +626,18 @@ def process_files(base, names, old_dir, new_dir, tol, shared):
     kind_map = {}
     n_app = n_rew = n_new = 0
     skipped_no_meta = []
+    skipped_tencent_less = []
     t_a = t_b = 0.0
     t0_all = time.time()
 
     for nm in names:
         f = os.path.splitext(nm)[0]
+        # 腾讯无源指数 → 直接跳过，不进包。正常情况下基线重建后这些标的没有 meta 行，
+        # 下面的 idmap 检查已能拦住；这里是防线：基线若是 is_tencent_less（2026-10-05 定稿）
+        # 之前生成的（如 20260831 基线仍含 261 只），不拦就会白出补丁（设备侧 JOIN 会丢弃）。
+        if is_tencent_less(f):
+            skipped_tencent_less.append(f)
+            continue
         mid = idmap.get(f)
         t0 = time.time()
         # 基线主库里没有这个 file → **直接跳过，不进包**。
@@ -708,7 +716,9 @@ def process_files(base, names, old_dir, new_dir, tol, shared):
 
     return {"rows": rows, "per_file": per_file, "kind_map": kind_map, "idmap": idmap,
             "n_app": n_app, "n_rew": n_rew, "n_new": n_new,
-            "skipped_no_meta": skipped_no_meta, "t_a": t_a, "t_b": t_b,
+            "skipped_no_meta": skipped_no_meta,
+            "skipped_tencent_less": skipped_tencent_less,
+            "t_a": t_a, "t_b": t_b,
             "t_loop": time.time() - t0_all,
             "dmax": dmax, "lo": LO,
             "cur_counts": {p: len(CUR_BAR[p]) for p in MERGE_PERIODS}}
@@ -941,15 +951,25 @@ def run_sharded(args, out_dir, before_base, t_all):
     workers = min(args.workers or (os.cpu_count() or 1), n_shards)   # 0 = 自动
     names = sorted(n for n in os.listdir(args.new_txt_dir) if n.endswith(TXT_EXT))
 
-    # 待处理标的 = 新目录里有、且**基线 meta 里有**（否则设备侧 JOIN 会丢弃、进不了包）
+    # 待处理标的 = 新目录里有、且**基线 meta 里有**（否则设备侧 JOIN 会丢弃、进不了包）；
+    # 腾讯无源指数也在此剔除（保持「分配集 = 产出集」自检成立——worker 里再跳就晚了）。
+    # 基线若是 is_tencent_less（2026-10-05 定稿）之前生成的（如 20260831 基线仍含 261 只），
+    # 不剔就会白出补丁（设备侧 JOIN 会丢弃）。
     pbase = sqlite3.connect(L.ro_uri(args.base_db), uri=True)
     pbase.execute("PRAGMA query_only=1")
     idmap = {f for _, f in pbase.execute("SELECT id, file FROM meta")}
     pbase.close()
-    pending = sorted(os.path.splitext(n)[0] for n in names if os.path.splitext(n)[0] in idmap)
+    all_files = [os.path.splitext(n)[0] for n in names]
+    skipped_less = sorted(f for f in all_files if is_tencent_less(f))
+    pending = sorted(f for f in all_files
+                     if f in idmap and not is_tencent_less(f))
+    skipped_no_meta_n = len(all_files) - len(pending) - len(skipped_less)
     groups = shard_pending(pending, n_shards)
-    print("待处理标的: %d（新目录 txt %d 个，基线无 meta 跳过 %d）→ 分 %d 片"
-          % (len(pending), len(names), len(names) - len(pending), n_shards))
+    print("待处理标的: %d（新目录 txt %d 个，基线无 meta 跳过 %d，腾讯无源指数跳过 %d）→ 分 %d 片"
+          % (len(pending), len(names), skipped_no_meta_n, len(skipped_less), n_shards))
+    if skipped_less:
+        print("腾讯无源指数（不进包）: %s"
+              % (", ".join(skipped_less[:12]) + (" …" if len(skipped_less) > 12 else "")))
     print("分片策略: file 排序后按 index%%N 分组（两两不交、并集 = 全集）；"
           "worker 数 = %d（%s）；仅出第 %s 片"
           % (workers,
@@ -1099,13 +1119,19 @@ def run_single(args, out_dir, before_base, t_all):
         total_rows = sum(len(rows[p]) for p in PATCH_PERIODS)
         t_a, t_b = r["t_a"], r["t_b"]
         print("-" * 78)
-        print("分类: append=%d rewrite=%d new=%d（合计 %d）"
-              % (r["n_app"], r["n_rew"], r["n_new"], len(names)))
+        print("分类: append=%d rewrite=%d new=%d（合计 %d；另有无 meta %d + 无源指数 %d 跳过）"
+              % (r["n_app"], r["n_rew"], r["n_new"], r["n_app"] + r["n_rew"] + r["n_new"],
+                 len(r["skipped_no_meta"]), len(r.get("skipped_tencent_less") or [])))
         if r["skipped_no_meta"]:
             print("跳过 %d 个「主库无此标的」的 txt（不进包，设备侧会被 JOIN 丢弃）: %s"
                   % (len(r["skipped_no_meta"]),
                      ", ".join(sorted(r["skipped_no_meta"])[:12])
                      + (" …" if len(r["skipped_no_meta"]) > 12 else "")))
+        if r.get("skipped_tencent_less"):
+            print("跳过 %d 个「腾讯无源指数」的 txt（不进包；若基线已按 is_tencent_less 重建则不会出现）: %s"
+                  % (len(r["skipped_tencent_less"]),
+                     ", ".join(sorted(r["skipped_tencent_less"])[:12])
+                     + (" …" if len(r["skipped_tencent_less"]) > 12 else "")))
         print("阶段 A（分类+解析，融合，2 次句柄/文件）  %.1fs" % t_a)
         print("阶段 B（比对/聚合/汇总）               %.1fs" % t_b)
         print("受影响 file 数: %d（bkt_meta）" % len(rows["meta"]))
