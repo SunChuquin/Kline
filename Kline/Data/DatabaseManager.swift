@@ -34,6 +34,10 @@ class DatabaseManager: ObservableObject {
     private let fileMapLock = NSLock()
     private var fileByMetaId: [Int: String] = [:]
 
+    /// metaList 首载重试次数与间隔（撞 WAL 恢复锁等瞬时竞争场景；含 busy_timeout 5s 兜底）
+    private static let metaLoadMaxAttempts = 5
+    private static let metaLoadRetryDelay: TimeInterval = 1.0
+
     /// 已应用到 dataVersion 的增量库指纹（同一指纹不重复自增，防止重复发布）
     private var appliedLiveFingerprint: String? = nil
     /// 增量库热重载信号订阅
@@ -244,6 +248,10 @@ class DatabaseManager: ObservableObject {
             }
             return
         }
+        // 锁竞争时等锁而不是立刻 BUSY：TrollStore 覆盖安装会让新旧进程短暂并存
+        // （实测 2026-10-10：新进程启动 0.9s 内旧进程还活着），首个读者做 WAL 恢复时
+        // 可能撞上旧连接持有的锁 → prepare 一次 BUSY 就永久放弃会让 metaList 永不就绪
+        sqlite3_busy_timeout(db, 5000)
         loadMetaList()
     }
 
@@ -253,39 +261,73 @@ class DatabaseManager: ObservableObject {
 
             let query = "SELECT id, file, code, name, type, first_date, last_date FROM meta ORDER BY id;"
 
-            var statement: OpaquePointer?
+            // 有限重试：主库打开即读（TrollStore 覆盖安装时可能与旧进程短暂并存，
+            // 首个读者做 WAL 恢复可能撞锁 BUSY）。此前一次失败即静默永久放弃
+            // （errorMessage 无 UI 消费、不落日志）→ 行情/自选页永远加载中。每次失败落日志。
+            var results: [MetaItem] = []
+            var succeeded = false
+            var lastError = ""
 
-            guard sqlite3_prepare_v2(self.db, query, -1, &statement, nil) == SQLITE_OK else {
+            for attempt in 1...Self.metaLoadMaxAttempts {
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(self.db, query, -1, &statement, nil) == SQLITE_OK else {
+                    let rc = sqlite3_extended_errcode(self.db)
+                    lastError = String(cString: sqlite3_errmsg(self.db))
+                    if statement != nil { sqlite3_finalize(statement) }
+                    DebugLogger.shared.log("[DB] metaList 查询失败（第 \(attempt)/\(Self.metaLoadMaxAttempts) 次）rc=\(rc)：\(lastError)")
+                    if attempt < Self.metaLoadMaxAttempts { Thread.sleep(forTimeInterval: Self.metaLoadRetryDelay) }
+                    continue
+                }
+
+                var stepFailed = false
+                while true {
+                    let stepRc = sqlite3_step(statement)
+                    if stepRc == SQLITE_ROW {
+                        let id = Int(sqlite3_column_int64(statement, 0))
+                        let file = String(cString: sqlite3_column_text(statement, 1))
+                        let code = String(cString: sqlite3_column_text(statement, 2))
+                        let name = String(cString: sqlite3_column_text(statement, 3))
+                        let type = String(cString: sqlite3_column_text(statement, 4))
+                        let firstDate = sqlite3_column_type(statement, 5) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 5)) : nil
+                        let lastDate = sqlite3_column_type(statement, 6) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 6)) : nil
+
+                        results.append(MetaItem(
+                            id: id,
+                            file: file,
+                            code: code,
+                            name: name,
+                            type: type,
+                            firstDate: firstDate,
+                            lastDate: lastDate
+                        ))
+                    } else if stepRc == SQLITE_DONE {
+                        break
+                    } else {
+                        // step 中途 BUSY/IO 错误若不处理会静默截断 metaList → 视为失败参与重试
+                        let rc = sqlite3_extended_errcode(self.db)
+                        lastError = String(cString: sqlite3_errmsg(self.db))
+                        stepFailed = true
+                        DebugLogger.shared.log("[DB] metaList step 失败（第 \(attempt)/\(Self.metaLoadMaxAttempts) 次）rc=\(rc)：\(lastError)")
+                        break
+                    }
+                }
+                sqlite3_finalize(statement)
+
+                if !stepFailed {
+                    succeeded = true
+                    break
+                }
+                if attempt < Self.metaLoadMaxAttempts { Thread.sleep(forTimeInterval: Self.metaLoadRetryDelay) }
+            }
+
+            guard succeeded else {
+                let message = "主库 meta 查询失败：\(lastError)"
+                DebugLogger.shared.log("[DB] metaList 重试耗尽，放弃：\(message)")
                 DispatchQueue.main.async {
-                    self.errorMessage = "准备查询失败"
+                    self.errorMessage = message
                 }
                 return
             }
-
-            var results: [MetaItem] = []
-
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let id = Int(sqlite3_column_int64(statement, 0))
-                let file = String(cString: sqlite3_column_text(statement, 1))
-                let code = String(cString: sqlite3_column_text(statement, 2))
-                let name = String(cString: sqlite3_column_text(statement, 3))
-                let type = String(cString: sqlite3_column_text(statement, 4))
-                let firstDate = sqlite3_column_type(statement, 5) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 5)) : nil
-                let lastDate = sqlite3_column_type(statement, 6) == SQLITE_INTEGER ? Int(sqlite3_column_int64(statement, 6)) : nil
-
-                let item = MetaItem(
-                    id: id,
-                    file: file,
-                    code: code,
-                    name: name,
-                    type: type,
-                    firstDate: firstDate,
-                    lastDate: lastDate
-                )
-                results.append(item)
-            }
-
-            sqlite3_finalize(statement)
 
             // 一次性建好 metaID → file 映射（增量库以 file 为键；避免每次查询线性遍历 metaList）
             var fileMap: [Int: String] = [:]
