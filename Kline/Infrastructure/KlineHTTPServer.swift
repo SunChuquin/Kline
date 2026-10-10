@@ -569,12 +569,12 @@ final class KlineHTTPServer {
             // 拒绝 / 60s 超时 → 403 {"error":"denied"}。响应在用户应答后才发出（连接保持等待）。
             handleSyncRequestPair(body: body, connection: connection)
         case ("POST", "/sync/backup"):
-            // 覆盖前备份（需会话 token）：把将被对端覆盖的文件/目录快照到 Documents/Backups/<ts>/
-            guard requirePairToken(pairToken, connection: connection) else { return }
+            // 覆盖前备份（门禁：token / 环回 / pipeline，见 allowSyncAction——USB 通道不依赖暴露）
+            guard allowSyncAction(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
             handleSyncBackup(body: body, connection: connection)
         case ("POST", "/sync/reload-config"):
-            // 配置/指标热重载（需会话 token）：主线程按 scope 重载各 Store
-            guard requirePairToken(pairToken, connection: connection) else { return }
+            // 配置/指标热重载（门禁：token / 环回 / pipeline，见 allowSyncAction——USB 通道不依赖暴露）
+            guard allowSyncAction(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
             handleSyncReloadConfig(body: body, connection: connection)
         case ("GET", "/sync/status"):
             // 增量库当前状态（既有 PC 推送脚本是本端点的消费者，原字段绝不能动）；
@@ -789,6 +789,21 @@ final class KlineHTTPServer {
             return false
         }
         return true
+    }
+
+    /// LAN 同步辅助动作（/sync/backup、/sync/reload-config）门禁，与沙盒写门禁同语义：
+    /// 本机回环（USB 转发的 PC 工具链）/ 已暴露 / pipeline 标识 / 有效会话 token 之一即放行。
+    /// 设计约定：**关闭「暴露」只影响 WiFi 发现与访问，USB 工具链通道不受限**。
+    private func allowSyncAction(pairToken: String, pipelineHeader: Bool, connection: NWConnection) -> Bool {
+        if Self.isLoopbackConnection(connection.endpoint)
+            || isLANAccessible || pipelineHeader
+            || (!pairToken.isEmpty && LANSyncPairing.shared.isValidToken(pairToken)) {
+            return true
+        }
+        DebugLogger.shared.log("[LAN门禁] 非本机来源且未暴露且无有效会话，拒绝同步辅助请求")
+        respond(connection, status: 403, contentType: "application/json",
+                body: "{\"error\":\"not exposed\"}")
+        return false
     }
 
     // MARK: 沙盒访问门禁（隐私要求：未暴露的本机不可被局域网读写）
