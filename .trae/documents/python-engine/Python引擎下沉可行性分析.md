@@ -371,6 +371,19 @@ flowchart TB
 | 2 | **参数阈值锁哪一套** | TA-Lib 的 `CDL*` 带一堆参数（`penetration`、影线 / 实体比例等），**不同库默认值不同**，不锁定就必然两端不一致 |
 | 3 | **先做哪几个形态** | 61 个全做没有意义；先做 5~10 个常用形态（锤子 / 吞没 / 启明星 / 十字星 / 三只乌鸦）打通链路，再扩 |
 
+> **三件事已定死（2026-10-12 落地回填）**：
+> 1. **参考实现 = TA-Lib C 0.6.4 源码**（`src/ta_func/*.c` 逐函数提取判定条件与 lookback；PC 侧参考环境 talib 0.8.1 + numpy 2.5.4 出 golden）。
+> 2. **阈值 = TA-Lib 默认参数表**（`ta_common/ta_global.c`：BodyShort/BodyLong=实体 10/1.0、BodyDoji=高低幅 10/0.1、ShadowLong=实体 0/1.0、ShadowVeryShort=高低幅 10/0.1、Near=高低幅 5/0.2、Far=高低幅 5/0.6；morningstar/eveningstar penetration=0.3）。
+> 3. **首批 = 10 个形态**：hammer / invertedhammer / engulfing / doji / shootingstar / harami / morningstar / eveningstar / 3blackcrows / 3whitesoldiers。
+>
+> **路线选择：路线 B 的实现变体**——不做 TA-Lib C 交叉编译（路线 A 引入 C 依赖且 iOS 交叉编译无官方支持），也不引入 Python C 扩展，而是**按 TA-Lib C 源码语义做 numpy 向量化移植**（`Kline/PyScripts/candle_patterns.py`，BSD 许可声明保留；numpy 已随引擎包就绪）。零新增原生依赖。
+>
+> **验证结果（第 2 层已执行）**：PC 全量差分 62,373 bar × 10 形态**零差异**（语料：随机游走/独立 OHLC/跳空游走/乌鸦易发/退化序列 + 手工样例，含 ±100 双向分支）；golden fixture（409 命中）→ 模拟器（iPad mini 5）契约测试双轮：引擎轮 2/2 PASS、降级构建轮（`KLINE_SKIP_ENGINE_EMBED=1`）2 skipped 语义正确；全量 KlineTests 39/39 绿。
+>
+> **性能实测**：62k bar 全量 10 形态，C 0.088s vs numpy 移植 0.144s（**1.6x**，远优于「纯 Python 慢 10~20x」的悲观预估——向量化把逐 bar 循环消灭后差距只剩 numpy 调用开销）。
+>
+> **关键经验：浮点平局必须逐位镜像 C 累加器**。2 位小数行情下「实体 == 实体均值」的**语义平局**高频出现（如 0.71 == 0.71），C 版结果是 `>` 还是 `==` 由滚动求和的最后一位 ulp 决定；`TA_CANDLEAVERAGE` 的滚动和若**对每个窗口独立求和**（即使同样左到右），舍入序列也与 C 的「init 一次左到右求和 + 每步 `+= fl(新 - 旧)`」不同，会导致平局在两实现间随机翻转。解法：**镜像 C 的差分累加**——`S = np.cumsum(concat([init], r[j0:]-r[a:]))`（`np.cumsum` 严格左到右、首根 = init、差分项 d[k] 属于 j0+k→j0+k+1 转移，去尾不去头），与 C 逐位一致后差分清零。提取 C 判定条件时**绝不能按关键词过滤**（曾因漏读含 `PeriodTotal` 的条件行引入 153 处假差异）。
+
 - 四维：可读性 **强正** / 可维护性 **强正**（自研代码量为零，全部来自参考实现）/ 版本更新灵活性 中 / 避免造轮子 **强正**。
 - 分级：**推荐下沉**（若走路线 B）；若走路线 A 则**不需要引擎**，分级变为「引入 C 依赖，与 Python 引擎无关」。
 
