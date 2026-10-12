@@ -184,6 +184,19 @@ final class PyTDXWave {
         let completion: (Result<[TDXOutputLine], String>) -> Void
     }
 
+    /// 同区间请求分组（struct 替代带标签元组，规避老编译器泛型/元组解析歧义）
+    private struct Group {
+        let data: [KlineItem]
+        var slots: [Int]
+    }
+
+    /// 单组求值作业（struct 替代带标签元组，同上）
+    private struct Job {
+        let requests: [[TDXStatement]]
+        let data: [KlineItem]
+        let slots: [Int]
+    }
+
     private var pending: [Pending] = []
     private var flushScheduled = false
 
@@ -205,21 +218,23 @@ final class PyTDXWave {
         guard !batch.isEmpty else { return }
         // 按 barsKey 分组保持提交顺序；组内 slots 记录各请求在 batch 中的下标
         var order: [String] = []
-        var groups: [String: (data: [KlineItem], slots: [Int])] = [:]
+        var groups: [String: Group] = [:]
         for (i, p) in batch.enumerated() {
             if groups[p.barsKey] == nil {
-                groups[p.barsKey] = (p.data, [])
+                groups[p.barsKey] = Group(data: p.data, slots: [])
                 order.append(p.barsKey)
             }
             groups[p.barsKey]!.slots.append(i)
         }
-        let jobs: [(requests: [[TDXStatement]], data: [KlineItem], slots: [Int])] =
-            order.map { key in
-                let g = groups[key]!
-                return (g.slots.map { batch[$0].stmts }, g.data, g.slots)
-            }
+        var jobs: [Job] = []
+        jobs.reserveCapacity(order.count)
+        for key in order {
+            let g = groups[key]!
+            jobs.append(Job(requests: g.slots.map { batch[$0].stmts }, data: g.data, slots: g.slots))
+        }
         DispatchQueue.global(qos: .userInitiated).async {
-            var results = [Result<[TDXOutputLine>, String>]()
+            // 显式类型标注（不用泛型数组字面量初始化，规避老编译器 '>' 解析歧义）
+            var results: [Result<[TDXOutputLine], String>] = []
             results.reserveCapacity(batch.count)
             for j in jobs {
                 switch PyTDXFormulaBridge.evaluate(requests: j.requests, data: j.data) {
