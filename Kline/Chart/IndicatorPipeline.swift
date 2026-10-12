@@ -36,6 +36,14 @@ final class IndicatorComputationStore: ObservableObject {
     /// 引用替换仅发生在缓存恢复路径，必伴随 mainCurves @Published 写）
     var mainCache = MainIndicatorCache()
 
+    // MARK: 【首帧引擎实验】引擎异步求值代数 token
+    // 引擎求值为主线程收集请求 → 后台 Python → 主线程回填；配置/区间变化再次触发时递增代数，
+    // 完成回调校验代数一致才提交，防止旧配置结果覆盖新配置（与 prefetchToken 同思路）
+    /// 主图引擎求值代数
+    var engineMainGen = 0
+    /// 副图引擎求值代数（按 SubChartModel 实例区分，3 个副图并发互不干扰）
+    var engineSubGens: [ObjectIdentifier: Int] = [:]
+
     // MARK: let（init 一次定，此后只读）
     /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
     let gaps: [GapInfo]
@@ -397,14 +405,23 @@ extension KlineChartView {
                                                period: self.period)
             let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
             let activeIDs = Set(entries.map { $0.id })
-            for entry in entries {
-                curves += mainRows(for: entry.id, enabled: true, formula: entry.formula,
-                                   calcStart: calcStart, calcEnd: calcEnd,
-                                   build: { i, out in
-                                       buildMainLine(id: entry.id, isCustom: entry.isCustom,
-                                                     customColor: entry.isCustom ? customColor : nil,
-                                                     i: i, out: out)
-                                   })
+            // ===== 【首帧引擎实验】原 Swift 前台主图求值（2026-10-12 临时注释禁用，真机体验反馈后决定去留）=====
+            // for entry in entries {
+            //     curves += mainRows(for: entry.id, enabled: true, formula: entry.formula,
+            //                        calcStart: calcStart, calcEnd: calcEnd,
+            //                        build: { i, out in
+            //                            buildMainLine(id: entry.id, isCustom: entry.isCustom,
+            //                                          customColor: entry.isCustom ? customColor : nil,
+            //                                          i: i, out: out)
+            //                        })
+            // }
+            // ===== 引擎替代路径：收集过期输出行单元（复用 mainRows 的单元缓存结构）→
+            //       后台 Python 批量求值（一次 call）→ 完成回调回填缓存并提交 =====
+            let pending = collectMainPendingUnits(entries: entries, calcStart: calcStart, calcEnd: calcEnd)
+            assembleMainCurvesFromCache(into: &curves, entries: entries)
+            if !pending.isEmpty {
+                evaluateMainPendingViaEngine(pending, entries: entries, customColor: customColor,
+                                             calcStart: calcStart, calcEnd: calcEnd)
             }
             // 清理已禁用/不再使用的指标缓存，避免残留占用
             for key in computation.mainCache.units.keys where !activeIDs.contains(key) {
@@ -414,6 +431,13 @@ extension KlineChartView {
             // 裸K：不显示指标，清空自定义缓存（其余指标缓存保留，切回裸K时复用）
             computation.mainCache.units[MainIndicatorCache.customKey] = nil
         }
+        commitMainCurves(curves)
+    }
+
+    /// 主图提交：写 mainCurves + (标的, 周期) 缓存写回。
+    /// 原 recomputeMainCurves 末尾提交块抽为公共提交点——引擎异步完成回填后也走此提交，
+    /// 内容与原实现逐行一致（原位置已注释见 recomputeMainCurves 末行）
+    func commitMainCurves(_ curves: [IndicatorLine]) {
         computation.mainCurves = curves
         // 写回 (标的, 周期) 缓存：切走再回来时恢复主图曲线与覆盖状态，不重复计算
         if let metaId = metaId {
@@ -437,6 +461,120 @@ extension KlineChartView {
             // 覆盖末端只增不减，避免后台/旧任务已算得更远时被本次写回往回推
             e.bgCoverageEnd = max(e.bgCoverageEnd, computation.bgCoverageEnd)
             e.configFingerprint = fp
+        }
+    }
+
+    // MARK: - 【首帧引擎实验】主图引擎求值路径
+
+    /// 主图过期单元（输出行缓存 key 不一致的单元），供引擎批量求值
+    private struct MainPendingUnit {
+        let entryIndex: Int
+        let unitIndex: Int
+        let text: String              // 单元公式文本（回填时与缓存当前文本核对，防中途重拆错位）
+        let stmts: [TDXStatement]     // 已解析语句（依赖闭包 + 输出语句）
+    }
+
+    /// 同步收集主图过期单元（镜像 mainRows 的单元缓存维护：formulaKey 变化重拆单元，
+    /// key 不一致即过期）。返回过期列表；缓存结构同步更新供组装复用
+    private func collectMainPendingUnits(entries: [MainIndicatorEntry],
+                                         calcStart: Int, calcEnd: Int) -> [MainPendingUnit] {
+        var pending: [MainPendingUnit] = []
+        for (ei, entry) in entries.enumerated() {
+            var cache = computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
+            // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元；计算区间变化也须重建
+            let formulaKey = "\(entry.formula)|\(calcStart)|\(calcEnd)"
+            if cache.formulaKey != formulaKey {
+                cache.formulaKey = formulaKey
+                cache.units = (try? TDXFormulaEngine.splitOutputUnits(formula: entry.formula)) ?? []
+                cache.rows = Array(repeating: MainIndicatorCache.Row(), count: cache.units.count)
+            }
+            for (ui, unit) in cache.units.enumerated() where cache.rows[ui].key != unit.text {
+                pending.append(MainPendingUnit(entryIndex: ei, unitIndex: ui, text: unit.text, stmts: unit.statements))
+            }
+            computation.mainCache.units[entry.id] = cache
+        }
+        return pending
+    }
+
+    /// 从单元缓存组装主图曲线（镜像 mainRows 尾部：已算好的行按 entries 顺序追加）
+    private func assembleMainCurvesFromCache(into curves: inout [IndicatorLine], entries: [MainIndicatorEntry]) {
+        for entry in entries {
+            guard let cache = computation.mainCache.units[entry.id] else { continue }
+            for row in cache.rows {
+                if let line = row.line { curves.append(line) }
+            }
+        }
+    }
+
+    /// 主图引擎求值：主线程收集请求 → 后台 Python 批量求值（一次 call）→ 主线程回填缓存并提交。
+    /// 引擎未就绪 → ensureOnce + 轮询重试（期间指标由 Swift 后台预计算兜底）
+    private func evaluateMainPendingViaEngine(_ pending: [MainPendingUnit],
+                                              entries: [MainIndicatorEntry],
+                                              customColor: Color?,
+                                              calcStart: Int, calcEnd: Int) {
+        let calcData = calcData(from: calcStart, to: calcEnd)
+        guard !calcData.isEmpty, !pending.isEmpty else { return }
+        guard KlinePythonBridge.shared.isReady else {
+            engineReadyRetry { self.recomputeMainCurves() }
+            return
+        }
+        computation.engineMainGen += 1
+        let gen = computation.engineMainGen
+        // 后台求值 + 手动回主线程（与 SystemIndicatorStore.calibrateWithPythonIfNeeded 同款分发范式）
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = PyTDXFormulaBridge.evaluate(requests: pending.map { $0.stmts }, data: calcData)
+            guard case .success(let batches) = r else {
+                if case .failure(let msg) = r {
+                    DebugLogger.shared.log("[PyTDXBridge] 主图引擎求值失败（\(pending.count) 单元）：\(msg)")
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
+                guard self.computation.engineMainGen == gen else { return }
+                // 回填单元缓存（镜像 mainRows：key 先行锁定防反复重试，line 仅成功且非全 NaN 时写入）
+                for (pi, p) in pending.enumerated() {
+                    guard pi < batches.count else { continue }
+                    let entry = entries[p.entryIndex]
+                    guard var cache = self.computation.mainCache.units[entry.id],
+                          p.unitIndex < cache.units.count, p.unitIndex < cache.rows.count,
+                          cache.units[p.unitIndex].text == p.text else { continue }
+                    cache.rows[p.unitIndex].key = p.text
+                    let outs = batches[pi]
+                    if let out = outs.last,
+                       let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
+                                                 customColor: entry.isCustom ? customColor : nil,
+                                                 i: p.unitIndex, out: out),
+                       !self.allNaN(built.values) {
+                        cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
+                    } else {
+                        cache.rows[p.unitIndex].line = nil
+                    }
+                    self.computation.mainCache.units[entry.id] = cache
+                }
+                // 拖拽中只回填缓存不提交（重算提交是拖拽卡顿根源），松手后 recompute 从缓存组装
+                guard !self.drag.isDragging else { return }
+                var curves: [IndicatorLine] = []
+                self.assembleMainCurvesFromCache(into: &curves, entries: entries)
+                self.commitMainCurves(curves)
+            }
+        }
+    }
+
+    /// 引擎未就绪：ensureOnce 后每 0.25s 轮询，就绪即重试（上限 10s）。
+    /// 引擎未安装等永久失败场景由上限兜底——期间指标由 Swift 后台预计算补齐
+    func engineReadyRetry(attempt: Int = 0, retry: @escaping () -> Void) {
+        KlinePythonBridge.shared.ensureOnce()
+        if attempt > 40 {
+            DebugLogger.shared.log("[PyTDXBridge] 等待引擎就绪超时（10s），本轮放弃重试（Swift 后台预计算兜底）")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            if KlinePythonBridge.shared.isReady {
+                retry()
+            } else {
+                self.engineReadyRetry(attempt: attempt + 1, retry: retry)
+            }
         }
     }
 
@@ -561,14 +699,20 @@ extension KlineChartView {
         }
         let calcData = calcData(from: calcStart, to: calcEnd)
         var curves: [IndicatorLine] = []
-        if m.activeCustomID != nil, let custom,
-           let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: calcData) {
-            for (i, line) in lines.enumerated() {
-                let built = IndicatorLine(name: displayName(line.name), values: line.values,
-                                          color: customLineColor(i, line: line, indicatorColor: custom.color),
-                                          style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue)
-                curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
-            }
+        if m.activeCustomID != nil, let custom {
+            // ===== 【首帧引擎实验】原 Swift 前台求值（2026-10-12 临时注释禁用，真机体验反馈后决定去留）=====
+            // if let lines = try? TDXFormulaEngine.evaluate(formula: custom.formula, data: calcData) {
+            //     for (i, line) in lines.enumerated() {
+            //         let built = IndicatorLine(name: displayName(line.name), values: line.values,
+            //                                   color: customLineColor(i, line: line, indicatorColor: custom.color),
+            //                                   style: line.style, lineWidth: line.lineWidth, hideValue: line.hideValue)
+            //         curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+            //     }
+            // }
+            // ===== 引擎替代路径：完成回调内组装并提交 =====
+            evaluateSubViaEngine(m, formula: custom.formula, custom: custom,
+                                 calcStart: calcStart, calcEnd: calcEnd, calcData: calcData)
+            return
         } else if m.kind == "VOL" || m.kind == "AMO" {
             let isAmo = m.kind == "AMO"
             let baseAll = isAmo ? turnovers : volumes
@@ -584,30 +728,43 @@ extension KlineChartView {
                                         calcStart: calcStart, calcEnd: calcEnd))
             }
         } else {
-                // 其余系统指标：按内置/可覆盖的 .tdx 公式模板求值
-                if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: self.period),
-                   let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
-                    for (i, line) in lines.enumerated() {
-                        guard !allNaN(line.values) else { continue }
-                        let built = IndicatorLine(name: displayName(line.name), values: line.values,
-                                                  color: lineColor(from: line, fallback: maColor(i)),
-                                                  style: line.style, lineWidth: line.lineWidth,
-                                                  hideValue: line.hideValue,
-                                                  barColor: line.colorStick ? .sign : .fixed,
-                                                  markerColors: line.markerDirections?.map { $0 ? upColor : downColor })
-                        curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
-                    }
+                // ===== 【首帧引擎实验】原 Swift 前台求值（2026-10-12 临时注释禁用，真机体验反馈后决定去留）=====
+                // if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: self.period),
+                //    let lines = try? TDXFormulaEngine.evaluate(formula: formula, data: calcData) {
+                //     for (i, line) in lines.enumerated() {
+                //         guard !allNaN(line.values) else { continue }
+                //         let built = IndicatorLine(name: displayName(line.name), values: line.values,
+                //                                   color: lineColor(from: line, fallback: maColor(i)),
+                //                                   style: line.style, lineWidth: line.lineWidth,
+                //                                   hideValue: line.hideValue,
+                //                                   barColor: line.colorStick ? .sign : .fixed,
+                //                                   markerColors: line.markerDirections?.map { $0 ? upColor : downColor })
+                //         curves.append(padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+                //     }
+                // }
+                // ===== 引擎替代路径：完成回调内组装并提交 =====
+                if let formula = SystemIndicatorStore.shared.formula(for: m.kind, values: [:], period: self.period) {
+                    evaluateSubViaEngine(m, formula: formula, custom: nil,
+                                         calcStart: calcStart, calcEnd: calcEnd, calcData: calcData)
+                    return
                 }
         }
+        // VOL/AMO 与无公式路径：保持同步提交；引擎路径在完成回调经 commitSubCurves 提交
+        commitSubCurves(m, curves: curves, custom: custom)
+    }
+
+    /// 副图提交：防空保护 + (标的, 周期) 缓存写回。
+    /// 原 recomputeSub 末尾提交块抽为公共提交点——引擎异步完成回填后也走此提交，
+    /// 内容与原实现逐行一致（原位置见 recomputeSub 末段）
+    func commitSubCurves(_ m: SubChartModel, curves: [IndicatorLine], custom: CustomIndicator?) {
         // 防空保护：重算结果为空（如公式在裁剪区间求值失败/裁剪数据异常）时保留旧曲线，
         // 避免副图被清空变空白；后台分块预计算随后会用正确结果覆盖
         if !curves.isEmpty || m.curves.isEmpty {
-            if curves.isEmpty { klineDebug("[DualLink] recomputeSub 计算空将覆盖 \(m.kind) isolated=\(isolatedSubs) 旧=\(m.curves.count) win=[\(startIndex)...\(endIndex)] calc=\(calcStart)...\(calcEnd)") }
             m.curves = curves
             m.titleName = (m.isCustom ? custom?.name : nil) ?? m.kind
             m.color = custom?.color ?? Color(hex: "0050FF")!
         } else {
-            klineDebug("[KlineDebug] 防空:计算空保留旧 \(m.kind) 旧=\(m.curves.count) bgCovered=\(bgCovered) calc=\(calcStart)...\(calcEnd) calcData=\(calcData.count)")
+            klineDebug("[KlineDebug] 防空:计算空保留旧 \(m.kind) 旧=\(m.curves.count)")
         }
         // 写回 (标的, 周期) 缓存：副图曲线按槽位存储，切回该周期时直接恢复
         if let metaId = metaId {
@@ -625,6 +782,70 @@ extension KlineChartView {
             let slot = m === subTop ? 0 : (m === subBottom ? 1 : 2)
             e.subCurves[slot] = m.curves
             e.configFingerprint = fp
+        }
+    }
+
+    /// 副图引擎求值：主线程解析公式收集请求 → 后台 Python → 主线程组装提交。
+    /// 引擎未就绪 → ensureOnce + 轮询重试（期间指标由 Swift 后台预计算兜底）
+    private func evaluateSubViaEngine(_ m: SubChartModel, formula: String, custom: CustomIndicator?,
+                                      calcStart: Int, calcEnd: Int, calcData: [KlineItem]) {
+        var lexer = TDXLexer(formula)
+        let tokens = (try? lexer.tokenize()) ?? []
+        var parser = TDXParser(tokens: tokens)
+        guard !tokens.isEmpty, let stmts = try? parser.parse() else {
+            // 解析失败：走防空保留旧曲线（原实现解析失败会 fallthrough 到系统公式分支，语义收紧更安全）
+            commitSubCurves(m, curves: [], custom: custom)
+            return
+        }
+        guard !calcData.isEmpty else {
+            commitSubCurves(m, curves: [], custom: custom)
+            return
+        }
+        guard KlinePythonBridge.shared.isReady else {
+            engineReadyRetry { self.recomputeSub(m) }
+            return
+        }
+        let key = ObjectIdentifier(m)
+        computation.engineSubGens[key, default: 0] += 1
+        let gen = computation.engineSubGens[key] ?? 0
+        // 后台求值 + 手动回主线程（与 SystemIndicatorStore.calibrateWithPythonIfNeeded 同款分发范式）
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = PyTDXFormulaBridge.evaluate(requests: [stmts], data: calcData)
+            guard case .success(let batches) = r, let outs = batches.first else {
+                if case .failure(let msg) = r {
+                    DebugLogger.shared.log("[PyTDXBridge] 副图 \(m.kind) 引擎求值失败：\(msg)")
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
+                guard self.computation.engineSubGens[key] == gen else { return }
+                var curves: [IndicatorLine] = []
+                if custom != nil {
+                    // 自定义指标组装（与原 custom 分支逐行一致）
+                    for (j, out) in outs.enumerated() {
+                        let built = IndicatorLine(name: self.displayName(out.name), values: out.values,
+                                                  color: self.customLineColor(j, line: out, indicatorColor: custom?.color),
+                                                  style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                        curves.append(self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+                    }
+                } else {
+                    // 系统指标组装（与原 system 分支逐行一致）
+                    for (j, out) in outs.enumerated() {
+                        guard !self.allNaN(out.values) else { continue }
+                        let built = IndicatorLine(name: self.displayName(out.name), values: out.values,
+                                                  color: self.lineColor(from: out, fallback: self.maColor(j)),
+                                                  style: out.style, lineWidth: out.lineWidth,
+                                                  hideValue: out.hideValue,
+                                                  barColor: out.colorStick ? .sign : .fixed,
+                                                  markerColors: out.markerDirections?.map { $0 ? self.upColor : self.downColor })
+                        curves.append(self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+                    }
+                }
+                // 拖拽中不提交，松手后 recompute 补齐
+                guard !self.drag.isDragging else { return }
+                self.commitSubCurves(m, curves: curves, custom: custom)
+            }
         }
     }
 

@@ -42,6 +42,11 @@ struct KlineApp: App {
         // 前台按 11:00 / 14:30 / 15:05 / 17:30 时刻表检查，到点即从 data 分支拉取并热刷新
         // （同时触发「清单标的当日K线」东财直连更新，两者独立、成败互不影响）
         TdxSyncManager.shared.start()
+
+        // 【首帧引擎实验】启动后台预热 Python 引擎（ensureOnce 惰性激活改启动触发）：
+        // A8 实测 dlopen ~20ms + Py_Initialize ~130ms，用户打开图表前完成就绪；
+        // tdx_eval.py 纯标准库无 numpy 长等待；预热必须后台异步，绝不阻塞启动主线程
+        KlinePythonBridge.shared.ensureOnce()
     }
 
     var body: some Scene {
