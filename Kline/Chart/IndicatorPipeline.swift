@@ -43,6 +43,8 @@ final class IndicatorComputationStore: ObservableObject {
     var engineMainGen = 0
     /// 副图引擎求值代数（按 SubChartModel 实例区分，3 个副图并发互不干扰）
     var engineSubGens: [ObjectIdentifier: Int] = [:]
+    /// 主图波次合并提交标记：同波次 N 个单元完成回调只触发一次组装+提交
+    var mainCommitScheduled = false
 
     // MARK: let（init 一次定，此后只读）
     /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
@@ -520,44 +522,51 @@ extension KlineChartView {
         }
         computation.engineMainGen += 1
         let gen = computation.engineMainGen
-        // 后台求值 + 手动回主线程（与 SystemIndicatorStore.calibrateWithPythonIfNeeded 同款分发范式）
-        DispatchQueue.global(qos: .userInitiated).async {
-            let r = PyTDXFormulaBridge.evaluate(requests: pending.map { $0.stmts }, data: calcData)
-            guard case .success(let batches) = r else {
-                if case .failure(let msg) = r {
-                    DebugLogger.shared.log("[PyTDXBridge] 主图引擎求值失败（\(pending.count) 单元）：\(msg)")
-                }
-                return
-            }
-            DispatchQueue.main.async {
+        // 与 Swift 原生同构的一次求值波次：主图全部过期单元 + 同帧副图请求由 PyTDXWave
+        // 合并为**一次** Python call（bars 只序列化/写盘一份），结果按下标发回各请求方
+        let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
+        for p in pending {
+            PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: p.stmts) { r in
                 // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
                 guard self.computation.engineMainGen == gen else { return }
-                // 回填单元缓存（镜像 mainRows：key 先行锁定防反复重试，line 仅成功且非全 NaN 时写入）
-                for (pi, p) in pending.enumerated() {
-                    guard pi < batches.count else { continue }
-                    let entry = entries[p.entryIndex]
-                    guard var cache = self.computation.mainCache.units[entry.id],
-                          p.unitIndex < cache.units.count, p.unitIndex < cache.rows.count,
-                          cache.units[p.unitIndex].text == p.text else { continue }
-                    cache.rows[p.unitIndex].key = p.text
-                    let outs = batches[pi]
-                    if let out = outs.last,
-                       let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
-                                                 customColor: entry.isCustom ? customColor : nil,
-                                                 i: p.unitIndex, out: out),
-                       !self.allNaN(built.values) {
-                        cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
-                    } else {
-                        cache.rows[p.unitIndex].line = nil
+                guard case .success(let outs) = r else {
+                    if case .failure(let msg) = r {
+                        DebugLogger.shared.log("[PyTDXBridge] 主图单元 '\(p.text.prefix(24))' 求值失败：\(msg)")
                     }
-                    self.computation.mainCache.units[entry.id] = cache
+                    return // 失败不锁 key → 下次 recompute 自动重试（Swift 后台预计算兜底）
                 }
-                // 拖拽中只回填缓存不提交（重算提交是拖拽卡顿根源），松手后 recompute 从缓存组装
-                guard !self.drag.isDragging else { return }
-                var curves: [IndicatorLine] = []
-                self.assembleMainCurvesFromCache(into: &curves, entries: entries)
-                self.commitMainCurves(curves)
+                // 回填单元缓存（镜像 mainRows：key 先行锁定防反复重试，line 仅成功且非全 NaN 时写入）
+                let entry = entries[p.entryIndex]
+                guard var cache = self.computation.mainCache.units[entry.id],
+                      p.unitIndex < cache.units.count, p.unitIndex < cache.rows.count,
+                      cache.units[p.unitIndex].text == p.text else { return }
+                cache.rows[p.unitIndex].key = p.text
+                if let out = outs.last,
+                   let built = self.buildMainLine(id: entry.id, isCustom: entry.isCustom,
+                                                  customColor: entry.isCustom ? customColor : nil,
+                                                  i: p.unitIndex, out: out),
+                   !self.allNaN(built.values) {
+                    cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
+                } else {
+                    cache.rows[p.unitIndex].line = nil
+                }
+                self.computation.mainCache.units[entry.id] = cache
+                self.scheduleMainCommit(entries: entries)
             }
+        }
+    }
+
+    /// 主图合并提交：同波次各单元完成回调都只回填缓存，最后一个回填完后统一组装+提交一次
+    /// （N 个单元只触发一次 mainCurves 写；拖拽中不提交，松手后 recompute 从缓存组装）
+    private func scheduleMainCommit(entries: [MainIndicatorEntry]) {
+        guard !computation.mainCommitScheduled else { return }
+        computation.mainCommitScheduled = true
+        DispatchQueue.main.async {
+            self.computation.mainCommitScheduled = false
+            guard !self.drag.isDragging else { return }
+            var curves: [IndicatorLine] = []
+            self.assembleMainCurvesFromCache(into: &curves, entries: entries)
+            self.commitMainCurves(curves)
         }
     }
 
@@ -808,44 +817,42 @@ extension KlineChartView {
         let key = ObjectIdentifier(m)
         computation.engineSubGens[key, default: 0] += 1
         let gen = computation.engineSubGens[key] ?? 0
-        // 后台求值 + 手动回主线程（与 SystemIndicatorStore.calibrateWithPythonIfNeeded 同款分发范式）
-        DispatchQueue.global(qos: .userInitiated).async {
-            let r = PyTDXFormulaBridge.evaluate(requests: [stmts], data: calcData)
-            guard case .success(let batches) = r, let outs = batches.first else {
+        // 波次提交：与同帧主图请求合并为一次 Python call（bars 共享一份）
+        let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
+        PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: stmts) { r in
+            // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
+            guard self.computation.engineSubGens[key] == gen else { return }
+            guard case .success(let outs) = r else {
                 if case .failure(let msg) = r {
                     DebugLogger.shared.log("[PyTDXBridge] 副图 \(m.kind) 引擎求值失败：\(msg)")
                 }
                 return
             }
-            DispatchQueue.main.async {
-                // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
-                guard self.computation.engineSubGens[key] == gen else { return }
-                var curves: [IndicatorLine] = []
-                if custom != nil {
-                    // 自定义指标组装（与原 custom 分支逐行一致）
-                    for (j, out) in outs.enumerated() {
-                        let built = IndicatorLine(name: self.displayName(out.name), values: out.values,
-                                                  color: self.customLineColor(j, line: out, indicatorColor: custom?.color),
-                                                  style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
-                        curves.append(self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
-                    }
-                } else {
-                    // 系统指标组装（与原 system 分支逐行一致）
-                    for (j, out) in outs.enumerated() {
-                        guard !self.allNaN(out.values) else { continue }
-                        let built = IndicatorLine(name: self.displayName(out.name), values: out.values,
-                                                  color: self.lineColor(from: out, fallback: self.maColor(j)),
-                                                  style: out.style, lineWidth: out.lineWidth,
-                                                  hideValue: out.hideValue,
-                                                  barColor: out.colorStick ? .sign : .fixed,
-                                                  markerColors: out.markerDirections?.map { $0 ? self.upColor : self.downColor })
-                        curves.append(self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
-                    }
+            var curves: [IndicatorLine] = []
+            if custom != nil {
+                // 自定义指标组装（与原 custom 分支逐行一致）
+                for (j, out) in outs.enumerated() {
+                    let built = IndicatorLine(name: self.displayName(out.name), values: out.values,
+                                              color: self.customLineColor(j, line: out, indicatorColor: custom?.color),
+                                              style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                    curves.append(self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
                 }
-                // 拖拽中不提交，松手后 recompute 补齐
-                guard !self.drag.isDragging else { return }
-                self.commitSubCurves(m, curves: curves, custom: custom)
+            } else {
+                // 系统指标组装（与原 system 分支逐行一致）
+                for (j, out) in outs.enumerated() {
+                    guard !self.allNaN(out.values) else { continue }
+                    let built = IndicatorLine(name: self.displayName(out.name), values: out.values,
+                                              color: self.lineColor(from: out, fallback: self.maColor(j)),
+                                              style: out.style, lineWidth: out.lineWidth,
+                                              hideValue: out.hideValue,
+                                              barColor: out.colorStick ? .sign : .fixed,
+                                              markerColors: out.markerDirections?.map { $0 ? self.upColor : self.downColor })
+                    curves.append(self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd))
+                }
             }
+            // 拖拽中不提交，松手后 recompute 补齐
+            guard !self.drag.isDragging else { return }
+            self.commitSubCurves(m, curves: curves, custom: custom)
         }
     }
 

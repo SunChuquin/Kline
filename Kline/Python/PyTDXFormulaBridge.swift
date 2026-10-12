@@ -167,3 +167,74 @@ enum PyTDXFormulaBridge {
         }
     }
 }
+
+// MARK: - 【首帧引擎实验】同帧波次合并器
+//
+// 对齐 Swift 原生实现的一次求值波次：主图 + 三个副图在同一次 runloop tick 内触发的
+// recompute，合并为**一次** Python call（bars 只序列化/写盘一份），结果按下标发回各请求方。
+// 修复首轮实现「每个图表各发一次 call、各带一份 bars」导致的 4 倍 JSON/文件 I/O 开销。
+final class PyTDXWave {
+
+    static let shared = PyTDXWave()
+
+    private struct Pending {
+        let barsKey: String
+        let data: [KlineItem]
+        let stmts: [TDXStatement]
+        let completion: (Result<[TDXOutputLine], String>) -> Void
+    }
+
+    private var pending: [Pending] = []
+    private var flushScheduled = false
+
+    /// 主线程提交一次求值请求。同一 runloop tick 内的多个提交（主图 N 个单元 + 副图 3 个）
+    /// 在下一 tick 冲刷时按 barsKey 分组合并：同区间共享一份 bars payload → 单组一次 call
+    func submit(barsKey: String, data: [KlineItem], stmts: [TDXStatement],
+                completion: @escaping (Result<[TDXOutputLine], String>) -> Void) {
+        assert(Thread.isMainThread, "PyTDXWave.submit 仅限主线程（与 recompute 同帧）")
+        pending.append(Pending(barsKey: barsKey, data: data, stmts: stmts, completion: completion))
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.async { self.flush() }
+    }
+
+    private func flush() {
+        flushScheduled = false
+        let batch = pending
+        pending = []
+        guard !batch.isEmpty else { return }
+        // 按 barsKey 分组保持提交顺序；组内 slots 记录各请求在 batch 中的下标
+        var order: [String] = []
+        var groups: [String: (data: [KlineItem], slots: [Int])] = [:]
+        for (i, p) in batch.enumerated() {
+            if groups[p.barsKey] == nil {
+                groups[p.barsKey] = (p.data, [])
+                order.append(p.barsKey)
+            }
+            groups[p.barsKey]!.slots.append(i)
+        }
+        let jobs: [(requests: [[TDXStatement]], data: [KlineItem], slots: [Int])] =
+            order.map { key in
+                let g = groups[key]!
+                return (g.slots.map { batch[$0].stmts }, g.data, g.slots)
+            }
+        DispatchQueue.global(qos: .userInitiated).async {
+            var results = [Result<[TDXOutputLine>, String>]()
+            results.reserveCapacity(batch.count)
+            for j in jobs {
+                switch PyTDXFormulaBridge.evaluate(requests: j.requests, data: j.data) {
+                case .success(let batches):
+                    // batches 与 j.requests 按下标对齐；组内逐请求发回，单请求失败不拖垮同组其余
+                    for b in batches { results.append(.success(b)) }
+                case .failure(let msg):
+                    for _ in j.slots { results.append(.failure(msg)) }
+                }
+            }
+            DispatchQueue.main.async {
+                for (i, p) in batch.enumerated() where i < results.count {
+                    p.completion(results[i])
+                }
+            }
+        }
+    }
+}

@@ -221,12 +221,25 @@ final class KlinePythonBridge {
         __kline_script__ = _kb64.b64decode('\(b64(scriptPath))').decode()
         _kres = {"ok": False, "error": "unreachable"}
         try:
+            # 编译缓存：PyRun_SimpleString 的 __main__ 命名空间跨调用持久，
+            # 业务脚本（随 bundle 不变）只 compile 一次，后续调用直接 exec 字节码。
+            # A8 实测每次重编译 ~500 行脚本贡献了「越跑越慢」的主要份额。
+            try:
+                _kcode_cache
+            except NameError:
+                _kcode_cache = {}
+            import os as _kos
+            _kst = _kos.stat(__kline_script__)
+            _kk = (__kline_script__, _kst.st_size, _kst.st_mtime)
+            _kc = _kcode_cache.get(_kk)
+            if _kc is None:
+                with open(__kline_script__, "r", encoding="utf-8") as _f:
+                    _kc = compile(_f.read(), __kline_script__, "exec")
+                _kcode_cache[_kk] = _kc
             with open(__kline_in__, "r", encoding="utf-8") as _f:
                 _kinput = _kjson.load(_f)
             _g = {"__name__": "__main__", "__file__": __kline_script__, "kline_input": _kinput}
-            with open(__kline_script__, "r", encoding="utf-8") as _f:
-                _ksrc = _f.read()
-            exec(compile(_ksrc, __kline_script__, "exec"), _g)
+            exec(_kc, _g)
             _kres = _g.get("kline_result")
             if not isinstance(_kres, dict):
                 raise RuntimeError("脚本未定义 dict 类型的 kline_result")
