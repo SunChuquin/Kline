@@ -301,13 +301,13 @@ a = out.get("audit", {})
 check("对拍-全绿(合并/增量优先/主库较新行)", a.get("equal") is True and a.get("source") == "live+main"
       and a.get("db_rows") == 13, "audit=%r" % a)
 
-# 25. 实时 bar 场景：Swift 内存多一根库中还没有的 20260114 → 首差 idx=0 date
+# 25. 实时 bar 场景：Swift 内存多一根库中还没有的 20260114 → 按日期对齐后 db 侧缺失 → 首差 idx=0 field=o db=nan
 out = run_audit({"main": MAIN_DB, "live": LIVE_DB, "meta_id": 1, "table": "daily"},
                 [(20260114, 999.0, 999.0, 999.0, 999.0, 0.0, 0.0)] + expect)
 a = out.get("audit", {})
 fd = a.get("first_diff") or {}
 check("对拍-实时bar暴露首差", a.get("equal") is False
-      and fd.get("field") == "date" and fd.get("swift") == 20260114, "audit=%r" % a)
+      and fd.get("field") == "o" and fd.get("db") == "nan" and fd.get("idx") == 0, "audit=%r" % a)
 
 # 26. 增量库缺失 → 纯主库（note=main；Swift 传主库值 → 全绿）
 main_only = [main_bar(d) for d in range(20260112, 20260100, -1)]

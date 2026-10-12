@@ -536,7 +536,10 @@ extension KlineChartView {
         for p in pending {
             PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: p.stmts, dbAudit: dbAudit) { r in
                 // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
-                guard self.computation.engineMainGen == gen else { return }
+                guard self.computation.engineMainGen == gen else {
+                    DebugLogger.shared.log("[PyTDXBridge] 诊断 主图completion丢弃 gen=\(gen) cur=\(self.computation.engineMainGen) unit=\(p.unitIndex)")
+                    return
+                }
                 guard case .success(let outs) = r else {
                     if case .failure(let msg) = r {
                         DebugLogger.shared.log("[PyTDXBridge] 主图单元 '\(p.text.prefix(24))' 求值失败：\(msg)")
@@ -547,7 +550,12 @@ extension KlineChartView {
                 let entry = entries[p.entryIndex]
                 guard var cache = self.computation.mainCache.units[entry.id],
                       p.unitIndex < cache.units.count, p.unitIndex < cache.rows.count,
-                      cache.units[p.unitIndex].text == p.text else { return }
+                      cache.units[p.unitIndex].text == p.text else {
+                    let why = self.computation.mainCache.units[entry.id] == nil ? "缺cache" :
+                        (p.unitIndex >= (self.computation.mainCache.units[entry.id]?.units.count ?? 0) ? "越界" : "text不匹配")
+                    DebugLogger.shared.log("[PyTDXBridge] 诊断 主图回填失败 entry=\(entry.id) unit=\(p.unitIndex) 原因=\(why)")
+                    return
+                }
                 cache.rows[p.unitIndex].key = p.text
                 if let out = outs.last,
                    let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
@@ -556,6 +564,8 @@ extension KlineChartView {
                    !self.allNaN(built.values) {
                     cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
                 } else {
+                    let nanCount = outs.last.map { $0.values.filter { !$0.isNaN }.count } ?? -1
+                    DebugLogger.shared.log("[PyTDXBridge] 诊断 主图回填line=nil entry=\(entry.id) unit=\(p.unitIndex) outs=\(outs.count) 有效值=\(nanCount)")
                     cache.rows[p.unitIndex].line = nil
                 }
                 self.computation.mainCache.units[entry.id] = cache
@@ -571,9 +581,13 @@ extension KlineChartView {
         computation.mainCommitScheduled = true
         DispatchQueue.main.async {
             self.computation.mainCommitScheduled = false
-            guard !self.drag.isDragging else { return }
+            guard !self.drag.isDragging else {
+                DebugLogger.shared.log("[PyTDXBridge] 诊断 主图commit跳过(拖拽中)")
+                return
+            }
             var curves: [IndicatorLine] = []
             self.assembleMainCurvesFromCache(into: &curves, entries: entries)
+            DebugLogger.shared.log("[PyTDXBridge] 诊断 主图commit 组装=\(curves.count)行")
             self.commitMainCurves(curves)
         }
     }
@@ -836,7 +850,10 @@ extension KlineChartView {
         }
         PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: stmts, dbAudit: dbAudit) { r in
             // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
-            guard self.computation.engineSubGens[key] == gen else { return }
+            guard self.computation.engineSubGens[key] == gen else {
+                DebugLogger.shared.log("[PyTDXBridge] 诊断 副图completion丢弃 kind=\(m.kind) gen=\(gen) cur=\(self.computation.engineSubGens[key] ?? -1)")
+                return
+            }
             guard case .success(let outs) = r else {
                 if case .failure(let msg) = r {
                     DebugLogger.shared.log("[PyTDXBridge] 副图 \(m.kind) 引擎求值失败：\(msg)")
@@ -866,7 +883,11 @@ extension KlineChartView {
                 }
             }
             // 拖拽中不提交，松手后 recompute 补齐
-            guard !self.drag.isDragging else { return }
+            guard !self.drag.isDragging else {
+                DebugLogger.shared.log("[PyTDXBridge] 诊断 副图commit跳过(拖拽中) kind=\(m.kind) 组装=\(curves.count)行")
+                return
+            }
+            DebugLogger.shared.log("[PyTDXBridge] 诊断 副图commit kind=\(m.kind) 组装=\(curves.count)行")
             self.commitSubCurves(m, curves: curves, custom: custom)
         }
     }

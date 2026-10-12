@@ -556,7 +556,9 @@ def audit_bars(db_bars, swift_bars):
         first_diff = {"idx": n, "field": "count", "db": len(db_bars), "swift": len(swift_bars)}
     audit = {"db_rows": len(db_bars), "swift_rows": len(swift_bars), "equal": equal}
     if first_diff:
-        audit["first_diff"] = first_diff
+        # 值字符串化：NaN 无法过 JSONSerialization（Swift 端会整体解析失败丢日志）
+        audit["first_diff"] = {"idx": first_diff["idx"], "field": first_diff["field"],
+                               "db": str(first_diff["db"]), "swift": str(first_diff["swift"])}
     if db_bars:
         audit["date_span"] = [db_bars[-1]["date"], db_bars[0]["date"]]
     return audit
@@ -582,9 +584,8 @@ def run(kline_input):
             if not db_cfg.get("file"):
                 db_cfg["file"] = _resolve_file(db_cfg["main"], db_cfg["meta_id"])
             db_bars, note = load_bars_from_db(db_cfg)
-            # Swift 传入的是 calcData **切片**（date 降序）：按切片日期集合过滤 db 全量后再对齐，
-            # 否则行数天然不等。库中缺失的实时 bar / 超出库范围的差异会以 count/date 差异暴露——
-            # 这正是阶段1要观测的对象
+            # Swift 传入的是 calcData **切片**：按切片日期逐位对齐（不假设切片方向），
+            # 库中缺失的日期（实时 bar 等）记为 diff——这正是阶段1要观测的对象
             dates = db_cfg.get("dates")
             n = len(bars["c"])
             swift_bars = [{"date": 0, "o": bars["o"][i], "h": bars["h"][i],
@@ -592,11 +593,20 @@ def run(kline_input):
                            "v": bars["v"][i], "a": bars["a"][i]}
                           for i in range(n)]
             if isinstance(dates, list) and len(dates) == n:
+                # Swift sortedData 为**升序**（老→新）；db 查询为 DESC。按切片日期精确对齐，
+                # 库中缺失的日期（实时 bar 等）记为 diff——这正是阶段1要观测的对象
                 for i in range(n):
                     swift_bars[i]["date"] = int(dates[i])
-                dset = {int(x) for x in dates}
-                db_bars = [b for b in db_bars if b["date"] in dset]  # db_bars 已 date 降序
-            audit = audit_bars(db_bars, swift_bars)
+                by_date = {b["date"]: b for b in db_bars}
+                db_aligned = []
+                for i in range(n):
+                    d = int(dates[i])
+                    db_aligned.append(by_date.get(d) or
+                                      {"date": d, "o": _NAN, "h": _NAN, "l": _NAN,
+                                       "c": _NAN, "v": _NAN, "a": _NAN})
+                audit = audit_bars(db_aligned, swift_bars)
+            else:
+                audit = audit_bars(db_bars, swift_bars)
             audit["source"] = note
         except Exception as exc:  # 对拍失败不阻断求值
             audit = {"equal": None, "error": "%s: %s" % (type(exc).__name__, exc)}
