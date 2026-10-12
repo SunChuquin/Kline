@@ -213,6 +213,18 @@ struct PythonEngineLabView: View {
 
                 Divider()
 
+                // 实验④：候选 2 阶段 B「首帧红线」重估的真机手动验证入口（进程内桥接，
+                // 与 KlineTests/PyBridgeFirstFramePerfTests 同口径；iOS 15.5 设备无法
+                // 跑 XCTest，靠本按钮测量）。重启 App 后立即跑可测到真实预热/首调耗时。
+                actionRow(title: "实验④ 首帧端到端（进程内桥接）",
+                          systemImage: "4.circle",
+                          enabled: !host.isBusy && runningExp == 0 && engineStatus == .installed,
+                          showSpinner: runningExp == 4) {
+                    runExp4()
+                }
+
+                Divider()
+
                 actionRow(title: "清理下载文件",
                           systemImage: "trash",
                           tint: .red,
@@ -628,6 +640,135 @@ struct PythonEngineLabView: View {
                 }
             case .failure(let e):
                 host.appendOutput("实验③ 失败：" + e)
+            }
+        }
+    }
+
+    // MARK: 实验④ 首帧端到端（进程内桥接；候选 2 阶段 B 红线重估，与 PyBridgeFirstFramePerfTests 同口径）
+
+    /// 进程物理内存足迹（phys_footprint，jetsam 口径，比 RSS 严格）
+    private static func physFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return -1 }
+        return Double(info.phys_footprint) / 1024 / 1024
+    }
+
+    /// 固定种子 150 根 OHLC（与 PyBridgeFirstFramePerfTests.makeBars 同 LCG，跨端可比）
+    private static func makePerfBars(_ n: Int = 150, seed: UInt64 = 20261012) -> [[Double]] {
+        var x = seed
+        func rnd() -> Double {
+            x = x &* 6364136223846793005 &+ 1442695040888963407
+            return Double((x >> 11) & 0x1F_FFFF_FFFF_FFFF) / Double(0x1F_FFFF_FFFF_FFFF)
+        }
+        var price = 100.0
+        var rows: [[Double]] = []
+        rows.reserveCapacity(n)
+        for _ in 0..<n {
+            let o = price
+            let c = max(1.0, o * (1 + (rnd() - 0.5) * 0.04))
+            let h = max(o, c) * (1 + rnd() * 0.01)
+            let l = min(o, c) * (1 - rnd() * 0.01)
+            rows.append([o, h, l, c])
+            price = c
+        }
+        return rows
+    }
+
+    /// 实验④：A-① ensureReady（引擎加载）→ A-② 首调 mytt（numpy import，一次性）
+    /// → B 稳态 20 次 150 根 MA/EMA/MACD 端到端（blockingCall 全程）→ 内存增量 → 判定。
+    /// 判据：稳态 median < 16ms（60fps 一帧）理想；< 33ms（30fps）可用上限；≥ 33ms 红线维持。
+    private func runExp4() {
+        runningExp = 4
+        let bridge = KlinePythonBridge.shared
+        let wasLoaded = bridge.isReady
+        let t0 = CFAbsoluteTimeGetCurrent()
+        bridge.ensureReady { [weak host] result in
+            guard let host = host else { return }
+            switch result {
+            case .failure(let e):
+                runningExp = 0
+                host.appendOutput("实验④ 失败：引擎未就绪（\(e)）——需先安装/加载引擎")
+            case .success:
+                if wasLoaded {
+                    host.appendOutput("实验④ A-① ensureReady：已就绪（本次未测加载耗时；重启 App 后立即跑可测真实值）")
+                } else {
+                    host.appendOutput(String(format: "实验④ A-① ensureReady：%.0fms（dlopen + Py_Initialize；重估后为启动后台预热项）",
+                                             (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+                }
+                let mem1 = Self.physFootprintMB()
+                // 后台线程跑首调 + 稳态（blockingCall 禁主线程）
+                DispatchQueue.global(qos: .userInitiated).async { [weak host] in
+                    guard let host = host else { return }
+                    let bars = Self.makePerfBars()
+                    let series: [String: [Double]] = [
+                        "open": bars.map { $0[0] },
+                        "high": bars.map { $0[1] },
+                        "low": bars.map { $0[2] },
+                        "close": bars.map { $0[3] },
+                    ]
+                    // args：序列直接用 series 键名；"$id" 是前序结果引用（勿混）
+                    let calls: [[String: Any]] = [
+                        ["fn": "MA", "args": ["close", 5]],
+                        ["fn": "MA", "args": ["close", 10]],
+                        ["fn": "EMA", "args": ["close", 12]],
+                        ["fn": "MACD", "args": ["close", 12, 26, 9]],
+                    ]
+                    let input: [String: Any] = ["op": "functions", "series": series, "calls": calls]
+
+                    // A-② 首调（含 numpy import + 模块加载，一次性；A8 设备可能数秒，属正常）
+                    let tf = CFAbsoluteTimeGetCurrent()
+                    let first = bridge.blockingCall(script: "mytt", input: input, timeout: 60)
+                    let firstMs = (CFAbsoluteTimeGetCurrent() - tf) * 1000
+                    guard case .success = first else {
+                        host.appendOutput("实验④ 失败：首调 mytt 失败（\(first)）——引擎就绪后失败属真实缺陷")
+                        DispatchQueue.main.async { runningExp = 0; refreshStatus() }
+                        return
+                    }
+                    host.appendOutput(String(format: "实验④ A-② 首调 mytt：%.0fms（numpy import + 模块加载，一次性；若此前跑过 mytt 则为稳态值）", firstMs))
+                    let mem2 = Self.physFootprintMB()
+
+                    // B 稳态 20 次端到端
+                    var samples: [Double] = []
+                    var steadyFail = ""
+                    for _ in 0..<20 {
+                        let t = CFAbsoluteTimeGetCurrent()
+                        let r = bridge.blockingCall(script: "mytt", input: input, timeout: 30)
+                        samples.append((CFAbsoluteTimeGetCurrent() - t) * 1000)
+                        if case .failure(let e) = r {
+                            steadyFail = "\(e)"
+                            break
+                        }
+                    }
+                    if !steadyFail.isEmpty {
+                        host.appendOutput("实验④ 失败：稳态调用失败（\(steadyFail)）")
+                        DispatchQueue.main.async { runningExp = 0; refreshStatus() }
+                        return
+                    }
+                    let sorted = samples.sorted()
+                    let sMin = sorted[0], median = (sorted[9] + sorted[10]) / 2
+                    let p95 = sorted[18], sMax = sorted[19]
+                    host.appendOutput(String(format: "实验④ B 稳态端到端（150根 MA5/MA10/EMA12/MACD，20 次）：min=%.1f median=%.1f p95=%.1f max=%.1f ms",
+                                             sMin, median, p95, sMax))
+                    let mem3 = Self.physFootprintMB()
+                    host.appendOutput(String(format: "实验④ 内存 phys_footprint：引擎后 %.1fMB → numpy 后 %.1fMB（增量 %.1fMB）→ 稳态 %.1fMB（稳态增量 %.1fMB）",
+                                             mem1, mem2, mem2 - mem1, mem3, mem3 - mem2))
+                    let verdict: String
+                    if median < 16 {
+                        verdict = "稳态 median < 16ms（60fps 一帧预算）——阈值化条件满足，红线可重估"
+                    } else if median < 33 {
+                        verdict = "稳态 median < 33ms（30fps 一帧）——勉强可用，需结合单屏指标数与并帧预算评估"
+                    } else {
+                        verdict = "稳态 median ≥ 33ms——首帧红线维持"
+                    }
+                    host.appendOutput("实验④ 判定：" + verdict + "（对照模拟器 median 14.2ms；结果已同步落沙盒日志）")
+                    DispatchQueue.main.async { runningExp = 0; refreshStatus() }
+                }
             }
         }
     }
