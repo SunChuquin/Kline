@@ -19,7 +19,7 @@ Kline（iOS）功能开发与修复标准打法：**小步分阶段，每阶段�
   构建 → 安装启动（模拟器走 simctl、真机走 devicectl）→ git 提交推送一条龙；任一步失败非零退出且不提交代码。
   注意：xcodebuild 必须**非沙箱**执行，否则 #Preview 宏插件被拦截会误报 macro implementation not found；
   要用别的设备时 `KLINE_DEVICE_ID=<模拟器UDID或真机ECID> bash scripts/...` 覆盖。
-- **Windows（公司，GitHub Actions 构建 + TrollStore 部署到 iPad mini 4）**：
+- **Windows（公司，git提交当前项目所有改动 + GitHub Actions 构建 + TrollStore 部署到 iPad mini 4）**：
   `python c:/Users/sunck/home/projects/ios/TrollRestore/build_and_deploy.py "<提交描述>"`
   退出码 **0=部署成功 / 6=云端构建成功 / 7=云端构建中网络抖动（稍后重试）** 均可交付；其它退出码自行排查。
 
