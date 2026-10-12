@@ -673,13 +673,26 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 单只取数与自校准（并发执行）
 
-    /// 单源腾讯取数 + 自校准（2026-10-05 起东财下线：批量中途超时/拒连拖垮吞吐，见文件头③）
+    /// 单源腾讯取数 + 自校准（2026-10-05 起东财下线：批量中途超时/拒连拖垮吞吐，见文件头③）。
+    /// 取数层拆两级：HTTP+结构提取（wire 行）留 Swift；行解析+自校准 **Python 优先**
+    /// （quote_parse.py op="calibrate"，候选 4 阶段 B），失败/未就绪降级原 Swift 路径。
     private func fetchGap(job: GapJob, mainLatest: Int, today: Int, session: URLSession) -> GapOutcome {
         let count = Self.barsCount(from: mainLatest, to: today)
-        let (rows, why) = fetchSourceBars(item: job.item, from: mainLatest, to: today,
-                                          count: count, session: session)
-        guard let r = rows, !r.isEmpty else { return .failed(why) }
-        return calibrate(job: job, rows: r, mainLatest: mainLatest)
+        let (wire, why) = fetchWireRows(item: job.item, from: mainLatest, to: today,
+                                        count: count, session: session)
+        guard let wireRows = wire, !wireRows.isEmpty else { return .failed(why) }
+        // Python 优先：自校准（内含腾讯行解析 + 锚点/停牌/吸附/哨兵/折算全判定）
+        if let outcome = Self.pyCalibrate(job: job, wireRows: wireRows, mainLatest: mainLatest) {
+            return outcome
+        }
+        // Swift 降级：行解析 + 原自校准（零行为变化）
+        var rows: [SourceBar] = []
+        rows.reserveCapacity(wireRows.count)
+        for r in wireRows {
+            if let bar = Self.parseTencentRow(r) { rows.append(bar) }
+        }
+        guard !rows.isEmpty else { return .failed(why.isEmpty ? "响应无 K 线数组" : why) }
+        return calibrate(job: job, rows: rows, mainLatest: mainLatest)
     }
 
     /// 自校准 + 缺口行生成（与来源无关：价格逐字段相等 → 量额口径折算 → 只补价格路径）
@@ -767,10 +780,10 @@ final class GapBackfill: ObservableObject {
         return Swift.min(maxBars, days + barsMargin)
     }
 
-    /// 取某只 `[from, to]` 的日线（**不复权**，与主库同口径）。
-    /// 返回 `(K线, 失败原因)`：成功时原因为空串；请求 / 解析 / 接口报错都给出可读原因
-    private func fetchSourceBars(item: ProbeItem, from: Int, to: Int, count: Int,
-                                 session: URLSession) -> ([SourceBar]?, String) {
+    /// GET 某只 `[from, to]` 的日线响应数据（**不复权**，与主库同口径）。
+    /// 返回 `(响应 Data, 失败原因)`：成功时原因为空串。
+    private func fetchData(item: ProbeItem, from: Int, to: Int, count: Int,
+                           session: URLSession) -> (Data?, String) {
         // param 必须 6 段：<代码>,day,<起>,<止>,<根数>,bfq（bfq = 不复权；缺这段接口判 bad params）
         let param = "\(item.marketCode),day,\(Self.ymd(from)),\(Self.ymd(to)),\(count),bfq"
         guard let encoded = param.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
@@ -778,14 +791,20 @@ final class GapBackfill: ObservableObject {
             return (nil, "URL 非法")
         }
         guard let data = getData(url, session) else { return (nil, "HTTP 失败/超时") }
+        return (data, "")
+    }
+
+    /// 响应 Data → **wire 行数组**（结构提取：code / data.<marketCode> / *day 数组，未做行解析）。
+    /// 错误分支与 Python tencent_kline op 镜像（阶段 A PC 差分零差异）。
+    private static func wireRowsFromData(_ data: Data, marketCode: String) -> ([[Any]]?, String) {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return (nil, "响应非 JSON")
         }
         if let code = (root["code"] as? NSNumber)?.intValue, code != 0 {
             return (nil, "接口 code=\(code) \(root["msg"] as? String ?? "")")
         }
-        guard let container = (root["data"] as? [String: Any])?[item.marketCode] as? [String: Any] else {
-            return (nil, "响应无 data.\(item.marketCode)")
+        guard let container = (root["data"] as? [String: Any])?[marketCode] as? [String: Any] else {
+            return (nil, "响应无 data.\(marketCode)")
         }
         // `bfq` → `day`；万一接口换版返回复权键，兜底取任一 *day（价格会对不上，由自校准拦下）
         var raw: [[Any]]? = container["day"] as? [[Any]]
@@ -796,6 +815,29 @@ final class GapBackfill: ObservableObject {
             }
         }
         guard let rows = raw else { return (nil, "响应无 K 线数组") }
+        return (rows, "")
+    }
+
+    /// 取某只 `[from, to]` 的日线 → wire 行数组（fetchGap 主路径：行解析随 calibrate 一并下沉）。
+    private func fetchWireRows(item: ProbeItem, from: Int, to: Int, count: Int,
+                               session: URLSession) -> ([[Any]]?, String) {
+        let (data, why) = fetchData(item: item, from: from, to: to, count: count, session: session)
+        guard let d = data else { return (nil, why) }
+        return Self.wireRowsFromData(d, marketCode: item.marketCode)
+    }
+
+    /// 取某只 `[from, to]` 的日线 → 解析后 SourceBar（probeUpToDate 探测用）。
+    /// Python 优先：整段解析（结构提取+行解析）下沉 quote_parse.py op="tencent_kline"；
+    /// 失败/未就绪降级原 Swift 路径（零行为变化）。
+    private func fetchSourceBars(item: ProbeItem, from: Int, to: Int, count: Int,
+                                 session: URLSession) -> ([SourceBar]?, String) {
+        let (data, why) = fetchData(item: item, from: from, to: to, count: count, session: session)
+        guard let d = data else { return (nil, why) }
+        if let bars = Self.pyTencentRows(data: d, marketCode: item.marketCode) {
+            return (bars, "")
+        }
+        let (wire, why2) = Self.wireRowsFromData(d, marketCode: item.marketCode)
+        guard let rows = wire else { return (nil, why2) }
         var out: [SourceBar] = []
         out.reserveCapacity(rows.count)
         for r in rows {
@@ -846,6 +888,151 @@ final class GapBackfill: ObservableObject {
         }.resume()
         if sem.wait(timeout: .now() + Self.requestTimeout + 5) == .timedOut { return nil }
         return out
+    }
+
+    // MARK: - Python 下沉（quote_parse.py，候选 4 阶段 B：calibrate / tencent_kline）
+
+    /// 引擎未就绪一次性日志门闩（calibrate 与 tencent_kline 共用）
+    private static var pyNotReadyLogged = false
+    /// calibrate 首次成功一次性日志门闩（3000+ 只批量只记一次）
+    private static var pyCalibrateOkLogged = false
+    /// calibrate 降级日志计数（前 5 次逐条记录，之后静默降级防刷屏）
+    private static var pyCalibrateFailCount = 0
+
+    /// Python 优先自校准（quote_parse.py op="calibrate"，内含腾讯 wire 行解析 +
+    /// 锚点/停牌/量比吸附/额比哨兵/量额折算全判定；数值经 _num6 规整，与 PC 差分
+    /// golden 同口径）。返回 nil = 未就绪/调用失败/输出解码不符 → 调用方降级 Swift。
+    /// 仅在后台 queue / concurrentPerform 线程调用（blockingCall 禁主线程）。
+    private static func pyCalibrate(job: GapJob, wireRows: [[Any]], mainLatest: Int) -> GapOutcome? {
+        guard KlinePythonBridge.shared.isReady else {
+            if !pyNotReadyLogged {
+                pyNotReadyLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse calibrate 跳过：引擎未就绪 → 自校准走 Swift（一次性记录）；后台触发引擎加载（本会话一次）")
+            }
+            KlinePythonBridge.shared.ensureOnce()
+            return nil
+        }
+        let b = job.base
+        let input: [String: Any] = [
+            "op": "calibrate",
+            "base": ["open": b.open, "high": b.high, "low": b.low, "close": b.close,
+                     "vol": b.volume, "amo": b.turnover],
+            "sourceRows": wireRows,
+            "mainLatest": mainLatest,
+        ]
+        switch KlinePythonBridge.shared.blockingCall(script: "quote_parse", input: input, timeout: 10) {
+        case .failure(let e):
+            pyCalibrateFailCount += 1
+            if pyCalibrateFailCount <= 5 {
+                DebugLogger.shared.log("[PyBridge] quote_parse calibrate 失败（\(e)）→ \(job.meta.file) 自校准降级 Swift")
+            }
+            return nil
+        case .success(let data):
+            guard let out = decodeCalibrate(data: data) else {
+                pyCalibrateFailCount += 1
+                if pyCalibrateFailCount <= 5 {
+                    DebugLogger.shared.log("[PyBridge] quote_parse calibrate 输出解码失败 → \(job.meta.file) 降级 Swift")
+                }
+                return nil
+            }
+            if !pyCalibrateOkLogged {
+                pyCalibrateOkLogged = true
+                let summary: String
+                if case .gap(let bars, _, _) = out { summary = "gap \(bars.count) 行" }
+                else { summary = "\(outcomeSummary(out))" }
+                DebugLogger.shared.log("[PyBridge] quote_parse calibrate 首次成功：\(job.meta.file) → \(summary)（一次性记录；数值口径 _num6 与 golden 一致）")
+            }
+            return out
+        }
+    }
+
+    /// GapOutcome 的一句话摘要（日志用，不展开 bars 明细）
+    private static func outcomeSummary(_ o: GapOutcome) -> String {
+        switch o {
+        case .gap: return "gap"
+        case .upToDate: return "upToDate"
+        case .suspended: return "suspended"
+        case .anchorMissing: return "anchorMissing"
+        case .anomaly: return "anomaly"
+        case .failed: return "failed"
+        }
+    }
+
+    /// 解码 calibrate op 输出（outcome 五分支 + gap 的 bars/volRatio/priceOnly）。
+    private static func decodeCalibrate(data: Data) -> GapOutcome? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let result = obj["result"] as? [String: Any],
+              let outcome = result["outcome"] as? String else { return nil }
+        switch outcome {
+        case "upToDate": return .upToDate
+        case "suspended": return .suspended
+        case "anchorMissing": return .anchorMissing
+        case "anomaly":
+            guard let reason = result["reason"] as? String else { return nil }
+            return .anomaly(reason)
+        case "gap":
+            guard let bars = result["bars"] as? [[String: Any]],
+                  let volRatio = (result["volRatio"] as? NSNumber)?.doubleValue,
+                  let priceOnly = result["priceOnly"] as? Bool else { return nil }
+            var out: [GapBar] = []
+            out.reserveCapacity(bars.count)
+            for bar in bars {
+                guard let date = (bar["date"] as? NSNumber)?.intValue,
+                      let open = (bar["open"] as? NSNumber)?.doubleValue,
+                      let high = (bar["high"] as? NSNumber)?.doubleValue,
+                      let low = (bar["low"] as? NSNumber)?.doubleValue,
+                      let close = (bar["close"] as? NSNumber)?.doubleValue,
+                      let vol = (bar["vol"] as? NSNumber)?.doubleValue,
+                      let amo = (bar["amo"] as? NSNumber)?.doubleValue else { return nil }
+                out.append(GapBar(date: date, open: open, high: high, low: low,
+                                  close: close, vol: vol, amo: amo))
+            }
+            return .gap(bars: out, volRatio: volRatio, priceOnly: priceOnly)
+        default:
+            return nil
+        }
+    }
+
+    /// Python 优先整段解析腾讯响应（quote_parse.py op="tencent_kline"：结构提取 +
+    /// 行解析 + 错误分支全下沉）。返回 nil = 未就绪/失败/解码不符 → 调用方降级 Swift
+    /// （错误分支由 Swift 原路径给出，二者镜像）。probeUpToDate 探测路径用。
+    private static func pyTencentRows(data: Data, marketCode: String) -> [SourceBar]? {
+        guard KlinePythonBridge.shared.isReady else {
+            if !pyNotReadyLogged {
+                pyNotReadyLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse tencent_kline 跳过：引擎未就绪 → 行解析走 Swift（一次性记录）；后台触发引擎加载（本会话一次）")
+            }
+            KlinePythonBridge.shared.ensureOnce()
+            return nil
+        }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        let input: [String: Any] = ["op": "tencent_kline", "raw": text, "marketCode": marketCode]
+        switch KlinePythonBridge.shared.blockingCall(script: "quote_parse", input: input, timeout: 10) {
+        case .failure(let e):
+            DebugLogger.shared.log("[PyBridge] quote_parse tencent_kline 失败（\(e)）→ 行解析降级 Swift")
+            return nil
+        case .success(let out):
+            guard let obj = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any],
+                  let result = obj["result"] as? [String: Any],
+                  let rows = result["rows"] as? [[String: Any]] else {
+                DebugLogger.shared.log("[PyBridge] quote_parse tencent_kline 输出解码失败 → 降级 Swift")
+                return nil
+            }
+            var bars: [SourceBar] = []
+            bars.reserveCapacity(rows.count)
+            for r in rows {
+                guard let date = (r["date"] as? NSNumber)?.intValue,
+                      let open = (r["open"] as? NSNumber)?.doubleValue,
+                      let close = (r["close"] as? NSNumber)?.doubleValue,
+                      let high = (r["high"] as? NSNumber)?.doubleValue,
+                      let low = (r["low"] as? NSNumber)?.doubleValue,
+                      let vol = (r["vol"] as? NSNumber)?.doubleValue,
+                      let amo = (r["amo"] as? NSNumber)?.doubleValue else { return nil }
+                bars.append(SourceBar(date: date, open: open, high: high, low: low,
+                                      close: close, vol: vol, amo: amo))
+            }
+            return bars
+        }
     }
 
     // MARK: - 工具

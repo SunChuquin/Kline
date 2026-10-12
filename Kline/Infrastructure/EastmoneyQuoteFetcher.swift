@@ -239,19 +239,28 @@ final class EastmoneyQuoteFetcher {
 
     private func performFetch(uniqueFiles: [String],
                               completion: @escaping (EastmoneyFetchResult) -> Void) {
-        // ① file -> secid；映射不到的逐条记录并跳过
+        // ① file -> secid（Python 优先：quote_parse.py op="secid" 批量映射——特例表+前缀
+        //    规则为 PC 权威口径；Python 判 null 的（27#/62#/102# 扩展指数）→ 设备侧覆盖表
+        //    兜底，有意分工。call 失败/未就绪 → 逐条走 Swift 原路径，零行为变化）
+        let pySecids = Self.pySecidMap(files: uniqueFiles)
         var fileSecid: [String: String] = [:]
         var orderedSecids: [String] = []
         var seenSecid = Set<String>()
         var skipped: [EastmoneySkip] = []
         for file in uniqueFiles {
-            guard let secid = self.secid(forFile: file) else {
+            let secid: String?
+            if let py = pySecids {
+                secid = py[file] ?? overrideSecids[file]
+            } else {
+                secid = self.secid(forFile: file)
+            }
+            guard let s = secid else {
                 skipped.append(EastmoneySkip(file: file, reason: .unmappable,
                                              detail: "无 secid 映射（扩展指数覆盖表缺失或前缀不支持）"))
                 continue
             }
-            fileSecid[file] = secid
-            if seenSecid.insert(secid).inserted { orderedSecids.append(secid) }
+            fileSecid[file] = s
+            if seenSecid.insert(s).inserted { orderedSecids.append(s) }
         }
 
         // ② 按 ≤100 分批
@@ -374,10 +383,22 @@ final class EastmoneyQuoteFetcher {
     }
 
     /// 解析单批响应 → {secid: 快照}；HTTP / JSON 异常 → failed（交给上层重试）。
+    /// Python 优先：JSON 解析下沉 quote_parse.py op="em_snapshot"（字段序号 f17开/f15高/
+    /// f16低/f2收/f5量/f6额、'-'→nil、f13.f12 拼 secid 全在 Python）；失败/未就绪降级
+    /// `decodeChunkSwift`（纯函数，供契约测试锁定降级路径）。
     static func decodeChunk(data: Data?, response: URLResponse?, error: Error?) -> ChunkOutcome {
         if let error = error { return .failed(error.localizedDescription) }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard let data = data, (200..<300).contains(status) else { return .failed("HTTP \(status)") }
+        if let snaps = pyDecodeSnapshot(data: data) {
+            return .ok(snaps)
+        }
+        return decodeChunkSwift(data: data)
+    }
+
+    /// Swift 降级路径：Codable 解析 ulist 响应（原 decodeChunk 实现，零行为变化；
+    /// 契约测试 QuoteParsingContractTests 直接锁定此纯函数）。
+    static func decodeChunkSwift(data: Data) -> ChunkOutcome {
         do {
             let decoded = try JSONDecoder().decode(EMResponse.self, from: data)
             var out: [String: EMSnapshot] = [:]
@@ -397,6 +418,96 @@ final class EastmoneyQuoteFetcher {
             return .ok(out)
         } catch {
             return .failed("JSON 解析失败：\(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Python 下沉（quote_parse.py，候选 4 阶段 B：secid / em_snapshot）
+
+    /// 引擎未就绪一次性日志门闩（secid 与 em_snapshot 共用）
+    private static var pyNotReadyLogged = false
+    /// secid 批量映射首次成功一次性日志门闩
+    private static var pySecidOkLogged = false
+    /// em_snapshot 解析首次成功一次性日志门闩
+    private static var pySnapshotOkLogged = false
+
+    /// Python 优先批量 secid 映射（quote_parse.py op="secid"：特例表 + SH#→1. / SZ#/BJ#→0.
+    /// 前缀规则，从 file 前缀判定不从 6 位 code 猜）。返回 nil = 未就绪/失败 → 调用方
+    /// 逐条走 Swift 原路径；返回字典只含 Python 判非 null 的 file（null 的由覆盖表兜底）。
+    /// 仅在内部串行 queue 上调用（blockingCall 禁主线程）。
+    private static func pySecidMap(files: [String]) -> [String: String]? {
+        guard KlinePythonBridge.shared.isReady else {
+            if !pyNotReadyLogged {
+                pyNotReadyLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse secid 跳过：引擎未就绪 → secid 映射走 Swift（一次性记录）；后台触发引擎加载（本会话一次）")
+            }
+            KlinePythonBridge.shared.ensureOnce()
+            return nil
+        }
+        switch KlinePythonBridge.shared.blockingCall(script: "quote_parse",
+                                                     input: ["op": "secid", "files": files],
+                                                     timeout: 15) {
+        case .failure(let e):
+            DebugLogger.shared.log("[PyBridge] quote_parse secid 失败（\(e)）→ secid 映射降级 Swift")
+            return nil
+        case .success(let data):
+            guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let result = obj["result"] as? [String: Any] else {
+                DebugLogger.shared.log("[PyBridge] quote_parse secid 输出解码失败 → 降级 Swift")
+                return nil
+            }
+            var out: [String: String] = [:]
+            for (file, v) in result {
+                if let s = v as? String { out[file] = s }   // NSNull（无映射）不进表
+            }
+            if !pySecidOkLogged {
+                pySecidOkLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse secid 首次成功：\(out.count)/\(files.count) 只有映射（一次性记录；其余走覆盖表兜底）")
+            }
+            return out
+        }
+    }
+
+    /// Python 优先解析 ulist 响应（quote_parse.py op="em_snapshot"）。返回 nil = 未就绪/
+    /// 失败/解码不符 → 调用方降级 Swift Codable 路径。在 dataTask 回调线程调用（非主线程）。
+    private static func pyDecodeSnapshot(data: Data) -> [String: EMSnapshot]? {
+        guard KlinePythonBridge.shared.isReady else {
+            if !pyNotReadyLogged {
+                pyNotReadyLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse em_snapshot 跳过：引擎未就绪 → 快照解析走 Swift（一次性记录）；后台触发引擎加载（本会话一次）")
+            }
+            KlinePythonBridge.shared.ensureOnce()
+            return nil
+        }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        switch KlinePythonBridge.shared.blockingCall(script: "quote_parse",
+                                                     input: ["op": "em_snapshot", "raw": text],
+                                                     timeout: 15) {
+        case .failure(let e):
+            DebugLogger.shared.log("[PyBridge] quote_parse em_snapshot 失败（\(e)）→ 快照解析降级 Swift")
+            return nil
+        case .success(let out):
+            guard let obj = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any],
+                  let result = obj["result"] as? [String: Any] else {
+                DebugLogger.shared.log("[PyBridge] quote_parse em_snapshot 输出解码失败 → 降级 Swift")
+                return nil
+            }
+            var snaps: [String: EMSnapshot] = [:]
+            for (secid, v) in result {
+                guard let d = v as? [String: Any] else { return nil }
+                snaps[secid] = EMSnapshot(
+                    open: (d["open"] as? NSNumber)?.doubleValue,
+                    high: (d["high"] as? NSNumber)?.doubleValue,
+                    low: (d["low"] as? NSNumber)?.doubleValue,
+                    close: (d["close"] as? NSNumber)?.doubleValue,
+                    vol: (d["vol"] as? NSNumber)?.doubleValue,
+                    amo: (d["amo"] as? NSNumber)?.doubleValue,
+                    ts: (d["ts"] as? NSNumber)?.doubleValue)
+            }
+            if !pySnapshotOkLogged {
+                pySnapshotOkLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse em_snapshot 首次成功：\(snaps.count) 条快照（一次性记录）")
+            }
+            return snaps
         }
     }
 }

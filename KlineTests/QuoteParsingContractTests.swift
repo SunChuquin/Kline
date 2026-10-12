@@ -92,8 +92,9 @@ final class QuoteParsingContractTests: XCTestCase {
             XCTFail("fixture 缺 eastmoneySnapshot.raw/golden（fixture: quote_parsing.json）")
             return
         }
-        let outcome = EastmoneyQuoteFetcher.decodeChunk(data: Data(raw.utf8),
-                                                        response: okResponse(), error: nil)
+        // 契约锁定 **Swift 降级路径**（decodeChunkSwift 纯函数；生产 decodeChunk 已
+        // Python 优先——主路径由 PyBridgeQuoteParsingTests 以同源 golden 覆盖）
+        let outcome = EastmoneyQuoteFetcher.decodeChunkSwift(data: Data(raw.utf8))
         guard case let .ok(snapshots) = outcome else {
             XCTFail("decodeChunk 应 ok，实际=\(outcome)（fixture: quote_parsing.json → eastmoneySnapshot.raw）")
             return
