@@ -45,12 +45,15 @@ enum PyTDXFormulaBridge {
     /// 批量求值：requests 与返回的 [[TDXOutputLine]] 按下标对齐（单请求失败对应下标为空数组，
     /// 不拖垮整批——失败信息见日志）。data 为该批公式的公共 K 线区间。
     /// 输出行已应用样式选项/SAR 红绿方向/NOTEXT_ 隐藏（规则与原 TDXEvaluator.applyOptions 一致）。
+    /// dbAudit：直读库对拍段（阶段1），仅观测——传入时 Python 读主库+增量库组装 bars 与
+    /// data 逐字段对拍，差异经日志输出，**不影响求值**（求值输入仍是 data）
     static func evaluate(requests: [[TDXStatement]],
                          data: [KlineItem],
+                         dbAudit: [String: Any]? = nil,
                          timeout: TimeInterval = 20) -> Result<[[TDXOutputLine]], String> {
         assert(!Thread.isMainThread, "PyTDXFormulaBridge.evaluate 禁止主线程调用（blockingCall）")
         guard !requests.isEmpty, !data.isEmpty else { return .success([]) }
-        let input: [String: Any] = [
+        var input: [String: Any] = [
             "bars": [
                 "c": data.map(\.close),
                 "h": data.map(\.high),
@@ -61,6 +64,7 @@ enum PyTDXFormulaBridge {
             ],
             "requests": requests.map { ["stmts": $0.map(stmtJSON)] },
         ]
+        if let dbAudit { input["db"] = dbAudit }
         switch KlinePythonBridge.shared.blockingCall(script: "tdx_eval", input: input, timeout: timeout) {
         case .failure(let err):
             let msg: String
@@ -71,7 +75,31 @@ enum PyTDXFormulaBridge {
             }
             return .failure(msg)
         case .success(let raw):
+            if dbAudit != nil {
+                Self.logAuditIfPresent(raw: raw, table: (dbAudit?["table"] as? String) ?? "?")
+            }
             return decode(raw: raw, requests: requests)
+        }
+    }
+
+    /// 对拍结果落日志（每 call 一行标量，无库内容；仅 db 段传入时调用）
+    private static func logAuditIfPresent(raw: Data, table: String) {
+        guard let obj = try? JSONSerialization.jsonObject(with: raw),
+              let dict = obj as? [String: Any],
+              let a = dict["audit"] as? [String: Any] else { return }
+        let dbRows = (a["db_rows"] as? NSNumber)?.intValue ?? -1
+        let swRows = (a["swift_rows"] as? NSNumber)?.intValue ?? -1
+        let src = (a["source"] as? String) ?? "?"
+        if let eq = a["equal"] as? Bool {
+            if eq {
+                DebugLogger.shared.log("[PyTDXBridge] 对拍<\(table)> \(src) \(dbRows)行 一致")
+            } else if let fd = a["first_diff"] as? [String: Any] {
+                DebugLogger.shared.log("[PyTDXBridge] 对拍<\(table)> \(src) db=\(dbRows) swift=\(swRows) 首差 idx=\(fd["idx"] ?? "-") field=\(fd["field"] ?? "-") db=\(fd["db"] ?? "-") swift=\(fd["swift"] ?? "-")")
+            } else {
+                DebugLogger.shared.log("[PyTDXBridge] 对拍<\(table)> \(src) db=\(dbRows) swift=\(swRows) 不一致(无首差)")
+            }
+        } else {
+            DebugLogger.shared.log("[PyTDXBridge] 对拍<\(table)> 异常：\(a["error"] ?? "?")")
         }
     }
 
@@ -181,12 +209,14 @@ final class PyTDXWave {
         let barsKey: String
         let data: [KlineItem]
         let stmts: [TDXStatement]
+        let dbAudit: [String: Any]?
         let completion: (Result<[TDXOutputLine], String>) -> Void
     }
 
     /// 同区间请求分组（struct 替代带标签元组，规避老编译器泛型/元组解析歧义）
     private struct Group {
         let data: [KlineItem]
+        let dbAudit: [String: Any]?
         var slots: [Int]
     }
 
@@ -194,6 +224,7 @@ final class PyTDXWave {
     private struct Job {
         let requests: [[TDXStatement]]
         let data: [KlineItem]
+        let dbAudit: [String: Any]?
         let slots: [Int]
     }
 
@@ -201,11 +232,14 @@ final class PyTDXWave {
     private var flushScheduled = false
 
     /// 主线程提交一次求值请求。同一 runloop tick 内的多个提交（主图 N 个单元 + 副图 3 个）
-    /// 在下一 tick 冲刷时按 barsKey 分组合并：同区间共享一份 bars payload → 单组一次 call
+    /// 在下一 tick 冲刷时按 barsKey 分组合并：同区间共享一份 bars payload → 单组一次 call。
+    /// dbAudit：直读库对拍段（同组请求应传同一份；组内取首请求的）
     func submit(barsKey: String, data: [KlineItem], stmts: [TDXStatement],
+                dbAudit: [String: Any]? = nil,
                 completion: @escaping (Result<[TDXOutputLine], String>) -> Void) {
         assert(Thread.isMainThread, "PyTDXWave.submit 仅限主线程（与 recompute 同帧）")
-        pending.append(Pending(barsKey: barsKey, data: data, stmts: stmts, completion: completion))
+        pending.append(Pending(barsKey: barsKey, data: data, stmts: stmts,
+                               dbAudit: dbAudit, completion: completion))
         guard !flushScheduled else { return }
         flushScheduled = true
         DispatchQueue.main.async { self.flush() }
@@ -216,12 +250,12 @@ final class PyTDXWave {
         let batch = pending
         pending = []
         guard !batch.isEmpty else { return }
-        // 按 barsKey 分组保持提交顺序；组内 slots 记录各请求在 batch 中的下标
+        // 按 barsKey 分组保持提交顺序；组内 slots 记录各请求在 batch 中的下标（dbAudit 取首请求的）
         var order: [String] = []
         var groups: [String: Group] = [:]
         for (i, p) in batch.enumerated() {
             if groups[p.barsKey] == nil {
-                groups[p.barsKey] = Group(data: p.data, slots: [])
+                groups[p.barsKey] = Group(data: p.data, dbAudit: p.dbAudit, slots: [])
                 order.append(p.barsKey)
             }
             groups[p.barsKey]!.slots.append(i)
@@ -230,14 +264,15 @@ final class PyTDXWave {
         jobs.reserveCapacity(order.count)
         for key in order {
             let g = groups[key]!
-            jobs.append(Job(requests: g.slots.map { batch[$0].stmts }, data: g.data, slots: g.slots))
+            jobs.append(Job(requests: g.slots.map { batch[$0].stmts }, data: g.data,
+                            dbAudit: g.dbAudit, slots: g.slots))
         }
         DispatchQueue.global(qos: .userInitiated).async {
             // 显式类型标注（不用泛型数组字面量初始化，规避老编译器 '>' 解析歧义）
             var results: [Result<[TDXOutputLine], String>] = []
             results.reserveCapacity(batch.count)
             for j in jobs {
-                switch PyTDXFormulaBridge.evaluate(requests: j.requests, data: j.data) {
+                switch PyTDXFormulaBridge.evaluate(requests: j.requests, data: j.data, dbAudit: j.dbAudit) {
                 case .success(let batches):
                     // batches 与 j.requests 按下标对齐；组内逐请求发回，单请求失败不拖垮同组其余
                     for b in batches { results.append(.success(b)) }

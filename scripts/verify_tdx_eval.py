@@ -239,6 +239,92 @@ r = run_one(bars([5, 7], h=[6, 9], l=[4, 6]),
             [stmt("RNG", binop("*", num(2), binop("-", var("H"), var("L"))))])
 expect_line(r, "RNG", [4.0, 6.0], "H/L 序列与乘法")
 
+# 24~27. 直读库对拍（阶段1）：mini main.db + live.db 镜像 Swift fetchPeriodTable 合并语义
+import sqlite3
+import tempfile
+
+def make_dbs(tmpdir):
+    main_db = os.path.join(tmpdir, "main.db")
+    live_db = os.path.join(tmpdir, "live.db")
+    m = sqlite3.connect(main_db)
+    m.execute("CREATE TABLE meta(id INTEGER PRIMARY KEY, file TEXT)")
+    m.execute("CREATE TABLE daily(meta_id INTEGER, date INTEGER, open REAL, high REAL, low REAL,"
+              " close REAL, vol REAL, amo REAL, PRIMARY KEY(meta_id, date))")
+    m.execute("INSERT INTO meta VALUES (1, 'sh600000')")
+    # 主库 20260101..20260112（12 根），值 = date*1.0
+    for d in range(20260101, 20260113):
+        m.execute("INSERT INTO daily VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+                  (d, float(d), float(d) + 1, float(d) - 1, float(d), 100.0, 10000.0))
+    m.commit()
+    m.close()
+    l = sqlite3.connect(live_db)
+    l.execute("CREATE TABLE live_meta(file TEXT PRIMARY KEY, code TEXT)")
+    l.execute("CREATE TABLE live_daily(file TEXT, date INTEGER, open REAL, high REAL, low REAL,"
+              " close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date))")
+    l.execute("INSERT INTO live_meta VALUES ('sh600000', '600000')")
+    # 增量 20260108/09/10（同 date 增量优先，值 = date*2.0）；另覆盖一个主库没有的 20260113
+    for d in (20260108, 20260109, 20260110, 20260113):
+        l.execute("INSERT INTO live_daily VALUES ('sh600000', ?, ?, ?, ?, ?, ?, ?)",
+                  (d, float(d) * 2, float(d) * 2 + 1, float(d) * 2 - 1, float(d) * 2, 200.0, 20000.0))
+    l.commit()
+    l.close()
+    return main_db, live_db
+
+_tmpdir = tempfile.mkdtemp(prefix="kline_audit_")
+MAIN_DB, LIVE_DB = make_dbs(_tmpdir)
+
+# bar 元组: (date, open, high, low, close, vol, amo)——与建库语句同一套生成规则，防手算漂移
+def main_bar(d):
+    return (d, float(d), float(d) + 1, float(d) - 1, float(d), 100.0, 10000.0)
+
+def live_bar(d):
+    return (d, float(d) * 2, float(d) * 2 + 1, float(d) * 2 - 1, float(d) * 2, 200.0, 20000.0)
+
+def run_audit(db_cfg, bars_seq):
+    """db 对拍辅助：bars_seq = 六字段元组列表（date 降序）；date 列表随 db 段传"""
+    dates = [b[0] for b in bars_seq]
+    inp = {"bars": {"c": [b[4] for b in bars_seq], "h": [b[2] for b in bars_seq],
+                    "l": [b[3] for b in bars_seq], "o": [b[1] for b in bars_seq],
+                    "v": [b[5] for b in bars_seq], "a": [b[6] for b in bars_seq]},
+           "requests": [{"stmts": [stmt("M", call("MA", var("C"), num(2)))]}],
+           "db": dict(db_cfg, dates=dates)}
+    out = tdx_eval.run(inp)
+    return out
+
+# 24. 全绿：Swift 组装（增量优先合并 + 主库较新行 20260112/11）与 Python 读库一致
+expect = ([live_bar(20260113)] +
+          [main_bar(20260112), main_bar(20260111)] +
+          [live_bar(20260110), live_bar(20260109), live_bar(20260108)] +
+          [main_bar(d) for d in range(20260107, 20260100, -1)])
+out = run_audit({"main": MAIN_DB, "live": LIVE_DB, "meta_id": 1, "table": "daily"}, expect)
+a = out.get("audit", {})
+check("对拍-全绿(合并/增量优先/主库较新行)", a.get("equal") is True and a.get("source") == "live+main"
+      and a.get("db_rows") == 13, "audit=%r" % a)
+
+# 25. 实时 bar 场景：Swift 内存多一根库中还没有的 20260114 → 首差 idx=0 date
+out = run_audit({"main": MAIN_DB, "live": LIVE_DB, "meta_id": 1, "table": "daily"},
+                [(20260114, 999.0, 999.0, 999.0, 999.0, 0.0, 0.0)] + expect)
+a = out.get("audit", {})
+fd = a.get("first_diff") or {}
+check("对拍-实时bar暴露首差", a.get("equal") is False
+      and fd.get("field") == "date" and fd.get("swift") == 20260114, "audit=%r" % a)
+
+# 26. 增量库缺失 → 纯主库（note=main；Swift 传主库值 → 全绿）
+main_only = [main_bar(d) for d in range(20260112, 20260100, -1)]
+out = run_audit({"main": MAIN_DB, "live": os.path.join(_tmpdir, "nope.db"),
+                 "meta_id": 1, "table": "daily"}, main_only)
+a = out.get("audit", {})
+check("对拍-增量库缺失回落纯主库", a.get("equal") is True and a.get("source") == "main",
+      "audit=%r" % a)
+
+# 27. 求值不受对拍影响：对拍输入下 MA 结果仍正确（取末两根收盘均值）
+out = run_audit({"main": MAIN_DB, "live": LIVE_DB, "meta_id": 1, "table": "daily"}, expect)
+r = out["results"][0]
+ma_last = r["lines"][0]["v"][-1] if r.get("ok") and r.get("lines") else None
+exp_last = (expect[-1][4] + expect[-2][4]) / 2
+check("对拍-求值不受影响", ma_last is not None and abs(ma_last - exp_last) < 1e-9,
+      "ma_last=%r exp=%r" % (ma_last, exp_last))
+
 print()
 if _failures:
     print("结果: %d/%d 通过，失败: %s" % (_total - len(_failures), _total, ", ".join(_failures)))

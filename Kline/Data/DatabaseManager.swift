@@ -456,6 +456,24 @@ class DatabaseManager: ObservableObject {
         return fileByMetaId[metaId]
     }
 
+    /// 【引擎直读库对拍·阶段1】对拍上下文：主库/增量库路径 + 该标的的 file 映射。
+    /// metaList 未就绪（file 映射缺）→ file 为 nil，Python 侧自行按 meta_id 反查；
+    /// 全部为只读信息，可在任意线程调用
+    func dbAuditContext(metaId: Int, table: String) -> [String: Any] {
+        var ctx: [String: Any] = [
+            "main": Self.writableDBPath,
+            "table": table,
+            "meta_id": metaId,
+        ]
+        if let live = LiveDataStore.shared.liveDBPathIfAvailable {
+            ctx["live"] = live
+        }
+        if let file = fileForMetaId(metaId) {
+            ctx["file"] = file
+        }
+        return ctx
+    }
+
     /// 统一执行 K 线查询并组装结果（需已在 dbQueue 上）
     /// - Parameter limit: 非 nil 时追加 `LIMIT ?`
     private func runBarsQuery(db: OpaquePointer, table: String,

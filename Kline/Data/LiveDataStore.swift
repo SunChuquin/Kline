@@ -235,6 +235,11 @@ final class LiveDataStore: ObservableObject {
         return docs.appendingPathComponent(dbFileName).path
     }
 
+    /// 【引擎直读库对拍·阶段1】增量库路径（可用时返回，否则 nil——调用方走纯主库语义）
+    var liveDBPathIfAvailable: String? {
+        isAvailable ? Self.writableDBPath : nil
+    }
+
     // MARK: 对外只读信号（一律在主线程发布）
 
     /// 最近一次计算 / 重载得到的指纹展示串（未找到文件为 "-"）

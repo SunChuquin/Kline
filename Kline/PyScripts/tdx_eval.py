@@ -18,9 +18,19 @@
 # 桥接契约（KlinePythonBridge 包装脚本）：全局作用域定义 dict 类型 kline_result，
 # 顶层 ok==true 才算成功。纯标准库实现——**不 import numpy**（A8 上 numpy import ~2s，
 # 且 150~2000 根规模下纯循环毫秒级，更快进入稳态）。
+#
+# 直读库对拍（阶段1，2026-10-12）：kline_input["db"] 存在时，Python 用 sqlite3 直读
+# 主库+增量库组装 bars，与 Swift 传入的 input["bars"] 逐字段对拍，差异挂
+# kline_result["audit"]（日志侧观测，不阻断求值——求值输入仍是 input["bars"]）。
+# 必须镜像 Swift 语义（DatabaseManager.fetchPeriodTable / runBarsQuery / LiveDataStore.slice）：
+#   - 主库 tdx.db：SELECT date,open,high,low,close,vol,amo FROM <表> WHERE meta_id=? ORDER BY date DESC
+#   - 增量库 tdx_live.db：SELECT ... FROM live_<表> WHERE file=? ORDER BY date DESC；vol/amo 非浮点→0
+#   - 合并：增量全部行 ∪ 主库「增量没有的 date」；同 date 增量优先；整体 date 降序
+#   - 增量库缺失/缺表/未覆盖该 file/无行 → 纯主库
 
 import json
 import math
+import sqlite3
 import traceback
 
 _NAN = float("nan")
@@ -437,8 +447,124 @@ def _finite_to_null(values):
     return out
 
 
+# ---- 直读库对拍（阶段1）----
+
+_FIELDS = ("o", "h", "l", "c", "v", "a")  # bar dict 键（与输入六序列对应）
+
+
+def _query_rows(conn, sql, param):
+    """返回 [(date, open, high, low, close, vol, amo)]；表缺失/查询失败 → None（调用方回落）"""
+    try:
+        cur = conn.execute(sql, param)
+        return cur.fetchall()
+    except sqlite3.OperationalError:
+        return None  # 多为 no such table
+
+
+def _rows_to_bars(rows, live_style):
+    """行 → bar dict 列表。NULL→0.0（镜像 Swift sqlite3_column_double 对 NULL 返回 0.0）；
+    live_style=True 时 vol/amo 非浮点 → 0（镜像 LiveDataStore.slice）"""
+    bars = []
+    for r in rows:
+        date, o, h, l, c, vol, amo = r
+        vals = [0.0 if v is None else float(v) for v in (o, h, l, c)]
+        if live_style:
+            vol = vol if isinstance(vol, float) else 0.0
+            amo = amo if isinstance(amo, float) else 0.0
+        else:
+            vol = 0.0 if vol is None else float(vol)
+            amo = 0.0 if amo is None else float(amo)
+        bars.append({"date": int(date), "o": vals[0], "h": vals[1], "l": vals[2],
+                     "c": vals[3], "v": float(vol), "a": float(amo)})
+    return bars
+
+
+def _resolve_file(main_path, meta_id):
+    """主库 meta 表 file ↔ meta_id 映射（file 全库唯一）；查不到 → None"""
+    conn = sqlite3.connect(main_path)
+    try:
+        cur = conn.execute("SELECT file FROM meta WHERE id = ?", (meta_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def load_bars_from_db(cfg):
+    """按 Swift fetchPeriodTable 语义组装 bars。
+    cfg: {main, live|null, meta_id, table, file|null}。返回 (bars, note)"""
+    main_path = cfg["main"]
+    table = cfg["table"]
+    if table not in ("daily", "weekly", "monthly", "quarterly", "yearly"):
+        raise TDxEvalError("非法周期表名 '%s'" % table)
+    note = "main"
+    # 增量库：缺失/缺表/未覆盖/无行 → 纯主库（镜像「走纯主库路径」）
+    live_bars = None
+    live_path = cfg.get("live")
+    if live_path and cfg.get("file"):
+        try:
+            conn = sqlite3.connect(live_path)
+            try:
+                rows = _query_rows(conn, "SELECT date, open, high, low, close, vol, amo FROM live_%s "
+                                         "WHERE file = ? ORDER BY date DESC" % table, (cfg["file"],))
+                if rows:
+                    live_bars = _rows_to_bars(rows, live_style=True)
+                    note = "live+main"
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            live_bars = None  # 打不开 → 纯主库
+
+    conn = sqlite3.connect(main_path)
+    try:
+        rows = _query_rows(conn, "SELECT date, open, high, low, close, vol, amo FROM %s "
+                                 "WHERE meta_id = ? ORDER BY date DESC" % table, (cfg["meta_id"],))
+        main_bars = _rows_to_bars(rows, live_style=False) if rows else []
+    finally:
+        conn.close()
+
+    if not live_bars:
+        return main_bars, ("live-none" if live_bars is not None else note)
+    # 合并：增量全部行 ∪ 主库「增量没有的 date」；同 date 增量优先；整体 date 降序
+    live_dates = {b["date"] for b in live_bars}
+    merged = live_bars + [b for b in main_bars if b["date"] not in live_dates]
+    merged.sort(key=lambda b: -b["date"])
+    return merged, "live+main"
+
+
+def audit_bars(db_bars, swift_bars):
+    """逐字段对拍（容差 1e-9）。返回 audit dict；equal=true 表示读库组装与 Swift 内存完全一致"""
+    tol = 1e-9
+    n = min(len(db_bars), len(swift_bars))
+    first_diff = None
+    for i in range(n):
+        d, s = db_bars[i], swift_bars[i]
+        if d["date"] != s["date"]:
+            first_diff = {"idx": i, "field": "date", "db": d["date"], "swift": s["date"]}
+            break
+        for f in _FIELDS:
+            x, y = d[f], s[f]
+            if not (abs(x - y) <= tol or (math.isnan(x) and math.isnan(y))):
+                first_diff = {"idx": i, "field": f, "db": x, "swift": y}
+                break
+        if first_diff:
+            break
+    equal = first_diff is None and len(db_bars) == len(swift_bars)
+    if first_diff is None and len(db_bars) != len(swift_bars):
+        first_diff = {"idx": n, "field": "count", "db": len(db_bars), "swift": len(swift_bars)}
+    audit = {"db_rows": len(db_bars), "swift_rows": len(swift_bars), "equal": equal}
+    if first_diff:
+        audit["first_diff"] = first_diff
+    if db_bars:
+        audit["date_span"] = [db_bars[-1]["date"], db_bars[0]["date"]]
+    return audit
+
+
 def run(kline_input):
-    """桥接入口：入参 {bars, requests} → {ok, results}。requests 与 results 按下标对齐"""
+    """桥接入口：入参 {bars, requests[, db]} → {ok, results[, audit]}。
+    requests 与 results 按下标对齐；db 存在时附带读库对拍 audit（不影响求值输入）"""
     bars = kline_input["bars"]
     closes = [float(x) for x in bars["c"]]
     builtins = {
@@ -449,6 +575,31 @@ def run(kline_input):
         "V": [float(x) for x in bars["v"]], "VOL": [float(x) for x in bars["v"]],
         "AMOUNT": [float(x) for x in bars["a"]],
     }
+    audit = None
+    db_cfg = kline_input.get("db")
+    if db_cfg:
+        try:
+            if not db_cfg.get("file"):
+                db_cfg["file"] = _resolve_file(db_cfg["main"], db_cfg["meta_id"])
+            db_bars, note = load_bars_from_db(db_cfg)
+            # Swift 传入的是 calcData **切片**（date 降序）：按切片日期集合过滤 db 全量后再对齐，
+            # 否则行数天然不等。库中缺失的实时 bar / 超出库范围的差异会以 count/date 差异暴露——
+            # 这正是阶段1要观测的对象
+            dates = db_cfg.get("dates")
+            n = len(bars["c"])
+            swift_bars = [{"date": 0, "o": bars["o"][i], "h": bars["h"][i],
+                           "l": bars["l"][i], "c": bars["c"][i],
+                           "v": bars["v"][i], "a": bars["a"][i]}
+                          for i in range(n)]
+            if isinstance(dates, list) and len(dates) == n:
+                for i in range(n):
+                    swift_bars[i]["date"] = int(dates[i])
+                dset = {int(x) for x in dates}
+                db_bars = [b for b in db_bars if b["date"] in dset]  # db_bars 已 date 降序
+            audit = audit_bars(db_bars, swift_bars)
+            audit["source"] = note
+        except Exception as exc:  # 对拍失败不阻断求值
+            audit = {"equal": None, "error": "%s: %s" % (type(exc).__name__, exc)}
     results = []
     for idx, req in enumerate(kline_input["requests"]):
         try:
@@ -469,7 +620,10 @@ def run(kline_input):
         except Exception as exc:  # 单请求失败不拖垮整批
             results.append({"id": idx, "ok": False, "lines": [],
                             "error": "%s: %s" % (type(exc).__name__, exc)})
-    return {"ok": True, "results": results}
+    out = {"ok": True, "results": results}
+    if audit is not None:
+        out["audit"] = audit  # 阶段1对拍：只观测，不阻断求值
+    return out
 
 
 try:

@@ -525,8 +525,16 @@ extension KlineChartView {
         // 与 Swift 原生同构的一次求值波次：主图全部过期单元 + 同帧副图请求由 PyTDXWave
         // 合并为**一次** Python call（bars 只序列化/写盘一份），结果按下标发回各请求方
         let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
+        // 【直读库对拍·阶段1】读库上下文：主库/增量库路径 + file + 切片日期（与 calcData 等长、降序）；
+        // 仅观测不阻断求值
+        var dbAudit: [String: Any]? = nil
+        if let metaId = metaId {
+            var ctx = DatabaseManager.shared.dbAuditContext(metaId: metaId, table: period.folderName)
+            ctx["dates"] = calcData.map(\.date)
+            dbAudit = ctx
+        }
         for p in pending {
-            PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: p.stmts) { r in
+            PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: p.stmts, dbAudit: dbAudit) { r in
                 // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
                 guard self.computation.engineMainGen == gen else { return }
                 guard case .success(let outs) = r else {
@@ -819,7 +827,14 @@ extension KlineChartView {
         let gen = computation.engineSubGens[key] ?? 0
         // 波次提交：与同帧主图请求合并为一次 Python call（bars 共享一份）
         let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
-        PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: stmts) { r in
+        // 【直读库对拍·阶段1】同主图：读库上下文仅观测
+        var dbAudit: [String: Any]? = nil
+        if let metaId = metaId {
+            var ctx = DatabaseManager.shared.dbAuditContext(metaId: metaId, table: period.folderName)
+            ctx["dates"] = calcData.map(\.date)
+            dbAudit = ctx
+        }
+        PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: stmts, dbAudit: dbAudit) { r in
             // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
             guard self.computation.engineSubGens[key] == gen else { return }
             guard case .success(let outs) = r else {
