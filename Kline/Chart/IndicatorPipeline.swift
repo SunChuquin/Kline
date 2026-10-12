@@ -542,9 +542,9 @@ extension KlineChartView {
                       cache.units[p.unitIndex].text == p.text else { return }
                 cache.rows[p.unitIndex].key = p.text
                 if let out = outs.last,
-                   let built = self.buildMainLine(id: entry.id, isCustom: entry.isCustom,
-                                                  customColor: entry.isCustom ? customColor : nil,
-                                                  i: p.unitIndex, out: out),
+                   let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
+                                             customColor: entry.isCustom ? customColor : nil,
+                                             i: p.unitIndex, out: out),
                    !self.allNaN(built.values) {
                     cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
                 } else {
