@@ -1041,8 +1041,70 @@ extension KlineChartView {
     }
 
     /// 后台线程：对请求中的每个公式求值（纯计算，无任何 UI/状态访问，线程安全）。
-    /// 使用增量求值：携带上一块状态，只算新增区间，返回最新状态供下一块延续
+    /// Python 引擎优先（bin 零拷贝，无状态整段求值 0..calcEnd）；引擎未就绪/求值失败
+    /// 降级 Swift 增量求值（跨块状态续算，无引擎构建的唯一可用路径）。
     nonisolated static func evaluatePrefetch(_ req: PrefetchCalcRequest) -> PrefetchCalcResult {
+        if let py = evaluatePrefetchViaPython(req) { return py }
+        return evaluatePrefetchViaSwift(req)
+    }
+
+    /// Python 路径：全部主图+副图公式合并为**一次** bin 调用，整段 [0..calcEnd] 无状态求值。
+    /// 无增量状态跨块传递——下一块从 0 重算整段，配合几何分块（500→1000→2000→…）
+    /// 总计算量 ≈ 2-3× 单次全量，后台任务可接受；换来的是无 FFI 状态序列化、
+    /// 递归指标始终从第一根累积（正确性与 Swift 非增量全量一致）。
+    /// 失败（引擎未就绪/超时/脚本报错）→ nil，调用方降级 Swift。
+    private nonisolated static func evaluatePrefetchViaPython(_ req: PrefetchCalcRequest) -> PrefetchCalcResult? {
+        var requests: [[TDXStatement]] = []
+        var mainSlots: [Int] = []   // requests 下标 → mainFormulas 下标
+        var subSlots: [Int] = []    // requests 下标（偏移 mainSlots.count 后）→ subs 下标
+        for (i, f) in req.mainFormulas.enumerated() {
+            guard !f.isEmpty, let stmts = parsePrefetchFormula(f) else { continue }
+            requests.append(stmts)
+            mainSlots.append(i)
+        }
+        for (i, s) in req.subs.enumerated() {
+            let f = s.customFormula ?? s.formula
+            guard let f, !f.isEmpty, let stmts = parsePrefetchFormula(f) else { continue }
+            requests.append(stmts)
+            subSlots.append(i)
+        }
+        if requests.isEmpty {
+            // 全部公式为空/解析失败：直接回空结果（与 Swift 路径行为一致）
+            return PrefetchCalcResult(main: Array(repeating: [], count: req.mainFormulas.count),
+                                      subs: Array(repeating: [], count: req.subs.count),
+                                      newMainStates: [], newSubStates: [])
+        }
+        // 超时随根数放宽（整段重算成本随历史线性增长；日线上限约万根）
+        let timeout: TimeInterval = max(20.0, Double(req.data.count) / 1000.0 * 2.0 + 10.0)
+        guard case .success(let batches) = PyTDXFormulaBridge.evaluate(requests: requests,
+                                                                       data: req.data,
+                                                                       timeout: timeout),
+              batches.count == requests.count else { return nil }
+        var main = Array(repeating: [] as [TDXOutputLine], count: req.mainFormulas.count)
+        var subs = Array(repeating: [] as [TDXOutputLine], count: req.subs.count)
+        for (k, lines) in batches.enumerated() {
+            if k < mainSlots.count {
+                main[mainSlots[k]] = lines
+            } else {
+                let si = subSlots[k - mainSlots.count]
+                if si < subs.count { subs[si] = lines }
+            }
+        }
+        // 无状态求值：不产出增量状态（空数组使下一块从 0 重算；VOL/AMO 副图保持空行，
+        // 主线程用成交量/成交额组装——与 Swift 路径约定一致）
+        return PrefetchCalcResult(main: main, subs: subs, newMainStates: [], newSubStates: [])
+    }
+
+    /// 公式文本解析（后台线程；失败返回 nil，对应槽位回空行——与 Swift 路径 try? 行为一致）
+    private nonisolated static func parsePrefetchFormula(_ formula: String) -> [TDXStatement]? {
+        var lexer = TDXLexer(formula)
+        guard let tokens = try? lexer.tokenize(), !tokens.isEmpty else { return nil }
+        var parser = TDXParser(tokens: tokens)
+        return try? parser.parse()
+    }
+
+    /// Swift 降级路径：增量求值（携带上一块状态，只算新增区间，返回最新状态供下一块延续）
+    private nonisolated static func evaluatePrefetchViaSwift(_ req: PrefetchCalcRequest) -> PrefetchCalcResult {
         var newMainStates: [TDXIncrementalState] = []
         let main: [[TDXOutputLine]] = req.mainFormulas.enumerated().map { i, formula in
             guard !formula.isEmpty else { newMainStates.append(TDXIncrementalState()); return [] }
