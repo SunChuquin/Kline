@@ -43,10 +43,9 @@ struct KlineApp: App {
         // （同时触发「清单标的当日K线」东财直连更新，两者独立、成败互不影响）
         TdxSyncManager.shared.start()
 
-        // 【首帧引擎实验】启动后台预热 Python 引擎（ensureOnce 惰性激活改启动触发）：
-        // A8 实测 dlopen ~20ms + Py_Initialize ~130ms，用户打开图表前完成就绪；
-        // tdx_eval.py 纯标准库无 numpy 长等待；预热必须后台异步，绝不阻塞启动主线程
-        KlinePythonBridge.shared.ensureOnce()
+        // 【首帧引擎实验】R1 启动后台预热：引擎加载 + tdx_eval 空转（编译缓存/bin 通道一次性成本
+        // 全部移出用户链路，首个真实求值直接进入稳态）；预热必须后台异步，绝不阻塞启动主线程
+        KlinePythonBridge.shared.warmUp()
     }
 
     var body: some Scene {

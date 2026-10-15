@@ -611,6 +611,8 @@ def run(kline_input):
         except Exception as exc:  # 对拍失败不阻断求值
             audit = {"equal": None, "error": "%s: %s" % (type(exc).__name__, exc)}
     results = []
+    use_bin = bool(kline_input.get("__bin__"))
+    bin_out = {} if use_bin else None
     for idx, req in enumerate(kline_input["requests"]):
         try:
             vars_map = {}
@@ -620,7 +622,15 @@ def run(kline_input):
                 value = _eval_expr(st["e"], vars_map, builtins, sar_box)
                 vars_map[st["n"].upper()] = value
                 if st.get("o"):
-                    line = {"n": st["n"], "v": _finite_to_null(value)}
+                    if use_bin:
+                        # bin 模式：输出序列走 __bin_out__（二进制一次拷贝），行内只留键。
+                        # 非有限值统一映射为 NaN（与 JSON 路径 null→NaN 语义对齐，Inf 不直传）
+                        key = "r%dl%d" % (idx, len(lines))
+                        bin_out[key] = [_NAN if isinstance(x, float) and not math.isfinite(x)
+                                        else float(x) for x in value]
+                        line = {"n": st["n"], "b": key}
+                    else:
+                        line = {"n": st["n"], "v": _finite_to_null(value)}
                     if st["e"]["t"] == "call" and st["e"]["fn"].upper() == "SAR" and sar_box[0] is not None:
                         line["d"] = [1 if d else 0 for d in sar_box[0]]
                     lines.append(line)
@@ -631,6 +641,8 @@ def run(kline_input):
             results.append({"id": idx, "ok": False, "lines": [],
                             "error": "%s: %s" % (type(exc).__name__, exc)})
     out = {"ok": True, "results": results}
+    if use_bin:
+        out["__bin_out__"] = bin_out
     if audit is not None:
         out["audit"] = audit  # 阶段1对拍：只观测，不阻断求值
     return out

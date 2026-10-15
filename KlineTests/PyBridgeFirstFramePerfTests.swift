@@ -281,4 +281,93 @@ final class PyBridgeFirstFramePerfTests: XCTestCase {
         let perKilo = (curve.last!.median - curve.first!.median) / Double(curve.last!.n - curve.first!.n) * 1000
         log(String(format: "线性斜率：约 %.2f ms / 千根（150→2000）", perKilo))
     }
+
+    // MARK: - 零拷贝 bin 通道对比（tdx_eval：JSON 基线 vs bin 零拷贝）
+
+    /// 首帧真实形状的通道对比：同一批 TDX 公式（MA5/MA10/EMA12/SAR/STD）× 150 根，
+    /// 分别走 JSON 通道（原生产路径形状）与 bin 通道（ctypes 零拷贝输入 + 二进制输出），
+    /// 各热身 1 + 采样 20 次稳态——量化零拷贝对单次调用开销的实际收益。
+    func testFirstFrameTDXEvalJSONvsBin() throws {
+        if !KlinePythonBridge.shared.isReady {
+            let ready = expectation(description: "ensureReady")
+            var failMsg: String?
+            KlinePythonBridge.shared.ensureReady { result in
+                if case .failure(let m) = result { failMsg = m }
+                ready.fulfill()
+            }
+            wait(for: [ready], timeout: 60)
+            if let m = failMsg {
+                throw XCTSkip("引擎未就绪：\(m)（无引擎构建验证降级路径而非本实验）")
+            }
+        }
+
+        let bars = Self.makeBars(150)
+        let seriesBin: [String: [Double]] = [
+            "c": bars.map { $0[3] }, "h": bars.map { $0[1] },
+            "l": bars.map { $0[2] }, "o": bars.map { $0[0] },
+            "v": bars.map { _ in 100.0 }, "a": bars.map { _ in 1000.0 },
+        ]
+        // JSON 通道输入（bin 出现前的生产形状）：bars 全序列进 JSON
+        let jsonInput: [String: Any] = [
+            "bars": ["c": seriesBin["c"]!, "h": seriesBin["h"]!, "l": seriesBin["l"]!,
+                     "o": seriesBin["o"]!, "v": seriesBin["v"]!, "a": seriesBin["a"]!],
+            "requests": [
+                ["stmts": [["n": "M5", "o": 1, "e": ["t": "call", "fn": "MA", "args": [["t": "var", "n": "C"], ["t": "num", "v": 5]]]]]],
+                ["stmts": [["n": "M10", "o": 1, "e": ["t": "call", "fn": "MA", "args": [["t": "var", "n": "C"], ["t": "num", "v": 10]]]]]],
+                ["stmts": [["n": "E12", "o": 1, "e": ["t": "call", "fn": "EMA", "args": [["t": "var", "n": "C"], ["t": "num", "v": 12]]]]]],
+                ["stmts": [["n": "S", "o": 1, "e": ["t": "call", "fn": "SAR", "args": [["t": "num", "v": 0.02], ["t": "num", "v": 0.2]]]]]],
+                ["stmts": [["n": "ST", "o": 1, "e": ["t": "call", "fn": "STD", "args": [["t": "var", "n": "C"], ["t": "num", "v": 10]]]]]],
+            ],
+        ]
+        let binInput: [String: Any] = ["__bin__": 1, "requests": jsonInput["requests"]!]
+
+        let exp = expectation(description: "json vs bin")
+        var jsonSamples: [Double] = []
+        var binSamples: [Double] = []
+        var cmpFail: String?
+        DispatchQueue.global(qos: .userInitiated).async {
+            // 热身各 1 次（消除输入形状首调抖动）
+            if case .failure(let e) = KlinePythonBridge.shared.blockingCall(script: "tdx_eval", input: jsonInput, timeout: 30) {
+                cmpFail = "JSON 热身失败：\(e)"
+            }
+            if cmpFail == nil, case .failure(let e) = KlinePythonBridge.shared.blockingCallBin(script: "tdx_eval", input: binInput, seriesBin: seriesBin, seriesInto: "bars", timeout: 30) {
+                cmpFail = "bin 热身失败：\(e)"
+            }
+            guard cmpFail == nil else { exp.fulfill(); return }
+            // 稳态各 20 次
+            for _ in 0..<20 {
+                let t = CFAbsoluteTimeGetCurrent()
+                if case .failure(let e) = KlinePythonBridge.shared.blockingCall(script: "tdx_eval", input: jsonInput, timeout: 30) {
+                    cmpFail = "JSON 稳态失败：\(e)"; break
+                }
+                jsonSamples.append((CFAbsoluteTimeGetCurrent() - t) * 1000)
+            }
+            for _ in 0..<20 {
+                let t = CFAbsoluteTimeGetCurrent()
+                if case .failure(let e) = KlinePythonBridge.shared.blockingCallBin(script: "tdx_eval", input: binInput, seriesBin: seriesBin, seriesInto: "bars", timeout: 30) {
+                    cmpFail = "bin 稳态失败：\(e)"; break
+                }
+                binSamples.append((CFAbsoluteTimeGetCurrent() - t) * 1000)
+            }
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 120)
+        if let f = cmpFail {
+            XCTFail("对比调用失败：\(f)")
+            return
+        }
+        guard jsonSamples.count == 20, binSamples.count == 20 else {
+            XCTFail("采样不足 json=\(jsonSamples.count) bin=\(binSamples.count)")
+            return
+        }
+        func median(_ s: [Double]) -> Double {
+            let sorted = s.sorted()
+            return (sorted[9] + sorted[10]) / 2
+        }
+        let jm = median(jsonSamples), bm = median(binSamples)
+        log(String(format: "tdx_eval 150根×5公式：JSON median=%.1fms  bin(零拷贝) median=%.1fms  收益=%.0f%%",
+                   jm, bm, jm > 0 ? (1 - bm / jm) * 100 : 0))
+        XCTAssertLessThan(bm, 200, "bin 通道稳态 median >200ms 与既有量级矛盾，疑似测量错误")
+        XCTAssertLessThan(bm, jm, "bin 通道应不慢于 JSON 通道")
+    }
 }

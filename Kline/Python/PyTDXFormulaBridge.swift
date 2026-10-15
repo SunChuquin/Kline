@@ -53,19 +53,24 @@ enum PyTDXFormulaBridge {
                          timeout: TimeInterval = 20) -> Result<[[TDXOutputLine]], String> {
         assert(!Thread.isMainThread, "PyTDXFormulaBridge.evaluate 禁止主线程调用（blockingCall）")
         guard !requests.isEmpty, !data.isEmpty else { return .success([]) }
+        // bin 通道：bars 六序列零拷贝进（ctypes 视图）+ 输出行序列二进制出（一次拷贝），
+        // JSON 只承载 requests/AST 与 db 对拍段——大数组不再过 JSON 文本化
+        let seriesBin: [String: [Double]] = [
+            "c": data.map(\.close),
+            "h": data.map(\.high),
+            "l": data.map(\.low),
+            "o": data.map(\.open),
+            "v": data.map(\.volume),
+            "a": data.map(\.turnover),
+        ]
         var input: [String: Any] = [
-            "bars": [
-                "c": data.map(\.close),
-                "h": data.map(\.high),
-                "l": data.map(\.low),
-                "o": data.map(\.open),
-                "v": data.map(\.volume),
-                "a": data.map(\.turnover),
-            ],
+            "__bin__": 1,
             "requests": requests.map { ["stmts": $0.map(stmtJSON)] },
         ]
         if let dbAudit { input["db"] = dbAudit }
-        switch KlinePythonBridge.shared.blockingCall(script: "tdx_eval", input: input, timeout: timeout) {
+        switch KlinePythonBridge.shared.blockingCallBin(script: "tdx_eval", input: input,
+                                                        seriesBin: seriesBin, seriesInto: "bars",
+                                                        timeout: timeout) {
         case .failure(let err):
             let msg: String
             switch err {
@@ -74,19 +79,17 @@ enum PyTDXFormulaBridge {
             case .scriptError(let m): msg = m
             }
             return .failure(msg)
-        case .success(let raw):
+        case .success(let bin):
             if dbAudit != nil {
-                Self.logAuditIfPresent(raw: raw, table: (dbAudit?["table"] as? String) ?? "?")
+                logAuditIfPresent(payload: bin.payload, table: (dbAudit?["table"] as? String) ?? "?")
             }
-            return decode(raw: raw, requests: requests)
+            return decode(bin: bin, requests: requests)
         }
     }
 
     /// 对拍结果落日志（每 call 一行标量，无库内容；仅 db 段传入时调用）
-    private static func logAuditIfPresent(raw: Data, table: String) {
-        guard let obj = try? JSONSerialization.jsonObject(with: raw),
-              let dict = obj as? [String: Any],
-              let a = dict["audit"] as? [String: Any] else { return }
+    private static func logAuditIfPresent(payload: [String: Any], table: String) {
+        guard let a = payload["audit"] as? [String: Any] else { return }
         let dbRows = (a["db_rows"] as? NSNumber)?.intValue ?? -1
         let swRows = (a["swift_rows"] as? NSNumber)?.intValue ?? -1
         let src = (a["source"] as? String) ?? "?"
@@ -105,10 +108,9 @@ enum PyTDXFormulaBridge {
 
     // MARK: - 解码与组装
 
-    private static func decode(raw: Data, requests: [[TDXStatement]]) -> Result<[[TDXOutputLine]], String> {
-        guard let obj = try? JSONSerialization.jsonObject(with: raw),
-              let dict = obj as? [String: Any],
-              (dict["ok"] as? Bool) == true,
+    private static func decode(bin: PyBinResult, requests: [[TDXStatement]]) -> Result<[[TDXOutputLine]], String> {
+        let dict = bin.payload
+        guard (dict["ok"] as? Bool) == true,
               let results = dict["results"] as? [[String: Any]] else {
             return .failure("输出 JSON 非法或缺 ok=true")
         }
@@ -125,21 +127,23 @@ enum PyTDXFormulaBridge {
                 continue
             }
             let lines = (r["lines"] as? [[String: Any]]) ?? []
-            all.append(assembleOutputLines(lines: lines, stmts: requests[i]))
+            all.append(assembleOutputLines(lines: lines, stmts: requests[i], arrays: bin.arrays))
         }
         return .success(all)
     }
 
-    /// 把 Python 返回的输出行（仅 name+values+可选 SAR 方向）与 Swift 侧语句序列按输出行顺序对齐，
-    /// 组装为带样式的 TDXOutputLine（与原 TDXEvaluator.evaluate 的输出组装规则一致）
-    private static func assembleOutputLines(lines: [[String: Any]], stmts: [TDXStatement]) -> [TDXOutputLine] {
+    /// 把 Python 返回的输出行（仅 name+值序列+可选 SAR 方向）与 Swift 侧语句序列按输出行顺序对齐，
+    /// 组装为带样式的 TDXOutputLine（与原 TDXEvaluator.evaluate 的输出组装规则一致）。
+    /// 值序列优先取 bin 段（"b" 键 → arrays），缺省回退 JSON "v"（null→NaN，向后兼容）
+    private static func assembleOutputLines(lines: [[String: Any]], stmts: [TDXStatement],
+                                            arrays: [String: [Double]]) -> [TDXOutputLine] {
         var out: [TDXOutputLine] = []
         var li = 0
         for stmt in stmts where stmt.output {
             guard li < lines.count else { break }
             let l = lines[li]
             li += 1
-            var line = TDXOutputLine(name: stmt.name, values: decodeValues(l["v"]))
+            var line = TDXOutputLine(name: stmt.name, values: binValues(l["b"], arrays: arrays) ?? decodeValues(l["v"]))
             applyOptions(stmt.options, to: &line)
             line.hideValue = stmt.name.hasPrefix("NOTEXT_")
             // SAR 输出线：附加红/绿方向用于逐点着色（Python 对根调用为 SAR 的语句返回 d 数组）
@@ -150,6 +154,12 @@ enum PyTDXFormulaBridge {
             out.append(line)
         }
         return out
+    }
+
+    /// bin 段值解码：键 → [Double]（NaN 以原始位模式直达，无 null 转换）
+    private static func binValues(_ any: Any?, arrays: [String: [Double]]) -> [Double]? {
+        guard let key = any as? String else { return nil }
+        return arrays[key]
     }
 
     /// 序列解码：null（Python 非有限值）→ NaN，数字 → Double
