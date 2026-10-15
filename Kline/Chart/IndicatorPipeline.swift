@@ -51,12 +51,10 @@ final class IndicatorComputationStore: ObservableObject {
     let gaps: [GapInfo]
     /// 指标覆盖区间最大跨度：防止一次滑到很老的历史后覆盖区间扩展到全量
     let maxCoverageSpan = 2000
-    /// 预计算每块向右推进的根数（单块毫秒级，块间让出主线程，不阻塞 UI）
-    let prefetchBlockSize = 500
     /// 指标计算左侧预热根数：往前多算这一段历史，保证 MA（需前 N 根）与 EMA/SMA 等递归指标
     /// 在可见窗口内已收敛、数值准确；也避免每次拖动/缩放后全量重算。
     /// 取 50 使前台近似总计算量 ≈ 可见窗口(默认100) + 预热(50) ≈ 150 根，降低打开标的时的卡顿；
-    /// 长周期指标在可见窗口前段的收敛精度会略降，由后台分块预计算随后覆盖为正确值
+    /// 长周期指标在可见窗口前段的收敛精度会略降，由后台单次全量预取随后覆盖为正确值
     let indicatorWarmup = 50
 
     /// - Parameters:
@@ -130,8 +128,6 @@ struct PrefetchCalcRequest {
     let calcStart: Int
     let calcEnd: Int
     let data: [KlineItem]        // 裁剪区间数据
-    /// 完整基础序列（整个标的的 C/H/L/O/V/AMOUNT），各块共享引用，避免重复 map
-    let series: TDXSharedSeries
     let volumes: [Double]        // 裁剪区间成交量
     let turnovers: [Double]      // 裁剪区间成交额
     /// 主图公式文本（仅启用的指标，按顺序；空串表示未启用/无自定义指标）
@@ -141,10 +137,6 @@ struct PrefetchCalcRequest {
     let mainIDs: [String]
     /// 副图请求（3 个，与 subTop/subBottom/subThird 对应）
     let subs: [SubPrefetchRequest]
-    /// 各主图公式上一块的增量求值状态（与 mainFormulas 一一对应；nil = 从头算）
-    let resumingMain: [TDXIncrementalState?]
-    /// 各副图公式上一块的增量求值状态（与 subs 一一对应；nil = 从头算）
-    let resumingSubs: [TDXIncrementalState?]
 }
 
 struct SubPrefetchRequest {
@@ -163,10 +155,6 @@ struct PrefetchCalcResult {
     let main: [[TDXOutputLine]]
     /// 与 subs 一一对应（VOL/AMO 为空，主线程用成交量/成交额组装）
     let subs: [[TDXOutputLine]]
-    /// 各主图公式算完后的最新增量状态（供下一块延续）
-    let newMainStates: [TDXIncrementalState]
-    /// 各副图公式算完后的最新增量状态（供下一块延续）
-    let newSubStates: [TDXIncrementalState]
 }
 
 // MARK: - 后台预计算辅助（文件级私有）
@@ -893,10 +881,10 @@ extension KlineChartView {
     }
 
     /// 打开标的后，在后台分块正确计算全部历史指标：
-    /// 前台已先显示当前可见窗口的近似值（从可见起点往前预热一段起算，偏差很小）；
-    /// 随后后台从数据开头（最左）向右逐块推进计算，EMA/SMA 等递归指标从第一根开始累积，
-    /// 数值最正确；覆盖到当前可见窗口末端后才替换前台近似曲线（最新部分被重算为正确值）。
-    /// 用户交互（拖动/缩放）或切换周期/标的/指标时 token 失效，任务自动停止
+    /// 前台已先显示当前可见窗口的近似值（Python 波次求值）；随后后台**单次全量** Python 调用
+    /// 算完整段历史（总计算量 = 1N，零拷贝 bin 通道），完成后一次性替换前台近似曲线。
+    /// 用户交互（拖动/缩放）或切换周期/标的/指标时 token 失效，任务自动停止。
+    /// 增量状态机与 Swift 分块降级已删除（2026-10-15 用户决策）：图表指标计算唯一路径 = Python 引擎
     func startPrefetch() {
         guard !sortedData.isEmpty, !mainFullscreen, computation.prefetchToken == nil else { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
@@ -913,133 +901,43 @@ extension KlineChartView {
         }
         let token = UUID()
         computation.prefetchToken = token
-        // Python 路径：引擎就绪 → **单次全量调用**（总计算量 = 1N，无分块无状态）。
-        // 零拷贝 bin 通道下全量 bars 输入成本趋近于零，一次算完整段历史是最优形状；
-        // 分块渐进推进是 Swift 增量状态机时代的产物，Python 路径不需要。
-        // 失败（超时/脚本报错）→ 会话内禁用 Python 预取并落入下方几何分块循环（Swift 增量降级）
-        if KlinePythonBridge.shared.isReady, !Self.prefetchPythonDisabled {
-            let dataFull = sortedData
-            let fingerprint = Self.currentConfigFingerprint(period: period)
-            guard let req = Self.makeFullRequest(data: dataFull, period: period) else {
-                computation.prefetchToken = nil
-                if let metaId = metaId {
-                    ChartCacheStore.shared.entry(for: metaId, period: period).isPrefetching = false
-                }
-                return
+        // 单次全量调用：引擎就绪 → 一次 bin 调用算完整段 [0..count-1]
+        let dataFull = sortedData
+        let fingerprint = Self.currentConfigFingerprint(period: period)
+        guard let req = Self.makeFullRequest(data: dataFull, period: period) else {
+            computation.prefetchToken = nil
+            if let metaId = metaId {
+                ChartCacheStore.shared.entry(for: metaId, period: period).isPrefetching = false
             }
-            Task { @MainActor in
-                let r = await Task.detached(priority: .utility) {
-                    Self.evaluatePrefetchViaPython(req)
-                }.value
-                guard self.computation.prefetchToken == token else { return }
-                if let r {
-                    // 指标配置在计算期间变化：丢弃旧配置结果（新配置会重新触发预取）
-                    guard Self.currentConfigFingerprint(period: self.period) == fingerprint else {
-                        self.computation.prefetchToken = nil
-                        if let metaId = self.metaId {
-                            ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
-                        }
-                        return
-                    }
-                    // 一次性提交全量正确曲线（等价分块循环的 isLastBlock 提交）
-                    self.commitPrefetch(req, r, updateCurves: true)
-                    self.computation.bgCoverageEnd = dataFull.count - 1
-                    if let metaId = self.metaId {
-                        let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
-                        entry.bgCoverageEnd = max(entry.bgCoverageEnd, dataFull.count - 1)
-                    }
-                    self.finishPrefetch()
-                } else {
-                    // Python 失败：会话内禁用（防重复失败空转），本次回退分块循环
-                    Self.prefetchPythonDisabled = true
+            return
+        }
+        Task { @MainActor in
+            let r = await Task.detached(priority: .utility) {
+                Self.evaluatePrefetchViaPython(req)
+            }.value
+            guard self.computation.prefetchToken == token else { return }
+            // 无论成败先复位任务标记（成功走 finishPrefetch 再标 done；失败仅记录，指标保持前台近似）
+            defer {
+                if self.computation.prefetchToken == token {
                     self.computation.prefetchToken = nil
                     if let metaId = self.metaId {
                         ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
                     }
-                    self.startPrefetch()
                 }
             }
-            return
-        }
-        // 完整基础序列只构建一次，各块共享引用（避免每块重复 map 全部基础数据）
-        let series = TDXSharedSeries(data: sortedData)
-        // 上一块算完后的增量状态（供下一块只算新增区间、复用前缀，避免每块从数据开头整段重算）；
-        // 空数组 = 从头算。公式与上一块不一致（配置中途变化）时清空状态，防止新旧公式状态错位
-        var resumingMain: [TDXIncrementalState?] = []
-        var resumingSubs: [TDXIncrementalState?] = []
-        var lastMainFormulas: [String] = []
-        var lastSubFormulas: [String?] = []
-        Task { @MainActor in
-            while self.computation.prefetchToken == token {
-                // 指标/设置面板打开期间暂停预计算，避免空转与干扰面板操作
-                if self.menuIsOpen {
-                    await Task.yield()
-                    continue
-                }
-                // 从数据开头（最左）向右推进：块大小随覆盖推进呈几何增长（每次约翻倍）。
-                // 结合增量求值（上一块状态延续，每块只算新增区间）使总计算量 ≈ O(N)，
-                // 接近一次全量，大幅缩短总耗时
-                let currentEnd = max(0, self.computation.bgCoverageEnd)
-                let step = max(self.computation.prefetchBlockSize, currentEnd)
-                let bgEnd = min(self.sortedData.count - 1, currentEnd + step)
-                guard bgEnd > currentEnd else {
-                    // 已全部算完：标记周期预计算完成，并让外层继续预计算其它未计算周期
-                    self.finishPrefetch()
-                    break
-                }
-                // 主线程构造计算请求（携带共享序列与上一块增量状态；从数据开头起算保证递归指标数值最正确）
-                guard let request = self.makePrefetchRequest(calcStart: 0, calcEnd: bgEnd, series: series,
-                                                             resumingMain: resumingMain,
-                                                             resumingSubs: resumingSubs) else { break }
-                // 后台线程执行指标求值（纯计算，不触碰任何 UI/状态）
-                let result = await Task.detached(priority: .utility) {
-                    Self.evaluatePrefetch(request)
-                }.value
-                // 回主线程：token 仍有效才提交；仅当正确覆盖推进到可见窗口末端时才更新曲线，
-                // 否则保持前台近似的立即显示（避免后台未覆盖时指标变空白）。
-                // 拖动/缩放进行中跳过曲线组装（只推进 bgCoverageEnd/进度条），
-                // 避免全量曲线组装占用主线程影响手势流畅度；松手后下一块会补上
-                guard self.computation.prefetchToken == token else { break }
-                let shouldCommit = bgEnd >= self.endIndex && !self.drag.isDragging
-                // 拖动中会跳过曲线提交；但若这一整块已覆盖到数据末尾（prefetch 即将结束），
-                // 即使在拖动中也强制提交，否则覆盖末端已到末尾、曲线却因拖动中跳过提交而陈旧，
-                // 退出拖动后 bgCovered 误判为已覆盖、prefetchDone 又跳过重启 → 指标永不补齐
-                let isLastBlock = bgEnd >= self.sortedData.count - 1
-                klineDebug("[KlineDebug] 后台块: bgEnd=\(bgEnd)/\(self.sortedData.count-1) shouldCommit=\(shouldCommit) isLast=\(isLastBlock) endIdx=\(self.endIndex) dragging=\(self.drag.isDragging)")
-                self.commitPrefetch(request, result, updateCurves: shouldCommit || isLastBlock)
-                self.computation.bgCoverageEnd = bgEnd
-                // 诊断：每块推进后副图状态（排查曲线是否在 bgEnd 更新后被清空）
-                klineDebug("[KlineDebug] 块后快照(bgEnd=\(bgEnd)) | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)]")
-                // 仅在曲线真正提交时推进缓存的覆盖末端，保证缓存 bgCoverageEnd 与实际存储曲线
-                // 的覆盖一致；否则会出现「声称已覆盖」但曲线未覆盖可见窗口，切回该周期后
-                // bgCovered 误判为真、recomputeSub 提前返回 → 副图空白
-                if (shouldCommit || isLastBlock), let metaId = self.metaId {
-                    let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
-                    entry.bgCoverageEnd = max(entry.bgCoverageEnd, bgEnd)
-                }
-                // 把本块最新增量状态传给下一块；公式与上一块不一致（配置中途变化）时从头算
-                let subsFormulas = request.subs.map { $0.customFormula ?? $0.formula }
-                if request.mainFormulas == lastMainFormulas, subsFormulas == lastSubFormulas {
-                    resumingMain = result.newMainStates.map { Optional($0) }
-                    resumingSubs = result.newSubStates.map { Optional($0) }
-                } else {
-                    resumingMain = []
-                    resumingSubs = []
-                    lastMainFormulas = request.mainFormulas
-                    lastSubFormulas = subsFormulas
-                }
-                // 让出主线程，先刷新 UI 再算下一块
-                await Task.yield()
+            guard let r else {
+                DebugLogger.shared.log("[Prefetch] Python 全量求值失败（引擎未就绪/超时/脚本报错），本周期保持前台近似曲线")
+                return
             }
-            // 仅当仍是自己在运行时才清理 token / 占用标记：
-            // 拖动等交互会把 prefetchToken 置 nil 或让后续 startPrefetch 换成新 token，
-            // 此时绝不能清掉新任务的 token，否则会把新任务误杀，导致进度条卡死不再推进
-            if self.computation.prefetchToken == token {
-                self.computation.prefetchToken = nil
-                if let metaId = self.metaId {
-                    ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
-                }
+            // 指标配置在计算期间变化：丢弃旧配置结果（新配置会重新触发预取）
+            guard Self.currentConfigFingerprint(period: self.period) == fingerprint else { return }
+            self.commitPrefetch(req, r, updateCurves: true)
+            self.computation.bgCoverageEnd = dataFull.count - 1
+            if let metaId = self.metaId {
+                let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
+                entry.bgCoverageEnd = max(entry.bgCoverageEnd, dataFull.count - 1)
             }
+            self.finishPrefetch()
         }
     }
 
@@ -1054,56 +952,19 @@ extension KlineChartView {
         onPeriodPrefetched?(period)
     }
 
-    /// 主线程构造预计算每块的请求：快照裁剪数据、启用的指标公式与参数（全部 Sendable，可跨线程）。
-    /// series 为完整基础序列（各块共享，避免重复 map）；resumingMain/resumingSubs 为上一块算完的
-    /// 增量状态（与公式一一对应；空数组 = 从头算），后台只算新增区间、复用前缀
-    func makePrefetchRequest(calcStart: Int, calcEnd: Int, series: TDXSharedSeries,
-                                     resumingMain: [TDXIncrementalState?] = [],
-                                     resumingSubs: [TDXIncrementalState?] = []) -> PrefetchCalcRequest? {
-        guard !sortedData.isEmpty, calcStart >= 0, calcStart <= calcEnd, calcEnd < sortedData.count else { return nil }
-        let data = Array(sortedData[calcStart...calcEnd])
-        let volumes = Array(self.volumes[calcStart...calcEnd])
-        let turnovers = Array(self.turnovers[calcStart...calcEnd])
-        let store = SystemIndicatorStore.shared
-        // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按顺序生成公式与 id，
-        // 保证后台结果与提交组装的索引严格一一对应，避免中途配置变化导致错位
-        let entries = mainIndicatorEntries(store: store, customStore: customStore,
-                                           config: config, customFormula: activeCustomIndicator?.formula,
-                                           period: self.period)
-        let main = entries.map { $0.formula }
-        let mainIDs = entries.map { $0.id }
-        // 副图（3 个，与 subTop/subBottom/subThird 对应）
-        var subs: [SubPrefetchRequest] = []
-        for m in [subTop, subBottom, subThird] {
-            let customInd = customStore.indicators.first { $0.id == m.activeCustomID }
-            let isCustom = m.activeCustomID != nil && customInd != nil
-            let customFormula = isCustom ? customInd?.formula : nil
-            let formula = (m.kind == "VOL" || m.kind == "AMO") ? nil : store.formula(for: m.kind, values: [:], period: self.period)
-            subs.append(SubPrefetchRequest(kind: m.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
-        }
-        return PrefetchCalcRequest(calcStart: calcStart, calcEnd: calcEnd, data: data,
-                                   series: series,
-                                   volumes: volumes, turnovers: turnovers, mainFormulas: main, mainIDs: mainIDs,
-                                   subs: subs,
-                                   resumingMain: resumingMain, resumingSubs: resumingSubs)
-    }
-
     /// 后台线程：对请求中的每个公式求值（纯计算，无任何 UI/状态访问，线程安全）。
-    /// Python 引擎优先（bin 零拷贝，无状态整段求值 0..calcEnd）；引擎未就绪/求值失败
-    /// 降级 Swift 增量求值（跨块状态续算，无引擎构建的唯一可用路径）。
+    /// Python 引擎唯一路径（bin 零拷贝，无状态整段求值 0..calcEnd）；失败返回空结果
+    /// （各槽位空行，commitPrefetch 保持前台近似曲线不被清空）。
     nonisolated static func evaluatePrefetch(_ req: PrefetchCalcRequest) -> PrefetchCalcResult {
-        if let py = evaluatePrefetchViaPython(req) { return py }
-        return evaluatePrefetchViaSwift(req)
+        evaluatePrefetchViaPython(req) ?? PrefetchCalcResult(
+            main: Array(repeating: [], count: req.mainFormulas.count),
+            subs: Array(repeating: [], count: req.subs.count))
     }
-
-    /// Python 预取会话级失败标志：单次全量调用失败（超时/脚本报错）后置位，
-    /// 本次会话预取直接走 Swift 分块降级，防重复失败空转。下次启动 App 重置。
-    nonisolated(unsafe) static var prefetchPythonDisabled = false
 
     /// Python 路径：全部主图+副图公式合并为**一次** bin 调用，整段 [0..calcEnd] 无状态求值。
     /// 无增量状态跨块传递——调用方（startPrefetch）传全量 [0..count-1]，总计算量 = 1N；
     /// 零拷贝 bin 通道下全量 bars 输入成本趋近于零，无分块是最优形状。
-    /// 失败（引擎未就绪/超时/脚本报错）→ nil，调用方降级 Swift。
+    /// 失败（引擎未就绪/超时/脚本报错）→ nil。
     private nonisolated static func evaluatePrefetchViaPython(_ req: PrefetchCalcRequest) -> PrefetchCalcResult? {
         var requests: [[TDXStatement]] = []
         var mainSlots: [Int] = []   // requests 下标 → mainFormulas 下标
@@ -1120,10 +981,9 @@ extension KlineChartView {
             subSlots.append(i)
         }
         if requests.isEmpty {
-            // 全部公式为空/解析失败：直接回空结果（与 Swift 路径行为一致）
+            // 全部公式为空/解析失败：直接回空结果（与原 Swift 路径行为一致）
             return PrefetchCalcResult(main: Array(repeating: [], count: req.mainFormulas.count),
-                                      subs: Array(repeating: [], count: req.subs.count),
-                                      newMainStates: [], newSubStates: [])
+                                      subs: Array(repeating: [], count: req.subs.count))
         }
         // 超时随根数放宽（整段重算成本随历史线性增长；日线上限约万根）
         let timeout: TimeInterval = max(20.0, Double(req.data.count) / 1000.0 * 2.0 + 10.0)
@@ -1141,41 +1001,16 @@ extension KlineChartView {
                 if si < subs.count { subs[si] = lines }
             }
         }
-        // 无状态求值：不产出增量状态（空数组使下一块从 0 重算；VOL/AMO 副图保持空行，
-        // 主线程用成交量/成交额组装——与 Swift 路径约定一致）
-        return PrefetchCalcResult(main: main, subs: subs, newMainStates: [], newSubStates: [])
+        // 无状态求值：不产出增量状态；VOL/AMO 副图保持空行，主线程用成交量/成交额组装
+        return PrefetchCalcResult(main: main, subs: subs)
     }
 
-    /// 公式文本解析（后台线程；失败返回 nil，对应槽位回空行——与 Swift 路径 try? 行为一致）
+    /// 公式文本解析（后台线程；失败返回 nil，对应槽位回空行——与原 Swift 路径 try? 行为一致）
     private nonisolated static func parsePrefetchFormula(_ formula: String) -> [TDXStatement]? {
         var lexer = TDXLexer(formula)
         guard let tokens = try? lexer.tokenize(), !tokens.isEmpty else { return nil }
         var parser = TDXParser(tokens: tokens)
         return try? parser.parse()
-    }
-
-    /// Swift 降级路径：增量求值（携带上一块状态，只算新增区间，返回最新状态供下一块延续）
-    private nonisolated static func evaluatePrefetchViaSwift(_ req: PrefetchCalcRequest) -> PrefetchCalcResult {
-        var newMainStates: [TDXIncrementalState] = []
-        let main: [[TDXOutputLine]] = req.mainFormulas.enumerated().map { i, formula in
-            guard !formula.isEmpty else { newMainStates.append(TDXIncrementalState()); return [] }
-            let resuming = i < req.resumingMain.count ? req.resumingMain[i] : nil
-            let r = (try? TDXFormulaEngine.evaluateIncremental(formula: formula, series: req.series,
-                                                               barCount: req.data.count, resuming: resuming))
-            newMainStates.append(r?.state ?? TDXIncrementalState())
-            return r?.lines ?? []
-        }
-        var newSubStates: [TDXIncrementalState] = []
-        let subs: [[TDXOutputLine]] = req.subs.enumerated().map { i, s in
-            let f = s.customFormula ?? s.formula
-            guard let f, !f.isEmpty else { newSubStates.append(TDXIncrementalState()); return [] }
-            let resuming = i < req.resumingSubs.count ? req.resumingSubs[i] : nil
-            let r = (try? TDXFormulaEngine.evaluateIncremental(formula: f, series: req.series,
-                                                               barCount: req.data.count, resuming: resuming))
-            newSubStates.append(r?.state ?? TDXIncrementalState())
-            return r?.lines ?? []
-        }
-        return PrefetchCalcResult(main: main, subs: subs, newMainStates: newMainStates, newSubStates: newSubStates)
     }
 
     /// 主线程：把后台求得的原始输出行组装为 IndicatorLine，更新主图/副图曲线（含标题与颜色）。
@@ -1186,7 +1021,7 @@ extension KlineChartView {
         // ===== 进入commit时的副图快照（任何修改前，诊断用）=====
         klineDebug("[KlineDebug] commit进入快照 | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] cursor=\(selectedIndex == nil ? "无" : "有") bgEnd=\(computation.bgCoverageEnd)")
         let cs = req.calcStart, ce = req.calcEnd
-        // ---- 主图（数据驱动，与 makePrefetchRequest 的 mainFormulas/mainIDs 一一对应）----
+        // ---- 主图（数据驱动，与 makeFullRequest 的 mainFormulas/mainIDs 一一对应）----
         var curves: [IndicatorLine] = []
         let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
         for (idx, id) in req.mainIDs.enumerated() {
@@ -1365,10 +1200,8 @@ extension KlineChartView {
             subs.append(SubPrefetchRequest(kind: sel.kind, customFormula: customFormula, formula: formula, volPeriods: volMAFixedPeriods))
         }
         return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1, data: data,
-                                   series: TDXSharedSeries(data: data),
                                    volumes: volumes, turnovers: turnovers, mainFormulas: main, mainIDs: mainIDs,
-                                   subs: subs,
-                                   resumingMain: [], resumingSubs: [])
+                                   subs: subs)
     }
 
     /// 主线程：把后台求得的原始输出行组装为 IndicatorLine 并写入全局缓存。
