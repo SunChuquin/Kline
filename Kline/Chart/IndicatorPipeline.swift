@@ -913,6 +913,54 @@ extension KlineChartView {
         }
         let token = UUID()
         computation.prefetchToken = token
+        // Python 路径：引擎就绪 → **单次全量调用**（总计算量 = 1N，无分块无状态）。
+        // 零拷贝 bin 通道下全量 bars 输入成本趋近于零，一次算完整段历史是最优形状；
+        // 分块渐进推进是 Swift 增量状态机时代的产物，Python 路径不需要。
+        // 失败（超时/脚本报错）→ 会话内禁用 Python 预取并落入下方几何分块循环（Swift 增量降级）
+        if KlinePythonBridge.shared.isReady, !Self.prefetchPythonDisabled {
+            let dataFull = sortedData
+            let fingerprint = Self.currentConfigFingerprint(period: period)
+            guard let req = Self.makeFullRequest(data: dataFull, period: period) else {
+                computation.prefetchToken = nil
+                if let metaId = metaId {
+                    ChartCacheStore.shared.entry(for: metaId, period: period).isPrefetching = false
+                }
+                return
+            }
+            Task { @MainActor in
+                let r = await Task.detached(priority: .utility) {
+                    Self.evaluatePrefetchViaPython(req)
+                }.value
+                guard self.computation.prefetchToken == token else { return }
+                if let r {
+                    // 指标配置在计算期间变化：丢弃旧配置结果（新配置会重新触发预取）
+                    guard Self.currentConfigFingerprint(period: self.period) == fingerprint else {
+                        self.computation.prefetchToken = nil
+                        if let metaId = self.metaId {
+                            ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
+                        }
+                        return
+                    }
+                    // 一次性提交全量正确曲线（等价分块循环的 isLastBlock 提交）
+                    self.commitPrefetch(req, r, updateCurves: true)
+                    self.computation.bgCoverageEnd = dataFull.count - 1
+                    if let metaId = self.metaId {
+                        let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
+                        entry.bgCoverageEnd = max(entry.bgCoverageEnd, dataFull.count - 1)
+                    }
+                    self.finishPrefetch()
+                } else {
+                    // Python 失败：会话内禁用（防重复失败空转），本次回退分块循环
+                    Self.prefetchPythonDisabled = true
+                    self.computation.prefetchToken = nil
+                    if let metaId = self.metaId {
+                        ChartCacheStore.shared.entry(for: metaId, period: self.period).isPrefetching = false
+                    }
+                    self.startPrefetch()
+                }
+            }
+            return
+        }
         // 完整基础序列只构建一次，各块共享引用（避免每块重复 map 全部基础数据）
         let series = TDXSharedSeries(data: sortedData)
         // 上一块算完后的增量状态（供下一块只算新增区间、复用前缀，避免每块从数据开头整段重算）；
@@ -1048,10 +1096,13 @@ extension KlineChartView {
         return evaluatePrefetchViaSwift(req)
     }
 
+    /// Python 预取会话级失败标志：单次全量调用失败（超时/脚本报错）后置位，
+    /// 本次会话预取直接走 Swift 分块降级，防重复失败空转。下次启动 App 重置。
+    nonisolated(unsafe) static var prefetchPythonDisabled = false
+
     /// Python 路径：全部主图+副图公式合并为**一次** bin 调用，整段 [0..calcEnd] 无状态求值。
-    /// 无增量状态跨块传递——下一块从 0 重算整段，配合几何分块（500→1000→2000→…）
-    /// 总计算量 ≈ 2-3× 单次全量，后台任务可接受；换来的是无 FFI 状态序列化、
-    /// 递归指标始终从第一根累积（正确性与 Swift 非增量全量一致）。
+    /// 无增量状态跨块传递——调用方（startPrefetch）传全量 [0..count-1]，总计算量 = 1N；
+    /// 零拷贝 bin 通道下全量 bars 输入成本趋近于零，无分块是最优形状。
     /// 失败（引擎未就绪/超时/脚本报错）→ nil，调用方降级 Swift。
     private nonisolated static func evaluatePrefetchViaPython(_ req: PrefetchCalcRequest) -> PrefetchCalcResult? {
         var requests: [[TDXStatement]] = []
