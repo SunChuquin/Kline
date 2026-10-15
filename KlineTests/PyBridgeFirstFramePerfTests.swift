@@ -185,4 +185,100 @@ final class PyBridgeFirstFramePerfTests: XCTestCase {
         // 判据锚定：median 必须落在可解释区间（防测量错误，如把首调算进稳态）
         XCTAssertLessThan(median, 200, "稳态 median >200ms 与既有 quote_parse 3-15ms 稳态量级矛盾，疑似测量错误")
     }
+
+    // MARK: - 大序列压力测试（交接文档待执行项 #5：根数-耗时曲线）
+    //
+    // 实验 B 只有 150 根一个点；生产后台预取粒度是 500 根/块、单屏序列可能
+    // 500~2000 根，JSON 序列化 + 临时文件 IO 随根数线性增长。本用例对
+    // 150/500/1000/2000 根各热身 1 次 + 采样 20 次稳态端到端（同一典型首屏负载），
+    // 产出「根数 vs median」曲线——作为首帧切换序列长度上限/分块阈值、以及
+    // 桥接通道优化（二进制批量/零拷贝）是否立项的量化依据。
+    //
+    // 判定口径不变：median < 16ms（60fps）理想；< 33ms（30fps）可用上限；≥ 33ms 超帧。
+    // 本用例只测稳态分布（引擎/numpy 已由前序用例预热），无需进程全新；
+    // 但整个测试类仍须单独 -only-testing 跑（保证前序用例 A 组数据有效）。
+
+    func testStressRootsVsLatencyCurve() throws {
+        // 引擎未就绪 → 后台确保一次；失败 skip（与降级轮语义一致）
+        if !KlinePythonBridge.shared.isReady {
+            let ready = expectation(description: "ensureReady")
+            var failMsg: String?
+            KlinePythonBridge.shared.ensureReady { result in
+                if case .failure(let m) = result { failMsg = m }
+                ready.fulfill()
+            }
+            wait(for: [ready], timeout: 60)
+            if let m = failMsg {
+                throw XCTSkip("引擎未就绪：\(m)（无引擎构建验证降级路径而非本实验）")
+            }
+        }
+
+        let sizes = [150, 500, 1000, 2000]
+        var curve: [(n: Int, sMin: Double, median: Double, p95: Double, sMax: Double)] = []
+        var stressFail: String?
+
+        let exp = expectation(description: "stress curve")
+        DispatchQueue.global(qos: .userInitiated).async {
+            for n in sizes {
+                let bars = Self.makeBars(n)
+                let series: [String: [Double]] = [
+                    "open": bars.map { $0[0] },
+                    "high": bars.map { $0[1] },
+                    "low": bars.map { $0[2] },
+                    "close": bars.map { $0[3] },
+                ]
+                // 与实验 B 同负载：双均线 + EMA + MACD（args 序列直接用键名）
+                let calls: [[String: Any]] = [
+                    ["fn": "MA", "args": ["close", 5]],
+                    ["fn": "MA", "args": ["close", 10]],
+                    ["fn": "EMA", "args": ["close", 12]],
+                    ["fn": "MACD", "args": ["close", 12, 26, 9]],
+                ]
+                let input: [String: Any] = ["op": "functions", "series": series, "calls": calls]
+                // 每档先 1 次热身（消除该输入形状的首调抖动），再采 20 次稳态
+                if case .failure(let e) = KlinePythonBridge.shared.blockingCall(script: "mytt", input: input, timeout: 60) {
+                    stressFail = "热身失败（\(n) 根）：\(e)"
+                    break
+                }
+                var samples: [Double] = []
+                for _ in 0..<20 {
+                    let t = CFAbsoluteTimeGetCurrent()
+                    let r = KlinePythonBridge.shared.blockingCall(script: "mytt", input: input, timeout: 60)
+                    samples.append((CFAbsoluteTimeGetCurrent() - t) * 1000)
+                    if case .failure(let e) = r {
+                        stressFail = "稳态失败（\(n) 根）：\(e)"
+                        break
+                    }
+                }
+                if stressFail != nil { break }
+                let sorted = samples.sorted()
+                let median = (sorted[9] + sorted[10]) / 2
+                curve.append((n, sorted[0], median, sorted[18], sorted[19]))
+                self.log(String(format: "压测 %4d 根（MA5/MA10/EMA12/MACD，20 次）：min=%.1f median=%.1f p95=%.1f max=%.1f ms",
+                               n, sorted[0], median, sorted[18], sorted[19]))
+            }
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 600)
+
+        if let f = stressFail {
+            XCTFail("压测调用失败：\(f)")
+            return
+        }
+        guard curve.count == sizes.count else {
+            XCTFail("压测档位不足：\(curve.count)/\(sizes.count)")
+            return
+        }
+
+        log("—— 根数-耗时曲线（模拟器稳态；真机 A8 预期 ×5~10）——")
+        for c in curve {
+            let verdict = c.median < 16 ? "✓ 60fps 预算内" : (c.median < 33 ? "△ 30fps 勉强可用" : "✗ 超帧预算")
+            log(String(format: "%5d 根  median=%6.1fms  p95=%6.1fms  %@", c.n, c.median, c.p95, verdict))
+        }
+        // sanity：2000 根单次不应接近超时线；曲线应近似线性（超线性 = 桥接异常膨胀）
+        let last = curve.last!
+        XCTAssertLessThan(last.sMax, 5000, "2000 根稳态单次 >5s，疑似桥接异常")
+        let perKilo = (curve.last!.median - curve.first!.median) / Double(curve.last!.n - curve.first!.n) * 1000
+        log(String(format: "线性斜率：约 %.2f ms / 千根（150→2000）", perKilo))
+    }
 }
