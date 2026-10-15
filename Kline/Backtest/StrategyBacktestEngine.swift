@@ -878,16 +878,17 @@ final class StrategyBacktestRunner: ObservableObject {
                 // 因果公式下这等价于逐 bar 截断重算，却省掉「逐日 × 全市场」的重算；
                 // 未来函数会破坏该等价性（已在引擎 warnings 里静态提示）。
                 var hits = Set<Int>()
-                do {
-                    let lines = try TDXFormulaEngine.evaluate(formula: formula, data: series)
+                switch PyTDXFormulaBridge.evaluateText(formulas: [formula], data: series).first {
+                case .some(.success(let lines)):
                     if let last = lines.last {
                         for (i, value) in last.values.enumerated() where !value.isNaN && value > 0 {
                             if i < series.count { hits.insert(series[i].date) }
                         }
                     }
-                } catch {
-                    runnerSkips.append("\(meta.name) \(meta.code)：选股公式求值失败"
-                                       + "（\(error.localizedDescription)），已跳过")
+                case .some(.failure(let msg)):
+                    runnerSkips.append("\(meta.name) \(meta.code)：选股公式求值失败（\(msg)），已跳过")
+                    continue
+                case .none:
                     continue
                 }
 

@@ -98,6 +98,10 @@ struct StrategyFormulaEditorView: View {
     @State private var testIsError = false
     /// 保存失败文案（就地展示在校验区，不弹 alert）
     @State private var saveError: String?
+    /// 内嵌选股公式的语法错误（异步求值落态；pickBody/mode 变化即重算）
+    @State private var pickSyntaxError: String?
+    /// 异步校验令牌：旧请求晚到不覆盖新状态
+    @State private var pickSyntaxCheckToken = 0
 
     /// 内嵌选股公式输入框控制器（向光标处插入 / 全选）
     private let pickInputController = FormulaInputController()
@@ -163,16 +167,32 @@ struct StrategyFormulaEditorView: View {
         return library.doc(kind: .picker, id: ref) != nil
     }
 
-    /// 内嵌选股公式的语法错误（用行情数据试算得到；无数据 / 非内嵌 / 已删除的引用都不试算）
-    private var pickSyntaxError: String? {
-        guard mode == .inline, !data.isEmpty else { return nil }
+    /// 异步校验内嵌选股公式（求值走 Python 引擎后台线程，回主线程落态）。
+    /// 非 内嵌模式 / 无数据 / 空公式 → 清空错误。保存前由 save() 强制重查一次，防在途回填空窗漏检
+    private func schedulePickSyntaxCheck() {
+        guard mode == .inline, !data.isEmpty else {
+            pickSyntaxError = nil
+            return
+        }
         let body = pickBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return nil }
-        do {
-            _ = try TDXFormulaEngine.evaluate(formula: pickBody, data: data)
-            return nil
-        } catch {
-            return error.localizedDescription
+        guard !body.isEmpty else {
+            pickSyntaxError = nil
+            return
+        }
+        pickSyntaxCheckToken += 1
+        let token = pickSyntaxCheckToken
+        let sample = data
+        DispatchQueue.global(qos: .userInitiated).async {
+            let err: String?
+            switch PyTDXFormulaBridge.evaluateText(formulas: [body], data: sample).first {
+            case .some(.success): err = nil
+            case .some(.failure(let msg)): err = msg
+            case .none: err = nil
+            }
+            DispatchQueue.main.async {
+                guard token == self.pickSyntaxCheckToken else { return }
+                self.pickSyntaxError = err
+            }
         }
     }
 
@@ -232,6 +252,10 @@ struct StrategyFormulaEditorView: View {
         .background(Color(.systemBackground))
         // 表单贴物理屏幕底边（全 App 统一贴底为 0）；仅忽略 container 区，键盘行为不变
         .ignoresSafeArea(.container, edges: .bottom)
+        // 内嵌公式语义校验（Python 后台求值落态）：出现/模式切换/正文变化即重算
+        .onAppear { schedulePickSyntaxCheck() }
+        .onChange(of: mode) { _ in schedulePickSyntaxCheck() }
+        .onChange(of: pickBody) { _ in schedulePickSyntaxCheck() }
     }
 
     /// 页头：取消 / 标题 / 保存（字号沿用 IndicatorEditSheet 的页头令牌）
@@ -985,23 +1009,50 @@ struct StrategyFormulaEditorView: View {
 
     // MARK: - 动作
 
-    /// 测试选股公式：内嵌正文在样例行情上试算，结论就地显示
+    /// 测试选股公式：内嵌正文在样例行情上试算（Python 引擎后台求值），结论就地显示
     private func runTest() {
-        testMessage = nil
+        testMessage = "计算中…"
         testIsError = false
-        let result = FormulaLibraryStore.shared.testPicker(formula: pickBody, data: data)
-        if let err = result.error {
-            testMessage = "✗ \(err)"
-            testIsError = true
-        } else {
-            let verdict = result.hit ? "命中：最后一根输出值 > 0" : "未命中：最后一根输出值 ≤ 0"
-            testMessage = "✓ 解析成功\n\(result.display)\n\(verdict)"
+        let body = pickBody
+        let sample = data
+        FormulaLibraryStore.shared.testPicker(formula: body, data: sample) { result in
+            if let err = result.error {
+                testMessage = "✗ \(err)"
+                testIsError = true
+            } else {
+                let verdict = result.hit ? "命中：最后一根输出值 > 0" : "未命中：最后一根输出值 ≤ 0"
+                testMessage = "✓ 解析成功\n\(result.display)\n\(verdict)"
+            }
         }
     }
 
-    /// 保存：写公式库；成功即回调 + 关闭，失败就地红字（本阶段不生成任何条件单）
+    /// 保存：写公式库；成功即回调 + 关闭，失败就地红字（本阶段不生成任何条件单）。
+    /// 内嵌公式保存前强制重查一次语义（后台校验可能尚未回填 pickSyntaxError，防空窗漏检）
     private func save() {
         saveError = nil
+        if mode == .inline, !data.isEmpty, !pickBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let body = pickBody.trimmingCharacters(in: .whitespacesAndNewlines)
+            let sample = data
+            DispatchQueue.global(qos: .userInitiated).async {
+                let err: String?
+                switch PyTDXFormulaBridge.evaluateText(formulas: [body], data: sample).first {
+                case .some(.success): err = nil
+                case .some(.failure(let msg)): err = msg
+                case .none: err = nil
+                }
+                DispatchQueue.main.async {
+                    pickSyntaxCheckToken += 1
+                    pickSyntaxError = err
+                    finishSave()
+                }
+            }
+            return
+        }
+        finishSave()
+    }
+
+    /// 保存的第二段（issues 已含最新语义校验结果）
+    private func finishSave() {
         guard issues.isEmpty else { return }
         guard let saved = library.save(doc) else {
             saveError = "保存失败，请检查公式内容"

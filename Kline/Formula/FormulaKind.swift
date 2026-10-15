@@ -249,26 +249,34 @@ final class FormulaLibraryStore: ObservableObject {
 
     // MARK: - 测试
 
-    /// 在给定行情数据上求值：与既有 FormulaEditorView.runTest 的取值/格式化方式一致
-    func testPicker(formula: String, data: [KlineItem]) -> PickerTestResult {
+    /// 在给定行情数据上求值（异步）：与既有 FormulaEditorView.runTest 的取值/格式化方式一致。
+    /// 求值走 Python 引擎（后台线程），结果回调主线程；引擎未就绪/解析/求值失败 → error 文案
+    func testPicker(formula: String, data: [KlineItem], completion: @escaping (PickerTestResult) -> Void) {
         guard !data.isEmpty else {
-            return PickerTestResult(display: "", hit: false, error: "暂无行情数据用于测试")
+            completion(PickerTestResult(display: "", hit: false, error: "暂无行情数据用于测试"))
+            return
         }
-        do {
-            let lines = try TDXFormulaEngine.evaluate(formula: formula, data: data)
-            let display = lines.map { line in
-                let last = line.values.last(where: { !$0.isNaN }).map { String(format: "%.3f", $0) } ?? "-"
-                return "\(line.name): \(last)"
-            }.joined(separator: "   ")
-            // 最后一条输出行的最后一根有效值 > 0 视为命中
-            var hit = false
-            if let lastLine = lines.last,
-               let v = lastLine.values.last(where: { !$0.isNaN }) {
-                hit = v > 0
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result: PickerTestResult
+            switch PyTDXFormulaBridge.evaluateText(formulas: [formula], data: data).first {
+            case .some(.success(let lines)):
+                let display = lines.map { line in
+                    let last = line.values.last(where: { !$0.isNaN }).map { String(format: "%.3f", $0) } ?? "-"
+                    return "\(line.name): \(last)"
+                }.joined(separator: "   ")
+                // 最后一条输出行的最后一根有效值 > 0 视为命中
+                var hit = false
+                if let lastLine = lines.last,
+                   let v = lastLine.values.last(where: { !$0.isNaN }) {
+                    hit = v > 0
+                }
+                result = PickerTestResult(display: display, hit: hit, error: nil)
+            case .some(.failure(let msg)):
+                result = PickerTestResult(display: "", hit: false, error: msg)
+            case .none:
+                result = PickerTestResult(display: "", hit: false, error: "内部错误")
             }
-            return PickerTestResult(display: display, hit: hit, error: nil)
-        } catch {
-            return PickerTestResult(display: "", hit: false, error: error.localizedDescription)
+            DispatchQueue.main.async { completion(result) }
         }
     }
 

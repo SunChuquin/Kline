@@ -467,35 +467,53 @@ struct IndicatorEditSheet: View {
     }
 
     private func runTest() {
-        testMessage = nil
+        testMessage = "计算中…"
         testError = false
-        // 选股公式：走公式库测试逻辑，最后一根输出值 > 0 视为命中
-        if isPicker {
-            let result = FormulaLibraryStore.shared.testPicker(formula: formula, data: data)
-            if let err = result.error {
-                testMessage = "✗ \(err)"
-                testError = true
-            } else {
-                let verdict = result.hit ? "命中：最后一根输出值 > 0" : "未命中：最后一根输出值 ≤ 0"
-                testMessage = "✓ 解析成功\n\(result.display)\n\(verdict)"
+        // 求值走 Python 引擎（后台线程），回主线程更新结果文案
+        let formula = self.formula
+        let data = self.data
+        let isPicker = self.isPicker
+        DispatchQueue.global(qos: .userInitiated).async {
+            // 选股公式：走公式库测试逻辑，最后一根输出值 > 0 视为命中
+            if isPicker {
+                FormulaLibraryStore.shared.testPicker(formula: formula, data: data) { result in
+                    if let err = result.error {
+                        self.testMessage = "✗ \(err)"
+                        self.testError = true
+                    } else {
+                        let verdict = result.hit ? "命中：最后一根输出值 > 0" : "未命中：最后一根输出值 ≤ 0"
+                        self.testMessage = "✓ 解析成功\n\(result.display)\n\(verdict)"
+                    }
+                }
+                return
             }
-            return
-        }
-        guard !data.isEmpty else {
-            testMessage = "暂无行情数据用于测试"
-            testError = true
-            return
-        }
-        do {
-            let lines = try TDXFormulaEngine.evaluate(formula: formula, data: data)
-            let desc = lines.map { line in
-                let last = line.values.last(where: { !$0.isNaN }).map { String(format: "%.3f", $0) } ?? "-"
-                return "\(line.name): \(last)"
-            }.joined(separator: "   ")
-            testMessage = "✓ 解析成功\n\(desc)"
-        } catch {
-            testMessage = "✗ \(error.localizedDescription)"
-            testError = true
+            guard !data.isEmpty else {
+                DispatchQueue.main.async {
+                    self.testMessage = "暂无行情数据用于测试"
+                    self.testError = true
+                }
+                return
+            }
+            switch PyTDXFormulaBridge.evaluateText(formulas: [formula], data: data).first {
+            case .some(.success(let lines)):
+                let desc = lines.map { line in
+                    let last = line.values.last(where: { !$0.isNaN }).map { String(format: "%.3f", $0) } ?? "-"
+                    return "\(line.name): \(last)"
+                }.joined(separator: "   ")
+                DispatchQueue.main.async {
+                    self.testMessage = "✓ 解析成功\n\(desc)"
+                }
+            case .some(.failure(let msg)):
+                DispatchQueue.main.async {
+                    self.testMessage = "✗ \(msg)"
+                    self.testError = true
+                }
+            case .none:
+                DispatchQueue.main.async {
+                    self.testMessage = "✗ 内部错误"
+                    self.testError = true
+                }
+            }
         }
     }
 

@@ -2,18 +2,18 @@
 //  PyTDXEvalTests.swift
 //  KlineTests
 //
-//  【首帧引擎实验】tdx_eval bin 通道契约测试：Swift 原生 TDXFormulaEngine（oracle，
-//  原实现未动）与 PyTDXFormulaBridge（Python bin 通道）对同一公式 + 同一数据求值，
-//  逐输出行逐值对拍——覆盖零拷贝输入（ctypes）+ 二进制输出（__bin_out__）全链路。
+//  tdx_eval（Python 求值器）契约测试：对照 golden fixture（tdx_eval_golden.json）。
 //
-//  对拍口径：
-//  - 行数/顺序/名称必须一致；
-//  - 值序列 NaN 位点必须逐一相同（bin 通道 NaN 以原始位直达）；
-//  - 数值容差 1e-9（两侧同为 IEEE754 双精度 + 同序运算，正常应逐位一致；
-//    容差只为吸收潜在的求值顺序微差，不做严格位级断言）。
+//  fixture 来源：2026-10-16 删除 Swift 求值器前，由 tdx_eval 在固定数据（LCG 种子
+//  20261012 / 180 根升序 OHLCV）上对 goldenFormulas 全集求值生成（生成器 =
+//  testZZGenerateGoldenFixture，常关；需要再生时单独 -only-testing 跑并从日志提取）。
+//  fixture 生成时已通过 PyTDXEvalTests 差分对拍（Swift TDXFormulaEngine 为 oracle）
+//  验证 ≡ Swift 非增量全量语义，故 fixture 即语义基准。
 //
-//  skip 语义：引擎未就绪（无引擎构建 / KLINE_SKIP_ENGINE_EMBED=1）→ XCTSkip
-//  （降级轮验证 Swift 兜底路径，与本测试正交）。
+//  对拍口径：行数/顺序/名称必须一致；值序列 NaN 位点逐一相同；数值为
+//  Double→String 最短往返表示的逐位比对（无容差，同为 IEEE754 double）。
+//
+//  skip 语义：引擎未就绪（无引擎构建 / KLINE_SKIP_ENGINE_EMBED=1）→ XCTSkip。
 //
 
 import XCTest
@@ -21,7 +21,8 @@ import XCTest
 
 final class PyTDXEvalTests: XCTestCase {
 
-    /// 固定种子合成 K 线（与 PyBridgeFirstFramePerfTests.makeBars 同 LCG；升序老→新）
+    /// 固定种子合成 K 线（与 PyBridgeFirstFramePerfTests.makeBars 同 LCG；升序老→新）。
+    /// ⚠️ 与 fixture 生成时的数据必须保持一致——改种子/根数 = fixture 失效，须重新生成
     private static func makeItems(_ n: Int, seed: UInt64 = 20261012) -> [KlineItem] {
         var x = seed
         func rnd() -> Double {
@@ -43,34 +44,12 @@ final class PyTDXEvalTests: XCTestCase {
         return items
     }
 
-    /// 解析公式为语句序列（复用 TDXFormulaEngine 同一入口，保证两侧吃到同一 AST）
+    /// 解析公式为语句序列（lexer/parser 单源，Swift 侧保留）
     private static func parse(_ formula: String) throws -> [TDXStatement] {
         var lexer = TDXLexer(formula)
         let tokens = try lexer.tokenize()
         var parser = TDXParser(tokens: tokens)
         return try parser.parse()
-    }
-
-    /// NaN 位点一致 + 数值容差对拍
-    private func assertLinesEqual(_ swift: [TDXOutputLine], _ py: [TDXOutputLine],
-                                  _ label: String, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertEqual(swift.count, py.count, "\(label)：输出行数不一致", file: file, line: line)
-        for (i, (s, p)) in zip(swift, py).enumerated() {
-            XCTAssertEqual(s.name, p.name, "\(label)#\(i) 行名不一致", file: file, line: line)
-            XCTAssertEqual(s.values.count, p.values.count, "\(label)#\(i) 序列长度不一致", file: file, line: line)
-            for j in 0..<min(s.values.count, p.values.count) {
-                let a = s.values[j], b = p.values[j]
-                if a.isNaN || b.isNaN {
-                    XCTAssertTrue(a.isNaN && b.isNaN,
-                                  "\(label)#\(i)[\(j)] NaN 位点不一致（swift=\(a) py=\(b)）",
-                                  file: file, line: line)
-                } else {
-                    XCTAssertEqual(a, b, accuracy: 1e-9,
-                                   "\(label)#\(i)[\(j)] 数值不一致（swift=\(a) py=\(b)）",
-                                   file: file, line: line)
-                }
-            }
-        }
     }
 
     private func requireEngine() throws {
@@ -88,83 +67,143 @@ final class PyTDXEvalTests: XCTestCase {
         }
     }
 
-    // MARK: - 对拍用例（公式覆盖：均线/递归/窗口极值/SAR/除零语义/多请求批）
+    // MARK: - golden fixture 生成器（常关；再生方法见方法注释）
 
-    func testTDXEvalBinParityWithSwiftEngine() throws {
+    /// 一次性跑 tdx_eval 全公式集，输出 golden JSON 到日志（GOLDEN_BEGIN/GOLDEN_END 标记间），
+    /// 提取落盘 KlineTests/Fixtures/tdx_eval_golden.json。
+    /// ⚠️ 再生前 fixture 的语义基准是「已通过 Swift 差分对拍的 tdx_eval」——
+    /// Swift 求值器已删除，再生时必须确认 tdx_eval.py 无语义改动，否则 fixture 失去锚点。
+    func testZZGenerateGoldenFixture() throws {
+        throw XCTSkip("生成器常关：fixture 已入库（tdx_eval_golden.json）。再生步骤见方法注释")
+    }
+
+    /// golden 公式集（覆盖：常量/双均线/递归 EMA+SMA/窗口极值/SAR 状态机/除零语义/STD/BARSLAST
+    /// + 多请求批两条）——fixture 与测试共用
+    static let goldenFormulas: [(String, String)] = [
+        ("closeonly", "X: C;"),
+        ("ma", "M5: MA(C,5);\nM10: MA(C,10);\nM60: MA(C,60);"),
+        ("ema", "E12: EMA(C,12);\nS5: SMA(C,5,2);"),
+        ("hhvllv", "H20: HHV(H,20);\nL10: LLV(L,10);"),
+        ("sar", "S: SAR(0.02,0.2);"),
+        ("divzero", "DZ: C/(C-C);\nN: C/2;"),
+        ("std", "ST: STD(C,10);"),
+        ("barslast", "B: BARSLAST(C > REF(C,1));"),
+        ("batchA", "A1: MA(C,5);"),
+        ("batchB", "B1: EMA(C,26);\nB2: SAR(0.02,0.2);"),
+    ]
+
+    // MARK: - fixture 对照
+
+    private struct GoldenLine {
+        let name: String
+        let values: [String]   // "NaN" 或 Double 最短往返字符串
+    }
+
+    private func loadGolden() throws -> [String: [GoldenLine]] {
+        let url = Bundle(for: Self.self).url(forResource: "tdx_eval_golden", withExtension: "json")
+        guard let url, let data = try? Data(contentsOf: url),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            XCTFail("golden fixture 缺失或非法：tdx_eval_golden.json")
+            return [:]
+        }
+        var out: [String: [GoldenLine]] = [:]
+        for entry in arr {
+            guard let label = entry["label"] as? String,
+                  let lines = entry["lines"] as? [[String: Any]] else { continue }
+            out[label] = lines.map { l in
+                GoldenLine(name: (l["name"] as? String) ?? "",
+                           values: (l["values"] as? [String]) ?? [])
+            }
+        }
+        return out
+    }
+
+    /// 行级对拍：行数/顺序/名称一致；NaN 位点逐一相同；数值字符串逐位一致
+    private func assertLinesMatch(_ actual: [TDXOutputLine], _ golden: [GoldenLine],
+                                  _ label: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(actual.count, golden.count, "\(label)：输出行数不一致", file: file, line: line)
+        for (i, (a, g)) in zip(actual, golden).enumerated() {
+            XCTAssertEqual(a.name, g.name, "\(label)#\(i) 行名不一致", file: file, line: line)
+            XCTAssertEqual(a.values.count, g.values.count, "\(label)#\(i) 序列长度不一致", file: file, line: line)
+            for j in 0..<min(a.values.count, g.values.count) {
+                let v = a.values[j]
+                let actualStr = v.isNaN ? "NaN" : String(v)
+                XCTAssertEqual(actualStr, g.values[j],
+                               "\(label)#\(i)[\(j)] 值不一致（actual=\(actualStr) golden=\(g.values[j])）",
+                               file: file, line: line)
+            }
+        }
+    }
+
+    /// 主契约：全公式集经 evaluateText（parse+求值全链路）对照 fixture
+    func testTDXEvalAgainstGoldenFixture() throws {
         try requireEngine()
-
-        // 覆盖面：常量序列、双均线、递归 EMA/SMA、窗口 HHV/LLV、SAR 状态机、除零语义
-        let formulas: [(String, String)] = [
-            ("closeonly", "X: C;"),
-            ("ma", "M5: MA(C,5);\nM10: MA(C,10);\nM60: MA(C,60);"),
-            ("ema", "E12: EMA(C,12);\nS5: SMA(C,5,2);"),
-            ("hhvllv", "H20: HHV(H,20);\nL10: LLV(L,10);"),
-            ("sar", "S: SAR(0.02,0.2);"),
-            ("divzero", "DZ: C/(C-C);\nN: C/2;"),
-            ("std", "ST: STD(C,10);"),
-            ("barslast", "B: BARSLAST(C > REF(C,1));"),
-        ]
+        let golden = try loadGolden()
+        guard !golden.isEmpty else { return }
         let data = Self.makeItems(180)
 
-        let exp = expectation(description: "parity")
+        let exp = expectation(description: "golden parity")
         var failures: [String] = []
         DispatchQueue.global(qos: .userInitiated).async {
-            for (label, formula) in formulas {
-                do {
-                    let stmts = try Self.parse(formula)
-                    let oracle = try TDXFormulaEngine.evaluate(statements: stmts, data: data)
-                    switch PyTDXFormulaBridge.evaluate(requests: [stmts], data: data) {
-                    case .success(let batches):
-                        guard let py = batches.first else {
-                            failures.append("\(label)：无返回")
-                            continue
-                        }
-                        self.assertLinesEqual(oracle, py, label)
-                    case .failure(let msg):
-                        failures.append("\(label)：\(msg)")
-                    }
-                } catch {
-                    failures.append("\(label)：\(error)")
+            for (label, formula) in Self.goldenFormulas {
+                guard let expected = golden[label] else {
+                    failures.append("\(label)：fixture 缺该公式")
+                    continue
+                }
+                switch PyTDXFormulaBridge.evaluateText(formulas: [formula], data: data).first {
+                case .some(.success(let lines)):
+                    self.assertLinesMatch(lines, expected, label)
+                case .some(.failure(let msg)):
+                    failures.append("\(label)：\(msg)")
+                case .none:
+                    failures.append("\(label)：无返回")
                 }
             }
             exp.fulfill()
         }
         wait(for: [exp], timeout: 60)
         if !failures.isEmpty {
-            XCTFail("对拍失败：\(failures.joined(separator: " | "))")
+            XCTFail("golden 对拍失败：\(failures.joined(separator: " | "))")
         }
     }
 
-    func testTDXEvalBinMultiRequestBatch() throws {
+    /// 多请求批一致性：batchA/batchB 两条公式合并一次 evaluate 调用，结果须与 fixture
+    /// 单请求形式逐位一致（批量 == 单次的语义恒等）
+    func testTDXEvalMultiRequestBatchMatchesGolden() throws {
         try requireEngine()
+        let golden = try loadGolden()
+        guard let goldenA = golden["batchA"], let goldenB = golden["batchB"] else {
+            XCTFail("fixture 缺 batchA/batchB"); return
+        }
+        let data = Self.makeItems(180)
+        guard let idxA = Self.goldenFormulas.firstIndex(where: { $0.0 == "batchA" }),
+              let idxB = Self.goldenFormulas.firstIndex(where: { $0.0 == "batchB" }) else {
+            XCTFail("goldenFormulas 缺 batch 项"); return
+        }
+        let fA = Self.goldenFormulas[idxA].1
+        let fB = Self.goldenFormulas[idxB].1
 
-        // 多请求一批（波次合并形状）：结果数与顺序对齐；SAR 方向数组可用
-        let data = Self.makeItems(150)
-        let stmtsA = try Self.parse("A1: MA(C,5);")
-        let stmtsB = try Self.parse("B1: EMA(C,26);\nB2: SAR(0.02,0.2);")
-
-        let exp = expectation(description: "batch")
+        let exp = expectation(description: "batch parity")
         var failures: [String] = []
         DispatchQueue.global(qos: .userInitiated).async {
-            switch PyTDXFormulaBridge.evaluate(requests: [stmtsA, stmtsB], data: data) {
-            case .success(let batches):
-                guard batches.count == 2 else {
-                    failures.append("批结果数 \(batches.count) ≠ 2")
-                    break
-                }
-                do {
-                    let oracleA = try TDXFormulaEngine.evaluate(statements: stmtsA, data: data)
-                    let oracleB = try TDXFormulaEngine.evaluate(statements: stmtsB, data: data)
-                    self.assertLinesEqual(oracleA, batches[0], "batchA")
-                    self.assertLinesEqual(oracleB, batches[1], "batchB")
-                    // SAR 方向数组（markerDirections）必须随行返回（bin 通道不搬 d 数组，仍在 JSON）
-                    let sarLine = batches[1].first { $0.markerDirections != nil }
-                    XCTAssertNotNil(sarLine, "SAR 行缺 markerDirections")
-                } catch {
-                    failures.append("\(error)")
-                }
-            case .failure(let msg):
-                failures.append(msg)
+            // evaluateText 一次传两条（共享 data 一次 call）
+            let results = PyTDXFormulaBridge.evaluateText(formulas: [fA, fB], data: data)
+            guard results.count == 2 else {
+                failures.append("批结果数 \(results.count) ≠ 2")
+                exp.fulfill()
+                return
+            }
+            switch results[0] {
+            case .success(let lines): self.assertLinesMatch(lines, goldenA, "batchA")
+            case .failure(let m): failures.append("batchA：\(m)")
+            }
+            switch results[1] {
+            case .success(let lines):
+                self.assertLinesMatch(lines, goldenB, "batchB")
+                // SAR 方向数组（markerDirections）必须随行返回
+                let sarLine = lines.first { $0.markerDirections != nil }
+                XCTAssertNotNil(sarLine, "SAR 行缺 markerDirections")
+            case .failure(let m): failures.append("batchB：\(m)")
             }
             exp.fulfill()
         }

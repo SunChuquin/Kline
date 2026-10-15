@@ -288,15 +288,17 @@ final class MarketRowCache: ObservableObject {
             if let bars = row.recentBars, !bars.isEmpty {
                 // bars 已就绪：直接跑（耗时求值在 computeQueue 上串行推进）
                 computeQueue.async {
-                    do {
-                        let outputs = try TDXFormulaEngine.evaluate(formula: formulaRaw, data: bars)
+                    switch PyTDXFormulaBridge.evaluateText(formulas: [formulaRaw], data: bars).first {
+                    case .some(.success(let outputs)):
                         guard let first = outputs.first else {
                             completion(false); return
                         }
                         let v = first.values.last ?? 0
                         completion(v > 0)
-                    } catch {
-                        DebugLogger.shared.log("[MarketRowCache] matchFormula failed meta=\(metaID) err=\(error.localizedDescription)")
+                    case .some(.failure(let msg)):
+                        DebugLogger.shared.log("[MarketRowCache] matchFormula failed meta=\(metaID) err=\(msg)")
+                        completion(false)
+                    case .none:
                         completion(false)
                     }
                 }

@@ -42,16 +42,14 @@ enum PyTDXFormulaBridge {
 
     // MARK: - 求值（仅后台线程）
 
-    /// 批量求值：requests 与返回的 [[TDXOutputLine]] 按下标对齐（单请求失败对应下标为空数组，
-    /// 不拖垮整批——失败信息见日志）。data 为该批公式的公共 K 线区间。
-    /// 输出行已应用样式选项/SAR 红绿方向/NOTEXT_ 隐藏（规则与原 TDXEvaluator.applyOptions 一致）。
+    /// 批量求值（详细版）：批内单请求错误透传（Batch.error），其余同 evaluate。
     /// dbAudit：直读库对拍段（阶段1），仅观测——传入时 Python 读主库+增量库组装 bars 与
     /// data 逐字段对拍，差异经日志输出，**不影响求值**（求值输入仍是 data）
-    static func evaluate(requests: [[TDXStatement]],
-                         data: [KlineItem],
-                         dbAudit: [String: Any]? = nil,
-                         timeout: TimeInterval = 20) -> Result<[[TDXOutputLine]], String> {
-        assert(!Thread.isMainThread, "PyTDXFormulaBridge.evaluate 禁止主线程调用（blockingCall）")
+    static func evaluateDetailed(requests: [[TDXStatement]],
+                                 data: [KlineItem],
+                                 dbAudit: [String: Any]? = nil,
+                                 timeout: TimeInterval = 20) -> Result<[Batch], String> {
+        assert(!Thread.isMainThread, "PyTDXFormulaBridge.evaluateDetailed 禁止主线程调用（blockingCall）")
         guard !requests.isEmpty, !data.isEmpty else { return .success([]) }
         // bin 通道：bars 六序列零拷贝进（ctypes 视图）+ 输出行序列二进制出（一次拷贝），
         // JSON 只承载 requests/AST 与 db 对拍段——大数组不再过 JSON 文本化
@@ -83,8 +81,79 @@ enum PyTDXFormulaBridge {
             if dbAudit != nil {
                 logAuditIfPresent(payload: bin.payload, table: (dbAudit?["table"] as? String) ?? "?")
             }
-            return decode(bin: bin, requests: requests)
+            return decodeDetailed(bin: bin, requests: requests)
         }
+    }
+
+    /// 批量求值：requests 与返回的 [[TDXOutputLine]] 按下标对齐（单请求失败对应下标为空数组，
+    /// 不拖垮整批——失败信息见日志）。data 为该批公式的公共 K 线区间。
+    /// 输出行已应用样式选项/SAR 红绿方向/NOTEXT_ 隐藏（规则与原 TDXEvaluator.applyOptions 一致）。
+    static func evaluate(requests: [[TDXStatement]],
+                         data: [KlineItem],
+                         dbAudit: [String: Any]? = nil,
+                         timeout: TimeInterval = 20) -> Result<[[TDXOutputLine]], String> {
+        switch evaluateDetailed(requests: requests, data: data, dbAudit: dbAudit, timeout: timeout) {
+        case .failure(let m): return .failure(m)
+        case .success(let batches): return .success(batches.map(\.lines))
+        }
+    }
+
+    // MARK: - 文本公式求值（编辑器/筛选/回测/联动等非图表场景统一入口）
+
+    /// 公式文本解析（lexer/parser 单源保留在 Swift；错误文案与 Swift 引擎逐字一致）。
+    /// 解析层下沉另行决策——这里只复用解析，求值全部走 Python
+    static func parseFormulaText(_ formula: String) -> Result<[TDXStatement], String> {
+        var lexer = TDXLexer(formula)
+        do {
+            let tokens = try lexer.tokenize()
+            guard !tokens.isEmpty else { return .failure("公式为空") }
+            var parser = TDXParser(tokens: tokens)
+            let stmts = try parser.parse()
+            guard !stmts.isEmpty else { return .failure("公式为空") }
+            return .success(stmts)
+        } catch {
+            return .failure((error as? LocalizedError)?.errorDescription ?? "\(error)")
+        }
+    }
+
+    /// 文本公式批量求值：formulas 与返回按下标对齐（单个解析失败对应下标 .failure(错误文案)）。
+    /// 全部解析成功的公式合并为**一次** Python call（共享 data，bars 零拷贝一份）。
+    /// 求值语义错误（未定义变量/无输出行等）由 tdx_eval 返回，文案与 Swift 引擎对齐。
+    /// 线程约束：内部走 blockingCallBin，只能在后台线程调用（主线程 assert）。
+    static func evaluateText(formulas: [String], data: [KlineItem],
+                             timeout: TimeInterval = 20) -> [Result<[TDXOutputLine], String>] {
+        assert(!Thread.isMainThread, "PyTDXFormulaBridge.evaluateText 禁止主线程调用（blockingCallBin）")
+        guard !formulas.isEmpty else { return [] }
+        guard !data.isEmpty else { return formulas.map { _ in .failure("无行情数据") } }
+        var out: [Result<[TDXOutputLine], String>?] = []
+        var pendingIdx: [Int] = []
+        var pendingStmts: [[TDXStatement]] = []
+        for (i, f) in formulas.enumerated() {
+            switch parseFormulaText(f) {
+            case .success(let stmts):
+                pendingIdx.append(i)
+                pendingStmts.append(stmts)
+                out.append(nil)
+            case .failure(let msg):
+                out.append(.failure(msg))
+            }
+        }
+        if !pendingStmts.isEmpty {
+            switch evaluateDetailed(requests: pendingStmts, data: data, timeout: timeout) {
+            case .failure(let msg):
+                for i in pendingIdx { out[i] = .failure(msg) }
+            case .success(let batches):
+                for (k, i) in pendingIdx.enumerated() {
+                    let b = batches[k]
+                    if let err = b.error {
+                        out[i] = .failure(err)
+                    } else {
+                        out[i] = .success(b.lines)
+                    }
+                }
+            }
+        }
+        return out.map { $0 ?? .failure("内部错误") }
     }
 
     /// 对拍结果落日志（每 call 一行标量，无库内容；仅 db 段传入时调用）
@@ -108,7 +177,14 @@ enum PyTDXFormulaBridge {
 
     // MARK: - 解码与组装
 
-    private static func decode(bin: PyBinResult, requests: [[TDXStatement]]) -> Result<[[TDXOutputLine]], String> {
+    /// 单请求求值结果（批内对齐）：error 非 nil = 该请求失败（lines 为空）
+    struct Batch {
+        let lines: [TDXOutputLine]
+        let error: String?
+    }
+
+    /// 详细解码：批内单请求错误透传（evaluateText 用于编辑器报错显示）
+    private static func decodeDetailed(bin: PyBinResult, requests: [[TDXStatement]]) -> Result<[Batch], String> {
         let dict = bin.payload
         guard (dict["ok"] as? Bool) == true,
               let results = dict["results"] as? [[String: Any]] else {
@@ -117,19 +193,27 @@ enum PyTDXFormulaBridge {
         guard results.count == requests.count else {
             return .failure("结果数 \(results.count) 与请求数 \(requests.count) 不一致")
         }
-        var all: [[TDXOutputLine]] = []
+        var all: [Batch] = []
         all.reserveCapacity(requests.count)
         for (i, r) in results.enumerated() {
             guard (r["ok"] as? Bool) == true else {
                 let e = (r["error"] as? String) ?? "(缺 error)"
                 DebugLogger.shared.log("[PyTDXBridge] 批内请求 #\(i) 求值失败：\(e)")
-                all.append([])
+                all.append(Batch(lines: [], error: e))
                 continue
             }
             let lines = (r["lines"] as? [[String: Any]]) ?? []
-            all.append(assembleOutputLines(lines: lines, stmts: requests[i], arrays: bin.arrays))
+            all.append(Batch(lines: assembleOutputLines(lines: lines, stmts: requests[i], arrays: bin.arrays),
+                             error: nil))
         }
         return .success(all)
+    }
+
+    private static func decode(bin: PyBinResult, requests: [[TDXStatement]]) -> Result<[[TDXOutputLine]], String> {
+        switch decodeDetailed(bin: bin, requests: requests) {
+        case .failure(let m): return .failure(m)
+        case .success(let batches): return .success(batches.map(\.lines))
+        }
     }
 
     /// 把 Python 返回的输出行（仅 name+值序列+可选 SAR 方向）与 Swift 侧语句序列按输出行顺序对齐，

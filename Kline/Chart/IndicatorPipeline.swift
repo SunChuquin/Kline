@@ -597,42 +597,6 @@ extension KlineChartView {
         }
     }
 
-    /// 主图单指标按「输出行」缓存求值：仅某行单元文本（含参数）变化才重算该行，其余行复用缓存。
-    /// 计算使用「裁剪区间」数据（可见窗口+预热），计算量≈可见窗口+预热，与总 K 数无关
-    func mainRows(for id: String,
-                          enabled: Bool,
-                          formula: String?,
-                          calcStart: Int, calcEnd: Int,
-                          build: (Int, TDXOutputLine) -> IndicatorLine?) -> [IndicatorLine] {
-        guard enabled, let formula else { return [] }
-        var cache = computation.mainCache.units[id] ?? MainIndicatorCache.UnitSet()
-        // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元；计算区间变化也须重建
-        let formulaKey = "\(formula)|\(calcStart)|\(calcEnd)"
-        if cache.formulaKey != formulaKey {
-            cache.formulaKey = formulaKey
-            cache.units = (try? TDXFormulaEngine.splitOutputUnits(formula: formula)) ?? []
-            cache.rows = Array(repeating: MainIndicatorCache.Row(), count: cache.units.count)
-        }
-        let calcData = calcData(from: calcStart, to: calcEnd)
-        var lines: [IndicatorLine] = []
-        for (i, unit) in cache.units.enumerated() {
-            // 该行单元文本与缓存一致 → 直接复用；否则只重算这一行
-            if cache.rows[i].key != unit.text {
-                cache.rows[i].key = unit.text
-                // 单元内可能含前置输出行（如 BOLL 的 UP 依赖输出行 MID），目标行是最后一个输出行
-                if let outs = try? TDXFormulaEngine.evaluate(statements: unit.statements, data: calcData),
-                   let out = outs.last, let built = build(i, out), !allNaN(built.values) {
-                    cache.rows[i].line = padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
-                } else {
-                    cache.rows[i].line = nil
-                }
-            }
-            if let line = cache.rows[i].line { lines.append(line) }
-        }
-        computation.mainCache.units[id] = cache
-        return lines
-    }
-
     /// 整行是否全为 NaN（周期为 0 的 MA 行等）
     func allNaN(_ values: [Double]) -> Bool { values.allSatisfy { $0.isNaN } }
 

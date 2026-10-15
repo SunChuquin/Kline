@@ -166,43 +166,71 @@ struct AsOfRequest {
     let subs: [Sub?]
 }
 
-/// 后台执行 as-of 求值：逐指标用截断（末项替换）序列重算，**只取每条输出行末点值**。
+/// 后台执行 as-of 求值：主图单元 + 副图公式合并为**一次** Python 批量调用（bin 零拷贝），
+/// **只取每条输出行末点值**。
 /// 行的保留/跳过规则必须与前台 recomputeMainCurves / recomputeSub 严格一致，
 /// 结果下标才能与当前 curves 数组一一对齐：
-/// - 主图：formula → splitOutputUnits → 逐单元 evaluate，out 非全 NaN（buildMainLine 的唯一过滤条件）才占一个曲线位；
-/// - 副图自定义：evaluate(formula:) 的全部输出行；
+/// - 主图：formula → splitOutputUnits → 逐单元求值，out 非全 NaN（buildMainLine 的唯一过滤条件）才占一个曲线位；
+/// - 副图自定义：全部输出行；
 /// - 副图系统指标：过滤全 NaN 行（recomputeSub 的 guard !allNaN）；
 /// - VOL/AMO：不入此通道（合成量/额在阶段 A 处理）。
+/// 线程约束：调用方在后台线程（evaluateText/evaluateDetailed 内部 assert）。
 func evaluateAsOf(_ req: AsOfRequest) -> AsOfResult {
     var result = AsOfResult()
 
-    // 主图
-    var mainIndex = 0
+    // 收集全部求值请求：主图单元（保持 entries 顺序）+ 副图公式；单槽解析失败跳过（与前台一致）
+    enum Slot {
+        case main                 // 主图单元：成功才占一个 mainCurves 位
+        case sub(slot: Int, isCustom: Bool)
+    }
+    var requests: [[TDXStatement]] = []
+    var slots: [Slot] = []
     for formula in req.mainFormulas {
         guard let units = try? TDXFormulaEngine.splitOutputUnits(formula: formula) else { continue }
         for unit in units {
-            // 与 mainRows 同源：每个 unit 成功（out 非全 NaN）才占一个 mainCurves 位，失败不占位
-            if let outs = try? TDXFormulaEngine.evaluate(statements: unit.statements, data: req.data),
-               let out = outs.last,
-               !tdxAllNaN(out.values),
+            slots.append(.main)
+            requests.append(unit.statements)
+        }
+    }
+    for (slot, sub) in req.subs.enumerated() {
+        guard let sub else { continue }
+        switch PyTDXFormulaBridge.parseFormulaText(sub.formula) {
+        case .success(let stmts):
+            slots.append(.sub(slot: slot, isCustom: sub.isCustom))
+            requests.append(stmts)
+        case .failure:
+            continue   // 解析失败 = 该副图无曲线（与前台 try? evaluate 失败语义一致）
+        }
+    }
+
+    // 一次 Python 批量求值（后台线程；引擎未就绪 → 整体失败，各槽不占位）
+    guard !requests.isEmpty,
+          case .success(let batches) = PyTDXFormulaBridge.evaluateDetailed(requests: requests,
+                                                                           data: req.data) else { return result }
+
+    // 回填：主图成功单元按序占位；副图行按保留规则逐行占位（规则与前台一致）
+    var mainIndex = 0
+    for (k, slot) in slots.enumerated() {
+        guard k < batches.count else { break }
+        let lines = batches[k].lines
+        switch slot {
+        case .main:
+            // 与 mainRows 同源：每个单元成功（out 非全 NaN 且末值有效）才占一个 mainCurves 位
+            if let out = lines.last, !tdxAllNaN(out.values),
                let v = out.values.last, !v.isNaN {
                 result.main[mainIndex] = v
                 mainIndex += 1
             }
-        }
-    }
-
-    // 副图三槽
-    for (slot, sub) in req.subs.enumerated() {
-        guard let sub, let lines = try? TDXFormulaEngine.evaluate(formula: sub.formula, data: req.data) else { continue }
-        var curveIndex = 0
-        for line in lines {
-            // 自定义行全部保留；系统行过滤全 NaN（与前台同一规则）
-            guard sub.isCustom || !tdxAllNaN(line.values) else { continue }
-            if let v = line.values.last, !v.isNaN {
-                result.subs[slot][curveIndex] = v
+        case .sub(let slotIdx, let isCustom):
+            var curveIndex = 0
+            for line in lines {
+                // 自定义行全部保留；系统行过滤全 NaN（与前台同一规则）
+                guard isCustom || !tdxAllNaN(line.values) else { continue }
+                if let v = line.values.last, !v.isNaN {
+                    result.subs[slotIdx][curveIndex] = v
+                }
+                curveIndex += 1
             }
-            curveIndex += 1
         }
     }
     return result
