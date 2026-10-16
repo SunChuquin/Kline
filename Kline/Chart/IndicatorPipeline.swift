@@ -873,6 +873,14 @@ extension KlineChartView {
     /// 增量状态机与 Swift 分块降级已删除（2026-10-15 用户决策）：图表指标计算唯一路径 = Python 引擎
     func startPrefetch() {
         guard !sortedData.isEmpty, !mainFullscreen, computation.prefetchToken == nil else { return }
+        // ⚠️【2026-10-16 修正】联动态（多图 LinkedKlineTile，metaId=nil）**不做**后台全量预取：
+        //   ① metaId=nil 时本函数既没有「已完成」短路、也没有 ChartCacheStore 可写 →
+        //      每个 tile 每次触发（onAppear / 切周期 / 切标的 / 手势 / .id 重建）都跑一次 [0..count-1] 全量；
+        //   ② 全量完成后又把 computation.bgCoverageEnd 顶到满值 → 之后每次 recompute 都走全量区间，
+        //      前台「可见+预热」近似被彻底报废（用户实证："多图都是全量，只有单图有预热"）；
+        //   ③ N 块 tile 并发全量还挤占共享引擎队列，把前台预热波次顶到后面 → 各格迟迟不出图。
+        //   故联动态只保留前台「可见+预热」（随滚动/缩放按需扩展覆盖），全量正确性留给单图模式缓存。
+        guard metaId != nil else { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
         // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
         // 防止「完成标记」与「实际覆盖/配置」不一致时进度条卡住或指标不更新

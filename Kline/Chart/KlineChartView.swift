@@ -750,7 +750,9 @@ struct KlineChartView: View {
             // 不依赖共享缓存/后台预计算推进，保证搜索切标后新标的副图第一时间完整显示。
             // 普通单图（有缓存可用）：先走不强制路径，命中缓存恢复/短可见窗口近似后由后台补齐。
             refreshCurves(force: isolatedSubs)
-            // 先显示当前可见窗口（不卡），随后分块预计算更久远历史指标
+            // 先显示当前可见窗口（不卡），随后后台全量预计算更久远历史指标。
+            // 联动态（多图 LinkedKlineTile，metaId=nil）由 startPrefetch 内部守卫跳过全量预取
+            // （无 ChartCacheStore 可写、且会把前台「可见+预热」顶成全量），详见 startPrefetch 注释。
             startPrefetch()
             notifyHasCursor()
         }
