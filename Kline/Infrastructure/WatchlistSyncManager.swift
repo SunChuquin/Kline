@@ -28,7 +28,10 @@
 //   - 逐只给 `TencentQuoteFetcher` 一个 `GapJob`（file + 腾讯码 + **主库锚点行**），
 //     取数 + 自校准全复用 `GapBackfill.fetchGap` → 与「补缺口」同一量纲口径（写增量库不会踩手/股断崖）；
 //   - 锚点行 = 该只主库 `meta.last_date` 当天那一行（**逐只按自己的 last_date**，不是全局最新日）；
-//     锚点行缺失 → 该只记跳过（`noBaseline`），不写脏数据。
+//     锚点行缺失 → 该只记跳过（`noBaseline`），不写脏数据；
+//   - **主库已含当日 bar**（`last_date >= 今日`，如 17:30 全市场补缺口已合并入主库）时，锚点
+//     **回退到上一根主库日线**：这样源侧「当日那根」才是缺口行、能被产出 → 当日 bar 可被覆盖刷新
+//     （盘中刷新更灵敏）。同日情形只写日线、不并入季/年 bar（避免 `mergePeriodBar` 累加双计）。
 //
 //  线程：`sync(reason:slot:)` 须在主线程调用（内部再切主线程执行）；腾讯取数 completion 在它自己的
 //  串行队列，本类在回调处显式切回主线程；主库锚点行查询走 `DatabaseManager.performOnDBQueue`（在 dbQueue 上批量查）。
@@ -162,6 +165,13 @@ final class WatchlistSyncManager: ObservableObject {
 
         // ③ 主库锚点行：**逐只按自己的 last_date**（不是全局最新日），按日期分组后在一次 dbQueue 内多查
         //    （锚点行 = 自校准基准：要求锚点日价格逐字段相等 + 量比吸附，见 GapBackfill.calibrate）
+        //
+        //    **同日刷新（2026-10-16）**：若主库**已含当日 bar**（`last_date >= 今日`，典型：17:30 全市场
+        //    补缺口已把今日 bar 合并入主库），则锚点必须**回退到上一根主库日线** —— 否则源侧当日那根
+        //    会被自校准当作锚点消费掉、产出集合恒为空，当日 bar 永远无法被覆盖刷新（盘中刷新即失效）。
+        //    回退后缺口行 = 源侧当日那根 → 经自校准折算后写增量库，`(file,date)` 逐字段比对，
+        //    值有变才真正写并自增 dataVersion（条件单/预警随之重扫）。
+        let today = TdxSyncManager.todayYMD()
         var metaIdByFile: [String: Int] = [:]
         for m in candidates { metaIdByFile[m.file] = m.id }
         var filesByLastDate: [Int: [String]] = [:]
@@ -169,20 +179,34 @@ final class WatchlistSyncManager: ObservableObject {
             guard let last = m.lastDate else { continue }
             filesByLastDate[last, default: []].append(m.file)
         }
-        DatabaseManager.shared.performOnDBQueue({ db -> [String: KlineItem] in
+        // 需要回退锚点的日期组（40 个自然日前窗保证含上一交易日）
+        let steppedBackDates = Set(filesByLastDate.keys.filter { $0 >= today })
+        DatabaseManager.shared.performOnDBQueue({ db -> ([String: KlineItem], Set<String>) in
             var out: [String: KlineItem] = [:]
+            var noPrev: Set<String> = []
             for (date, group) in filesByLastDate {
                 var ids: [String: Int] = [:]
                 for f in group { if let id = metaIdByFile[f] { ids[f] = id } }
                 let rows = DatabaseManager.readMainDaily(db: db, metaIdByFile: ids,
                                                          fromDate: date, toDate: date)
                 for (f, list) in rows { if let first = list.first { out[f] = first } }
+                guard steppedBackDates.contains(date) else { continue }
+                let prev = DatabaseManager.readMainDaily(db: db, metaIdByFile: ids,
+                                                         fromDate: date - 40, toDate: date - 1)
+                for f in group {
+                    if let row = prev[f]?.last { out[f] = row } else { noPrev.insert(f) }
+                }
             }
-            return out
-        }, completion: { [weak self] baseByFile in
+            return (out, noPrev)
+        }, completion: { [weak self] (baseByFile, noPrev) in
             guard let self = self else { return }
             var jobs: [GapJob] = []
             for m in candidates {
+                guard !noPrev.contains(m.file) else {
+                    skips.append(QuoteSkip(file: m.file, reason: .noBaseline,
+                                           detail: "主库已含 \(m.lastDate ?? 0) 的 bar，但无更早的主库日线可作锚点"))
+                    continue
+                }
                 guard let base = baseByFile[m.file],
                       let item = ProbeItem(file: m.file, type: m.type) else {
                     skips.append(QuoteSkip(file: m.file, reason: .noBaseline,
@@ -191,8 +215,11 @@ final class WatchlistSyncManager: ObservableObject {
                 }
                 jobs.append(GapJob(meta: m, item: item, base: base))
             }
+            let steppedBack = jobs.filter { ($0.meta.lastDate ?? 0) >= today }.count
+            let stepNote = steppedBackDates.isEmpty ? "" : "（主库已含当日 bar → 其中 \(steppedBack) 只锚点回退到上一根"
+                + (noPrev.isEmpty ? "" : " · \(noPrev.count) 只无更早主库日线被跳过") + "）"
             DebugLogger.shared.log("[WatchlistSync] \(reason)：可映射 \(candidates.count) 只 → 锚点行就绪 \(jobs.count) 只"
-                + "（预过滤跳过 \(skips.count) 只）→ 腾讯取数（并发 \(TencentQuoteFetcher.concurrency)）")
+                + "（预过滤跳过 \(skips.count) 只）\(stepNote)→ 腾讯取数（并发 \(TencentQuoteFetcher.concurrency)）")
 
             // ④ 腾讯取数（completion 在它自己的串行队列 → 显式切回主线程）
             TencentQuoteFetcher.shared.fetch(jobs: jobs) { [weak self] result in
@@ -258,6 +285,12 @@ final class WatchlistSyncManager: ObservableObject {
         //    ② 主库日线（周/月当期窗口）→ 供 ⑥ 与增量库日线求并集后重算当期周/月 bar。
         var metaIdByFile: [String: Int] = [:]
         for b in bars { if let m = metaByFile[b.file] { metaIdByFile[b.file] = m.id } }
+        // 只有 **date > 主库 last_date** 的日线才是「新的一天」，才能并入当期季/年 bar：
+        // 主库当期 bar 已含同日那根，`mergePeriodBar` 是 `base.vol + daily.vol` 累加口径 → 同日刷新
+        // （date == 主库 last_date）再并一次会把 vol/amo **双计**。同日刷新只覆盖日线：
+        // 周/月由 ⑥ `rebuildCurrentPeriodBars`（按当期窗口**全量重算**，同 date 以增量库为准）修正，
+        // 季/年则由次日的常规日更或 17:30 全市场档重算。
+        let newDayBars = bars.filter { $0.date > (metaByFile[$0.file]?.lastDate ?? 0) }
         let tradeDate = result.tradeDate
         let quarterStart = tradeDate > 0 ? KlinePeriod.periodDateRange(.quarterly, date: tradeDate).0 : 0
         let yearStart = tradeDate > 0 ? KlinePeriod.periodDateRange(.yearly, date: tradeDate).0 : 0
@@ -268,7 +301,7 @@ final class WatchlistSyncManager: ObservableObject {
         let t0 = Date()
         DatabaseManager.shared.performOnDBQueue({ db -> ([String: [LiveUpsertBar]], [String: [KlineItem]]) in
             guard tradeDate > 0, quarterStart > 0, yearStart > 0 else { return ([:], [:]) }
-            let periodBars = Self.currentPeriodBars(db: db, dailyBars: bars, metaIdByFile: metaIdByFile,
+            let periodBars = Self.currentPeriodBars(db: db, dailyBars: newDayBars, metaIdByFile: metaIdByFile,
                                                     quarterStart: quarterStart, yearStart: yearStart)
             let mainDaily = DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
                                                           fromDate: windowFrom, toDate: tradeDate)
@@ -277,9 +310,10 @@ final class WatchlistSyncManager: ObservableObject {
             guard let self = self else { return }
             let elapsed = Date().timeIntervalSince(t0)
             let rows = periodBars.values.reduce(0) { $0 + $1.count }
+            let sameDayNote = newDayBars.count == bars.count ? "" : "（同日刷新 \(bars.count - newDayBars.count) 只不并季/年）"
             DebugLogger.shared.log("[WatchlistSync] \(reason)：当期季/年 bar \(rows) 行"
                 + "（季 \(periodBars["quarterly"]?.count ?? 0) 行 / 年 \(periodBars["yearly"]?.count ?? 0) 行）"
-                + " = 主库当期 bar ⊕ 新日线；主库日线 \(mainDaily.count) 只（周/月窗口 \(windowFrom)~\(tradeDate)）"
+                + " = 主库当期 bar ⊕ 新日线\(sameDayNote)；主库日线 \(mainDaily.count) 只（周/月窗口 \(windowFrom)~\(tradeDate)）"
                 + "，耗时=\(String(format: "%.0fms", elapsed * 1000))")
 
             // ⑤ 直写增量库（成功后由既有热刷新链路自增 dataVersion → 监控重扫）
@@ -303,10 +337,13 @@ final class WatchlistSyncManager: ObservableObject {
                         DebugLogger.shared.log("[WatchlistSync] 热刷新完成 可用=\(summary.isAvailable)"
                             + " 内容变化=\(summary.contentChanged) 最新=\(summary.latestDateAfter)")
                     })
-                    self.finish(outcome: .success,
-                                text: "成功：写入 \(merge.dailyRows) 行 / \(result.hitCount) 只",
-                                reason: reason, slot: slot, tradeDate: tradeDate,
-                                hit: result.hitCount, skipped: allSkips.count,
+                    // 同日刷新命中但值未变时 `dailyRows == 0`（`upsertDaily` 逐字段比对后不写）：
+                    // 这属于「成功但无变化」，与「没有新 bar」区分开，便于真机一眼验收
+                    let okText = merge.dailyRows == 0
+                        ? "成功：无变化（命中 \(result.hitCount) 只，源侧与库内一致）"
+                        : "成功：写入 \(merge.dailyRows) 行 / \(result.hitCount) 只"
+                    self.finish(outcome: .success, text: okText, reason: reason, slot: slot,
+                                tradeDate: tradeDate, hit: result.hitCount, skipped: allSkips.count,
                                 batchFailures: result.batchFailures.count)
                 }
             }
