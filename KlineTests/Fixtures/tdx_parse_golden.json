@@ -1,0 +1,209 @@
+{
+  "errors" : [
+    {
+      "error" : "无法识别的字符 '@'",
+      "label" : "err:badchar"
+    },
+    {
+      "error" : "期望指标名称",
+      "label" : "err:noname"
+    },
+    {
+      "error" : "指标 'X' 后缺少 ':' 或 ':='",
+      "label" : "err:noassign"
+    },
+    {
+      "error" : "表达式不完整",
+      "label" : "err:incomplete"
+    },
+    {
+      "error" : "函数 'MA' 缺少右括号 ')'",
+      "label" : "err:unmatched"
+    },
+    {
+      "error" : "非法的表达式起始符",
+      "label" : "err:badstart"
+    },
+    {
+      "error" : "公式没有输出行（至少需要一行以 ':' 输出的指标）",
+      "label" : "err:nooutput"
+    },
+    {
+      "error" : "公式为空",
+      "label" : "err:empty"
+    },
+    {
+      "error" : "",
+      "label" : "err:unclosedcomment"
+    }
+  ],
+  "units" : [
+    {
+      "label" : "closeonly",
+      "units" : [
+        {
+          "name" : "X",
+          "text" : "X:C;"
+        }
+      ]
+    },
+    {
+      "label" : "ma",
+      "units" : [
+        {
+          "name" : "M5",
+          "text" : "M5:MA(C,5);"
+        },
+        {
+          "name" : "M10",
+          "text" : "M10:MA(C,10);"
+        },
+        {
+          "name" : "M60",
+          "text" : "M60:MA(C,60);"
+        }
+      ]
+    },
+    {
+      "label" : "ema",
+      "units" : [
+        {
+          "name" : "E12",
+          "text" : "E12:EMA(C,12);"
+        },
+        {
+          "name" : "S5",
+          "text" : "S5:SMA(C,5,2);"
+        }
+      ]
+    },
+    {
+      "label" : "hhvllv",
+      "units" : [
+        {
+          "name" : "H20",
+          "text" : "H20:HHV(H,20);"
+        },
+        {
+          "name" : "L10",
+          "text" : "L10:LLV(L,10);"
+        }
+      ]
+    },
+    {
+      "label" : "sar",
+      "units" : [
+        {
+          "name" : "S",
+          "text" : "S:SAR(0.02,0.2);"
+        }
+      ]
+    },
+    {
+      "label" : "divzero",
+      "units" : [
+        {
+          "name" : "DZ",
+          "text" : "DZ:(C \/ (C - C));"
+        },
+        {
+          "name" : "N",
+          "text" : "N:(C \/ 2);"
+        }
+      ]
+    },
+    {
+      "label" : "std",
+      "units" : [
+        {
+          "name" : "ST",
+          "text" : "ST:STD(C,10);"
+        }
+      ]
+    },
+    {
+      "label" : "barslast",
+      "units" : [
+        {
+          "name" : "B",
+          "text" : "B:BARSLAST((C > REF(C,1)));"
+        }
+      ]
+    },
+    {
+      "label" : "batchA",
+      "units" : [
+        {
+          "name" : "A1",
+          "text" : "A1:MA(C,5);"
+        }
+      ]
+    },
+    {
+      "label" : "batchB",
+      "units" : [
+        {
+          "name" : "B1",
+          "text" : "B1:EMA(C,26);"
+        },
+        {
+          "name" : "B2",
+          "text" : "B2:SAR(0.02,0.2);"
+        }
+      ]
+    },
+    {
+      "label" : "edge:implicit",
+      "units" : [
+        {
+          "name" : "X",
+          "text" : "X:(2 * HV);"
+        },
+        {
+          "name" : "Y",
+          "text" : "Y:(2 * (C - L));"
+        }
+      ]
+    },
+    {
+      "label" : "edge:comment",
+      "units" : [
+        {
+          "name" : "X",
+          "text" : "X:C;"
+        },
+        {
+          "name" : "Y",
+          "text" : "Y:H;"
+        }
+      ]
+    },
+    {
+      "label" : "edge:eq",
+      "units" : [
+        {
+          "name" : "X",
+          "text" : "X:(C == REF(C,1));"
+        }
+      ]
+    },
+    {
+      "label" : "edge:assign",
+      "units" : [
+        {
+          "name" : "X",
+          "text" : "V1:=SMA(C,5,1);X:V1;"
+        }
+      ]
+    },
+    {
+      "label" : "edge:opts",
+      "units" : [
+        {
+          "name" : "X",
+          "text" : "X:MA(C,5),DOTLINE,COLORRED,LINETHICK2;"
+        }
+      ]
+    }
+  ]
+}

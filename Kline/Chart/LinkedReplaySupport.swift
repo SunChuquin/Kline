@@ -166,67 +166,60 @@ struct AsOfRequest {
     let subs: [Sub?]
 }
 
-/// 后台执行 as-of 求值：主图单元 + 副图公式合并为**一次** Python 批量调用（bin 零拷贝），
-/// **只取每条输出行末点值**。
+/// 后台执行 as-of 求值：主图 + 副图公式文本合并为**一次** Python 调用（text_eval，
+/// 解析+拆分+求值全在 Python；单元级错误隔离），**只取每条输出行末点值**。
 /// 行的保留/跳过规则必须与前台 recomputeMainCurves / recomputeSub 严格一致，
 /// 结果下标才能与当前 curves 数组一一对齐：
-/// - 主图：formula → splitOutputUnits → 逐单元求值，out 非全 NaN（buildMainLine 的唯一过滤条件）才占一个曲线位；
+/// - 主图：每输出行单元成功（末值非 NaN）才占一个曲线位；
 /// - 副图自定义：全部输出行；
 /// - 副图系统指标：过滤全 NaN 行（recomputeSub 的 guard !allNaN）；
 /// - VOL/AMO：不入此通道（合成量/额在阶段 A 处理）。
-/// 线程约束：调用方在后台线程（evaluateText/evaluateDetailed 内部 assert）。
+/// 线程约束：调用方在后台线程（evaluateFormulasWithUnits 内部 assert）。
 func evaluateAsOf(_ req: AsOfRequest) -> AsOfResult {
     var result = AsOfResult()
 
-    // 收集全部求值请求：主图单元（保持 entries 顺序）+ 副图公式；单槽解析失败跳过（与前台一致）
+    // 收集全部公式文本：主图条目 + 副图槽位（槽位下标对齐）
     enum Slot {
-        case main                 // 主图单元：成功才占一个 mainCurves 位
+        case main                 // 主图：每单元成功才占一个 mainCurves 位
         case sub(slot: Int, isCustom: Bool)
     }
-    var requests: [[TDXStatement]] = []
+    var texts: [String] = []
     var slots: [Slot] = []
-    for formula in req.mainFormulas {
-        guard let units = try? TDXFormulaEngine.splitOutputUnits(formula: formula) else { continue }
-        for unit in units {
-            slots.append(.main)
-            requests.append(unit.statements)
-        }
+    for formula in req.mainFormulas where !formula.isEmpty {
+        texts.append(formula)
+        slots.append(.main)
     }
     for (slot, sub) in req.subs.enumerated() {
-        guard let sub else { continue }
-        switch PyTDXFormulaBridge.parseFormulaText(sub.formula) {
-        case .success(let stmts):
-            slots.append(.sub(slot: slot, isCustom: sub.isCustom))
-            requests.append(stmts)
-        case .failure:
-            continue   // 解析失败 = 该副图无曲线（与前台 try? evaluate 失败语义一致）
-        }
+        guard let sub, !sub.formula.isEmpty else { continue }
+        texts.append(sub.formula)
+        slots.append(.sub(slot: slot, isCustom: sub.isCustom))
     }
 
     // 一次 Python 批量求值（后台线程；引擎未就绪 → 整体失败，各槽不占位）
-    guard !requests.isEmpty,
-          case .success(let batches) = PyTDXFormulaBridge.evaluateDetailed(requests: requests,
-                                                                           data: req.data) else { return result }
+    guard !texts.isEmpty else { return result }
+    let perFormula = PyTDXFormulaBridge.evaluateFormulasWithUnits(formulas: texts, data: req.data)
 
     // 回填：主图成功单元按序占位；副图行按保留规则逐行占位（规则与前台一致）
     var mainIndex = 0
     for (k, slot) in slots.enumerated() {
-        guard k < batches.count else { break }
-        let lines = batches[k].lines
+        guard k < perFormula.count, case .success(let units) = perFormula[k] else { continue }
         switch slot {
         case .main:
-            // 与 mainRows 同源：每个单元成功（out 非全 NaN 且末值有效）才占一个 mainCurves 位
-            if let out = lines.last, !tdxAllNaN(out.values),
-               let v = out.values.last, !v.isNaN {
-                result.main[mainIndex] = v
-                mainIndex += 1
+            for unit in units {
+                // 与 mainRows 同源：每个单元成功（目标行末值有效）才占一个 mainCurves 位
+                if unit.error == nil, let out = unit.lines.last,
+                   !tdxAllNaN(out.values),
+                   let v = out.values.last, !v.isNaN {
+                    result.main[mainIndex] = v
+                    mainIndex += 1
+                }
             }
         case .sub(let slotIdx, let isCustom):
             var curveIndex = 0
-            for line in lines {
+            for unit in units {
                 // 自定义行全部保留；系统行过滤全 NaN（与前台同一规则）
-                guard isCustom || !tdxAllNaN(line.values) else { continue }
-                if let v = line.values.last, !v.isNaN {
+                guard isCustom || unit.error != nil || !tdxAllNaN(unit.lines.last?.values ?? []) else { continue }
+                if let v = unit.lines.last?.values.last, !v.isNaN {
                     result.subs[slotIdx][curveIndex] = v
                 }
                 curveIndex += 1

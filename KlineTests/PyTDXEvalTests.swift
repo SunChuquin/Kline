@@ -2,13 +2,12 @@
 //  PyTDXEvalTests.swift
 //  KlineTests
 //
-//  tdx_eval（Python 求值器）契约测试：对照 golden fixture（tdx_eval_golden.json）。
+//  tdx_eval（Python 解析+求值）契约测试：对照 golden fixture（tdx_eval_golden.json）。
 //
-//  fixture 来源：2026-10-16 删除 Swift 求值器前，由 tdx_eval 在固定数据（LCG 种子
-//  20261012 / 180 根升序 OHLCV）上对 goldenFormulas 全集求值生成（生成器 =
-//  testZZGenerateGoldenFixture，常关；需要再生时单独 -only-testing 跑并从日志提取）。
-//  fixture 生成时已通过 PyTDXEvalTests 差分对拍（Swift TDXFormulaEngine 为 oracle）
-//  验证 ≡ Swift 非增量全量语义，故 fixture 即语义基准。
+//  fixture 来源：2026-10-16 删除 Swift 求值器/解析器前，由 tdx_eval 在固定数据（LCG 种子
+//  20261012 / 180 根升序 OHLCV）上对 goldenFormulas 全集求值生成（生成时已通过
+//  Swift 差分对拍验证 ≡ Swift 语义）；解析/拆分/错误文案由 tdx_parse_golden.json +
+//  scripts/verify_parse_port.py PC 差分锁死（与已删除的 Swift lexer/parser 逐字一致）。
 //
 //  对拍口径：行数/顺序/名称必须一致；值序列 NaN 位点逐一相同；数值为
 //  Double→String 最短往返表示的逐位比对（无容差，同为 IEEE754 double）。
@@ -44,14 +43,6 @@ final class PyTDXEvalTests: XCTestCase {
         return items
     }
 
-    /// 解析公式为语句序列（lexer/parser 单源，Swift 侧保留）
-    private static func parse(_ formula: String) throws -> [TDXStatement] {
-        var lexer = TDXLexer(formula)
-        let tokens = try lexer.tokenize()
-        var parser = TDXParser(tokens: tokens)
-        return try parser.parse()
-    }
-
     private func requireEngine() throws {
         if !KlinePythonBridge.shared.isReady {
             let ready = expectation(description: "ensureReady")
@@ -65,16 +56,6 @@ final class PyTDXEvalTests: XCTestCase {
                 throw XCTSkip("引擎未就绪：\(m)（无引擎构建验证降级路径而非本测试）")
             }
         }
-    }
-
-    // MARK: - golden fixture 生成器（常关；再生方法见方法注释）
-
-    /// 一次性跑 tdx_eval 全公式集，输出 golden JSON 到日志（GOLDEN_BEGIN/GOLDEN_END 标记间），
-    /// 提取落盘 KlineTests/Fixtures/tdx_eval_golden.json。
-    /// ⚠️ 再生前 fixture 的语义基准是「已通过 Swift 差分对拍的 tdx_eval」——
-    /// Swift 求值器已删除，再生时必须确认 tdx_eval.py 无语义改动，否则 fixture 失去锚点。
-    func testZZGenerateGoldenFixture() throws {
-        throw XCTSkip("生成器常关：fixture 已入库（tdx_eval_golden.json）。再生步骤见方法注释")
     }
 
     /// golden 公式集（覆盖：常量/双均线/递归 EMA+SMA/窗口极值/SAR 状态机/除零语义/STD/BARSLAST
@@ -135,7 +116,7 @@ final class PyTDXEvalTests: XCTestCase {
         }
     }
 
-    /// 主契约：全公式集经 evaluateText（parse+求值全链路）对照 fixture
+    /// 主契约：全公式集经 evaluateText（text 通道：Python 解析+拆分+求值）对照 fixture
     func testTDXEvalAgainstGoldenFixture() throws {
         try requireEngine()
         let golden = try loadGolden()
@@ -167,7 +148,7 @@ final class PyTDXEvalTests: XCTestCase {
         }
     }
 
-    /// 多请求批一致性：batchA/batchB 两条公式合并一次 evaluate 调用，结果须与 fixture
+    /// 多请求批一致性：batchA/batchB 两条公式合并一次 evaluateText 调用，结果须与 fixture
     /// 单请求形式逐位一致（批量 == 单次的语义恒等）
     func testTDXEvalMultiRequestBatchMatchesGolden() throws {
         try requireEngine()

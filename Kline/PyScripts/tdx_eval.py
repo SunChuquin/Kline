@@ -648,7 +648,458 @@ def run(kline_input):
     return out
 
 
+# ==================== 公式文本解析下沉（2026-10-16，Swift TDXLexer/TDXParser 移植） ====================
+# 语义必须逐条镜像 Swift FormulaEngine.swift 的 TDXLexer/TDXParser/splitOutputUnits/stmtText/exprText：
+#   - 错误文案逐字一致（Swift 编辑器直接显示 Python 解析错误）
+#   - AST 按公式文本缓存（跨调用持久，挂 __main__——包装脚本每次 exec 用新命名空间，
+#     但 PyRun_SimpleString 的真 __main__ 跨调用持久）
+#   - text_split：公式文本 → 每输出行单元 [{name, text}]（依赖闭包 + 输出行，单元文本可独立解析求值）
+#   - text_eval：单元文本 → 输出行（单元级错误隔离——单行求值失败不拖垮同公式其余行，
+#     镜像 Swift 逐单元 evaluate 的占位语义）
+
+class TDxParseError(Exception):
+    """语法错误（文案与 Swift TDXEngineError.syntax 逐字一致）"""
+
+
+# ---------- 词法（TDXLexer 移植） ----------
+
+def _tokenize(src):
+    """源码 → token 列表。token: (kind, value)；kind ∈
+    num/id/plus/minus/star/slash/assign/assignout/semi/comma/lp/rp/lt/gt/le/ge/eq/ne"""
+    chars = src
+    pos = 0
+    n = len(chars)
+    toks = []
+
+    def peek():
+        return chars[pos] if pos < n else None
+
+    while True:
+        # skipWhitespaceAndComments
+        while pos < n:
+            c = chars[pos]
+            if c.isspace():
+                pos += 1
+            elif c == "{":
+                while pos < n and chars[pos] != "}":
+                    pos += 1
+                if pos < n:
+                    pos += 1
+            else:
+                break
+        if pos >= n:
+            break
+        c = chars[pos]
+        # 数字（.5 也算）
+        if c.isdigit() or (c == "." and pos + 1 < n and chars[pos + 1].isdigit()):
+            s = ""
+            while pos < n and (chars[pos].isdigit() or chars[pos] == "."):
+                s += chars[pos]
+                pos += 1
+            try:
+                toks.append(("num", float(s)))
+            except ValueError:
+                toks.append(("num", 0.0))  # Swift Double(s) ?? 0
+            continue
+        # 标识符
+        if c.isalpha() or c == "_":
+            s = ""
+            while pos < n and (chars[pos].isalnum() or chars[pos] == "_"):
+                s += chars[pos]
+                pos += 1
+            toks.append(("id", s))
+            continue
+        pos += 1
+        if c == "+":
+            toks.append(("plus", None))
+        elif c == "-":
+            toks.append(("minus", None))
+        elif c == "*":
+            toks.append(("star", None))
+        elif c == "/":
+            toks.append(("slash", None))
+        elif c == ";":
+            toks.append(("semi", None))
+        elif c == ",":
+            toks.append(("comma", None))
+        elif c == "(":
+            toks.append(("lp", None))
+        elif c == ")":
+            toks.append(("rp", None))
+        elif c == "<":
+            if peek() == "=":
+                pos += 1
+                toks.append(("le", None))
+            elif peek() == ">":
+                pos += 1
+                toks.append(("ne", None))
+            else:
+                toks.append(("lt", None))
+        elif c == ">":
+            if peek() == "=":
+                pos += 1
+                toks.append(("ge", None))
+            else:
+                toks.append(("gt", None))
+        elif c == "=":
+            if peek() == "=":
+                pos += 1
+            toks.append(("eq", None))  # 单个 "=" 也是相等比较
+        elif c == ":":
+            if peek() == "=":
+                pos += 1
+                toks.append(("assign", None))   # :=
+            else:
+                toks.append(("assignout", None))  # :
+        else:
+            raise TDxParseError("无法识别的字符 '%s'" % c)
+    return toks
+
+
+# ---------- 语法（TDXParser 移植；AST 为 dict，与 _eval_expr 的 JSON 格式完全一致） ----------
+# AST 节点：{"t":"num","v":..} | {"t":"var","n":..} | {"t":"un","op":..,"x":..}
+#          | {"t":"bin","op":..,"l":..,"r":..} | {"t":"call","fn":..,"args":[..]}
+# 语句：{"n": 名, "o": 是否输出, "e": AST, "opts": [选项]}
+
+class _Parser:
+    def __init__(self, toks):
+        self.toks = toks
+        self.pos = 0
+
+    def parse(self):
+        stmts = []
+        while not self.at_end():
+            stmts.append(self.parse_statement())
+            while self.match("comma"):   # 容错：语句后孤立逗号
+                pass
+            self.match("semi")           # 语句间允许 0 或 1 个分号
+        return stmts
+
+    def parse_statement(self):
+        name = self.consume_identifier("期望指标名称")
+        if self.match("assignout"):
+            expr = self.parse_expr()
+            opts = []
+            while self.match("comma"):
+                if self.peek() and self.peek()[0] == "id":
+                    opts.append(self.toks[self.pos][1])
+                    self.pos += 1
+                else:
+                    break
+            return {"n": name, "o": True, "e": expr, "opts": opts}
+        if self.match("assign"):
+            return {"n": name, "o": False, "e": self.parse_expr(), "opts": []}
+        raise TDxParseError("指标 '%s' 后缺少 ':' 或 ':='" % name)
+
+    def parse_expr(self):
+        return self.parse_or()
+
+    def parse_or(self):
+        lhs = self.parse_and()
+        while self.match_identifier("OR"):
+            lhs = {"t": "bin", "op": "or", "l": lhs, "r": self.parse_and()}
+        return lhs
+
+    def parse_and(self):
+        lhs = self.parse_not()
+        while self.match_identifier("AND"):
+            lhs = {"t": "bin", "op": "and", "l": lhs, "r": self.parse_not()}
+        return lhs
+
+    def parse_not(self):
+        if self.match_identifier("NOT"):
+            return {"t": "un", "op": "not", "x": self.parse_not()}
+        return self.parse_comparison()
+
+    def parse_comparison(self):
+        lhs = self.parse_additive()
+        while True:
+            for kind, op in (("lt", "<"), ("gt", ">"), ("le", "<="),
+                             ("ge", ">="), ("eq", "=="), ("ne", "!=")):
+                if self.match(kind):
+                    lhs = {"t": "bin", "op": op, "l": lhs, "r": self.parse_additive()}
+                    break
+            else:
+                return lhs
+
+    def parse_additive(self):
+        lhs = self.parse_multiplicative()
+        while True:
+            if self.match("plus"):
+                lhs = {"t": "bin", "op": "+", "l": lhs, "r": self.parse_multiplicative()}
+            elif self.match("minus"):
+                lhs = {"t": "bin", "op": "-", "l": lhs, "r": self.parse_multiplicative()}
+            else:
+                return lhs
+
+    def parse_multiplicative(self):
+        lhs = self.parse_unary()
+        while True:
+            if self.match("star"):
+                lhs = {"t": "bin", "op": "*", "l": lhs, "r": self.parse_unary()}
+            elif self.match("slash"):
+                lhs = {"t": "bin", "op": "/", "l": lhs, "r": self.parse_unary()}
+            elif self._implicit_mul_start():
+                lhs = {"t": "bin", "op": "*", "l": lhs, "r": self.parse_unary()}  # 通达信隐式乘法
+            else:
+                return lhs
+
+    def _implicit_mul_start(self):
+        t = self.peek()
+        if t is None:
+            return False
+        kind, val = t
+        if kind == "id":
+            up = val.upper()
+            return up not in ("AND", "OR", "NOT")
+        return kind in ("num", "lp")
+
+    def parse_unary(self):
+        if self.match("minus"):
+            return {"t": "un", "op": "-", "x": self.parse_unary()}
+        return self.parse_primary()
+
+    def parse_primary(self):
+        if self.at_end():
+            raise TDxParseError("表达式不完整")
+        kind, val = self.toks[self.pos]
+        if kind == "num":
+            self.pos += 1
+            return {"t": "num", "v": val}
+        if kind == "id":
+            self.pos += 1
+            if self.match("lp"):
+                args = []
+                if not self.check("rp"):
+                    args.append(self.parse_expr())
+                    while self.match("comma"):
+                        args.append(self.parse_expr())
+                self.consume("rp", "函数 '%s' 缺少右括号 ')'" % val)
+                return {"t": "call", "fn": val, "args": args}
+            return {"t": "var", "n": val}
+        if kind == "lp":
+            self.pos += 1
+            e = self.parse_expr()
+            self.consume("rp", "缺少右括号 ')'")
+            return e
+        raise TDxParseError("非法的表达式起始符")
+
+    # ---- 工具 ----
+    def at_end(self):
+        return self.pos >= len(self.toks)
+
+    def peek(self):
+        return self.toks[self.pos] if self.pos < len(self.toks) else None
+
+    def check(self, kind):
+        t = self.peek()
+        return t is not None and t[0] == kind
+
+    def match(self, kind):
+        if self.check(kind):
+            self.pos += 1
+            return True
+        return False
+
+    def match_identifier(self, name):
+        t = self.peek()
+        if t is not None and t[0] == "id" and t[1].upper() == name:
+            self.pos += 1
+            return True
+        return False
+
+    def consume(self, kind, msg):
+        if not self.match(kind):
+            raise TDxParseError(msg)
+
+    def consume_identifier(self, msg):
+        t = self.peek()
+        if t is None or t[0] != "id":
+            raise TDxParseError(msg)
+        self.pos += 1
+        return t[1]
+
+
+# ---------- 单元拆分（splitOutputUnits 移植） ----------
+
+def _collect_vars(e, into):
+    t = e["t"]
+    if t == "var":
+        into.add(e["n"].upper())
+    elif t == "un":
+        _collect_vars(e["x"], into)
+    elif t == "bin":
+        _collect_vars(e["l"], into)
+        _collect_vars(e["r"], into)
+    elif t == "call":
+        for a in e["args"]:
+            _collect_vars(a, into)
+
+
+def _expr_text(e):
+    t = e["t"]
+    if t == "num":
+        v = e["v"]
+        return "%.0f" % v if v == round(v) else "%g" % v
+    if t == "var":
+        return e["n"]
+    if t == "un":
+        return e["op"] + _expr_text(e["x"])
+    if t == "bin":
+        op = e["op"]
+        sym = " AND " if op == "and" else (" OR " if op == "or" else " %s " % op)
+        return "(" + _expr_text(e["l"]) + sym + _expr_text(e["r"]) + ")"
+    # call
+    return e["fn"] + "(" + ",".join(_expr_text(a) for a in e["args"]) + ")"
+
+
+def _stmt_text(s):
+    t = s["n"] + (":" if s["o"] else ":=") + _expr_text(s["e"])
+    if s["o"] and s["opts"]:
+        t += "," + ",".join(s["opts"])
+    return t + ";"
+
+
+def _parse_formula(text):
+    toks = _tokenize(text)
+    if not toks:
+        raise TDxParseError("公式为空")
+    stmts = _Parser(toks).parse()
+    if not stmts:
+        raise TDxParseError("公式为空")
+    return stmts
+
+
+def _split_units(stmts):
+    stmt_map = {}
+    for st in stmts:
+        stmt_map[st["n"].upper()] = st
+    units = []
+    for st in stmts:
+        if not st["o"]:
+            continue
+        needed = set()
+        _collect_vars(st["e"], into=needed)
+        queue = set(needed)
+        processed = set()
+        while queue:
+            name = queue.pop()
+            if name in processed:
+                continue
+            processed.add(name)
+            s = stmt_map.get(name)
+            if s is None:
+                continue
+            deps = set()
+            _collect_vars(s["e"], into=deps)
+            for d in deps:
+                if d in stmt_map and d not in needed:
+                    needed.add(d)
+                    queue.add(d)
+        sub = [s for s in stmts if s["n"].upper() in needed]
+        sub.append(st)
+        units.append({"name": st["n"], "stmts": sub, "text": "".join(_stmt_text(s) for s in sub)})
+    if not units:
+        raise TDxParseError("公式没有输出行（至少需要一行以 ':' 输出的指标）")
+    return units
+
+
+# ---------- AST 缓存（跨调用持久，挂真 __main__） ----------
+
+def _ast_cache():
+    import __main__ as _km
+    try:
+        return _km._ktdx_ast_cache
+    except AttributeError:
+        c = {}
+        _km._ktdx_ast_cache = c
+        return c
+
+
+def _parse_cached(text):
+    cache = _ast_cache()
+    got = cache.get(text)
+    if got is None:
+        got = _parse_formula(text)
+        cache[text] = got
+    return got
+
+
+def _split_cached(text):
+    cache = _ast_cache()
+    key = "\x01split\x01" + text
+    got = cache.get(key)
+    if got is None:
+        got = _split_units(_parse_cached(text))
+        cache[key] = got
+    return got
+
+
+# ---------- text op 分发 ----------
+
+def _eval_unit_text(unit_stmts, bars):
+    """单元语句序列求值 → 输出行（复用 run 的逐语句求值骨架；单元级错误隔离）。
+    每行附带 opts（目标行样式选项，COLORxxx/LINETHICK 等下沉——Swift 侧据此着色）。"""
+    closes = [float(x) for x in bars["c"]]
+    builtins = {
+        "C": closes, "CLOSE": closes,
+        "H": [float(x) for x in bars["h"]], "HIGH": [float(x) for x in bars["h"]],
+        "L": [float(x) for x in bars["l"]], "LOW": [float(x) for x in bars["l"]],
+        "O": [float(x) for x in bars["o"]], "OPEN": [float(x) for x in bars["o"]],
+        "V": [float(x) for x in bars["v"]], "VOL": [float(x) for x in bars["v"]],
+        "AMOUNT": [float(x) for x in bars["a"]],
+    }
+    vars_map = {}
+    lines = []
+    for st in unit_stmts:
+        sar_box = [None]
+        value = _eval_expr(st["e"], vars_map, builtins, sar_box)
+        vars_map[st["n"].upper()] = value
+        if st.get("o"):
+            line = {"n": st["n"], "v": _finite_to_null(value), "opts": st.get("opts", [])}
+            if st["e"]["t"] == "call" and st["e"]["fn"].upper() == "SAR" and sar_box[0] is not None:
+                line["d"] = [1 if d else 0 for d in sar_box[0]]
+            lines.append(line)
+    return lines
+
+
+def _run_text(kline_input):
+    """text op 入口：kline_input["texts"] = [{"id": i, "text": s}]；kline_input["mode"] = "split"|"eval"
+    split → results[i] = {id, ok, units:[{name, text}]}
+    eval  → results[i] = {id, ok, units:[{name, text, ok, lines, error?}]}（单元级错误隔离）
+    bars 走零拷贝（kline_input["bars"] 由包装脚本注入 ctypes 视图）"""
+    bars = kline_input["bars"]
+    mode = kline_input.get("mode", "eval")
+    results = []
+    for req in kline_input["texts"]:
+        idx = req["id"]
+        text = req["text"]
+        try:
+            if mode == "split":
+                units = [{"name": u["name"], "text": u["text"]} for u in _split_cached(text)]
+                results.append({"id": idx, "ok": True, "units": units})
+            else:
+                out_units = []
+                for u in _split_cached(text):
+                    try:
+                        lines = _eval_unit_text(u["stmts"], bars)
+                        out_units.append({"name": u["name"], "text": u["text"],
+                                          "ok": True, "lines": lines})
+                    except Exception as exc:  # 单元级错误隔离（镜像 Swift 逐单元 try?）
+                        out_units.append({"name": u["name"], "text": u["text"], "ok": False,
+                                          "lines": [],
+                                          "error": "%s: %s" % (type(exc).__name__, exc)})
+                results.append({"id": idx, "ok": True, "units": out_units})
+        except Exception as exc:  # 整公式解析失败
+            results.append({"id": idx, "ok": False, "units": [],
+                            "error": str(exc)})
+    return {"ok": True, "results": results}
+
+
 try:
-    kline_result = run(kline_input)
+    if kline_input.get("__text__"):
+        kline_result = _run_text(kline_input)
+    else:
+        kline_result = run(kline_input)
 except Exception:
     kline_result = {"ok": False, "error": traceback.format_exc()}

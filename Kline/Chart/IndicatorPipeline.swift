@@ -405,11 +405,14 @@ extension KlineChartView {
             //                                          i: i, out: out)
             //                        })
             // }
-            // ===== 引擎替代路径：收集过期输出行单元（复用 mainRows 的单元缓存结构）→
-            //       后台 Python 批量求值（一次 call）→ 完成回调回填缓存并提交 =====
-            let pending = collectMainPendingUnits(entries: entries, calcStart: calcStart, calcEnd: calcEnd)
+            // ===== 引擎路径：收集过期输出行单元 → formulaKey 变化的条目先经 Python 异步拆分
+            //       （text_split），随后全部过期单元合并为一次波次（text_eval，零拷贝）→ 回填缓存并提交 =====
+            let (pending, needSplit) = collectMainPendingUnits(entries: entries, calcStart: calcStart, calcEnd: calcEnd)
             assembleMainCurvesFromCache(into: &curves, entries: entries)
-            if !pending.isEmpty {
+            if !needSplit.isEmpty {
+                splitMainUnitsViaPython(needSplit: needSplit, alreadyPending: pending, entries: entries,
+                                        customColor: customColor, calcStart: calcStart, calcEnd: calcEnd)
+            } else if !pending.isEmpty {
                 evaluateMainPendingViaEngine(pending, entries: entries, customColor: customColor,
                                              calcStart: calcStart, calcEnd: calcEnd)
             }
@@ -460,30 +463,77 @@ extension KlineChartView {
     private struct MainPendingUnit {
         let entryIndex: Int
         let unitIndex: Int
-        let text: String              // 单元公式文本（回填时与缓存当前文本核对，防中途重拆错位）
-        let stmts: [TDXStatement]     // 已解析语句（依赖闭包 + 输出语句）
+        let text: String              // 单元公式文本（Python 拆分产物；回填时与缓存当前文本核对防错位）
     }
 
-    /// 同步收集主图过期单元（镜像 mainRows 的单元缓存维护：formulaKey 变化重拆单元，
-    /// key 不一致即过期）。返回过期列表；缓存结构同步更新供组装复用
+    /// 同步收集主图过期单元。返回 (pending, needSplit)：
+    /// - pending：缓存已有单元且 key 不一致的行（直接可提交波次）；
+    /// - needSplit：formulaKey 变化（或无缓存）的条目——缓存先标新 key、units 置空，
+    ///   由 splitMainUnitsViaPython 异步拆分补齐后继续收集。
     private func collectMainPendingUnits(entries: [MainIndicatorEntry],
-                                         calcStart: Int, calcEnd: Int) -> [MainPendingUnit] {
+                                         calcStart: Int, calcEnd: Int)
+        -> (pending: [MainPendingUnit], needSplit: [(entryIndex: Int, entry: MainIndicatorEntry)]) {
         var pending: [MainPendingUnit] = []
+        var needSplit: [(entryIndex: Int, entry: MainIndicatorEntry)] = []
         for (ei, entry) in entries.enumerated() {
-            var cache = computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
-            // 公式文本变化（参数/开关外内容变）→ 重新拆分输出行单元；计算区间变化也须重建
             let formulaKey = "\(entry.formula)|\(calcStart)|\(calcEnd)"
+            var cache = computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
             if cache.formulaKey != formulaKey {
                 cache.formulaKey = formulaKey
-                cache.units = (try? TDXFormulaEngine.splitOutputUnits(formula: entry.formula)) ?? []
-                cache.rows = Array(repeating: MainIndicatorCache.Row(), count: cache.units.count)
+                cache.units = []
+                cache.rows = []
+                computation.mainCache.units[entry.id] = cache
+                needSplit.append((ei, entry))
+            } else {
+                for (ui, unit) in cache.units.enumerated()
+                where ui < cache.rows.count && cache.rows[ui].key != unit.text {
+                    pending.append(MainPendingUnit(entryIndex: ei, unitIndex: ui, text: unit.text))
+                }
             }
-            for (ui, unit) in cache.units.enumerated() where cache.rows[ui].key != unit.text {
-                pending.append(MainPendingUnit(entryIndex: ei, unitIndex: ui, text: unit.text, stmts: unit.statements))
-            }
-            computation.mainCache.units[entry.id] = cache
         }
-        return pending
+        return (pending, needSplit)
+    }
+
+    /// formulaKey 变化的条目 → Python 异步拆分单元（text_split）→ 回主线程更新缓存后
+    /// 收集这些条目的过期单元并与已收集的合并，继续波次求值
+    private func splitMainUnitsViaPython(needSplit: [(entryIndex: Int, entry: MainIndicatorEntry)],
+                                         alreadyPending: [MainPendingUnit],
+                                         entries: [MainIndicatorEntry],
+                                         customColor: Color?,
+                                         calcStart: Int, calcEnd: Int) {
+        guard KlinePythonBridge.shared.isReady else {
+            engineReadyRetry { self.recomputeMainCurves() }
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let rs = PyTDXFormulaBridge.splitUnits(formulas: needSplit.map { $0.entry.formula })
+            DispatchQueue.main.async {
+                var merged = alreadyPending
+                for ((ei, entry), r) in zip(needSplit, rs) {
+                    let formulaKey = "\(entry.formula)|\(calcStart)|\(calcEnd)"
+                    guard var cache = self.computation.mainCache.units[entry.id],
+                          cache.formulaKey == formulaKey else { continue }   // 期间又变化 → 交给下一轮
+                    switch r {
+                    case .failure(let msg):
+                        DebugLogger.shared.log("[PyTDXBridge] 主图拆分失败 entry=\(entry.id)：\(msg)")
+                        continue
+                    case .success(let units):
+                        cache.units = units.map { TDXOutputLineUnit(name: $0.name, text: $0.text) }
+                        cache.rows = Array(repeating: MainIndicatorCache.Row(), count: units.count)
+                    }
+                    for (ui, unit) in cache.units.enumerated() {
+                        if ui < cache.rows.count, cache.rows[ui].key != unit.text {
+                            merged.append(MainPendingUnit(entryIndex: ei, unitIndex: ui, text: unit.text))
+                        }
+                    }
+                    self.computation.mainCache.units[entry.id] = cache
+                }
+                if !merged.isEmpty {
+                    self.evaluateMainPendingViaEngine(merged, entries: entries, customColor: customColor,
+                                                      calcStart: calcStart, calcEnd: calcEnd)
+                }
+            }
+        }
     }
 
     /// 从单元缓存组装主图曲线（镜像 mainRows 尾部：已算好的行按 entries 顺序追加）
@@ -497,7 +547,7 @@ extension KlineChartView {
     }
 
     /// 主图引擎求值：主线程收集请求 → 后台 Python 批量求值（一次 call）→ 主线程回填缓存并提交。
-    /// 引擎未就绪 → ensureOnce + 轮询重试（期间指标由 Swift 后台预计算兜底）
+    /// 引擎未就绪 → ensureOnce + 轮询重试
     private func evaluateMainPendingViaEngine(_ pending: [MainPendingUnit],
                                               entries: [MainIndicatorEntry],
                                               customColor: Color?,
@@ -510,19 +560,11 @@ extension KlineChartView {
         }
         computation.engineMainGen += 1
         let gen = computation.engineMainGen
-        // 与 Swift 原生同构的一次求值波次：主图全部过期单元 + 同帧副图请求由 PyTDXWave
-        // 合并为**一次** Python call（bars 只序列化/写盘一份），结果按下标发回各请求方
+        // 与前台同构的一次求值波次：主图全部过期单元 + 同帧副图请求由 PyTDXWave
+        // 合并为**一次** Python call（bars 只零拷贝一份），结果按下标发回各请求方
         let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
-        // 【直读库对拍·阶段1】读库上下文：主库/增量库路径 + file + 切片日期（与 calcData 等长、降序）；
-        // 仅观测不阻断求值
-        var dbAudit: [String: Any]? = nil
-        if let metaId = metaId {
-            var ctx = DatabaseManager.shared.dbAuditContext(metaId: metaId, table: period.folderName)
-            ctx["dates"] = calcData.map(\.date)
-            dbAudit = ctx
-        }
         for p in pending {
-            PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: p.stmts, dbAudit: dbAudit) { r in
+            PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, unitText: p.text) { r in
                 // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
                 guard self.computation.engineMainGen == gen else {
                     DebugLogger.shared.log("[PyTDXBridge] 诊断 主图completion丢弃 gen=\(gen) cur=\(self.computation.engineMainGen) unit=\(p.unitIndex)")
@@ -532,7 +574,7 @@ extension KlineChartView {
                     if case .failure(let msg) = r {
                         DebugLogger.shared.log("[PyTDXBridge] 主图单元 '\(p.text.prefix(24))' 求值失败：\(msg)")
                     }
-                    return // 失败不锁 key → 下次 recompute 自动重试（Swift 后台预计算兜底）
+                    return // 失败不锁 key → 下次 recompute 自动重试
                 }
                 // 回填单元缓存（镜像 mainRows：key 先行锁定防反复重试，line 仅成功且非全 NaN 时写入）
                 let entry = entries[p.entryIndex]
@@ -768,18 +810,10 @@ extension KlineChartView {
         }
     }
 
-    /// 副图引擎求值：主线程解析公式收集请求 → 后台 Python → 主线程组装提交。
-    /// 引擎未就绪 → ensureOnce + 轮询重试（期间指标由 Swift 后台预计算兜底）
+    /// 副图引擎求值：主线程取公式文本 → 后台 Python（解析+求值全在 Python）→ 主线程组装提交。
+    /// 引擎未就绪 → ensureOnce + 轮询重试
     private func evaluateSubViaEngine(_ m: SubChartModel, formula: String, custom: CustomIndicator?,
                                       calcStart: Int, calcEnd: Int, calcData: [KlineItem]) {
-        var lexer = TDXLexer(formula)
-        let tokens = (try? lexer.tokenize()) ?? []
-        var parser = TDXParser(tokens: tokens)
-        guard !tokens.isEmpty, let stmts = try? parser.parse() else {
-            // 解析失败：走防空保留旧曲线（原实现解析失败会 fallthrough 到系统公式分支，语义收紧更安全）
-            commitSubCurves(m, curves: [], custom: custom)
-            return
-        }
         guard !calcData.isEmpty else {
             commitSubCurves(m, curves: [], custom: custom)
             return
@@ -793,14 +827,7 @@ extension KlineChartView {
         let gen = computation.engineSubGens[key] ?? 0
         // 波次提交：与同帧主图请求合并为一次 Python call（bars 共享一份）
         let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
-        // 【直读库对拍·阶段1】同主图：读库上下文仅观测
-        var dbAudit: [String: Any]? = nil
-        if let metaId = metaId {
-            var ctx = DatabaseManager.shared.dbAuditContext(metaId: metaId, table: period.folderName)
-            ctx["dates"] = calcData.map(\.date)
-            dbAudit = ctx
-        }
-        PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, stmts: stmts, dbAudit: dbAudit) { r in
+        PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, unitText: formula) { r in
             // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
             guard self.computation.engineSubGens[key] == gen else {
                 DebugLogger.shared.log("[PyTDXBridge] 诊断 副图completion丢弃 kind=\(m.kind) gen=\(gen) cur=\(self.computation.engineSubGens[key] ?? -1)")
@@ -925,39 +952,35 @@ extension KlineChartView {
             subs: Array(repeating: [], count: req.subs.count))
     }
 
-    /// Python 路径：全部主图+副图公式合并为**一次** bin 调用，整段 [0..calcEnd] 无状态求值。
-    /// 无增量状态跨块传递——调用方（startPrefetch）传全量 [0..count-1]，总计算量 = 1N；
-    /// 零拷贝 bin 通道下全量 bars 输入成本趋近于零，无分块是最优形状。
+    /// Python 路径：全部主图+副图公式文本合并为**一次** bin 调用（解析+求值全在 Python），
+    /// 整段 [0..calcEnd] 无状态求值，总计算量 = 1N。
     /// 失败（引擎未就绪/超时/脚本报错）→ nil。
     private nonisolated static func evaluatePrefetchViaPython(_ req: PrefetchCalcRequest) -> PrefetchCalcResult? {
-        var requests: [[TDXStatement]] = []
-        var mainSlots: [Int] = []   // requests 下标 → mainFormulas 下标
-        var subSlots: [Int] = []    // requests 下标（偏移 mainSlots.count 后）→ subs 下标
-        for (i, f) in req.mainFormulas.enumerated() {
-            guard !f.isEmpty, let stmts = parsePrefetchFormula(f) else { continue }
-            requests.append(stmts)
+        var texts: [String] = []
+        var mainSlots: [Int] = []   // texts 下标 → mainFormulas 下标
+        var subSlots: [Int] = []    // texts 下标（偏移 mainSlots.count 后）→ subs 下标
+        for (i, f) in req.mainFormulas.enumerated() where !f.isEmpty {
+            texts.append(f)
             mainSlots.append(i)
         }
         for (i, s) in req.subs.enumerated() {
-            let f = s.customFormula ?? s.formula
-            guard let f, !f.isEmpty, let stmts = parsePrefetchFormula(f) else { continue }
-            requests.append(stmts)
+            guard let f = s.customFormula ?? s.formula, !f.isEmpty else { continue }
+            texts.append(f)
             subSlots.append(i)
         }
-        if requests.isEmpty {
-            // 全部公式为空/解析失败：直接回空结果（与原 Swift 路径行为一致）
+        if texts.isEmpty {
+            // 全部公式为空：直接回空结果
             return PrefetchCalcResult(main: Array(repeating: [], count: req.mainFormulas.count),
                                       subs: Array(repeating: [], count: req.subs.count))
         }
         // 超时随根数放宽（整段重算成本随历史线性增长；日线上限约万根）
         let timeout: TimeInterval = max(20.0, Double(req.data.count) / 1000.0 * 2.0 + 10.0)
-        guard case .success(let batches) = PyTDXFormulaBridge.evaluate(requests: requests,
-                                                                       data: req.data,
-                                                                       timeout: timeout),
-              batches.count == requests.count else { return nil }
+        let rs = PyTDXFormulaBridge.evaluateText(formulas: texts, data: req.data, timeout: timeout)
+        guard rs.count == texts.count else { return nil }
         var main = Array(repeating: [] as [TDXOutputLine], count: req.mainFormulas.count)
         var subs = Array(repeating: [] as [TDXOutputLine], count: req.subs.count)
-        for (k, lines) in batches.enumerated() {
+        for (k, r) in rs.enumerated() {
+            guard case .success(let lines) = r else { return nil }   // 任一公式失败 → 整批降级
             if k < mainSlots.count {
                 main[mainSlots[k]] = lines
             } else {
@@ -967,14 +990,6 @@ extension KlineChartView {
         }
         // 无状态求值：不产出增量状态；VOL/AMO 副图保持空行，主线程用成交量/成交额组装
         return PrefetchCalcResult(main: main, subs: subs)
-    }
-
-    /// 公式文本解析（后台线程；失败返回 nil，对应槽位回空行——与原 Swift 路径 try? 行为一致）
-    private nonisolated static func parsePrefetchFormula(_ formula: String) -> [TDXStatement]? {
-        var lexer = TDXLexer(formula)
-        guard let tokens = try? lexer.tokenize(), !tokens.isEmpty else { return nil }
-        var parser = TDXParser(tokens: tokens)
-        return try? parser.parse()
     }
 
     /// 主线程：把后台求得的原始输出行组装为 IndicatorLine，更新主图/副图曲线（含标题与颜色）。
