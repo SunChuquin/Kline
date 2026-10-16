@@ -246,6 +246,15 @@ final class PyTDXWave {
         let completion: (Result<[TDXOutputLine], String>) -> Void
     }
 
+    /// formula 级提交（首开/改指标）：公式文本直接进波次，返回单元数组
+    /// （text_eval 内部拆分 + 单元级错误隔离；调用方回填单元缓存）
+    private struct FormulaPending {
+        let barsKey: String
+        let data: [KlineItem]
+        let formulaText: String
+        let completion: ([PyTDXFormulaBridge.PyUnitEval]) -> Void
+    }
+
     /// 同区间请求分组（struct 替代带标签元组，规避老编译器泛型/元组解析歧义）
     private struct Group {
         let data: [KlineItem]
@@ -253,6 +262,7 @@ final class PyTDXWave {
     }
 
     private var pending: [Pending] = []
+    private var formulaPending: [FormulaPending] = []
     private var flushScheduled = false
 
     /// 主线程提交一次单元求值请求（unitText = 主图行缓存的单元文本 / 副图整式文本）。
@@ -261,6 +271,19 @@ final class PyTDXWave {
                 completion: @escaping (Result<[TDXOutputLine], String>) -> Void) {
         assert(Thread.isMainThread, "PyTDXWave.submit 仅限主线程（与 recompute 同帧）")
         pending.append(Pending(barsKey: barsKey, data: data, unitText: unitText, completion: completion))
+        scheduleFlush()
+    }
+
+    /// 主线程提交一次公式级求值请求（首开/改指标：免独立 split 轮次）
+    func submitFormula(barsKey: String, data: [KlineItem], formulaText: String,
+                       completion: @escaping ([PyTDXFormulaBridge.PyUnitEval]) -> Void) {
+        assert(Thread.isMainThread, "PyTDXWave.submitFormula 仅限主线程（与 recompute 同帧）")
+        formulaPending.append(FormulaPending(barsKey: barsKey, data: data,
+                                             formulaText: formulaText, completion: completion))
+        scheduleFlush()
+    }
+
+    private func scheduleFlush() {
         guard !flushScheduled else { return }
         flushScheduled = true
         DispatchQueue.main.async { self.flush() }
@@ -270,7 +293,9 @@ final class PyTDXWave {
         flushScheduled = false
         let batch = pending
         pending = []
-        guard !batch.isEmpty else { return }
+        let formulaBatch = formulaPending
+        formulaPending = []
+        guard !batch.isEmpty || !formulaBatch.isEmpty else { return }
         // 按 barsKey 分组保持提交顺序；组内 slots 记录各请求在 batch 中的下标
         var order: [String] = []
         var groups: [String: Group] = [:]
@@ -281,6 +306,15 @@ final class PyTDXWave {
             }
             groups[p.barsKey]!.slots.append(i)
         }
+        var fOrder: [String] = []
+        var fGroups: [String: Group] = [:]
+        for (i, p) in formulaBatch.enumerated() {
+            if fGroups[p.barsKey] == nil {
+                fGroups[p.barsKey] = Group(data: p.data, slots: [])
+                fOrder.append(p.barsKey)
+            }
+            fGroups[p.barsKey]!.slots.append(i)
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             var results: [Result<[TDXOutputLine], String>] = []
             results.reserveCapacity(batch.count)
@@ -290,9 +324,22 @@ final class PyTDXWave {
                 let rs = PyTDXFormulaBridge.evaluateUnitTexts(texts: texts, data: g.data)
                 for r in rs { results.append(r) }
             }
+            var fResults: [[PyTDXFormulaBridge.PyUnitEval]] = []
+            fResults.reserveCapacity(formulaBatch.count)
+            for key in fOrder {
+                let g = fGroups[key]!
+                let fs = g.slots.map { formulaBatch[$0].formulaText }
+                let rs = PyTDXFormulaBridge.evaluateFormulasWithUnits(formulas: fs, data: g.data)
+                for r in rs {
+                    fResults.append((try? r.get()) ?? [])
+                }
+            }
             DispatchQueue.main.async {
                 for (i, p) in batch.enumerated() where i < results.count {
                     p.completion(results[i])
+                }
+                for (i, p) in formulaBatch.enumerated() where i < fResults.count {
+                    p.completion(fResults[i])
                 }
             }
         }

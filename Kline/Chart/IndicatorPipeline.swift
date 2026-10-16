@@ -375,14 +375,13 @@ extension KlineChartView {
             let store = SystemIndicatorStore.shared
             let custom = activeCustomIndicator
             // 计算区间选择（同 recomputeSub）：
-            // - 联动隔离 + force（搜索切标首次 onAppear）：全量 [0..<count]，保证 warmup 完整、
-            //   指标曲线与 K 线数据一一对应，避免短窗口前台近似造成主图指标缺失/错位，用户观感"数据不对"。
-            // - 否则：正确覆盖用 bgCovered 全量；否则 mergedCalcRange 近似前台。
+            // - 正确覆盖（bgCovered）用全量已覆盖区间；否则 mergedCalcRange 近似前台（可见+预热）。
+            // - 【2026-10-16 修正】原「联动隔离+force 首开用全量 [0..<count]」例外已删除：
+            //   那是 Swift 前台求值时代的设计（全量在 Swift 毫秒级）；求值下沉 Python 后，A8 上
+            //   全量前台波次要等数秒（用户实证「打开标的等全量计算才显示主图指标」）。
+            //   前台只算可见+预热（快速上屏的近似值），全量正确性由后台单次全量预取随后覆盖。
             let (calcStart, calcEnd): (Int, Int)
-            if force && isolatedSubs && !sortedData.isEmpty {
-                calcStart = 0
-                calcEnd = sortedData.count - 1
-            } else if bgCovered {
+            if bgCovered {
                 calcStart = 0
                 calcEnd = computation.bgCoverageEnd
             } else {
@@ -405,14 +404,16 @@ extension KlineChartView {
             //                                          i: i, out: out)
             //                        })
             // }
-            // ===== 引擎路径：收集过期输出行单元 → formulaKey 变化的条目先经 Python 异步拆分
-            //       （text_split），随后全部过期单元合并为一次波次（text_eval，零拷贝）→ 回填缓存并提交 =====
-            let (pending, needSplit) = collectMainPendingUnits(entries: entries, calcStart: calcStart, calcEnd: calcEnd)
+            // ===== 引擎路径：缓存有单元的条目按单元粒度提交；formulaKey 变化（首开/改指标）的
+            //       条目按公式文本直接进波次（text_eval 内部拆分，免独立 split 轮次）——
+            //       两条路同帧合并为一次 Python call，完成后回填单元缓存并提交 =====
+            let (pending, formulaLevel) = collectMainPendingUnits(entries: entries, calcStart: calcStart, calcEnd: calcEnd)
             assembleMainCurvesFromCache(into: &curves, entries: entries)
-            if !needSplit.isEmpty {
-                splitMainUnitsViaPython(needSplit: needSplit, alreadyPending: pending, entries: entries,
-                                        customColor: customColor, calcStart: calcStart, calcEnd: calcEnd)
-            } else if !pending.isEmpty {
+            if !formulaLevel.isEmpty {
+                evaluateMainFormulasViaEngine(formulaLevel, entries: entries, customColor: customColor,
+                                              calcStart: calcStart, calcEnd: calcEnd)
+            }
+            if !pending.isEmpty {
                 evaluateMainPendingViaEngine(pending, entries: entries, customColor: customColor,
                                              calcStart: calcStart, calcEnd: calcEnd)
             }
@@ -466,15 +467,15 @@ extension KlineChartView {
         let text: String              // 单元公式文本（Python 拆分产物；回填时与缓存当前文本核对防错位）
     }
 
-    /// 同步收集主图过期单元。返回 (pending, needSplit)：
-    /// - pending：缓存已有单元且 key 不一致的行（直接可提交波次）；
-    /// - needSplit：formulaKey 变化（或无缓存）的条目——缓存先标新 key、units 置空，
-    ///   由 splitMainUnitsViaPython 异步拆分补齐后继续收集。
+    /// 同步收集主图求值请求。返回 (pending, formulaLevel)：
+    /// - pending：缓存已有单元且 key 不一致的行（单元粒度，直接可提交波次）；
+    /// - formulaLevel：formulaKey 变化（首开/改指标）的条目——缓存先标新 key、units 置空，
+    ///   按公式文本整体进波次（text_eval 内部拆分），完成后由回填写回单元缓存。
     private func collectMainPendingUnits(entries: [MainIndicatorEntry],
                                          calcStart: Int, calcEnd: Int)
-        -> (pending: [MainPendingUnit], needSplit: [(entryIndex: Int, entry: MainIndicatorEntry)]) {
+        -> (pending: [MainPendingUnit], formulaLevel: [(entryIndex: Int, entry: MainIndicatorEntry)]) {
         var pending: [MainPendingUnit] = []
-        var needSplit: [(entryIndex: Int, entry: MainIndicatorEntry)] = []
+        var formulaLevel: [(entryIndex: Int, entry: MainIndicatorEntry)] = []
         for (ei, entry) in entries.enumerated() {
             let formulaKey = "\(entry.formula)|\(calcStart)|\(calcEnd)"
             var cache = computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
@@ -483,7 +484,7 @@ extension KlineChartView {
                 cache.units = []
                 cache.rows = []
                 computation.mainCache.units[entry.id] = cache
-                needSplit.append((ei, entry))
+                formulaLevel.append((ei, entry))
             } else {
                 for (ui, unit) in cache.units.enumerated()
                 where ui < cache.rows.count && cache.rows[ui].key != unit.text {
@@ -491,47 +492,47 @@ extension KlineChartView {
                 }
             }
         }
-        return (pending, needSplit)
+        return (pending, formulaLevel)
     }
 
-    /// formulaKey 变化的条目 → Python 异步拆分单元（text_split）→ 回主线程更新缓存后
-    /// 收集这些条目的过期单元并与已收集的合并，继续波次求值
-    private func splitMainUnitsViaPython(needSplit: [(entryIndex: Int, entry: MainIndicatorEntry)],
-                                         alreadyPending: [MainPendingUnit],
-                                         entries: [MainIndicatorEntry],
-                                         customColor: Color?,
-                                         calcStart: Int, calcEnd: Int) {
+    /// 主图 formula 级引擎求值（首开/改指标路径）：公式文本直接进波次（免独立 split 轮次，
+    /// text_eval 内部拆分），完成回调把单元文本+各行结果写回单元缓存并统一提交。
+    private func evaluateMainFormulasViaEngine(_ formulas: [(entryIndex: Int, entry: MainIndicatorEntry)],
+                                               entries: [MainIndicatorEntry],
+                                               customColor: Color?,
+                                               calcStart: Int, calcEnd: Int) {
+        let calcData = calcData(from: calcStart, to: calcEnd)
+        guard !calcData.isEmpty, !formulas.isEmpty else { return }
         guard KlinePythonBridge.shared.isReady else {
             engineReadyRetry { self.recomputeMainCurves() }
             return
         }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let rs = PyTDXFormulaBridge.splitUnits(formulas: needSplit.map { $0.entry.formula })
-            DispatchQueue.main.async {
-                var merged = alreadyPending
-                for ((ei, entry), r) in zip(needSplit, rs) {
-                    let formulaKey = "\(entry.formula)|\(calcStart)|\(calcEnd)"
-                    guard var cache = self.computation.mainCache.units[entry.id],
-                          cache.formulaKey == formulaKey else { continue }   // 期间又变化 → 交给下一轮
-                    switch r {
-                    case .failure(let msg):
-                        DebugLogger.shared.log("[PyTDXBridge] 主图拆分失败 entry=\(entry.id)：\(msg)")
-                        continue
-                    case .success(let units):
-                        cache.units = units.map { TDXOutputLineUnit(name: $0.name, text: $0.text) }
-                        cache.rows = Array(repeating: MainIndicatorCache.Row(), count: units.count)
+        computation.engineMainGen += 1
+        let gen = computation.engineMainGen
+        let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
+        for f in formulas {
+            PyTDXWave.shared.submitFormula(barsKey: barsKey, data: calcData, formulaText: f.entry.formula) { units in
+                // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
+                guard self.computation.engineMainGen == gen else { return }
+                let entry = entries[f.entryIndex]
+                var cache = self.computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
+                guard cache.formulaKey == "\(entry.formula)|\(calcStart)|\(calcEnd)" else { return }
+                // 回填单元缓存：文本（后续改参数走单元粒度增量）+ 各行结果（成功且非全 NaN 才写 line）
+                cache.units = units.map { TDXOutputLineUnit(name: $0.name, text: $0.text) }
+                cache.rows = units.enumerated().map { i, unit in
+                    var row = MainIndicatorCache.Row()
+                    if unit.error == nil, let out = unit.lines.last,
+                       let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
+                                                 customColor: entry.isCustom ? customColor : nil,
+                                                 i: i, out: out),
+                       !self.allNaN(built.values) {
+                        row.key = unit.text
+                        row.line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
                     }
-                    for (ui, unit) in cache.units.enumerated() {
-                        if ui < cache.rows.count, cache.rows[ui].key != unit.text {
-                            merged.append(MainPendingUnit(entryIndex: ei, unitIndex: ui, text: unit.text))
-                        }
-                    }
-                    self.computation.mainCache.units[entry.id] = cache
+                    return row
                 }
-                if !merged.isEmpty {
-                    self.evaluateMainPendingViaEngine(merged, entries: entries, customColor: customColor,
-                                                      calcStart: calcStart, calcEnd: calcEnd)
-                }
+                self.computation.mainCache.units[entry.id] = cache
+                self.scheduleMainCommit(entries: entries)
             }
         }
     }
@@ -705,18 +706,12 @@ extension KlineChartView {
         klineDebug("[KlineDebug] 进入计算 \(m.kind) 旧curves=\(m.curves.count) bgCovered=\(bgCovered) 匹配=\(curvesMatchCurrentData) force=\(force)")
         let custom = customStore.indicators.first { $0.id == m.activeCustomID }
         // 计算区间选择：
-        // - 联动隔离模式 + 强制重算（搜索切标后的首次 onAppear refreshCurves(force:true)）：
-        //   直接用全量数据 [0...count-1] 计算，既保证指标 warmup 完整（MACD/EMA 等递归指标
-        //   从首根 K 线开始累积，数值最准），又绕开 mergedCalcRange 的有限窗口 + 覆盖率推进
-        //   机制，避免数据量 < warmup 时 merged 区间只覆盖可见部分导致公式求值全 NaN、
-        //   副图最终显示为空。该场景只在切换标的时触发一次，是可接受的一次性开销。
-        // - 否则：优先走正确覆盖区间（bgCovered），否则用 mergedCalcRange 合并已覆盖区间
-        //   的近似前台计算，后台 prefetch 随后补齐。
+        // - 正确覆盖（bgCovered）用全量已覆盖区间；否则 mergedCalcRange 近似前台（可见+预热）。
+        // - 【2026-10-16 修正】原「联动隔离+force 首开用全量 [0...count-1]」例外已删除：
+        //   Swift 求值时代全量前台计算毫秒级，下沉 Python 后 A8 上要等数秒（真机实证）。
+        //   前台只算可见+预热快速上屏，全量正确性由后台单次全量预取随后覆盖。
         let (calcStart, calcEnd): (Int, Int)
-        if force && isolatedSubs && !sortedData.isEmpty {
-            calcStart = 0
-            calcEnd = sortedData.count - 1
-        } else if bgCovered {
+        if bgCovered {
             calcStart = 0
             calcEnd = computation.bgCoverageEnd
         } else {
