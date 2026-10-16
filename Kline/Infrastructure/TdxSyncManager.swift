@@ -274,7 +274,9 @@ final class TdxSyncManager: ObservableObject {
             DebugLogger.shared.log("[TdxSync] 17:30 档 → 触发全市场补缺口（含自动合并主库）")
             GapBackfill.shared.run()
         } else {
-            DebugLogger.shared.log("[TdxSync] \(slotText) 档 → 先补清单范围缺口，再日更")
+            // 【2026-10-16 单源腾讯化】清单日更仍保留（编排/面板/手动触发不变），只把底层取数
+            // 由东财换成腾讯：先补清单范围缺口，再跑清单日更（见 single-source-tencent-plan.md）
+            DebugLogger.shared.log("[TdxSync] \(slotText) 档 → 先补清单范围缺口，再日更（腾讯源）")
             // 清单 file 集**延迟解析**（冷启动窗口内 metaList 可能为空 → 提前快照会得到空集）
             GapBackfill.shared.run(resolveFiles: { WatchlistSymbols.unionFiles() }) {
                 WatchlistSyncManager.shared.sync(reason: trigger, slot: slotText)
@@ -599,7 +601,7 @@ final class TdxSyncManager: ObservableObject {
     /// **跨队列顺序**：先读主库 → 再进 LiveDataStore 队列，双方都不在持锁时回调对方。
     /// 任一步无数据都静默跳过（当期周/月线仍由主库提供，功能等价于改动前）。
     private func rebuildCurrentPeriodBars(referenceDate: Int, completion: @escaping () -> Void) {
-        // 参考日取「本批分片最新交易日」与「增量库日线最新日期」的较大者（东财当日路径可能先行写过）
+        // 参考日取「本批分片最新交易日」与「增量库日线最新日期」的较大者（清单日更路径可能先行写过）
         let liveNewest = LiveDataStore.shared.newestDates(limit: 1).first ?? 0
         let ref = Swift.max(referenceDate, liveNewest)
         let files = LiveDataStore.shared.coveredFiles()

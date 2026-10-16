@@ -11,7 +11,6 @@ contract_golden.py —— PC 侧契约 golden 生成器（纯标准库 · 无网
 
     KlineTests/Fixtures/period_aggregation.json
     KlineTests/Fixtures/quote_parsing.json
-    KlineTests/Fixtures/secid_mapping.json
     KlineTests/Fixtures/indicator_templates.json
 
 用法
@@ -19,19 +18,17 @@ contract_golden.py —— PC 侧契约 golden 生成器（纯标准库 · 无网
     cd <仓库根目录>
     python src/contract_golden.py        # Windows 环境（无 python3 命令）
 
-运行时绝不发网络请求：真实抓包样本以常量内置（EMSNAPSHOT_RAW / TENCENT_*_RAW）。
+运行时绝不发网络请求：真实抓包样本以常量内置（TENCENT_*_RAW）。
 
 重新生成时机
 ------------
 以下任一口径改动后重跑本脚本，并连同对应 Swift 断言一起评审提交：
   · 周期聚合口径（src/tdx_parser.py period_key/handle_data、
     src/live_db_builder.py aggregate_full_periods/period_bounds/period_key）
-  · secid 映射（src/live_db_builder.py secid_for_file / SPECIAL_FILE_SECID、
-    Kline/Resources/universe_secids.txt 覆盖表）
   · 行情解析与自校准（Kline/Infrastructure/GapBackfill.swift 的行解析、calibrate 常量）
   · 指标模板解析（check_indicators.py parse_tdx、SystemIndicatorStore.parse）
 
-四个 fixtures 与被测 Swift 函数
+三个 fixtures 与被测 Swift 函数
 ------------------------------
   period_aggregation.json
       → LiveDataStore.rebuildGapPeriods / WatchlistSyncManager.mergePeriodBar
@@ -40,29 +37,25 @@ contract_golden.py —— PC 侧契约 golden 生成器（纯标准库 · 无网
         并用 live_db_builder.aggregate_full_periods（全窗口）对 weekly/monthly 做逐字段交叉自检，
         两路不一致立即失败——确保「主库 tdx.db 口径」与「增量库口径」在同一份 golden 上闭合。
   quote_parsing.json
-      · eastmoneySnapshot → EastmoneyQuoteFetcher.decodeChunk + beijingDate(fromEpoch:)
-        golden 用 live_db_builder._snapshot_from_diff + beijing_date_from_ts 计算
-        （f17开/f15高/f16低/f2收/f5量/f6额、f124 按 UTC+8 换算 tradeDate）。
       · tencentKline → GapBackfill.fetchSourceBars
         行数组 11 字段：[0]日期 [1]开 [2]收 [3]高 [4]低 [5]量(手) [6]{} [7]换手% [8]额(万元)
-        （价格顺序开-收-高-低，与快照的开-高-低-收不同）。Python 侧无既有实现，
+        （价格顺序开-收-高-低，与东财快照的开-高-低-收不同）。Python 侧无既有实现，
         本脚本按 GapBackfill.fetchSourceBars(:699-709) 的取数语义解析。
       · calibration → GapBackfill.calibrate
         ⚠ 校准无 Python 侧实现：本脚本按 GapBackfill.calibrate(:584-639) 的常量与判定顺序
         镜像实现（价格逐字段相等 → 量比吸附 1/100/1e-4/1e-7 → 额比哨兵 2% → 折算缺口行），
         属唯一非 import 复用段，口径改动须 PC/Swift 双侧同步。
-  secid_mapping.json
-      → EastmoneyQuoteFetcher.secid(forFile:)（对拍 PC live_db_builder.secid_for_file）
   indicator_templates.json
       → SystemIndicatorStore.parse(content:id:)
         KIND= 缺失（本 corpus 全部如此）或 KIND=TECH → accepted；出现 KIND= 且取值非
         TECH（SELECT/TRADE/未知）→ rejected。formulaTemplate 与 Swift 一致为 '\n' join 串。
 
+  （原 eastmoneySnapshot / secid_mapping 两份 fixture 于 2026-10-16 随「单源腾讯化」删除：
+    设备侧清单日更改走腾讯 newfqkline，东财 secid 覆盖表 universe_secids.txt 一并下线。）
+
 样本来源
 --------
 真实抓包（2026-10-04，与 App 生产请求同 URL / 同 UA / 同 Referer）：
-  · 东财批量快照 ulist.np/get：1.600000 / 0.000001 / 1.000001 / 0.300750 / 1.601398
-    （2026-09-30 收盘快照；含 0.000001 平安银行 与 1.000001 上证指数 的同码消歧样本）
   · 腾讯 newfqkline：sh600000、sh000001，2026-09 全月（bfq 不复权）
 需要新样本时重新抓取并整体替换常量，脚本仍保持离线。
 
@@ -77,7 +70,6 @@ import datetime
 import glob
 import json
 import os
-import re
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,7 +79,7 @@ OUT_DIR = os.path.join(REPO_ROOT, "KlineTests", "Fixtures")
 sys.path.insert(0, SRC_DIR)
 sys.path.insert(0, REPO_ROOT)
 
-import live_db_builder as ldb            # noqa: E402  复用：aggregate_full_periods / secid_for_file
+import live_db_builder as ldb            # noqa: E402  复用：aggregate_full_periods
 import tdx_parser                        # noqa: E402  复用：TDXDataGenerator.period_key / handle_data
 import check_indicators                  # noqa: E402  复用：parse_tdx
 
@@ -96,7 +88,7 @@ import check_indicators                  # noqa: E402  复用：parse_tdx
 # 真实抓包样本（原样内置；运行时不发任何请求）
 # ---------------------------------------------------------------------------
 
-EMSNAPSHOT_RAW = r"""{"rc":0,"rt":11,"svr":177622159,"lt":2,"full":1,"dlmkts":"8,10,128","dsc":"0","data":{"total":5,"diff":[{"f2":9.48,"f5":1474848,"f6":1386209937.0,"f12":"600000","f13":1,"f14":"浦发银行","f15":9.49,"f16":9.16,"f17":9.22,"f18":9.18,"f124":1790755897},{"f2":11.57,"f5":1045357,"f6":1205814857.64,"f12":"000001","f13":0,"f14":"平安银行","f15":11.65,"f16":11.33,"f17":11.36,"f18":11.35,"f124":1790753694},{"f2":3842.19,"f5":414560247,"f6":679398992444.8,"f12":"000001","f13":1,"f14":"上证指数","f15":3851.22,"f16":3833.09,"f17":3839.25,"f18":3830.45,"f124":1790755920},{"f2":291.11,"f5":296995,"f6":8613929784.25,"f12":"300750","f13":0,"f14":"宁德时代","f15":292.7,"f16":285.8,"f17":290.0,"f18":286.8,"f124":1790753658},{"f2":8.28,"f5":2931711,"f6":2417869721.0,"f12":"601398","f13":1,"f14":"工商银行","f15":8.3,"f16":8.15,"f17":8.17,"f18":8.16,"f124":1790755918}]}}"""
+TENCENT_SH600000_RAW = r"""{"code":0,"msg":"","data":{"sh600000":{"day":[["2026-09-02","9.35","9.28","9.43","9.25","670365.00",{},"0.20","62537.48","0.00","0.00"],["2026-09-03","9.24","9.27","9.47","9.22","898172.00",{},"0.27","84197.29","0.00","0.00"],["2026-09-04","9.27","9.43","9.45","9.26","757660.00",{},"0.23","71227.10","0.00","0.00"],["2026-09-07","9.43","9.23","9.46","9.19","867113.00",{},"0.26","80632.62","0.00","0.00"],["2026-09-08","9.21","9.28","9.34","9.21","403779.00",{},"0.12","37476.32","0.00","0.00"],["2026-09-09","9.25","9.23","9.29","9.21","505325.00",{},"0.15","46754.99","0.00","0.00"],["2026-09-10","9.22","9.35","9.36","9.19","597743.00",{},"0.18","55588.22","0.00","0.00"],["2026-09-11","9.35","9.26","9.35","9.22","653273.00",{},"0.20","60462.59","0.00","0.00"],["2026-09-14","9.28","9.40","9.43","9.24","771871.00",{},"0.23","72230.74","0.00","0.00"],["2026-09-15","9.39","9.18","9.42","9.16","893562.00",{},"0.27","82377.39","0.00","0.00"],["2026-09-16","9.17","9.10","9.20","9.00","723404.00",{},"0.22","65634.81","0.00","0.00"],["2026-09-17","9.10","9.06","9.14","9.03","456711.00",{},"0.14","41488.71","0.00","0.00"],["2026-09-18","9.05","9.07","9.15","9.00","517593.00",{},"0.16","46996.94","0.00","0.00"],["2026-09-21","9.04","9.01","9.06","8.91","659062.00",{},"0.20","59349.22","0.00","0.00"],["2026-09-22","9.03","9.04","9.07","8.97","532667.00",{},"0.16","48079.57","0.00","0.00"],["2026-09-23","9.02","8.98","9.05","8.95","511244.00",{},"0.15","45895.22","0.00","0.00"],["2026-09-24","8.99","9.00","9.05","8.97","528364.00",{},"0.16","47596.49","0.00","0.00"],["2026-09-28","9.03","9.16","9.18","9.00","1184853.00",{},"0.36","108084.68","0.00","0.00"],["2026-09-29","9.15","9.18","9.25","9.09","805097.00",{},"0.24","73974.10","0.00","0.00"],["2026-09-30","9.22","9.48","9.49","9.16","1474848.00",{},"0.44","138620.99","0.00","0.00"]],"qt":{"sh600000":["1","\u6d66\u53d1\u94f6\u884c","600000","9.48","9.18","9.22","1474848","986826","488022","9.47","1698","9.46","3703","9.45","2708","9.44","729","9.43","1244","9.48","10808","9.49","29728","9.50","39954","9.51","18403","9.52","11369","","20260930161454","0.30","3.27","9.49","9.16","9.48\/1474848\/1386209937","1474848","138621","0.44","6.16","","9.49","9.16","3.59","3157.39","3157.39","0.42","10.10","8.26","2.07","-100180","9.40","5.10","6.31","","","-0.00","138620.9937","42.1860","445","   A","GP-A","-21.13","4.87","4.43","6.14","0.50","13.11","8.07","3.27","1.39","11.92","33305838300","33305838300","-83.24","-16.84","33305838300","","","-17.42","0.11","","CNY","0","___D__F__N","9.55","-7366",""],"market":["2026-10-04 12:06:52|HK_close_\u5df2\u4f11\u5e02|SH_close_\u56fd\u5e86\u8282\u4f11\u5e02|SZ_close_\u56fd\u5e86\u8282\u4f11\u5e02|US_close_\u5df2\u4f11\u5e02|SQ_close_\u5df2\u4f11\u5e02|DS_close_\u5df2\u4f11\u5e02|ZS_close_\u5df2\u4f11\u5e02|NEWSH_close_\u56fd\u5e86\u8282\u4f11\u5e02|NEWSZ_close_\u56fd\u5e86\u8282\u4f11\u5e02|NEWHK_close_\u5df2\u4f11\u5e02|NEWUS_close_\u5df2\u4f11\u5e02|REPO_close_\u56fd\u5e86\u8282\u4f11\u5e02|UK_close_\u5df2\u4f11\u5e02|KCB_close_\u56fd\u5e86\u8282\u4f11\u5e02|HSZB_close_\u56fd\u5e86\u8282\u4f11\u5e02|IT_close_\u5df2\u4f11\u5e02|MY_close_\u5df2\u4f11\u5e02|EU_close_\u5df2\u4f11\u5e02|AH_close_\u5df2\u4f11\u5e02|DE_close_\u5df2\u4f11\u5e02|JW_close_\u56fd\u5e86\u8282\u4f11\u5e02|CYB_close_\u56fd\u5e86\u8282\u4f11\u5e02|USA_close_\u5df2\u4f11\u5e02|USB_close_\u5df2\u4f11\u5e02|ZQ_close_\u56fd\u5e86\u8282\u4f11\u5e02"]},"mx_price":{"mx":[],"price":[]},"prec":"9.35","fsStartDate":"20201009","version":"16"}}}"""
 
 TENCENT_SH600000_RAW = r"""{"code":0,"msg":"","data":{"sh600000":{"day":[["2026-09-02","9.35","9.28","9.43","9.25","670365.00",{},"0.20","62537.48","0.00","0.00"],["2026-09-03","9.24","9.27","9.47","9.22","898172.00",{},"0.27","84197.29","0.00","0.00"],["2026-09-04","9.27","9.43","9.45","9.26","757660.00",{},"0.23","71227.10","0.00","0.00"],["2026-09-07","9.43","9.23","9.46","9.19","867113.00",{},"0.26","80632.62","0.00","0.00"],["2026-09-08","9.21","9.28","9.34","9.21","403779.00",{},"0.12","37476.32","0.00","0.00"],["2026-09-09","9.25","9.23","9.29","9.21","505325.00",{},"0.15","46754.99","0.00","0.00"],["2026-09-10","9.22","9.35","9.36","9.19","597743.00",{},"0.18","55588.22","0.00","0.00"],["2026-09-11","9.35","9.26","9.35","9.22","653273.00",{},"0.20","60462.59","0.00","0.00"],["2026-09-14","9.28","9.40","9.43","9.24","771871.00",{},"0.23","72230.74","0.00","0.00"],["2026-09-15","9.39","9.18","9.42","9.16","893562.00",{},"0.27","82377.39","0.00","0.00"],["2026-09-16","9.17","9.10","9.20","9.00","723404.00",{},"0.22","65634.81","0.00","0.00"],["2026-09-17","9.10","9.06","9.14","9.03","456711.00",{},"0.14","41488.71","0.00","0.00"],["2026-09-18","9.05","9.07","9.15","9.00","517593.00",{},"0.16","46996.94","0.00","0.00"],["2026-09-21","9.04","9.01","9.06","8.91","659062.00",{},"0.20","59349.22","0.00","0.00"],["2026-09-22","9.03","9.04","9.07","8.97","532667.00",{},"0.16","48079.57","0.00","0.00"],["2026-09-23","9.02","8.98","9.05","8.95","511244.00",{},"0.15","45895.22","0.00","0.00"],["2026-09-24","8.99","9.00","9.05","8.97","528364.00",{},"0.16","47596.49","0.00","0.00"],["2026-09-28","9.03","9.16","9.18","9.00","1184853.00",{},"0.36","108084.68","0.00","0.00"],["2026-09-29","9.15","9.18","9.25","9.09","805097.00",{},"0.24","73974.10","0.00","0.00"],["2026-09-30","9.22","9.48","9.49","9.16","1474848.00",{},"0.44","138620.99","0.00","0.00"]],"qt":{"sh600000":["1","\u6d66\u53d1\u94f6\u884c","600000","9.48","9.18","9.22","1474848","986826","488022","9.47","1698","9.46","3703","9.45","2708","9.44","729","9.43","1244","9.48","10808","9.49","29728","9.50","39954","9.51","18403","9.52","11369","","20260930161454","0.30","3.27","9.49","9.16","9.48\/1474848\/1386209937","1474848","138621","0.44","6.16","","9.49","9.16","3.59","3157.39","3157.39","0.42","10.10","8.26","2.07","-100180","9.40","5.10","6.31","","","-0.00","138620.9937","42.1860","445","   A","GP-A","-21.13","4.87","4.43","6.14","0.50","13.11","8.07","3.27","1.39","11.92","33305838300","33305838300","-83.24","-16.84","33305838300","","","-17.42","0.11","","CNY","0","___D__F__N","9.55","-7366",""],"market":["2026-10-04 12:06:52|HK_close_\u5df2\u4f11\u5e02|SH_close_\u56fd\u5e86\u8282\u4f11\u5e02|SZ_close_\u56fd\u5e86\u8282\u4f11\u5e02|US_close_\u5df2\u4f11\u5e02|SQ_close_\u5df2\u4f11\u5e02|DS_close_\u5df2\u4f11\u5e02|ZS_close_\u5df2\u4f11\u5e02|NEWSH_close_\u56fd\u5e86\u8282\u4f11\u5e02|NEWSZ_close_\u56fd\u5e86\u8282\u4f11\u5e02|NEWHK_close_\u5df2\u4f11\u5e02|NEWUS_close_\u5df2\u4f11\u5e02|REPO_close_\u56fd\u5e86\u8282\u4f11\u5e02|UK_close_\u5df2\u4f11\u5e02|KCB_close_\u56fd\u5e86\u8282\u4f11\u5e02|HSZB_close_\u56fd\u5e86\u8282\u4f11\u5e02|IT_close_\u5df2\u4f11\u5e02|MY_close_\u5df2\u4f11\u5e02|EU_close_\u5df2\u4f11\u5e02|AH_close_\u5df2\u4f11\u5e02|DE_close_\u5df2\u4f11\u5e02|JW_close_\u56fd\u5e86\u8282\u4f11\u5e02|CYB_close_\u56fd\u5e86\u8282\u4f11\u5e02|USA_close_\u5df2\u4f11\u5e02|USB_close_\u5df2\u4f11\u5e02|ZQ_close_\u56fd\u5e86\u8282\u4f11\u5e02"]},"mx_price":{"mx":[],"price":[]},"prec":"9.35","fsStartDate":"20201009","version":"16"}}}"""
 
@@ -318,28 +310,6 @@ def parse_tencent_golden(raw, market_code):
     return out
 
 
-def build_eastmoney_golden():
-    """复用 live_db_builder._snapshot_from_diff + beijing_date_from_ts。"""
-    data = json.loads(EMSNAPSHOT_RAW)
-    snap = ldb._snapshot_from_diff((data.get("data") or {}).get("diff"))
-    golden = []
-    for secid in sorted(snap):
-        s = snap[secid]
-        golden.append({
-            "secid": s["secid"],
-            "code": s["code"],
-            "name": s["name"],
-            "open": num6(s["open"]),
-            "high": num6(s["high"]),
-            "low": num6(s["low"]),
-            "close": num6(s["close"]),
-            "vol": num6(s["vol"]),
-            "amo": num6(s["amo"]),
-            "tradeDate": ldb.beijing_date_from_ts(s["ts"]),
-        })
-    return golden
-
-
 # --- calibration：镜像 GapBackfill.calibrate(:584-639) -----------------------
 
 PRICE_TOLERANCE = 1e-5          # GapBackfill.priceTolerance
@@ -490,17 +460,10 @@ def build_calibration_cases():
 
 def build_quote_parsing():
     return {
-        "notes": "行情解析契约。eastmoneySnapshot：ulist 批量快照，f17开/f15高/f16低/f2收/f5量/f6额，"
-                 "tradeDate 由 f124（秒级 epoch）按北京时间 UTC+8 换算（golden 由 "
-                 "live_db_builder._snapshot_from_diff + beijing_date_from_ts 计算）。"
-                 "tencentKline：newfqkline(bfq) 行数组 11 字段，价格顺序开-收-高-低（与快照不同），"
+        "notes": "行情解析契约。tencentKline：newfqkline(bfq) 行数组 11 字段，价格顺序开-收-高-低，"
                  "vol=手、amo=万元，date 去 '-' 转 YYYYMMDD 整数。"
                  "calibration：基准行=主库锚点（个股 vol=股/amo=元；指数 vol=手），源行=腾讯 wire 行数组；"
                  "golden 为 GapBackfill.calibrate 语义的期望输出（本脚本镜像实现，无 Python 侧既有实现）。",
-        "eastmoneySnapshot": {
-            "raw": EMSNAPSHOT_RAW,
-            "golden": build_eastmoney_golden(),
-        },
         "tencentKline": [
             {"marketCode": "sh600000", "raw": TENCENT_SH600000_RAW,
              "golden": parse_tencent_golden(TENCENT_SH600000_RAW, "sh600000")},
@@ -508,69 +471,6 @@ def build_quote_parsing():
              "golden": parse_tencent_golden(TENCENT_SH000001_RAW, "sh000001")},
         ],
         "calibration": build_calibration_cases(),
-    }
-
-
-# ---------------------------------------------------------------------------
-# ③ secid_mapping.json —— file → secid 映射 golden
-#    复用：live_db_builder.secid_for_file / SPECIAL_FILE_SECID
-# ---------------------------------------------------------------------------
-
-def build_secid_mapping():
-    txt_path = os.path.join(REPO_ROOT, "Kline", "Resources", "universe_secids.txt")
-    entries, override = [], {}
-    with open(txt_path, "r", encoding="utf-8-sig") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = [p for p in re.split(r"[ \t]+", line) if p]
-            if len(parts) < 2 or "#" not in parts[0]:
-                continue
-            file_str, secid_override = parts[0], parts[1]
-            code = file_str.split("#", 1)[1]
-            py_secid = ldb.secid_for_file(file_str, code)
-            if file_str in ldb.SPECIAL_FILE_SECID:
-                rule = "special"
-            elif py_secid is not None:
-                rule = "prefix"
-            else:
-                rule = "override"       # 27#/62#/102#：Python 无映射，Swift 查覆盖表
-            entries.append({"file": file_str, "code": code, "secid": py_secid, "rule": rule})
-            override[file_str] = secid_override
-
-    # Swift 侧 secid(forFile:)：① 特例表 → ② 前缀规则(SH/SZ/BJ) → ③ 覆盖表
-    divergent = []
-    for e in entries:
-        f = e["file"]
-        if f in ldb.SPECIAL_FILE_SECID:
-            swift_secid = ldb.SPECIAL_FILE_SECID[f]
-        elif e["rule"] == "prefix":
-            swift_secid = e["secid"]
-        else:
-            swift_secid = override.get(f)
-        if swift_secid != e["secid"]:
-            divergent.append({"file": f, "python": e["secid"], "swift": swift_secid})
-
-    return {
-        "notes": "file → 东财 secid 映射契约。Python 权威实现 live_db_builder.secid_for_file(:302)："
-                 "用 file 前缀判定市场（SH#→1.*、SZ#/BJ#→0.*，不从 6 位 code 猜），"
-                 "SH#999999 走 SPECIAL_FILE_SECID 特例 → 1.000001；"
-                 "其余前缀（27#/62#/102# 扩展行情指数，含恒生系与 930/931/97x/98x 定制指数）返回 None "
-                 "—— 云端/PC 结构上不产这些标的的分片。Swift EastmoneyQuoteFetcher.secid(forFile:)"
-                 "(:149-162) 在前缀规则之后追加 Bundle 覆盖表 universe_secids.txt（东财接口其实有数据），"
-                 "读不到表时降级为仅前缀规则。两侧对 27#/62#/102# 语义不同属有意为之，"
-                 "见 knownDivergence（不硬凑一致）。本表无 hk# 前缀条目；恒生系以 27# 出现"
-                 "（27#HSI→100.HSI，其余→124.*）。universe_secids.txt 本身即 Swift 覆盖表原文。",
-        "specialFileSecid": dict(ldb.SPECIAL_FILE_SECID),
-        "entries": entries,
-        "swiftOverrideTable": override,
-        "knownDivergence": {
-            "reason": "Python secid_for_file 对非 SH#/SZ#/BJ# 前缀一律返回 None（云端跳过、"
-                      "计入 missing_sample/coverage）；Swift 对同一条目查覆盖表得到 secid 并正常取数。"
-                      "同一 file 两侧映射结果不同，是生产端分工（PC 独占扩展行情指数）而非口径漂移。",
-            "entries": divergent,
-        },
     }
 
 
@@ -621,7 +521,6 @@ def main():
     fixtures = [
         ("period_aggregation.json", build_period_aggregation()),
         ("quote_parsing.json", build_quote_parsing()),
-        ("secid_mapping.json", build_secid_mapping()),
         ("indicator_templates.json", build_indicator_templates()),
     ]
     for name, payload in fixtures:
@@ -629,16 +528,12 @@ def main():
         print("✅ %-28s %7d bytes" % (name, os.path.getsize(path)))
     cases = fixtures[0][1]["cases"]
     quote = fixtures[1][1]
-    secid = fixtures[2][1]
-    ind = fixtures[3][1]
+    ind = fixtures[2][1]
     print("   周期用例 %d 组（%s）" % (len(cases), ", ".join(c["caseName"] for c in cases)))
-    print("   东财快照 %d 标的 / 腾讯K线 %s 根 / 校准用例 %d 组"
-          % (len(quote["eastmoneySnapshot"]["golden"]),
-             "/".join(str(len(t["golden"])) for t in quote["tencentKline"]),
+    print("   腾讯K线 %s 根 / 校准用例 %d 组"
+          % ("/".join(str(len(t["golden"])) for t in quote["tencentKline"]),
              len(quote["calibration"])))
-    print("   secid 条目 %d（分歧 %d）/ 指标模板 %d 份"
-          % (len(secid["entries"]), len(secid["knownDivergence"]["entries"]),
-             len(ind["templates"])))
+    print("   指标模板 %d 份" % len(ind["templates"]))
 
 
 if __name__ == "__main__":

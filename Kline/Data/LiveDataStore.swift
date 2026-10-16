@@ -165,7 +165,7 @@ struct LiveIncrementSnapshot {
     }
 }
 
-/// 「直接写入当日K线」的 meta 行（东财取数结果 → `live_meta`；键 = file）
+/// 「直接写入当日K线」的 meta 行（清单日更取数结果 → `live_meta`；键 = file）
 struct LiveUpsertMeta {
     let file: String
     let code: String
@@ -173,7 +173,7 @@ struct LiveUpsertMeta {
     let type: String
 }
 
-/// 「直接写入当日K线」的一根日线（东财取数结果 → `live_daily`；键 = (file, date)）
+/// 「直接写入当日K线」的一根日线（清单日更取数结果 → `live_daily`；键 = (file, date)）
 struct LiveUpsertBar {
     let file: String
     let date: Int
@@ -338,7 +338,7 @@ final class LiveDataStore: ObservableObject {
         }
     }
 
-    /// 直接写入「当日K线」（内存里的东财取数结果，非 sqlite 分片文件）：
+    /// 直接写入「当日K线」（内存里的清单日更取数结果，非 sqlite 分片文件）：
     /// **先与库内逐字段比对，只写真正变化 / 新增的行**（浮点容差 1e-6），单事务内
     /// `live_meta` 补缺失标的（`INSERT OR IGNORE`）+ `live_daily` 按 `(file, date)` UPSERT
     /// （表名 / 字段顺序与 `_mergeBucketLocked` 一致）。本地增量库不存在时按既有 schema 新建。
@@ -358,7 +358,7 @@ final class LiveDataStore: ObservableObject {
             // 无变化时 metaRows / dailyRows 均为 0：库文件未变，跳过刷新（否则会白走一次指纹比对链路）
             if result.ok && (result.metaRows > 0 || result.dailyRows > 0
                              || result.quarterlyRows > 0 || result.yearlyRows > 0) {
-                self._refreshAfterInternalWriteLocked(reason: "外部写入·清单东财")
+                self._refreshAfterInternalWriteLocked(reason: "外部写入·清单日更")
             }
             DispatchQueue.main.async { completion(result) }
         }
@@ -916,7 +916,7 @@ final class LiveDataStore: ObservableObject {
         return r
     }
 
-    /// 东财当日K线 → 本地增量库：**先比对后写入**（单事务），全程预处理语句 + 绑定（不拼字符串 SQL），
+    /// 清单日更当日K线 → 本地增量库：**先比对后写入**（单事务），全程预处理语句 + 绑定（不拼字符串 SQL），
     /// 任一步失败整体回滚。与库内完全一致（浮点容差 `upsertEpsilon`）时不写任何行、不开事务。
     /// `periodBars`（键 = `quarterly`/`yearly`）为「当期季/年 bar」，在同一事务内 UPSERT。
     private func _upsertDailyLocked(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],

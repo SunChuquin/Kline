@@ -3,7 +3,7 @@
 //  Kline
 //
 //  设备侧「清单标的当日K线」自动更新编排（单例 + ObservableObject）：
-//    清单并集（WatchlistSymbols） → 东财直连拉取当日K线（EastmoneyQuoteFetcher）
+//    清单并集（WatchlistSymbols） → 读主库锚点行 → 腾讯直连拉最新K线（TencentQuoteFetcher）
 //    → 直写增量库（LiveDataStore.upsertDaily）→ 走既有热刷新链路（dataVersion 自增 → 监控重扫）
 //
 //  五表一致性：除当日日线外，还会产出**当期**周/月/季/年 bar：
@@ -24,8 +24,14 @@
 //     周/月不走这条口径 —— 它们按当期窗口从日线**全量重算**（同样幂等，且不受主库当期 bar 是否已过期影响）；
 //   - UI 状态一律在主线程写。
 //
-//  线程：`sync(reason:slot:)` 须在主线程调用（内部再切主线程执行）；东财 completion 在它自己的串行队列，
-//  本类在回调处显式切回主线程；主库基期 bar 查询走 `DatabaseManager.performOnDBQueue`（在 dbQueue 上批量查）。
+//  取数（**单源腾讯**，2026-10-16 起）：
+//   - 逐只给 `TencentQuoteFetcher` 一个 `GapJob`（file + 腾讯码 + **主库锚点行**），
+//     取数 + 自校准全复用 `GapBackfill.fetchGap` → 与「补缺口」同一量纲口径（写增量库不会踩手/股断崖）；
+//   - 锚点行 = 该只主库 `meta.last_date` 当天那一行（**逐只按自己的 last_date**，不是全局最新日）；
+//     锚点行缺失 → 该只记跳过（`noBaseline`），不写脏数据。
+//
+//  线程：`sync(reason:slot:)` 须在主线程调用（内部再切主线程执行）；腾讯取数 completion 在它自己的
+//  串行队列，本类在回调处显式切回主线程；主库锚点行查询走 `DatabaseManager.performOnDBQueue`（在 dbQueue 上批量查）。
 //
 
 import Foundation
@@ -118,38 +124,117 @@ final class WatchlistSyncManager: ObservableObject {
                    tradeDate: nil, hit: 0, skipped: 0, batchFailures: 0)
             return
         }
-        DebugLogger.shared.log("[WatchlistSync] \(reason)：清单并集 \(files.count) 只 → 开始拉取当日K线")
+        DebugLogger.shared.log("[WatchlistSync] \(reason)：清单并集 \(files.count) 只 → 分流可映射标的")
 
-        // ② 东财直连（completion 在它自己的串行队列 → 显式切回主线程）
-        EastmoneyQuoteFetcher.shared.fetch(files: files) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.handle(result: result, reason: reason, slot: slot)
+        // ② 清单并集 ∩ 主库 meta → 分流（与 GapBackfill.perform() **同一预过滤口径**）：
+        //    不可映射腾讯码 / 62#·102# 定制段（腾讯无码）/ 无 last_date → 先记跳过，不发起请求
+        var metaByFile: [String: MetaItem] = [:]
+        for m in DatabaseManager.shared.metaList where metaByFile[m.file] == nil { metaByFile[m.file] = m }
+        var candidates: [MetaItem] = []
+        var skips: [QuoteSkip] = []
+        for file in files {
+            guard let m = metaByFile[file] else {
+                skips.append(QuoteSkip(file: file, reason: .noBaseline, detail: "主库 meta 无该 file"))
+                continue
             }
+            guard ProbeItem(file: m.file, type: m.type) != nil else {
+                skips.append(QuoteSkip(file: file, reason: .unmappable, detail: "无腾讯码映射"))
+                continue
+            }
+            if Self.isNoSourceSegment(m.file) {
+                skips.append(QuoteSkip(file: file, reason: .noSourceSegment,
+                                       detail: "62#/102# 定制段腾讯无码"))
+                continue
+            }
+            guard let last = m.lastDate, last > 0 else {
+                skips.append(QuoteSkip(file: file, reason: .noBaseline, detail: "主库 meta 无 last_date"))
+                continue
+            }
+            candidates.append(m)
         }
+        guard !candidates.isEmpty else {
+            DebugLogger.shared.log("[WatchlistSync] \(reason)：可映射标的 0 只（\(skips.count) 只被预过滤跳过）→ 跳过")
+            finish(outcome: .skipped, text: "跳过：无可取数标的（\(skips.count) 只被跳过）",
+                   reason: reason, slot: slot, tradeDate: nil, hit: 0, skipped: skips.count,
+                   batchFailures: 0)
+            return
+        }
+
+        // ③ 主库锚点行：**逐只按自己的 last_date**（不是全局最新日），按日期分组后在一次 dbQueue 内多查
+        //    （锚点行 = 自校准基准：要求锚点日价格逐字段相等 + 量比吸附，见 GapBackfill.calibrate）
+        var metaIdByFile: [String: Int] = [:]
+        for m in candidates { metaIdByFile[m.file] = m.id }
+        var filesByLastDate: [Int: [String]] = [:]
+        for m in candidates {
+            guard let last = m.lastDate else { continue }
+            filesByLastDate[last, default: []].append(m.file)
+        }
+        DatabaseManager.shared.performOnDBQueue({ db -> [String: KlineItem] in
+            var out: [String: KlineItem] = [:]
+            for (date, group) in filesByLastDate {
+                var ids: [String: Int] = [:]
+                for f in group { if let id = metaIdByFile[f] { ids[f] = id } }
+                let rows = DatabaseManager.readMainDaily(db: db, metaIdByFile: ids,
+                                                         fromDate: date, toDate: date)
+                for (f, list) in rows { if let first = list.first { out[f] = first } }
+            }
+            return out
+        }, completion: { [weak self] baseByFile in
+            guard let self = self else { return }
+            var jobs: [GapJob] = []
+            for m in candidates {
+                guard let base = baseByFile[m.file],
+                      let item = ProbeItem(file: m.file, type: m.type) else {
+                    skips.append(QuoteSkip(file: m.file, reason: .noBaseline,
+                                           detail: "主库缺锚点日 \(m.lastDate ?? 0) 那行"))
+                    continue
+                }
+                jobs.append(GapJob(meta: m, item: item, base: base))
+            }
+            DebugLogger.shared.log("[WatchlistSync] \(reason)：可映射 \(candidates.count) 只 → 锚点行就绪 \(jobs.count) 只"
+                + "（预过滤跳过 \(skips.count) 只）→ 腾讯取数（并发 \(TencentQuoteFetcher.concurrency)）")
+
+            // ④ 腾讯取数（completion 在它自己的串行队列 → 显式切回主线程）
+            TencentQuoteFetcher.shared.fetch(jobs: jobs) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.handle(result: result, preSkips: skips, reason: reason, slot: slot)
+                }
+            }
+        })
+    }
+
+    /// 62#/102# **定制段**（930/931/932/950/987/970/CN 等）腾讯无码 → 预过滤跳过，
+    /// 与 `GapBackfill.perform()` 的筛选逐字一致（000/399/980 段腾讯有源）。
+    private static func isNoSourceSegment(_ file: String) -> Bool {
+        guard file.hasPrefix("62#") || file.hasPrefix("102#") else { return false }
+        let seg = file.split(separator: "#", maxSplits: 1).last.map(String.init) ?? ""
+        return !(seg.hasPrefix("000") || seg.hasPrefix("399") || seg.hasPrefix("980"))
     }
 
     /// ④ 拉取结果 → 状态 / 日志 → 写入增量库
-    private func handle(result: EastmoneyFetchResult, reason: String, slot: String?) {
-        let skipSample = Self.skipSummary(result.skipped)
+    /// - Parameter preSkips: 取数前预过滤的跳过清单（不可映射 / 腾讯无码段 / 无锚点行），与 `result.skipped` 合并统计
+    private func handle(result: QuoteFetchResult, preSkips: [QuoteSkip], reason: String, slot: String?) {
+        let allSkips = preSkips + result.skipped
+        let skipSample = Self.skipSummary(allSkips)
         DebugLogger.shared.log("[WatchlistSync] \(reason)：并集 \(unionCount) 只 → 命中 \(result.hitCount) 只"
-            + " → 跳过 \(result.skipped.count) 只（\(skipSample)）→ 批次失败 \(result.batchFailures.count)"
+            + " → 跳过 \(allSkips.count) 只（\(skipSample)）→ 取数失败 \(result.batchFailures.count)"
             + " → 交易日 \(result.tradeDate)")
 
         // 无命中 → 失败 / 跳过并按原因收尾（不写库）
         guard !result.bars.isEmpty else {
             let text: String
             if !result.batchFailures.isEmpty {
-                text = "失败：全部批次失败（\(result.batchFailures.count) 批）"
+                text = "失败：全部取数失败（\(result.batchFailures.count) 只）"
             } else if result.tradeDate <= 0 {
-                text = "失败：交易日缺失（f124 均无效）"
+                text = "失败：交易日缺失（无可校准的新K线）"
             } else {
-                text = "跳过：无命中标的（\(result.skipped.count) 只被跳过）"
+                text = "跳过：无命中标的（\(allSkips.count) 只被跳过）"
             }
             DebugLogger.shared.log("[WatchlistSync] \(reason)：\(text)")
             finish(outcome: .failed, text: text, reason: reason, slot: slot,
                    tradeDate: result.tradeDate > 0 ? result.tradeDate : nil,
-                   hit: 0, skipped: result.skipped.count, batchFailures: result.batchFailures.count)
+                   hit: 0, skipped: allSkips.count, batchFailures: result.batchFailures.count)
             return
         }
 
@@ -206,7 +291,7 @@ final class WatchlistSyncManager: ObservableObject {
                 guard merge.ok else {
                     DebugLogger.shared.log("[WatchlistSync] \(reason)：写入增量库失败 \(merge.message)")
                     self.finish(outcome: .failed, text: "失败：\(merge.message)", reason: reason, slot: slot,
-                                tradeDate: tradeDate, hit: 0, skipped: result.skipped.count,
+                                tradeDate: tradeDate, hit: 0, skipped: allSkips.count,
                                 batchFailures: result.batchFailures.count)
                     return
                 }
@@ -223,7 +308,7 @@ final class WatchlistSyncManager: ObservableObject {
                     self.finish(outcome: .success,
                                 text: "成功：写入 \(merge.dailyRows) 行 / \(result.hitCount) 只",
                                 reason: reason, slot: slot, tradeDate: tradeDate,
-                                hit: result.hitCount, skipped: result.skipped.count,
+                                hit: result.hitCount, skipped: allSkips.count,
                                 batchFailures: result.batchFailures.count)
                 }
             }
@@ -442,7 +527,7 @@ final class WatchlistSyncManager: ObservableObject {
     // MARK: - 工具
 
     /// 跳过原因分布 + 前 3 条样例（供日志 / 状态面板一眼看出失败原因）
-    private static func skipSummary(_ skipped: [EastmoneySkip]) -> String {
+    private static func skipSummary(_ skipped: [QuoteSkip]) -> String {
         guard !skipped.isEmpty else { return "无" }
         var counts: [String: Int] = [:]
         for s in skipped { counts[s.reason.text, default: 0] += 1 }

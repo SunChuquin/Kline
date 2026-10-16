@@ -1,34 +1,24 @@
 # -*- coding: utf-8 -*-
-"""quote_parse.py — 多源取数口径解析（Python 引擎候选 4，阶段 A：口径层下沉）。
+"""quote_parse.py — 腾讯取数口径解析（Python 引擎候选 4，阶段 A：口径层下沉）。
 
 权威语义来源（本脚本为自包含移植，不 import 上述模块）
-  - 东财批量快照：src/live_db_builder.py `_snapshot_from_diff` + `beijing_date_from_ts`
-    + `_num`（'-'/'--'/'' → None）。
   - 腾讯 newfqkline：src/contract_golden.py `parse_tencent_golden`（镜像
     GapBackfill.fetchSourceBars 的三段兜底 day→qfqday→任意 *day 与行解析
     GapBackfill.parseTencentRow）。
   - 自校准 calibrate：src/contract_golden.py `calibrate`（镜像
     GapBackfill.calibrate 的判定顺序：价格逐字段相等 → priceOnly → 源停牌 →
     量比吸附 → 额比哨兵 → 缺口行折算）。
-  - secid 映射：src/live_db_builder.py `secid_for_file` + `SPECIAL_FILE_SECID`
-    （27#/62#/102# 等扩展行情前缀返回 None 属 PC/设备有意分工，设备侧覆盖表留 Swift）。
 
-golden 对拍：KlineTests/Fixtures/quote_parsing.json 与 secid_mapping.json
+  东财 em_snapshot / secid 两个 op 已于 2026-10-16 随「单源腾讯化」删除：设备侧清单日更
+  改走腾讯 newfqkline，东财 secid 覆盖表 universe_secids.txt 一并下线。
+
+golden 对拍：KlineTests/Fixtures/quote_parsing.json
 （src/contract_golden.py 产出；PyBridgeQuoteParsingTests 对拍同一 fixture）。
 
 执行契约（由 Swift 桥接层包装，与 period_aggregate.py / candle_patterns.py 一致）
   - 桥接注入模块全局 dict `kline_input`；本脚本产出模块级 dict `kline_result`，
     `kline_result["ok"]` 为 bool；脚本异常由包装统一捕获，输入形状非法时
     直接返回 {"ok": False, "error": ...}。
-
-op = "em_snapshot"（东财 ulist 批量快照响应文本 → {secid: 当日行情}）
-  输入: {"op":"em_snapshot","raw":"<响应 JSON 文本>"}
-  输出: result = {secid: {"secid","code","name","open","high","low","close",
-                          "vol","amo","ts","tradeDate"}}
-  - 字段序号 ⚠：f17=开、f15=高、f16=低、f2=收、f5=量、f6=额（与 kline 接口的
-    开,收,高,低 顺序不同）；secid = f13.f12（同码消歧天然成立）。
-  - 非交易时段/停牌字段为 '-' → None；ts = f124（秒级 epoch）。
-  - tradeDate = ts 按北京时间(UTC+8) 换算 YYYYMMDD；ts 缺失/非正 → None。
 
 op = "tencent_kline"（腾讯 newfqkline(bfq) 响应文本 → SourceBar 行数组）
   输入: {"op":"tencent_kline","raw":"<响应 JSON 文本>","marketCode":"sh600000"}
@@ -48,18 +38,9 @@ op = "calibrate"（自校准 + 缺口行生成，与取数来源无关）
   - 价格容差 1e-5（相对）；量比吸附带 1/100/1e-4/1e-7；额比哨兵 2%。
   - 量折算：volRatio<1 的折算类为整数舍入口径 → round；amoScale：volRatio≥1
     → 10000（源万元→元），否则 0.01（指数折算类，PC 实测精确）。
-
-op = "secid"（file 前缀 → 东财 secid，PC 权威口径）
-  输入: {"op":"secid","files":["SH#600000","27#..."]}
-  输出: result = {file: secid 或 null}——SH#→1.、SZ#/BJ#→0.（用 file 前缀判定，
-    不从 6 位 code 猜）；SH#999999 走特例表 → 1.000001；其余前缀 → null
-    （公开行情接口无对应，云端/PC 不产分片；设备侧由覆盖表补齐，属有意分工）。
 """
 
-import datetime
 import json
-
-_BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 
 # --- calibrate 常量（镜像 GapBackfill / contract_golden） ---
 _PRICE_TOLERANCE = 1e-5
@@ -70,10 +51,6 @@ _VOL_RATIO_BANDS = (              # (下限, 上限, 吸附值) —— 判定顺
     (8e-8, 1.25e-7, 1e-7),        # volRatioBand1e_7：恒生系
 )
 _AMO_RATIO_TOLERANCE = 0.02
-
-_SPECIAL_FILE_SECID = {
-    "SH#999999": "1.000001",      # 上证指数：通达信记为 999999，东财 secid 是 1.000001
-}
 
 
 def _err(msg):
@@ -105,66 +82,7 @@ def _swift_num(v):
     return None
 
 
-def _em_num(v):
-    """镜像 live_db_builder._num：东财非交易时段/停牌会返回 '-'，统一转 None。"""
-    if v is None:
-        return None
-    if isinstance(v, str):
-        v = v.strip()
-        if v in ("", "-", "--"):
-            return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _beijing_date_from_ts(ts):
-    """秒级 epoch 按北京时间(UTC+8) 换算 YYYYMMDD；缺失/非正 → None。"""
-    if ts is None:
-        return None
-    try:
-        ts = int(float(ts))
-    except (TypeError, ValueError):
-        return None
-    if ts <= 0:
-        return None
-    return int(datetime.datetime.fromtimestamp(ts, _BEIJING_TZ).strftime("%Y%m%d"))
-
-
 # --- op 实现 ------------------------------------------------------------------
-
-
-def _op_em_snapshot(inp):
-    raw = inp.get("raw")
-    if not isinstance(raw, str) or not raw:
-        return _err("em_snapshot: raw 必须为非空字符串（响应 JSON 文本）")
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        return _err("em_snapshot: 响应非 JSON: %s" % exc)
-    diff = (data.get("data") or {}).get("diff") if isinstance(data, dict) else None
-    if not isinstance(diff, list):
-        return _err("em_snapshot: 响应缺 data.diff")
-    result = {}
-    for it in diff:
-        if not isinstance(it, dict):
-            continue
-        f12, f13 = it.get("f12"), it.get("f13")
-        if f12 is None or f13 is None:
-            continue
-        secid = "%s.%s" % (f13, f12)
-        ts = _em_num(it.get("f124"))
-        result[secid] = {
-            "secid": secid,
-            "code": str(f12),
-            "name": (it.get("f14") or "").strip() if isinstance(it.get("f14"), str) else "",
-            "open": _em_num(it.get("f17")), "high": _em_num(it.get("f15")),
-            "low": _em_num(it.get("f16")), "close": _em_num(it.get("f2")),
-            "vol": _em_num(it.get("f5")), "amo": _em_num(it.get("f6")),
-            "ts": ts, "tradeDate": _beijing_date_from_ts(ts),
-        }
-    return {"ok": True, "result": result}
 
 
 def _parse_tencent_row(r):
@@ -316,39 +234,11 @@ def _calibrate(base, rows, main_latest):
             "amoScale": amo_scale, "bars": bars}
 
 
-def _op_secid(inp):
-    files = inp.get("files")
-    if not isinstance(files, list) or not files:
-        return _err("secid: files 必须为非空数组")
-    result = {}
-    for (i, f) in enumerate(files):
-        if not isinstance(f, str) or not f:
-            return _err("secid: files[%d] 必须为非空字符串" % i)
-        result[f] = _secid_for_file(f)
-    return {"ok": True, "result": result}
-
-
-def _secid_for_file(file_str):
-    """镜像 live_db_builder.secid_for_file：用 file 前缀判定市场，不从 6 位 code 猜。
-    其余前缀（27#/62#/102# 等扩展行情）→ None（设备侧由覆盖表补齐，有意分工）。"""
-    if file_str in _SPECIAL_FILE_SECID:
-        return _SPECIAL_FILE_SECID[file_str]
-    prefix = file_str.split("#", 1)[0].upper()
-    code = file_str.split("#", 1)[1] if "#" in file_str else ""
-    if prefix == "SH":
-        return "1." + code
-    if prefix in ("SZ", "BJ"):
-        return "0." + code
-    return None
-
-
 # --- 分发 ---------------------------------------------------------------------
 
 _OPS = {
-    "em_snapshot": _op_em_snapshot,
     "tencent_kline": _op_tencent_kline,
     "calibrate": _op_calibrate,
-    "secid": _op_secid,
 }
 
 

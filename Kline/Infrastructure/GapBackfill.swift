@@ -750,7 +750,9 @@ final class GapBackfill: ObservableObject {
     /// 单源腾讯取数 + 自校准（2026-10-05 起东财下线：批量中途超时/拒连拖垮吞吐，见文件头③）。
     /// 取数层拆两级：HTTP+结构提取（wire 行）留 Swift；行解析+自校准 **Python 优先**
     /// （quote_parse.py op="calibrate"，候选 4 阶段 B），失败/未就绪降级原 Swift 路径。
-    private func fetchGap(job: GapJob, mainLatest: Int, today: Int, session: URLSession) -> GapOutcome {
+    /// - Note: `mainLatest` 即**自校准锚点日**（该只主库 `meta.last_date`），调用方按只传入；
+    ///   **非 private**：`TencentQuoteFetcher`（清单日更）复用同一条取数+自校准管线，保证两处口径一致。
+    func fetchGap(job: GapJob, mainLatest: Int, today: Int, session: URLSession) -> GapOutcome {
         let count = Self.barsCount(from: mainLatest, to: today)
         let (wire, why) = fetchWireRows(item: job.item, from: mainLatest, to: today,
                                         count: count, session: session)

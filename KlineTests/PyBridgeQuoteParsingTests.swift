@@ -2,16 +2,17 @@
 //  PyBridgeQuoteParsingTests.swift
 //  KlineTests
 //
-//  桥接契约测试⑤：多源取数口径解析 —— Python 引擎 quote_parse.py 经
-//  KlinePythonBridge 调用，四个 op（em_snapshot / tencent_kline / calibrate /
-//  secid）结果 vs 既有 golden（与 QuoteParsingContractTests 同一 fixture，
-//  纯标准库脚本，无 numpy 依赖）。
+//  桥接契约测试⑤：腾讯取数口径解析 —— Python 引擎 quote_parse.py 经
+//  KlinePythonBridge 调用，两个 op（tencent_kline / calibrate）结果 vs 既有 golden
+//  （与 QuoteParsingContractTests 同一 fixture，纯标准库脚本，无 numpy 依赖）。
 //
 //  契约来源：.trae/documents/python-engine/Python引擎下沉可行性分析.md 候选 4
-//  （多源取数口径下沉，阶段 A：口径层下沉、网络层留 Swift）。
+//  （腾讯取数口径下沉，阶段 A：口径层下沉、网络层留 Swift）。
 //  golden 为 src/contract_golden.py 产出的 KlineTests/Fixtures/quote_parsing.json
-//  与 secid_mapping.json（样本为 2026-10-04 真实抓包常量内置，离线确定）；
-//  PC 侧 quote_parse.py 四 op 已对该 fixture 差分零差异（内联驱动验证）。
+//  （样本为 2026-10-04 真实抓包常量内置，离线确定）；
+//  PC 侧 quote_parse.py 各 op 已对该 fixture 差分零差异（内联驱动验证）。
+//
+//  （原 em_snapshot / secid 两个 op 的用例于 2026-10-16 随「单源腾讯化」删除。）
 //
 //  数值口径（对齐 QuoteParsingContractTests）：价格容差 1e-6；vol/amo 单值直传
 //  精确相等；date / tradeDate / outcome 精确相等；calibrate 的 expectedReject
@@ -107,53 +108,7 @@ final class PyBridgeQuoteParsingTests: XCTestCase {
         }
     }
 
-    // MARK: - ① 东财批量快照（f17开/f15高/f16低/f2收/f5量/f6额/f124→tradeDate）
-
-    func testPyBridgeEmSnapshotMatchesGolden() throws {
-        try ensureEngineReady()
-        let root = try loadFixture("quote_parsing")
-        guard let em = root["eastmoneySnapshot"] as? [String: Any],
-              let raw = em["raw"] as? String,
-              let golden = em["golden"] as? [[String: Any]] else {
-            XCTFail("fixture 缺 eastmoneySnapshot.raw/golden（fixture: quote_parsing.json）")
-            return
-        }
-        let result = try callQuoteParse(["op": "em_snapshot", "raw": raw])
-        XCTAssertEqual(result.count, golden.count,
-            "标的数：golden=\(golden.count) python=\(result.count)"
-            + "（fixture: quote_parsing.json → eastmoneySnapshot.golden）")
-        for g in golden {
-            guard let secid = g["secid"] as? String else {
-                XCTFail("golden 缺 secid（fixture: quote_parsing.json → eastmoneySnapshot.golden）")
-                continue
-            }
-            let key = "quote_parsing.json → eastmoneySnapshot.golden(secid=\(secid))"
-            guard let snap = result[secid] as? [String: Any] else {
-                XCTFail("输出缺 secid=\(secid)（fixture: \(key)）")
-                continue
-            }
-            let fields: [(String, Double?, Double?)] = [
-                ("open", num(g["open"]), num(snap["open"])),
-                ("high", num(g["high"]), num(snap["high"])),
-                ("low", num(g["low"]), num(snap["low"])),
-                ("close", num(g["close"]), num(snap["close"])),
-                ("vol", num(g["vol"]), num(snap["vol"])),
-                ("amo", num(g["amo"]), num(snap["amo"])),
-            ]
-            for (field, gv, pv) in fields {
-                guard let gvv = gv, let pvv = pv else {
-                    XCTFail("[em:\(secid)] \(field)：golden=\(String(describing: gv)) python=\(String(describing: pv))（fixture: \(key).\(field)）")
-                    continue
-                }
-                XCTAssertEqual(pvv, gvv, accuracy: 1e-6,
-                    "[em:\(secid)] \(field)：golden=\(gvv) python=\(pvv)（fixture: \(key).\(field)；容差 1e-6）")
-            }
-            XCTAssertEqual(intVal(snap["tradeDate"]) ?? -1, intVal(g["tradeDate"]) ?? -1,
-                "[em:\(secid)] tradeDate：golden=\(String(describing: g["tradeDate"])) python=\(String(describing: snap["tradeDate"]))（f124 按 UTC+8 换算；fixture: \(key).tradeDate）")
-        }
-    }
-
-    // MARK: - ② 腾讯 newfqkline（⚠️ 价格顺序 开-收-高-低）
+    // MARK: - ① 腾讯 newfqkline（⚠️ 价格顺序 开-收-高-低）
 
     func testPyBridgeTencentKlineMatchesGolden() throws {
         try ensureEngineReady()
@@ -199,7 +154,7 @@ final class PyBridgeQuoteParsingTests: XCTestCase {
         }
     }
 
-    // MARK: - ③ 自校准 calibrate（价格 → 量比吸附 → 额比哨兵 → 缺口行折算）
+    // MARK: - ② 自校准 calibrate（价格 → 量比吸附 → 额比哨兵 → 缺口行折算）
 
     func testPyBridgeCalibrateMatchesGolden() throws {
         try ensureEngineReady()
@@ -262,31 +217,6 @@ final class PyBridgeQuoteParsingTests: XCTestCase {
                 XCTAssertTrue(gotReason.hasPrefix(String(reason.prefix(4))),
                     "[\(name)] anomaly 原因前缀：golden=\(reason) python=\(gotReason)（fixture: \(key).golden.reason）")
             }
-        }
-    }
-
-    // MARK: - ④ file → secid 映射（PC 权威口径：特例表 → 前缀规则；扩展前缀 → null）
-
-    func testPyBridgeSecidMatchesGolden() throws {
-        try ensureEngineReady()
-        let root = try loadFixture("secid_mapping")
-        guard let entries = root["entries"] as? [[String: Any]] else {
-            XCTFail("fixture 缺 entries（fixture: secid_mapping.json）")
-            return
-        }
-        var files: [String] = []
-        for e in entries {
-            if let f = e["file"] as? String { files.append(f) }
-        }
-        XCTAssertFalse(files.isEmpty, "fixture entries 不应为空")
-        let result = try callQuoteParse(["op": "secid", "files": files])
-        for (i, e) in entries.enumerated() {
-            guard let file = e["file"] as? String else { continue }
-            let rule = (e["rule"] as? String) ?? "-"
-            let expected = e["secid"] as? String   // JSON null → nil（rule=override 的有意分工）
-            let got = result[file] as? String
-            XCTAssertEqual(got ?? "", expected ?? "",
-                "[secid] rule=\(rule) file=\(file)：golden=\(String(describing: expected)) python=\(String(describing: got))（fixture: secid_mapping.json → entries[\(i)]；null 属 PC/设备有意分工）")
         }
     }
 }

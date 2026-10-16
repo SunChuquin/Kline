@@ -72,7 +72,7 @@ struct LocalUpdateView: View {
     @ObservedObject private var liveStore = LiveDataStore.shared
     /// 主库 meta（覆盖率分母 / 主库最新交易日）
     @ObservedObject private var dbManager = DatabaseManager.shared
-    /// 清单标的自动更新状态（设备侧东财直连：并集数 / 各时刻结果 / 命中数）
+    /// 清单标的自动更新状态（设备侧腾讯直连：并集数 / 各时刻结果 / 命中数）
     @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
     /// 补缺口（设备侧直连腾讯历史K线，把主库最新日 → 今天的日线自行补齐）
     @ObservedObject private var gapBackfill = GapBackfill.shared
@@ -799,7 +799,7 @@ struct LocalUpdateView: View {
         }
     }
 
-    // MARK: - 清单标的自动更新（设备侧东财直连，与云端同步各自独立）
+    // MARK: - 清单标的自动更新（设备侧腾讯直连，与云端同步各自独立）
 
     /// 「清单标的自动更新」子区：状态 / 最近结果 / 清单并集 / 本次请求命中 / 当日交易日 /
     /// 四个时刻各自的最近结果 / 立即更新 / 语义说明。规格与「数据同步」卡片组完全一致
@@ -858,7 +858,7 @@ struct LocalUpdateView: View {
 
             Divider()
 
-            // ⑤ 当日最新交易日（取自东财 f124 的北京时间换算）
+            // ⑤ 当日最新交易日（取自源侧最新一根K线的日期）
             infoRow(title: "当日交易日", value: watchlistSync.lastTradeDate.map { String($0) } ?? "—")
         }
     }
@@ -1109,11 +1109,11 @@ struct LocalUpdateView: View {
         }
     }
 
-    /// 本次请求：命中 / 跳过 / 批次失败（尚未执行过 → —）
+    /// 本次请求：命中 / 跳过 / 取数失败（尚未执行过 → —）
     private var watchlistRequestText: String {
         guard watchlistSync.lastOutcome != nil else { return "—" }
         return "命中 \(watchlistSync.hitCount) · 跳过 \(watchlistSync.skippedCount)"
-            + " · 批次失败 \(watchlistSync.batchFailureCount)"
+            + " · 取数失败 \(watchlistSync.batchFailureCount)"
     }
 
     /// 时刻行标题：`11:00 · 盘中快照` / `15:05 · 收盘`（语义跟随时刻动态判定）
