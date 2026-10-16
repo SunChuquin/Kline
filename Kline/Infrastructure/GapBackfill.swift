@@ -263,14 +263,15 @@ final class GapBackfill: ObservableObject {
 
     /// 全市场补缺口（UI 按钮 / 17:30 档）
     func run() {
-        startGapFill(scopedFiles: nil, completion: nil)
+        startGapFill(resolveScope: nil, completion: nil)
     }
 
-    /// 清单范围补缺口（日更前置）：只补给定 file 集（自选/分组/置顶/预警/条件单/委托 并集），
-    /// 完成后回调（主线程）。与全市场共用同一执行体与状态机；若撞上正在运行的全市场补缺口，
-    /// 本次直接跳过但仍触发回调，不阻塞随后的日更。
-    func run(files: Set<String>, completion: @escaping () -> Void) {
-        startGapFill(scopedFiles: files, completion: completion)
+    /// 清单范围补缺口（日更前置）：只补「清单并集 file 集」，完成后回调（主线程）。
+    /// `resolveFiles` **延迟到主库就绪后**才被调用（冷启动窗口内 metaList 可能为空，
+    /// 提前快照会得到空集、漏掉全部标的——真机实证：16:27 启动时 meta=0 → 解析出 0 只）。
+    /// 与全市场共用同一执行体与状态机；若撞上正在运行的全市场补缺口，本次跳过但仍触发回调。
+    func run(resolveFiles: @escaping () -> Set<String>, completion: @escaping () -> Void) {
+        startGapFill(resolveScope: resolveFiles, completion: completion)
     }
 
     /// 完成回调（统一派发主线程；nil 无操作）——scoped 补缺口用它串起「先补缺口 → 再日更」
@@ -279,10 +280,9 @@ final class GapBackfill: ObservableObject {
         DispatchQueue.main.async(execute: completion)
     }
 
-    private func startGapFill(scopedFiles: Set<String>?, completion: (() -> Void)?) {
+    private func startGapFill(resolveScope: (() -> Set<String>)?, completion: (() -> Void)?) {
         // 入口无条件落日志：区分「按钮没点到」与「点到了但早退」（UI 测试排障用）
-        let scopeText = scopedFiles.map { "\($0.count)只" } ?? "全市场"
-        DebugLogger.shared.log("[GapBackfill] run() 入口 state=\(state) meta=\(DatabaseManager.shared.metaList.count) scope=\(scopeText)")
+        DebugLogger.shared.log("[GapBackfill] run() 入口 state=\(state) meta=\(DatabaseManager.shared.metaList.count) scope=\(resolveScope == nil ? "全市场" : "清单范围")")
         guard state != .running else {
             DebugLogger.shared.log("[GapBackfill] 已在运行，忽略本次触发")
             Self.fire(completion)
@@ -310,7 +310,7 @@ final class GapBackfill: ObservableObject {
                         // 先复位防重入门闩再续跑：等待分支置的 .running 会被入口 guard 拦截；
                         // 同步执行无 await，不会被并发点击插队
                         self.state = .idle
-                        self.startGapFill(scopedFiles: scopedFiles, completion: completion)
+                        self.startGapFill(resolveScope: resolveScope, completion: completion)
                     }
             } else if DatabaseManager.shared.isLoaded {
                 // 主库已打开但 meta 仍为空：真异常（meta 表无数据），照旧报失败
@@ -322,8 +322,15 @@ final class GapBackfill: ObservableObject {
             }
             return
         }
-        // 清单范围：从全量 metaList 里过滤出目标 file（其余照旧全市场）
-        let metas = scopedFiles.map { scope in all.filter { scope.contains($0.file) } } ?? all
+        // 清单范围：**此处（主库就绪后）**才解析 scope → 从全量 metaList 过滤目标 file；其余照旧全市场
+        let metas: [MetaItem]
+        if let resolveScope {
+            let scope = resolveScope()
+            DebugLogger.shared.log("[GapBackfill] 清单范围解析：\(scope.count) 只，主库 meta \(all.count) 只")
+            metas = all.filter { scope.contains($0.file) }
+        } else {
+            metas = all
+        }
         guard !metas.isEmpty else {
             // 清单范围内无任何标的（自选/分组全空）：无缺口，直接回调让日更照跑
             DebugLogger.shared.log("[GapBackfill] 清单范围内无标的，跳过补缺口")
@@ -343,7 +350,7 @@ final class GapBackfill: ObservableObject {
         verdictText = "—"
         detailLines = []
         DebugLogger.shared.log("[GapBackfill] 开始补缺口：标的 \(metas.count) 只"
-            + (scopedFiles == nil ? "（全市场）" : "（清单范围）")
+            + (resolveScope == nil ? "（全市场）" : "（清单范围）")
             + "，主库最新 \(mainLatest)，今日 \(today)")
 
         guard mainLatest > 0, today > mainLatest else {

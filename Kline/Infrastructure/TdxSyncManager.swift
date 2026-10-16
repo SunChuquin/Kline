@@ -274,9 +274,9 @@ final class TdxSyncManager: ObservableObject {
             DebugLogger.shared.log("[TdxSync] 17:30 档 → 触发全市场补缺口（含自动合并主库）")
             GapBackfill.shared.run()
         } else {
-            let files = WatchlistSymbols.unionFiles()
-            DebugLogger.shared.log("[TdxSync] \(slotText) 档 → 先补清单范围缺口（\(files.count) 只），再日更")
-            GapBackfill.shared.run(files: files) {
+            DebugLogger.shared.log("[TdxSync] \(slotText) 档 → 先补清单范围缺口，再日更")
+            // 清单 file 集**延迟解析**（冷启动窗口内 metaList 可能为空 → 提前快照会得到空集）
+            GapBackfill.shared.run(resolveFiles: { WatchlistSymbols.unionFiles() }) {
                 WatchlistSyncManager.shared.sync(reason: trigger, slot: slotText)
             }
         }
