@@ -50,15 +50,21 @@
 ## 分阶段实现
 
 ### 阶段 1：清单日更改腾讯源（保留功能，只换取数底层）
+**状态：已完成 + 真机部署（v1.0.2 (535)，2026-10-16）**
 - 新增 `Kline/Infrastructure/TencentQuoteFetcher.swift`：与 `EastmoneyQuoteFetcher` **同一结果契约**
-  （`bars[file]=当日一根` / `tradeDate` / `skipped` / `batchFailures`），走
-  `web.ifzq.gtimg.cn/appstock/app/newfqkline/get`；复用 `GapBackfill` 的 file→腾讯码映射与
-  **量纲吸附校准**（保证写增量库口径与主库一致；必要时把 `ProbeItem` 与吸附窗口常量抽成共享）。
-- `WatchlistSyncManager.swift:123-124`：`EastmoneyQuoteFetcher.shared.fetch` → 腾讯取数器；
-  编排 / 状态发布 / 面板 / 手动触发**一律不动**。
-- 契约测试与夹具改为腾讯样本；`EastmoneyQuoteFetcher.swift` 在替换完成后删除。
+  （`bars[file]=最新一根` / `tradeDate` / `skipped` / `batchFailures`），逐只复用
+  `GapBackfill.fetchGap`（腾讯 `newfqkline` 取数 + 锚点自校准）→ 与补缺口同一量纲口径。
+- `GapBackfill.fetchGap` 由 private 放宽为 internal 供复用（唯一改动）。
+- `WatchlistSyncManager`：新增「清单并集 ∩ 主库 meta」预过滤（不可映射 / 62#·102# 定制段 /
+  无 `last_date`）+ **逐只按 `meta.last_date` 取主库锚点行**（按日期分组一次 dbQueue 多查），
+  再交腾讯取数；编排 / 状态 / 面板 / 手动触发一律未动。
+- 东财残留同批清理：删 `EastmoneyQuoteFetcher.swift`、`quote_parse.py` 的 `em_snapshot`/`secid` op、
+  `universe_secids.txt`（两份）、`Fixtures/secid_mapping.json` 与两侧东财用例；
+  `contract_golden.py` 同步去掉 `eastmoneySnapshot`/`secid_mapping` 两份 fixture（重生成已提交）。
+- CI：build.yml 与 test.yml（golden 确定性 + KlineTests）**双绿**。
+- 待办验收：真机点一次「立即更新」确认无 `[EMQuote]`、日志出现 `[TencQuote]` 且清单当日 bar 入增量库。
 
-### 阶段 2：清理东财残留（低风险）
+### 阶段 2：清理东财残留（低风险）—— **已并入阶段 1 同批完成**
 - 删 `EastmoneyQuoteFetcher.swift`、`quote_parse.py` 的 `em_snapshot` / `secid` op、
   `universe_secids.txt`（Kline/Resources 与 src/data 两份）、东财相关用例与夹具。
 - `LiveDataStore` / `KlineApp` 里东财路径的注释改中性表述。
