@@ -53,6 +53,7 @@ enum PyTDXFormulaBridge {
         } ?? ["c": dummy, "h": dummy, "l": dummy, "o": dummy, "v": dummy, "a": dummy]
         let input: [String: Any] = [
             "__text__": 1,
+            "__bin__": 1,   // eval 大数组走 __bin_out__ 二进制回传（split 分支内部忽略该位）
             "mode": mode,
             "texts": texts.enumerated().map { ["id": $0.offset, "text": $0.element] },
         ]
@@ -75,13 +76,41 @@ enum PyTDXFormulaBridge {
                   results.count == texts.count else {
                 return texts.map { _ in .failure("text op 输出非法") }
             }
-            return results.enumerated().map { i, r in
+            // __bin_out__ 行（行内 "b" 键）在此内联回 "v" 数组，下游解码器无需感知二进制通道
+            let resolved = Self.inlineBinaryLines(results, arrays: bin.arrays)
+            return resolved.enumerated().map { i, r in
                 if (r["ok"] as? Bool) == true {
                     return .success(r)
                 }
                 return .failure((r["error"] as? String) ?? "(缺 error)")
             }
         }
+    }
+
+    /// bin 通道行内联：results[i].units[j].lines[k] 若带 "b" 键（__bin_out__ 段名），
+    /// 用 arrays 里对应数值序列替换为 "v" 数组——使下游解码与 JSON 通道完全同构。
+    static func inlineBinaryLines(_ results: [[String: Any]],
+                                  arrays: [String: [Double]]) -> [[String: Any]] {
+        guard !arrays.isEmpty else { return results }
+        var out: [[String: Any]] = []
+        out.reserveCapacity(results.count)
+        for var r in results {
+            if var units = r["units"] as? [[String: Any]] {
+                for ui in units.indices {
+                    guard var lines = units[ui]["lines"] as? [[String: Any]] else { continue }
+                    for li in lines.indices {
+                        if let key = lines[li]["b"] as? String, let vals = arrays[key] {
+                            lines[li]["v"] = vals
+                            lines[li].removeValue(forKey: "b")
+                        }
+                    }
+                    units[ui]["lines"] = lines
+                }
+                r["units"] = units
+            }
+            out.append(r)
+        }
+        return out
     }
 
     // MARK: - 四个公开入口（全部仅后台线程）
@@ -101,47 +130,63 @@ enum PyTDXFormulaBridge {
         }
     }
 
+    /// text op 结果 dict → 该请求全部单元的输出行（失败单元跳过；PyTDXWave 主图波次用）
+    static func decodeUnitLines(_ dict: [String: Any]) -> [TDXOutputLine] {
+        let units = (dict["units"] as? [[String: Any]]) ?? []
+        // 单元文本解析后恰为一个输出行单元；行内含依赖行时目标行在最后
+        return units.flatMap { u -> [TDXOutputLine] in
+            guard (u["ok"] as? Bool) == true,
+                  let raw = u["lines"] as? [[String: Any]] else { return [] }
+            return raw.compactMap(assembleTextLine)
+        }
+    }
+
+    /// text op 结果 dict → 单元数组（名称/文本/各行/错误；公式级调用方回填缓存用）
+    static func decodeUnitEvals(_ dict: [String: Any]) -> [PyUnitEval] {
+        let units = (dict["units"] as? [[String: Any]]) ?? []
+        return units.compactMap { u in
+            guard let name = u["name"] as? String, let text = u["text"] as? String else { return nil }
+            var lines: [TDXOutputLine] = []
+            if (u["ok"] as? Bool) == true,
+               let raw = u["lines"] as? [[String: Any]] {
+                lines = raw.compactMap(assembleTextLine)
+            }
+            return PyUnitEval(name: name, text: text, lines: lines,
+                              error: (u["error"] as? String))
+        }
+    }
+
+    /// text op 结果 dict → 整式输出行（任一单元失败 → 整式 .failure；成功 → 各单元目标行）
+    static func decodeTextLines(_ dict: [String: Any]) -> Result<[TDXOutputLine], String> {
+        let units = (dict["units"] as? [[String: Any]]) ?? []
+        var lines: [TDXOutputLine] = []
+        for u in units {
+            if let e = u["error"] as? String { return .failure(e) }
+            guard (u["ok"] as? Bool) == true,
+                  let raw = u["lines"] as? [[String: Any]] else {
+                return .failure("(单元缺输出)")
+            }
+            let unitLines = raw.compactMap(assembleTextLine)
+            guard let target = unitLines.last else { return .failure("(单元缺输出)") }
+            lines.append(target)
+        }
+        return .success(lines)
+    }
+
     /// 单元文本 → 该单元输出行（与 texts 下标对齐；单元失败/解析失败 → .failure）。
     /// PyTDXWave 主图波次用——单元已是拆分后的最小求值粒度。
     static func evaluateUnitTexts(texts: [String], data: [KlineItem],
                                   timeout: TimeInterval = 20) -> [Result<[TDXOutputLine], String>] {
-        runTextOp(texts: texts, mode: "eval", data: data, timeout: timeout).map { r in
-            switch r {
-            case .failure(let m): return .failure(m)
-            case .success(let dict):
-                let units = (dict["units"] as? [[String: Any]]) ?? []
-                // 单元文本解析后恰为一个输出行单元；行内含依赖行时目标行在最后
-                let lines = units.flatMap { u -> [TDXOutputLine] in
-                    guard (u["ok"] as? Bool) == true,
-                          let raw = u["lines"] as? [[String: Any]] else { return [] }
-                    return raw.compactMap(assembleTextLine)
-                }
-                return .success(lines)
-            }
-        }
+        runTextOp(texts: texts, mode: "eval", data: data, timeout: timeout)
+            .map { $0.map { decodeUnitLines($0) } }
     }
 
     /// 公式文本 → 单元数组（单元级错误隔离；与 formulas 下标对齐）。
     /// evaluateAsOf 用——单元成败决定主图曲线占位，与前台规则严格一致。
     static func evaluateFormulasWithUnits(formulas: [String], data: [KlineItem],
                                           timeout: TimeInterval = 20) -> [Result<[PyUnitEval], String>] {
-        runTextOp(texts: formulas, mode: "eval", data: data, timeout: timeout).map { r in
-            switch r {
-            case .failure(let m): return .failure(m)
-            case .success(let dict):
-                let units = (dict["units"] as? [[String: Any]]) ?? []
-                return .success(units.compactMap { u in
-                    guard let name = u["name"] as? String, let text = u["text"] as? String else { return nil }
-                    var lines: [TDXOutputLine] = []
-                    if (u["ok"] as? Bool) == true,
-                       let raw = u["lines"] as? [[String: Any]] {
-                        lines = raw.compactMap(assembleTextLine)
-                    }
-                    return PyUnitEval(name: name, text: text, lines: lines,
-                                      error: (u["error"] as? String))
-                })
-            }
-        }
+        runTextOp(texts: formulas, mode: "eval", data: data, timeout: timeout)
+            .map { $0.map { decodeUnitEvals($0) } }
     }
 
     /// 公式文本 → 全部输出行（整式语义；与 formulas 下标对齐）。
@@ -150,25 +195,16 @@ enum PyTDXFormulaBridge {
     /// 编辑器/筛选/回测/预取的统一入口。
     static func evaluateText(formulas: [String], data: [KlineItem],
                              timeout: TimeInterval = 20) -> [Result<[TDXOutputLine], String>] {
-        runTextOp(texts: formulas, mode: "eval", data: data, timeout: timeout).map { r in
-            switch r {
-            case .failure(let m): return .failure(m)
-            case .success(let dict):
-                let units = (dict["units"] as? [[String: Any]]) ?? []
-                var lines: [TDXOutputLine] = []
-                for u in units {
-                    if let e = u["error"] as? String { return .failure(e) }
-                    guard (u["ok"] as? Bool) == true,
-                          let raw = u["lines"] as? [[String: Any]] else {
-                        return .failure("(单元缺输出)")
-                    }
-                    let unitLines = raw.compactMap(assembleTextLine)
-                    guard let target = unitLines.last else { return .failure("(单元缺输出)") }
-                    lines.append(target)
-                }
-                return .success(lines)
-            }
-        }
+        runTextOp(texts: formulas, mode: "eval", data: data, timeout: timeout)
+            .map { $0.flatMap { decodeTextLines($0) } }
+    }
+
+    /// 波次混合求值：unit 文本与 formula 文本**合并为一次** text_eval 调用（bars 只零拷贝一份）。
+    /// 返回与 texts 顺序对齐的原始结果 dict；调用方按 kind 解码
+    /// （unit → decodeUnitLines；formula → decodeUnitEvals）。
+    static func evaluateWaveRaw(texts: [String], data: [KlineItem],
+                                timeout: TimeInterval = 20) -> [Result<[String: Any], String>] {
+        runTextOp(texts: texts, mode: "eval", data: data, timeout: timeout)
     }
 
     // MARK: - 文本行组装（样式下沉：opts 由 Python 随行返回）
@@ -255,12 +291,6 @@ final class PyTDXWave {
         let completion: ([PyTDXFormulaBridge.PyUnitEval]) -> Void
     }
 
-    /// 同区间请求分组（struct 替代带标签元组，规避老编译器泛型/元组解析歧义）
-    private struct Group {
-        let data: [KlineItem]
-        var slots: [Int]
-    }
-
     private var pending: [Pending] = []
     private var formulaPending: [FormulaPending] = []
     private var flushScheduled = false
@@ -291,56 +321,58 @@ final class PyTDXWave {
 
     private func flush() {
         flushScheduled = false
-        let batch = pending
+        let unitBatch = pending
         pending = []
         let formulaBatch = formulaPending
         formulaPending = []
-        guard !batch.isEmpty || !formulaBatch.isEmpty else { return }
-        // 按 barsKey 分组保持提交顺序；组内 slots 记录各请求在 batch 中的下标
+        guard !unitBatch.isEmpty || !formulaBatch.isEmpty else { return }
+        // 两条路按 barsKey 合并分组：同 key（同 data）内 unit 在前、formula 在后，
+        // 一起进**一次** text_eval 调用；结果按全局下标回填（防分组重排错位）
         var order: [String] = []
-        var groups: [String: Group] = [:]
-        for (i, p) in batch.enumerated() {
-            if groups[p.barsKey] == nil {
-                groups[p.barsKey] = Group(data: p.data, slots: [])
-                order.append(p.barsKey)
-            }
-            groups[p.barsKey]!.slots.append(i)
+        var dataByKey: [String: [KlineItem]] = [:]
+        var unitIdxByKey: [String: [Int]] = [:]
+        var formulaIdxByKey: [String: [Int]] = [:]
+        for (i, p) in unitBatch.enumerated() {
+            if dataByKey[p.barsKey] == nil { dataByKey[p.barsKey] = p.data; order.append(p.barsKey) }
+            unitIdxByKey[p.barsKey, default: []].append(i)
         }
-        var fOrder: [String] = []
-        var fGroups: [String: Group] = [:]
         for (i, p) in formulaBatch.enumerated() {
-            if fGroups[p.barsKey] == nil {
-                fGroups[p.barsKey] = Group(data: p.data, slots: [])
-                fOrder.append(p.barsKey)
-            }
-            fGroups[p.barsKey]!.slots.append(i)
+            if dataByKey[p.barsKey] == nil { dataByKey[p.barsKey] = p.data; order.append(p.barsKey) }
+            formulaIdxByKey[p.barsKey, default: []].append(i)
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            var results: [Result<[TDXOutputLine], String>] = []
-            results.reserveCapacity(batch.count)
+            var unitOut = [Result<[TDXOutputLine], String>](repeating: .failure("波次未求值"),
+                                                            count: unitBatch.count)
+            var formulaOut = [[PyTDXFormulaBridge.PyUnitEval]](repeating: [],
+                                                                count: formulaBatch.count)
             for key in order {
-                let g = groups[key]!
-                let texts = g.slots.map { batch[$0].unitText }
-                let rs = PyTDXFormulaBridge.evaluateUnitTexts(texts: texts, data: g.data)
-                for r in rs { results.append(r) }
-            }
-            var fResults: [[PyTDXFormulaBridge.PyUnitEval]] = []
-            fResults.reserveCapacity(formulaBatch.count)
-            for key in fOrder {
-                let g = fGroups[key]!
-                let fs = g.slots.map { formulaBatch[$0].formulaText }
-                let rs = PyTDXFormulaBridge.evaluateFormulasWithUnits(formulas: fs, data: g.data)
-                for r in rs {
-                    fResults.append((try? r.get()) ?? [])
+                let data = dataByKey[key]!
+                let uIdx = unitIdxByKey[key] ?? []
+                let fIdx = formulaIdxByKey[key] ?? []
+                let texts = uIdx.map { unitBatch[$0].unitText }
+                    + fIdx.map { formulaBatch[$0].formulaText }
+                let raw = PyTDXFormulaBridge.evaluateWaveRaw(texts: texts, data: data)
+                for (k, gi) in uIdx.enumerated() {
+                    if k < raw.count {
+                        unitOut[gi] = raw[k].map { PyTDXFormulaBridge.decodeUnitLines($0) }
+                    } else {
+                        unitOut[gi] = .failure("波次输出缺行")
+                    }
+                }
+                for (k, gi) in fIdx.enumerated() {
+                    let rk = uIdx.count + k
+                    if rk < raw.count {
+                        formulaOut[gi] = (try? raw[rk].map {
+                            PyTDXFormulaBridge.decodeUnitEvals($0)
+                        }.get()) ?? []
+                    } else {
+                        formulaOut[gi] = []
+                    }
                 }
             }
             DispatchQueue.main.async {
-                for (i, p) in batch.enumerated() where i < results.count {
-                    p.completion(results[i])
-                }
-                for (i, p) in formulaBatch.enumerated() where i < fResults.count {
-                    p.completion(fResults[i])
-                }
+                for (i, p) in unitBatch.enumerated() { p.completion(unitOut[i]) }
+                for (i, p) in formulaBatch.enumerated() { p.completion(formulaOut[i]) }
             }
         }
     }

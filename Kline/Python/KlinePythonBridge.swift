@@ -75,8 +75,8 @@ final class KlinePythonBridge {
         }
     }
 
-    /// R1 启动预热：ensureReady 成功后追加一次 tdx_eval 空转 bin 调用——
-    /// 预热 PyRun 编译缓存、json/ctypes/array 模块与 bin 通道本身，
+    /// R1 启动预热：ensureReady 成功后追加一次 tdx_eval 空转 text 调用——
+    /// 预热 PyRun 编译缓存、AST 解析/拆分、json/ctypes/array 模块与 text+bin 通道本身，
     /// 让首个用户触发的首帧求值直接进入稳态（无首调抖动：真机实测首调比稳态慢一个量级）。
     /// 全程后台异步，绝不阻塞主线程；失败静默（日志记录），不影响任何降级路径。
     /// 与 ensureOnce 共用会话门闩——先到者生效，另一方自动跳过。
@@ -91,20 +91,25 @@ final class KlinePythonBridge {
         }
     }
 
-    /// tdx_eval 空转预热（后台线程；结果丢弃，只求「下一次调用进入稳态」）
+    /// tdx_eval 空转预热（后台线程；结果丢弃，只求「下一次调用进入稳态」）。
+    /// 走**生产同款** text 通道（__text__ + texts + mode=eval + __bin__ 二进制回传）：
+    /// 一次性捂热 _tokenize/_Parser/_split_cached/_eval_unit_text 与 AST 缓存、json/ctypes 模块。
+    /// ⚠️ 勿改用旧的 __bin__+requests（run()）入口——那条路生产已无调用者，预热不到真实链路。
     private func preheatTDXEval() {
         let bars: [Double] = [10.0, 10.5, 11.0]
         let seriesBin: [String: [Double]] = ["c": bars, "h": bars, "l": bars,
                                               "o": bars, "v": bars, "a": bars]
         let input: [String: Any] = [
+            "__text__": 1,
             "__bin__": 1,
-            "requests": [["stmts": [["n": "X", "o": 1, "e": ["t": "var", "n": "C"]]]]],
+            "mode": "eval",
+            "texts": [["id": 0, "text": "X:C;\nY:MA(C,5);"]],
         ]
         let t0 = CFAbsoluteTimeGetCurrent()
         if case .success = blockingCallBin(script: "tdx_eval", input: input,
                                            seriesBin: seriesBin, seriesInto: "bars", timeout: 10) {
             DebugLogger.shared.log(String(
-                format: "[PyBridge] tdx_eval 预热完成（%.0fms，编译缓存+bin 通道就绪）",
+                format: "[PyBridge] tdx_eval 预热完成（%.0fms，text 通道+编译/AST 缓存就绪）",
                 (CFAbsoluteTimeGetCurrent() - t0) * 1000))
         }
     }

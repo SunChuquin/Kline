@@ -564,12 +564,11 @@ def audit_bars(db_bars, swift_bars):
     return audit
 
 
-def run(kline_input):
-    """桥接入口：入参 {bars, requests[, db]} → {ok, results[, audit]}。
-    requests 与 results 按下标对齐；db 存在时附带读库对拍 audit（不影响求值输入）"""
-    bars = kline_input["bars"]
+def _make_builtins(bars):
+    """K 线基础序列 → 求值内置变量表。每调用构造一次，供本批所有单元共享
+    （避免 per-unit 重复 float 化整段序列——A8 上为热路径主要开销之一）。"""
     closes = [float(x) for x in bars["c"]]
-    builtins = {
+    return {
         "C": closes, "CLOSE": closes,
         "H": [float(x) for x in bars["h"]], "HIGH": [float(x) for x in bars["h"]],
         "L": [float(x) for x in bars["l"]], "LOW": [float(x) for x in bars["l"]],
@@ -577,6 +576,13 @@ def run(kline_input):
         "V": [float(x) for x in bars["v"]], "VOL": [float(x) for x in bars["v"]],
         "AMOUNT": [float(x) for x in bars["a"]],
     }
+
+
+def run(kline_input):
+    """桥接入口：入参 {bars, requests[, db]} → {ok, results[, audit]}。
+    requests 与 results 按下标对齐；db 存在时附带读库对拍 audit（不影响求值输入）"""
+    bars = kline_input["bars"]
+    builtins = _make_builtins(bars)
     audit = None
     db_cfg = kline_input.get("db")
     if db_cfg:
@@ -1037,18 +1043,10 @@ def _split_cached(text):
 
 # ---------- text op 分发 ----------
 
-def _eval_unit_text(unit_stmts, bars):
-    """单元语句序列求值 → 输出行（复用 run 的逐语句求值骨架；单元级错误隔离）。
-    每行附带 opts（目标行样式选项，COLORxxx/LINETHICK 等下沉——Swift 侧据此着色）。"""
-    closes = [float(x) for x in bars["c"]]
-    builtins = {
-        "C": closes, "CLOSE": closes,
-        "H": [float(x) for x in bars["h"]], "HIGH": [float(x) for x in bars["h"]],
-        "L": [float(x) for x in bars["l"]], "LOW": [float(x) for x in bars["l"]],
-        "O": [float(x) for x in bars["o"]], "OPEN": [float(x) for x in bars["o"]],
-        "V": [float(x) for x in bars["v"]], "VOL": [float(x) for x in bars["v"]],
-        "AMOUNT": [float(x) for x in bars["a"]],
-    }
+def _eval_unit_text(unit_stmts, builtins, bin_out=None, ridx=0, uidx=0):
+    """单元语句序列求值 → 输出行（单元级错误隔离）。
+    builtins 由 _run_text 每调用构造一次传入（本批所有单元共享，不再 per-unit 重建）。
+    bin_out 非 None 时大数组走 __bin_out__（行内只留键 "b"），否则 JSON 内联 "v"。"""
     vars_map = {}
     lines = []
     for st in unit_stmts:
@@ -1056,7 +1054,13 @@ def _eval_unit_text(unit_stmts, bars):
         value = _eval_expr(st["e"], vars_map, builtins, sar_box)
         vars_map[st["n"].upper()] = value
         if st.get("o"):
-            line = {"n": st["n"], "v": _finite_to_null(value), "opts": st.get("opts", [])}
+            if bin_out is not None:
+                key = "r%du%dl%d" % (ridx, uidx, len(lines))
+                bin_out[key] = [_NAN if isinstance(x, float) and not math.isfinite(x)
+                                else float(x) for x in value]
+                line = {"n": st["n"], "b": key, "opts": st.get("opts", [])}
+            else:
+                line = {"n": st["n"], "v": _finite_to_null(value), "opts": st.get("opts", [])}
             if st["e"]["t"] == "call" and st["e"]["fn"].upper() == "SAR" and sar_box[0] is not None:
                 line["d"] = [1 if d else 0 for d in sar_box[0]]
             lines.append(line)
@@ -1067,9 +1071,13 @@ def _run_text(kline_input):
     """text op 入口：kline_input["texts"] = [{"id": i, "text": s}]；kline_input["mode"] = "split"|"eval"
     split → results[i] = {id, ok, units:[{name, text}]}
     eval  → results[i] = {id, ok, units:[{name, text, ok, lines, error?}]}（单元级错误隔离）
-    bars 走零拷贝（kline_input["bars"] 由包装脚本注入 ctypes 视图）"""
+    bars 走零拷贝（kline_input["bars"] 由包装脚本注入 ctypes 视图）。
+    __bin__ 置位时 eval 的大数组走 __bin_out__ 二进制回传（省 JSON 文本化）；split 结构不变。"""
     bars = kline_input["bars"]
     mode = kline_input.get("mode", "eval")
+    use_bin = bool(kline_input.get("__bin__")) and mode != "split"
+    builtins = _make_builtins(bars) if mode != "split" else None
+    bin_out = {} if use_bin else None
     results = []
     for req in kline_input["texts"]:
         idx = req["id"]
@@ -1080,9 +1088,9 @@ def _run_text(kline_input):
                 results.append({"id": idx, "ok": True, "units": units})
             else:
                 out_units = []
-                for u in _split_cached(text):
+                for ui, u in enumerate(_split_cached(text)):
                     try:
-                        lines = _eval_unit_text(u["stmts"], bars)
+                        lines = _eval_unit_text(u["stmts"], builtins, bin_out, idx, ui)
                         out_units.append({"name": u["name"], "text": u["text"],
                                           "ok": True, "lines": lines})
                     except Exception as exc:  # 单元级错误隔离（镜像 Swift 逐单元 try?）
@@ -1093,7 +1101,10 @@ def _run_text(kline_input):
         except Exception as exc:  # 整公式解析失败
             results.append({"id": idx, "ok": False, "units": [],
                             "error": str(exc)})
-    return {"ok": True, "results": results}
+    out = {"ok": True, "results": results}
+    if bin_out is not None:
+        out["__bin_out__"] = bin_out
+    return out
 
 
 try:
