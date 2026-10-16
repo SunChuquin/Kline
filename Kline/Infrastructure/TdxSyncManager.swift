@@ -263,15 +263,22 @@ final class TdxSyncManager: ObservableObject {
         let slotKey = dayKey + " " + String(slot)
         guard !ranSlots.contains(slotKey) else { return }
         ranSlots.insert(slotKey)
-        DebugLogger.shared.log("[TdxSync] \(trigger)：已到点 \(Self.slotText(slot))，触发同步")
+        let slotText = Self.slotText(slot)
+        DebugLogger.shared.log("[TdxSync] \(trigger)：已到点 \(slotText)，触发同步")
         beginSync(reason: trigger)
-        // 17:30 档：清单盘中快照已无意义（完整K线 15:05 档已覆盖）→ 改为「补缺口」
-        // （拉主库最新日 → 今天的日线并自动合并入主库）；其余档位照旧触发清单直连更新
-        if Self.slotText(slot) == "17:30" {
-            DebugLogger.shared.log("[TdxSync] 17:30 档 → 触发补缺口（含自动合并主库）")
+        // 17:30 档：清单盘中快照已无意义（完整K线 15:05 档已覆盖）→ 改为全市场补缺口
+        // （拉主库最新日 → 今天的日线并自动合并入主库）；
+        // 其余档位【2026-10-16 修正】：**先补「清单并集」范围缺口，再写当日 bar**——
+        // 否则被跳过的中间交易日永远补不上（真机实证：自选股 13 号直接跨到 16 号，缺 14/15）。
+        if slotText == "17:30" {
+            DebugLogger.shared.log("[TdxSync] 17:30 档 → 触发全市场补缺口（含自动合并主库）")
             GapBackfill.shared.run()
         } else {
-            WatchlistSyncManager.shared.sync(reason: trigger, slot: Self.slotText(slot))
+            let files = WatchlistSymbols.unionFiles()
+            DebugLogger.shared.log("[TdxSync] \(slotText) 档 → 先补清单范围缺口（\(files.count) 只），再日更")
+            GapBackfill.shared.run(files: files) {
+                WatchlistSyncManager.shared.sync(reason: trigger, slot: slotText)
+            }
         }
     }
 

@@ -261,16 +261,36 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 入口（按钮调用，主线程）
 
+    /// 全市场补缺口（UI 按钮 / 17:30 档）
     func run() {
+        startGapFill(scopedFiles: nil, completion: nil)
+    }
+
+    /// 清单范围补缺口（日更前置）：只补给定 file 集（自选/分组/置顶/预警/条件单/委托 并集），
+    /// 完成后回调（主线程）。与全市场共用同一执行体与状态机；若撞上正在运行的全市场补缺口，
+    /// 本次直接跳过但仍触发回调，不阻塞随后的日更。
+    func run(files: Set<String>, completion: @escaping () -> Void) {
+        startGapFill(scopedFiles: files, completion: completion)
+    }
+
+    /// 完成回调（统一派发主线程；nil 无操作）——scoped 补缺口用它串起「先补缺口 → 再日更」
+    private static func fire(_ completion: (() -> Void)?) {
+        guard let completion else { return }
+        DispatchQueue.main.async(execute: completion)
+    }
+
+    private func startGapFill(scopedFiles: Set<String>?, completion: (() -> Void)?) {
         // 入口无条件落日志：区分「按钮没点到」与「点到了但早退」（UI 测试排障用）
-        DebugLogger.shared.log("[GapBackfill] run() 入口 state=\(state) meta=\(DatabaseManager.shared.metaList.count)")
+        let scopeText = scopedFiles.map { "\($0.count)只" } ?? "全市场"
+        DebugLogger.shared.log("[GapBackfill] run() 入口 state=\(state) meta=\(DatabaseManager.shared.metaList.count) scope=\(scopeText)")
         guard state != .running else {
-            DebugLogger.shared.log("[GapBackfill] 已在运行，忽略本次点击")
+            DebugLogger.shared.log("[GapBackfill] 已在运行，忽略本次触发")
+            Self.fire(completion)
             return
         }
         // @Published metaList 只能在主线程读
-        let metas = DatabaseManager.shared.metaList
-        guard !metas.isEmpty else {
+        let all = DatabaseManager.shared.metaList
+        guard !all.isEmpty else {
             // 主库还在加载（冷启动窗口 ~1.5-2s）：不报失败，等 isLoaded 就绪后自动续跑。
             // （TdxSync 17:30 档冷启动补跑 / 用户手点都会撞上这个窗口）
             if !DatabaseManager.shared.isLoaded, readyCancellable == nil {
@@ -287,10 +307,10 @@ final class GapBackfill: ObservableObject {
                         guard let self, self.readyCancellable != nil else { return }
                         self.readyCancellable = nil
                         DebugLogger.shared.log("[GapBackfill] 主库就绪，自动续跑补缺口")
-                        // 先复位防重入门闩再续跑：等待分支置的 .running 会被 run() 入口的
-                        // guard 拦截；同步执行无 await，不会被并发点击插队
+                        // 先复位防重入门闩再续跑：等待分支置的 .running 会被入口 guard 拦截；
+                        // 同步执行无 await，不会被并发点击插队
                         self.state = .idle
-                        self.run()
+                        self.startGapFill(scopedFiles: scopedFiles, completion: completion)
                     }
             } else if DatabaseManager.shared.isLoaded {
                 // 主库已打开但 meta 仍为空：真异常（meta 表无数据），照旧报失败
@@ -298,7 +318,19 @@ final class GapBackfill: ObservableObject {
                 state = .failed
                 statusText = "主库 metaList 为空（meta 表无数据）"
                 verdictText = "失败：主库 metaList 为空"
+                Self.fire(completion)
             }
+            return
+        }
+        // 清单范围：从全量 metaList 里过滤出目标 file（其余照旧全市场）
+        let metas = scopedFiles.map { scope in all.filter { scope.contains($0.file) } } ?? all
+        guard !metas.isEmpty else {
+            // 清单范围内无任何标的（自选/分组全空）：无缺口，直接回调让日更照跑
+            DebugLogger.shared.log("[GapBackfill] 清单范围内无标的，跳过补缺口")
+            state = .ok
+            statusText = "无缺口"
+            verdictText = "清单范围内无标的，无需补缺口"
+            Self.fire(completion)
             return
         }
         let mainLatest = metas.compactMap { $0.lastDate }.max() ?? 0
@@ -310,40 +342,47 @@ final class GapBackfill: ObservableObject {
         fetchText = "—"
         verdictText = "—"
         detailLines = []
-        DebugLogger.shared.log("[GapBackfill] 开始补缺口：清单 \(metas.count) 只，主库最新 \(mainLatest)，今日 \(today)")
+        DebugLogger.shared.log("[GapBackfill] 开始补缺口：标的 \(metas.count) 只"
+            + (scopedFiles == nil ? "（全市场）" : "（清单范围）")
+            + "，主库最新 \(mainLatest)，今日 \(today)")
 
         guard mainLatest > 0, today > mainLatest else {
             state = .ok
             statusText = "无缺口"
             verdictText = "无缺口：主库 \(mainLatest) 已不早于今日 \(today)"
             DebugLogger.shared.log("[GapBackfill] 主库已是最新（\(mainLatest) ≥ \(today)），无需补")
+            Self.fire(completion)
             return
         }
 
-        // ⓪ 单只探测：源侧最新交易日 ≤ 主库最新 → 无缺口早退（节假日/已补齐时省 3312 次请求）。
-        //    探测失败（网络抖动）→ 照旧跑全市场（fail-open，不因探测阻塞正常补缺口）
-        probeUpToDate(mainLatest: mainLatest, today: today) {
+        // ⓪ 单只探测：源侧最新交易日 ≤ 主库最新 → 无缺口早退（节假日/已补齐时省数千次请求）。
+        //    探测失败（网络抖动）→ 照旧继续（fail-open，不因探测阻塞正常补缺口）
+        probeUpToDate(mainLatest: mainLatest, today: today, finish: { Self.fire(completion) }) {
             var metaIdByFile: [String: Int] = [:]
             for m in metas { metaIdByFile[m.file] = m.id }
-            // 基准行：主库 mainLatest 当天的 OHLCV/AMO（一次 SQL 取全市场）
+            // 基准行：主库 mainLatest 当天的 OHLCV/AMO（一次 SQL 取对应标的）
             DatabaseManager.shared.performOnDBQueue({ db in
                 DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
                                               fromDate: mainLatest, toDate: mainLatest)
             }, completion: { [weak self] baseline in
-                guard let self = self else { return }
+                guard let self = self else { Self.fire(completion); return }
                 self.queue.async {
-                    self.perform(metas: metas, baseline: baseline, mainLatest: mainLatest, today: today)
+                    self.perform(metas: metas, baseline: baseline, mainLatest: mainLatest,
+                                 today: today, completion: completion)
                 }
             })
         }
     }
 
     /// 无缺口早退探测：拉一只活跃标的（SH#600000）最近几根，源侧最新日 ≤ 主库最新 → 判定全市场无缺口。
-    /// 回调（proceed）在主线程。探针失败 → 照常继续（宁可多跑，不因探测失败阻塞补缺口）。
-    private func probeUpToDate(mainLatest: Int, today: Int, proceed: @escaping () -> Void) {
+    /// 回调均在主线程：无缺口早退 → finish()（不再进入取数流程）；有缺口/探测失败 → proceed()。
+    private func probeUpToDate(mainLatest: Int, today: Int, finish: @escaping () -> Void,
+                               proceed: @escaping () -> Void) {
         queue.async { [weak self] in
-            guard let self = self else { return }
-            guard let item = ProbeItem(file: "SH#600000", type: "股票") else { proceed(); return }
+            guard let self = self else { DispatchQueue.main.async(execute: finish); return }
+            guard let item = ProbeItem(file: "SH#600000", type: "股票") else {
+                DispatchQueue.main.async(execute: proceed); return
+            }
             let (fetched, why) = self.fetchSourceBars(item: item, from: mainLatest, to: today,
                                                       count: 10, session: self.sessions[0])
             if let rows = fetched, let srcLatest = rows.last?.date {
@@ -357,11 +396,12 @@ final class GapBackfill: ObservableObject {
                         self.verdictText = "无缺口：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest)（非交易日或已补齐）"
                         self.detailLines = ["探测 \(item.marketCode)：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest)"]
                     }
+                    DispatchQueue.main.async(execute: finish)
                     return
                 }
-                DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) > 主库 \(mainLatest) → 有缺口，跑全市场")
+                DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) > 主库 \(mainLatest) → 有缺口，开始补")
             } else {
-                DebugLogger.shared.log("[GapBackfill] 探测失败（\(why)）→ 照旧跑全市场")
+                DebugLogger.shared.log("[GapBackfill] 探测失败（\(why)）→ 照旧继续补缺口")
             }
             DispatchQueue.main.async(execute: proceed)
         }
@@ -370,7 +410,7 @@ final class GapBackfill: ObservableObject {
     // MARK: - 主流程（只在 queue 上）
 
     private func perform(metas: [MetaItem], baseline: [String: [KlineItem]],
-                         mainLatest: Int, today: Int) {
+                         mainLatest: Int, today: Int, completion: (() -> Void)? = nil) {
         let t0 = Date()
 
         // ① 筛出「需要补 + 可映射 + 有基准行」的作业
@@ -407,7 +447,7 @@ final class GapBackfill: ObservableObject {
 
         guard total > 0 else {
             finishEmpty(mainLatest: mainLatest, today: today, unmappable: unmappable,
-                        noBaseline: noBaseline, noSource: noSource)
+                        noBaseline: noBaseline, noSource: noSource, completion: completion)
             return
         }
 
@@ -527,6 +567,7 @@ final class GapBackfill: ObservableObject {
             statusText = "无缺口行可补"
             verdictText = "无缺口：待补 \(total) 只均无新行（最新 \(upToDate) · 停牌 \(suspended)）"
             DebugLogger.shared.log("[GapBackfill] 无缺口行可写，结束")
+            Self.fire(completion)
             return
         }
 
@@ -539,6 +580,7 @@ final class GapBackfill: ObservableObject {
                 self.statusText = "写入增量库失败"
                 self.verdictText = "失败：写入增量库 \(merge.message)"
                 DebugLogger.shared.log("[GapBackfill] 写入增量库失败 \(merge.message)")
+                Self.fire(completion)
                 return
             }
             DebugLogger.shared.log("[GapBackfill] 写入增量库成功 \(merge.message)")
@@ -558,6 +600,7 @@ final class GapBackfill: ObservableObject {
                     self.verdictText = "失败：周期聚合 \(period.message)"
                     self.detailLines = lines
                     LiveDataStore.shared.reloadAsync { _ in }
+                    Self.fire(completion)
                     return
                 }
                 // ⑦ 自动合并入主库：五张表（日/周/月/季/年）+ meta.last_date，单事务 UPSERT；
@@ -579,6 +622,7 @@ final class GapBackfill: ObservableObject {
                         + " · " + (merged.ok ? "已合并主库" : "合并主库失败：\(merged.message)")
                         + " · 覆盖 \(dateSpan)"
                     self.detailLines = lines
+                    Self.fire(completion)
                 }
             }
         }
@@ -621,12 +665,14 @@ final class GapBackfill: ObservableObject {
 
     /// 没有任何可补作业（全部已最新 / 不可映射 / 无基准行 / 腾讯无源段）
     private func finishEmpty(mainLatest: Int, today: Int, unmappable: Int,
-                             noBaseline: Int, noSource: Int) {
+                             noBaseline: Int, noSource: Int,
+                             completion: (() -> Void)? = nil) {
         state = .ok
         statusText = "无缺口行可补"
         verdictText = "无缺口：主库 \(mainLatest) → 今日 \(today) 无可补标的"
             + "（不可映射 \(unmappable) · 基准行缺 \(noBaseline) · 腾讯无源段 \(noSource)）"
         DebugLogger.shared.log("[GapBackfill] 无可补作业，结束")
+        Self.fire(completion)
     }
 
     // MARK: - 基准缺失名单（按需查询，不发网络请求）
