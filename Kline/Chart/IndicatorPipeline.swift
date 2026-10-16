@@ -45,6 +45,10 @@ final class IndicatorComputationStore: ObservableObject {
     var engineSubGens: [ObjectIdentifier: Int] = [:]
     /// 主图波次合并提交标记：同波次 N 个单元完成回调只触发一次组装+提交
     var mainCommitScheduled = false
+    /// 已完成全量预取时所依据的**指标配置指纹**（nil = 尚未跑完）：
+    /// 联动态（metaId=nil）无 ChartCacheStore 可依，靠它保证每格 (标的,周期) 同一配置只跑一次全量
+    /// （否则每次手势/出现都重跑）；配置一变指纹即不一致 → 自动允许重跑一次。单图下与缓存短路互为双保险。
+    var prefetchDoneFingerprint: String? = nil
 
     // MARK: let（init 一次定，此后只读）
     /// 全数据集预计算的跳空缺口（只在数据加载时计算一次，避免每次重绘全量扫描）
@@ -620,7 +624,19 @@ extension KlineChartView {
             self.assembleMainCurvesFromCache(into: &curves, entries: entries)
             DebugLogger.shared.log("[PyTDXBridge] 诊断 主图commit 组装=\(curves.count)行")
             self.commitMainCurves(curves)
+            self.kickPrefetchAfterWarmup()
         }
+    }
+
+    /// 前台预热波次落盘后再启动后台全量预取（仅联动态 metaId=nil 需要）：
+    /// 保证顺序「先预热（可见+预热近似，快速上屏）→ 再全量（精确历史曲线）」，
+    /// 且让预热波次的引擎调用先入队，避免全量抢跑把队列占满（用户实证"多图都是全量"）。
+    /// 去重交给 startPrefetch 的配置指纹守卫（同一配置全量一次）；预热波次落盘是
+    /// 「引擎已空出来」的可靠时点，比定时器稳，且天然对该格的所有并发提交幂等。
+    private func kickPrefetchAfterWarmup() {
+        guard metaId == nil else { return }
+        // 由 startPrefetch 内部指纹守卫兜底：同一配置已全量 → 直接返回；换指标后指纹变 → 再跑一次
+        startPrefetch()
     }
 
     /// 引擎未就绪：ensureOnce 后每 0.25s 轮询，就绪即重试（上限 10s）。
@@ -873,14 +889,11 @@ extension KlineChartView {
     /// 增量状态机与 Swift 分块降级已删除（2026-10-15 用户决策）：图表指标计算唯一路径 = Python 引擎
     func startPrefetch() {
         guard !sortedData.isEmpty, !mainFullscreen, computation.prefetchToken == nil else { return }
-        // ⚠️【2026-10-16 修正】联动态（多图 LinkedKlineTile，metaId=nil）**不做**后台全量预取：
-        //   ① metaId=nil 时本函数既没有「已完成」短路、也没有 ChartCacheStore 可写 →
-        //      每个 tile 每次触发（onAppear / 切周期 / 切标的 / 手势 / .id 重建）都跑一次 [0..count-1] 全量；
-        //   ② 全量完成后又把 computation.bgCoverageEnd 顶到满值 → 之后每次 recompute 都走全量区间，
-        //      前台「可见+预热」近似被彻底报废（用户实证："多图都是全量，只有单图有预热"）；
-        //   ③ N 块 tile 并发全量还挤占共享引擎队列，把前台预热波次顶到后面 → 各格迟迟不出图。
-        //   故联动态只保留前台「可见+预热」（随滚动/缩放按需扩展覆盖），全量正确性留给单图模式缓存。
-        guard metaId != nil else { return }
+        // 本实例（= 一个 (标的,周期)）已按**当前配置**跑完一次全量 → 直接复用：
+        // 联动态（metaId=nil）没有 ChartCacheStore 短路，靠这条内存指纹保证「同一配置只跑一次全量」；
+        // 配置变化后指纹不一致 → 放行重跑一次。单图模式下与下面缓存短路互为双保险。
+        let fingerprint = Self.currentConfigFingerprint(period: period)
+        if computation.prefetchDoneFingerprint == fingerprint { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
         // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
         // 防止「完成标记」与「实际覆盖/配置」不一致时进度条卡住或指标不更新
@@ -897,7 +910,6 @@ extension KlineChartView {
         computation.prefetchToken = token
         // 单次全量调用：引擎就绪 → 一次 bin 调用算完整段 [0..count-1]
         let dataFull = sortedData
-        let fingerprint = Self.currentConfigFingerprint(period: period)
         guard let req = Self.makeFullRequest(data: dataFull, period: period) else {
             computation.prefetchToken = nil
             if let metaId = metaId {
@@ -927,6 +939,7 @@ extension KlineChartView {
             guard Self.currentConfigFingerprint(period: self.period) == fingerprint else { return }
             self.commitPrefetch(req, r, updateCurves: true)
             self.computation.bgCoverageEnd = dataFull.count - 1
+            self.computation.prefetchDoneFingerprint = fingerprint
             if let metaId = self.metaId {
                 let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
                 entry.bgCoverageEnd = max(entry.bgCoverageEnd, dataFull.count - 1)

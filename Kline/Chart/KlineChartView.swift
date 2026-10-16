@@ -751,9 +751,11 @@ struct KlineChartView: View {
             // 普通单图（有缓存可用）：先走不强制路径，命中缓存恢复/短可见窗口近似后由后台补齐。
             refreshCurves(force: isolatedSubs)
             // 先显示当前可见窗口（不卡），随后后台全量预计算更久远历史指标。
-            // 联动态（多图 LinkedKlineTile，metaId=nil）由 startPrefetch 内部守卫跳过全量预取
-            // （无 ChartCacheStore 可写、且会把前台「可见+预热」顶成全量），详见 startPrefetch 注释。
-            startPrefetch()
+            // 单图：此处立即发起（有 (标的,周期) 缓存短路，一次性）。
+            // 联动态（多图 tile，metaId=nil）：**不**在此立即发起——立即发起会抢在预热波次之前占住
+            // 共享引擎队列，把前台近似顶成全量（用户实证"多图都是全量"）；改为预热波次落盘后触发，
+            // 见 kickPrefetchAfterWarmup()（保证「先预热 → 再全量」的顺序与每格只跑一次）。
+            if metaId != nil { startPrefetch() }
             notifyHasCursor()
         }
         .onChange(of: visibleCount) { newValue in

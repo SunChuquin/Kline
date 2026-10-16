@@ -400,10 +400,7 @@ extension KlineChartView {
 
     /// 是否显示指标覆盖进度条：后台正确计算尚未覆盖全部历史（非放大模式），算完（bgCoverageEnd 到末尾）后消失
     var showCoverageBar: Bool {
-        // 联动态（多图 tile，metaId=nil）无后台全量预取推进：bgCoverageEnd 恒为初值 0，
-        // 若不排除会一直显示"覆盖 0%"进度条 → 排除（联动态只走前台可见+预热）。
-        !mainFullscreen && !isLinkedTile && !sortedData.isEmpty
-            && computation.bgCoverageEnd < sortedData.count - 1
+        !mainFullscreen && !sortedData.isEmpty && computation.bgCoverageEnd < sortedData.count - 1
     }
 
     /// 时间轴栏中间的指标覆盖进度条：高亮段表示后台已正确计算的覆盖范围 [0...bgCoverageEnd]
