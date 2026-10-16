@@ -221,18 +221,16 @@ final class WatchlistSyncManager: ObservableObject {
             + " → 跳过 \(allSkips.count) 只（\(skipSample)）→ 取数失败 \(result.batchFailures.count)"
             + " → 交易日 \(result.tradeDate)")
 
-        // 无命中 → 失败 / 跳过并按原因收尾（不写库）
+        // 无命中 → 不写库；**有**取数失败才算「失败」，否则就是「本来就没有新K线」→ 跳过。
+        // （对照 GapBackfill：主库已不早于今日时同样记「无缺口」而非失败。典型场景：17:30 全市场
+        //  补缺口已把今日 bar 合并入主库，此后盘中/手动再点「立即更新」→ 源侧确实没有更新的行。）
         guard !result.bars.isEmpty else {
-            let text: String
-            if !result.batchFailures.isEmpty {
-                text = "失败：全部取数失败（\(result.batchFailures.count) 只）"
-            } else if result.tradeDate <= 0 {
-                text = "失败：交易日缺失（无可校准的新K线）"
-            } else {
-                text = "跳过：无命中标的（\(allSkips.count) 只被跳过）"
-            }
+            let hasFailure = !result.batchFailures.isEmpty
+            let text = hasFailure
+                ? "失败：取数失败 \(result.batchFailures.count) 只（命中 0）"
+                : "跳过：无新K线（\(allSkips.count) 只被跳过）"
             DebugLogger.shared.log("[WatchlistSync] \(reason)：\(text)")
-            finish(outcome: .failed, text: text, reason: reason, slot: slot,
+            finish(outcome: hasFailure ? .failed : .skipped, text: text, reason: reason, slot: slot,
                    tradeDate: result.tradeDate > 0 ? result.tradeDate : nil,
                    hit: 0, skipped: allSkips.count, batchFailures: result.batchFailures.count)
             return

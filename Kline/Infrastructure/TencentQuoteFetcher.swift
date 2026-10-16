@@ -196,16 +196,20 @@ final class TencentQuoteFetcher {
         case failure(QuoteSourceFailure)
     }
 
-    /// 单只：锚点日 ≥ 今日 → 已最新；否则复用 `GapBackfill.fetchGap`（取数 + 自校准）取最新一根。
+    /// 单只：复用 `GapBackfill.fetchGap`（取数 + 自校准）取最新一根。
+    /// - Note: **刻意不用「主库锚点日已 ≥ 今日就早退」**——那种早退只凭本地主库 `last_date` 推断，
+    ///   一旦 17:30 全市场补缺口已把今日 bar 合并入主库，手动/盘中再点「立即更新」就会 0 请求早退，
+    ///   既拿不到可验证的取数日志，也容易被上层误判成失败。改为**照发一次请求**，由自校准给出
+    ///   `upToDate`（源侧无 `date > 锚点日` 的行）——请求成功即证明腾讯可达且源侧最新日已对齐。
     private func fetchOne(job: GapJob, today: Int, session: URLSession) -> OneOutcome {
         let file = job.meta.file
         let anchor = job.base.date
         guard anchor > 0 else {
             return .skip(QuoteSkip(file: file, reason: .noBaseline, detail: "主库锚点日无效"))
         }
-        guard today > anchor else {
+        guard anchor <= today else {
             return .skip(QuoteSkip(file: file, reason: .upToDate,
-                                   detail: "锚点日 \(anchor) 已不早于今日 \(today)"))
+                                   detail: "锚点日 \(anchor) 晚于今日 \(today)（设备时钟或主库异常）"))
         }
         let outcome = GapBackfill.shared.fetchGap(job: job, mainLatest: anchor,
                                                   today: today, session: session)
@@ -219,7 +223,8 @@ final class TencentQuoteFetcher {
                                       low: last.low, close: last.close,
                                       vol: last.vol, amo: last.amo))
         case .upToDate:
-            return .skip(QuoteSkip(file: file, reason: .upToDate, detail: "源侧无 date > \(anchor) 的行"))
+            return .skip(QuoteSkip(file: file, reason: .upToDate,
+                                   detail: "源侧无 date > 锚点日 \(anchor) 的行（源侧最新已对齐）"))
         case .suspended:
             return .skip(QuoteSkip(file: file, reason: .suspended, detail: "源侧锚点日 \(anchor) 量为 0"))
         case .anchorMissing:
