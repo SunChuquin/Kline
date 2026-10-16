@@ -2,10 +2,10 @@
 //  GapBackfill.swift
 //  Kline
 //
-//  补缺口（**App 直连腾讯历史K线自行补齐 · 不依赖 CNB**）
+//  补缺口（**App 直连腾讯历史K线自行补齐 · 不依赖任何外部生成端**）
 //
 //  背景：主库 `tdx.db` 的 `meta.last_date` / `daily` 止于导入时点（实测 20260828），
-//  而云源（CNB 分片）每天只给「最后一根」，中间的空档永远没人补 → 日线图上一段空白。
+//  而外部生成端每天只给「最后一根」，中间的空档永远没人补 → 日线图上一段空白。
 //
 //  本组件一次跑完（可重复跑，幂等）：
 //    ① 主库 `meta.last_date` 最大值 = 全市场主库最新交易日 `mainLatest`；
@@ -27,7 +27,7 @@
 //       柱的 `date` = 该周期内该只的**首个交易日**（与主库口径逐槽一致，停牌股会落在周中/月中）。
 //       季/年**不读整年日线**：直接取主库该桶当期 bar 作基期再叠加缺口日线（口径同 `mergePeriodBar`）。
 //
-//  顺带修掉「旧断崖」：云分片那几天的 `live_daily.vol` 是**手**（腾讯快照口径），而主库个股是**股**，
+//  顺带修掉「旧断崖」：早期生成端写入的那几天 `live_daily.vol` 是**手**（腾讯快照口径），而主库个股是**股**，
 //  查询层直接拼接 → 增量那几天成交量柱只有历史 1/100 高（已由子代理全链路核查确认无任何换算）。
 //  本组件的缺口行覆盖整个 `(mainLatest, today]` 区间，`(file,date)` UPSERT 会把旧的「手」值
 //  **就地覆盖**成「股」—— 断崖随补缺口一并消除。
@@ -264,6 +264,11 @@ final class GapBackfill: ObservableObject {
     /// 全市场补缺口（UI 按钮 / 17:30 档）
     func run() {
         startGapFill(resolveScope: nil, completion: nil)
+    }
+
+    /// 全市场补缺口（17:30 档）：completion 在主线程回调，供 `TdxSyncManager` 复位「链路进行中」守卫。
+    func run(completion: @escaping () -> Void) {
+        startGapFill(resolveScope: nil, completion: completion)
     }
 
     /// 清单范围补缺口（日更前置）：只补「清单并集 file 集」，完成后回调（主线程）。
@@ -580,7 +585,7 @@ final class GapBackfill: ObservableObject {
             return
         }
 
-        // ④ 写入增量库（(file,date) UPSERT：旧云分片的「手」值就地覆盖为「股」→ 断崖消除）
+        // ④ 写入增量库（(file,date) UPSERT：历史遗留的「手」值就地覆盖为「股」→ 断崖消除）
         LiveDataStore.shared.upsertDaily(metas: outMetas, bars: outBars,
                                         updatedAt: Self.utcMidnightEpoch(today)) { [weak self] merge in
             guard let self = self else { return }

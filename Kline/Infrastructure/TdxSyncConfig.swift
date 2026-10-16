@@ -2,53 +2,22 @@
 //  TdxSyncConfig.swift
 //  Kline
 //
-//  增量行情库（Documents/tdx_live.db）自动拉取配置：UserDefaults 持久化。
+//  行情更新调度配置：UserDefaults 持久化。
 //  与 ChartConfigStore / KlineThemeStore 同惯例：ObservableObject 单例，@Published 写入即持久化。
 //
-//  默认 **开启**（enabled = true），用户可在「个人中心 → 本地更新 → 数据同步」关闭。
+//  只服务**设备侧腾讯直连链路**的到点调度（`TdxSyncManager.checkSchedule`）：
+//  到点先补「清单并集」范围缺口、再写当日 bar（17:30 档为全市场补缺口，含自动合并主库）。
+//  默认 **开启**（enabled = true）；App 内已不再提供修改开关 / 时刻表的入口（云端分片链路已删除）。
 //
 
 import Foundation
 import Combine
-
-// MARK: - 数据源地址解析结果
-
-/// 一个数据源解析出的完整地址（同一目录下的 db / manifest，以及新版分片布局的 manifest）
-struct TdxSyncURLs {
-    /// 用户填写的原始值（日志 / UI 展示用）
-    var source: String
-    /// tdx_live.db 完整地址（schema 1 整库替换用）
-    var db: URL
-    /// tdx_live.manifest.json 完整地址（schema 1 布局）
-    var manifest: URL
-    /// `<base>/live/manifest.json`（schema 2 分片布局；分片文件 `bucket_<id>.db` 与其同目录）
-    var liveManifest: URL
-}
-
-// MARK: - 配置
 
 /// 同步配置（单例）
 final class TdxSyncConfig: ObservableObject {
     static let shared = TdxSyncConfig()
 
     // MARK: - 默认值
-
-    /// 默认数据源，按顺序尝试：
-    /// ① 主源 CNB（境内，data 分支原始文件直链，实测 ≈1 MB/s，比 GitHub raw 快约 16 倍）
-    /// ② 备源 `raw.githubusercontent.com`（同内容，境内可能超时）
-    /// ③ 备源 jsDelivr CDN（同分支镜像，注意 CDN 有缓存延迟）
-    static let defaultSourceURLs: [String] = [
-        "https://cnb.cool/sunchuquin/kline-data/-/git/raw/data",
-        "https://raw.githubusercontent.com/SunChuquin/Kline/data",
-        "https://cdn.jsdelivr.net/gh/SunChuquin/Kline@data",
-    ]
-
-    /// 上一版默认数据源（只有 GitHub 两源）。仅用于**一次性迁移**：已装机用户读回的历史值与它
-    /// 恰好相等 → 升级为新默认值（把 CNB 加为主源）；用户自己改过的值不在此列，保持不变。
-    static let legacyDefaultSourceURLs: [String] = [
-        "https://raw.githubusercontent.com/SunChuquin/Kline/data",
-        "https://cdn.jsdelivr.net/gh/SunChuquin/Kline@data",
-    ]
 
     /// 默认更新时刻（北京时间，交易日）：11:00 / 14:30 为盘中快照，15:05 为收盘后完整K线，17:30 为当日兜底
     static let defaultScheduleTimes: [String] = ["11:00", "14:30", "15:05", "17:30"]
@@ -57,36 +26,26 @@ final class TdxSyncConfig: ObservableObject {
     /// 用户自己改过的值不在此列，保持不变。
     static let legacyDefaultScheduleTimes: [String] = ["11:00", "14:30", "15:05"]
 
-    /// data 分支上的两个文件名
-    static let dbFileName = "tdx_live.db"
-    static let manifestFileName = "tdx_live.manifest.json"
-
     // MARK: - UserDefaults 键
 
     static let enabledKey = "kline.tdxsync.enabled"
-    static let sourceURLsKey = "kline.tdxsync.sourceURLs"
     static let scheduleTimesKey = "kline.tdxsync.scheduleTimes"
     static let tradingDaysOnlyKey = "kline.tdxsync.tradingDaysOnly"
     static let checkIntervalKey = "kline.tdxsync.foregroundCheckInterval"
 
     // MARK: - 持久化项
 
-    /// 是否启用自动拉取（**默认开启**：本功能的目的就是"自动盯盘"，装好即生效；用户可随时关闭）
+    /// 是否启用自动更新（**默认开启**：本功能的目的就是"自动盯盘"，装好即生效；用户可随时关闭）
     @Published var enabled: Bool = true {
         didSet { if enabled != oldValue { UserDefaults.standard.set(enabled, forKey: Self.enabledKey) } }
     }
 
-    /// 数据源地址列表（按顺序尝试，可增删改；写法见 `resolve(_:)`）
-    @Published var sourceURLs: [String] = TdxSyncConfig.defaultSourceURLs {
-        didSet { if sourceURLs != oldValue { Self.save(sourceURLs, key: Self.sourceURLsKey) } }
-    }
-
-    /// 更新时刻（"HH:mm"，24 小时制，可编辑）
+    /// 更新时刻（"HH:mm"，24 小时制）
     @Published var scheduleTimes: [String] = TdxSyncConfig.defaultScheduleTimes {
         didSet { if scheduleTimes != oldValue { Self.save(scheduleTimes, key: Self.scheduleTimesKey) } }
     }
 
-    /// 仅在周一至周五（交易日）拉取
+    /// 仅在周一至周五（交易日）更新
     @Published var tradingDaysOnly: Bool = true {
         didSet { if tradingDaysOnly != oldValue { UserDefaults.standard.set(tradingDaysOnly, forKey: Self.tradingDaysOnlyKey) } }
     }
@@ -101,15 +60,6 @@ final class TdxSyncConfig: ObservableObject {
         // 注：init 内的赋值不会触发 didSet，因此不会反向写回 UserDefaults
         // enabled 默认 true（本功能目的就是自动更新）；用 object(forKey:) 区分"从未设置过"与"用户显式关掉"
         enabled = (d.object(forKey: Self.enabledKey) as? Bool) ?? true
-        // 数据源：一次性迁移（老用户读回旧默认两源 → 升级为新默认并把 CNB 置为主源；用户自改值不动）
-        let storedSources = Self.load([String].self, key: Self.sourceURLsKey)
-        if storedSources == Self.legacyDefaultSourceURLs {
-            sourceURLs = Self.defaultSourceURLs
-            Self.save(Self.defaultSourceURLs, key: Self.sourceURLsKey)
-            DebugLogger.shared.log("[TdxSync] 数据源迁移：旧默认 → 新默认（主源改为 CNB）")
-        } else {
-            sourceURLs = storedSources ?? Self.defaultSourceURLs
-        }
         // 时刻表：一次性迁移（老用户读回旧三档默认值 → 升级为四档并落盘；用户自改值不动）
         let storedTimes = Self.load([String].self, key: Self.scheduleTimesKey)
         if storedTimes == Self.legacyDefaultScheduleTimes {
@@ -121,100 +71,6 @@ final class TdxSyncConfig: ObservableObject {
         }
         tradingDaysOnly = (d.object(forKey: Self.tradingDaysOnlyKey) as? Bool) ?? true
         foregroundCheckInterval = (d.object(forKey: Self.checkIntervalKey) as? Double) ?? 60
-    }
-
-    // MARK: - 地址解析（base → db / manifest）
-
-    /// 把用户填写的地址解析为 db / manifest 两个完整 URL。两种写法都支持：
-    ///
-    /// 1) **目录型 base**（不以 `.db` 结尾）：视为目录，分别拼接 `tdx_live.db` 与 `tdx_live.manifest.json`
-    ///    - `https://raw.githubusercontent.com/SunChuquin/Kline/data`
-    ///      → `…/data/tdx_live.db`、`…/data/tdx_live.manifest.json`
-    ///    - `https://cdn.jsdelivr.net/gh/SunChuquin/Kline@data`
-    ///      → `…/Kline@data/tdx_live.db`、`…/Kline@data/tdx_live.manifest.json`
-    /// 2) **完整 db 地址**（以 `.db` 结尾）：db 用它本身，manifest 取同目录下的 `tdx_live.manifest.json`
-    ///    - `…/data/tdx_live.db` → manifest `…/data/tdx_live.manifest.json`
-    ///
-    /// 末尾多余的 `/` 会被忽略；只接受 http / https，无法得到合法 URL 时返回 nil（该源跳过）。
-    ///
-    /// 另给出 **schema 2 分片布局** 的 manifest 地址 `<base>/live/manifest.json`（分片 `bucket_<id>.db` 与其同目录），
-    /// App 会先试旧地址、再试该地址（见 `TdxSyncManager.fetchFirstManifest`），升级瞬间不会失联。
-    static func resolve(_ raw: String) -> TdxSyncURLs? {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !s.isEmpty else { return nil }
-        while s.hasSuffix("/") { s = String(s.dropLast()) }
-        guard !s.isEmpty else { return nil }
-
-        let dbString: String
-        let dirString: String
-        if s.lowercased().hasSuffix(".db") {
-            dbString = s
-            dirString = directory(of: s)
-        } else {
-            dirString = s
-            dbString = s + "/" + dbFileName
-        }
-
-        guard let dbURL = URL(string: dbString),
-              let manifestURL = URL(string: dirString + "/" + manifestFileName),
-              let scheme = dbURL.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              manifestURL.scheme?.lowercased() == scheme else { return nil }
-
-        // schema 2 分片布局：manifest 在 `<base>/live/manifest.json`，分片同目录（`live/bucket_<id>.db`）
-        let liveManifestURL = URL(string: dirString + "/live/manifest.json") ?? manifestURL
-
-        return TdxSyncURLs(source: raw, db: dbURL,
-                           manifest: manifestURL, liveManifest: liveManifestURL)
-    }
-
-    /// 取字符串最后一个 "/" 之前的目录部分
-    private static func directory(of path: String) -> String {
-        guard let idx = path.lastIndex(of: "/") else { return path }
-        return String(path[path.startIndex..<idx])
-    }
-
-    // MARK: - 可编辑文本 ⇄ 数组
-
-    /// 源地址数组 → 单行可编辑文本（", " 分隔；URL 内不会出现逗号 / 空格）
-    static func sourceText(_ urls: [String]) -> String {
-        urls.joined(separator: ", ")
-    }
-
-    /// 可编辑文本 → 规范源地址数组：按逗号 / 分号 / 换行 / 空白拆分，去重、保持输入顺序，
-    /// 只保留能解析出 http(s) 地址的项（非法项直接丢弃，避免写坏配置）
-    static func parseSourceText(_ text: String) -> [String] {
-        let parts = text.split(whereSeparator: { ",，;；\n\r\t ".contains($0) })
-        var out: [String] = []
-        for part in parts {
-            var s = String(part).trimmingCharacters(in: .whitespaces)
-            guard !s.isEmpty else { continue }
-            while s.hasSuffix("/") { s = String(s.dropLast()) }
-            guard resolve(s) != nil, !out.contains(s) else { continue }
-            out.append(s)
-        }
-        return out
-    }
-
-    /// 时刻数组 → 可编辑文本（"11:00, 14:30, 15:05"）
-    static func scheduleText(_ times: [String]) -> String {
-        times.joined(separator: ", ")
-    }
-
-    /// 可编辑文本 → 规范时刻数组：按逗号 / 空格 / 换行拆分，仅保留合法 "HH:mm"，
-    /// 统一补零为 "HH:mm"（保证字典序 = 时间序）、去重、升序
-    static func parseScheduleText(_ text: String) -> [String] {
-        let parts = text.split(whereSeparator: { ",，;；\n\r\t ".contains($0) })
-        var out: [String] = []
-        for part in parts {
-            let segs = part.split(separator: ":")
-            guard segs.count == 2,
-                  let h = Int(segs[0]), let m = Int(segs[1]),
-                  (0...23).contains(h), (0...59).contains(m) else { continue }
-            let norm = String(format: "%02d:%02d", h, m)
-            if !out.contains(norm) { out.append(norm) }
-        }
-        return out.sorted()
     }
 
     // MARK: - UserDefaults 读写工具

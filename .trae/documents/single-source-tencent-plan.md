@@ -70,13 +70,65 @@
 - `LiveDataStore` / `KlineApp` 里东财路径的注释改中性表述。
 
 ### 阶段 3：删除云端分片链路（高风险，先补侦察）
-- 设备侧：`TdxSyncManager` 的 manifest/分片/补丁/收尾（L340-629）、`TdxSyncConfig` 分片相关配置、`LiveDataStore.mergeBucket`、分片 UI 区、相关状态与 `@Published`。
-- 生成端：`src/live_db_builder.py`、`txt_patch_builder.py`、`sync_pipeline.py` 等相关脚本、`.github/workflows/sync-live-db.yml`。
-- 文档：`.trae/documents/live-sync/**` 整篇作废或改写；`pipeline-shard-patch-sync`、`add-live-data-auto-sync`、`scale-live-db-to-whole-market` 等规格标注废弃。
-- **执行前必须确认的开放问题**（侦察未完全覆盖）：
-  1. `LANSync*.swift` 是否独立于分片链路（独立则保留）；
-  2. 是否存在**只由分片路径提供**的能力需要替代：复权因子重灌（rewrite）通道、全市场每日整片写入、季/年当期 bar 云端产物、A2 本地更新安装（`KlineHTTPServer` / `/notify`）；
-  3. `KlineHTTPServer` 的远程更新入口是否依赖 manifest。
+**用户决策（2026-10-16）**
+- **保留 LAN 联动**：`LANSync*` 五个文件 + `LANSyncView` + `LANSyncUITests` + 其依赖的
+  `/sync/{status,request-pair,sha,backup,reload-config,live-reset}` 全部保留，**只删云端分片路由**。
+- **整块删除** `LocalUpdateView` 的「数据同步」卡片（云端分片 UI）；保留
+  `TdxSyncConfig.enabled / tradingDaysOnly / scheduleTimes / foregroundCheckInterval`
+  给**腾讯链路四时刻调度**用（App 内不再有改开关/时刻的入口，用户已接受）。
+
+**3a 设备侧删除清单（含调用方证据）**
+- `Kline/Infrastructure/TdxSyncManager.swift`
+  - **保留**：`config`/`isEnabled`、`start()`/`scheduleTimer()`/`installForegroundObserver()`、
+    `checkSchedule`（四时刻 → 腾讯链路）、`updateNextScheduledText`、以及静态工具
+    `mainLatestTradeDate`/`todayYMD`/`naturalDaysSince`/`minutes(of:)`/`minutesOfDay`/
+    `slotText`/`isTradingDay`/`dayKey`/`nextSlotDescription`（`todayYMD`/`naturalDaysSince`
+    被 `GapBackfill` 调用）。
+  - **删除**：`TdxLiveBucket`/`TdxLiveManifest` 模型、`beginSync`/`manualSync`/`trySource`/
+    `fetchFirstManifest`/`startShardedSync`/`downloadBuckets`/`syncPatches`/`applyTrimThenReload`/
+    `downloadDB`/`finishSuccess`/`finishFailure`/`setError`/`verifyAndInstall`/`fetchManifest`/
+    `decodeManifest`/`downloadFile`/`moveDownloaded`/`validate`/`verifyBucket`/`verifyPatch`/
+    `selectBuckets`/`sha256Hex`/`patchKey`、以及 UserDefaults 本地记录键与
+    `bucketTmpPath`。相关 `@Published`（`isSyncing`/`lastSyncAt`/`lastVersion`/`lastTradeDate`/
+    `lastSource`/`lastError`/`lastBucketCount`/`lastBucketBytes`/`lastCovered*`/`lastUniverse`/
+    `lastNote`）**只被已删的 UI 卡片读取** → 一并删（证据：`Favorites*` 只读 `TdxSyncConfig.enabled`）。
+- `Kline/Infrastructure/TdxSyncConfig.swift`：删三源列表（CNB/GitHub raw/jsDelivr）、
+  `manifestFileName`、URL 解析（目录型 base / 完整 db 地址）、`sourceText`、`scheduleText`；
+  **保留** `enabled`/`tradingDaysOnly`/`scheduleTimes`/`foregroundCheckInterval`。
+- `Kline/Data/LiveDataStore.swift`：删 `mergeBucket(atPath:)` 与 `_mergeBucketLocked`，类头分片合并说明改中性。
+  **保留** `upsertDaily`/`trim`/`rebuildCurrentPeriodBars`/`rebuildGapPeriods`/`closeAndRemove`
+  （`closeAndRemove` 被 `/sync/live-reset` 调用 —— LAN 工具链要用）。
+- `Kline/Infrastructure/KlineHTTPServer.swift`
+  - **删**：`/sync/merge-bucket`、`/sync/apply-patch`、`/sync/patch-session/{begin,apply,commit,rollback}`、
+    `/sync/probe`（含各自执行体与结果契约类型）。
+  - **保留**：`/sync/reload`、`/sync/status`、`/sync/sha`、`/sync/request-pair`、`/sync/backup`、
+    `/sync/reload-config`、`/sync/live-reset`
+    （证据：`TrollRestore/lansync.py:249/296/543/609/619/654` 与 `push_live_*.py` 依赖它们）。
+- `Kline/Profile/LocalUpdateView.swift`：整块删「数据同步」卡片（`syncManager`/`syncConfig`
+  相关声明、源地址/时刻表编辑、覆盖率/分片进度/最近结果行、`SyncState` 一族）；
+  **保留**「主库合并」「清单标的自动更新」「补缺口」三张卡片。
+- `Kline/App/KlineApp.swift`：启动注释改中性（只提腾讯链路四时刻调度）。
+
+**3b 生成端删除清单**
+- 删 `src/live_db_builder.py`、`src/txt_patch_builder.py`、`.github/workflows/sync-live-db.yml`。
+- `src/contract_golden.py`：删 `import live_db_builder as ldb` 与 `aggregate_full_periods`
+  交叉自检，并改 `period_aggregation.json` 的 `notes` 文案 → **重跑 `python src/contract_golden.py`
+  再提交重生成的 fixtures**（`test.yml` 有「重跑后与已提交逐字节一致」门禁）。
+  同步改 `KlineTests/PeriodAggregationContractTests.swift` 头注释。
+- `Kline/PyScripts/period_aggregate.py` 头注释里对 `live_db_builder` 的引用改中性。
+
+**3c 文档 + 项目记忆**
+- `.trae/documents/live-sync/**` 整篇作废或改写；`Kline-增量行情库自动同步.md`、
+  `Kline-境内CI云端生产方案.md`、`market-favorites-refresh-plan.md` 标注云端已弃用；
+  `pipeline-shard-patch-sync` / `add-live-data-auto-sync` / `scale-live-db-to-whole-market`
+  等规格标注废弃。
+- `project_memory.md` 第 3/13/25/79/80/95/97/129 行；`Python引擎下沉可行性分析.md` 候选 4 标注云端已弃用。
+
+**仓库外（不在本仓库，需用户点头后再动）**
+`c:/Users/sunck/home/projects/ios/TrollRestore/` 下的 PC 侧分片工具会因设备路由删除而 404：
+`sync_pipeline.py`（patch-session + `/sync/probe`）、`push_bucket_usb.py`（merge-bucket/apply-patch）、
+`build_live_buckets_pc.py`（产出分片）。`lansync.py` / `push_live_usb.py` / `push_live_lan.py`
+依赖的保留路由不受影响。
 
 ### 阶段 4：文档 + 项目记忆
 - 现状改写为「设备侧单源腾讯（补缺口 + 清单范围日更）；云端分片已弃用」。

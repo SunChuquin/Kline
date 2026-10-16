@@ -4,7 +4,7 @@
 //
 //  Created by 孙楚昆 on 2026/9/22.
 //
-//  增量库读写层：`Documents/tdx_live.db`（外部 USB / 局域网整文件推送，或本类按缺口合并云端分片）。
+//  增量库读写层：`Documents/tdx_live.db`（外部 USB / 局域网整文件推送，或本类在设备侧按缺口写入）。
 //  **键 = `file`**（如 `SH#600000`）：主库 meta 的 `file` 3611/3611 唯一；`code` 有 55 处重复
 //  （指数与股票同码，如 `62#000995` 全指公用 vs `SZ#000995` 皇台酒业），不可作键。
 //  能力：
@@ -13,12 +13,14 @@
 //   3) 指纹 = (size, mtime) 快速键 + 可选 sha256（CryptoKit，iOS 13+）；
 //   4) reload()：清缓存、关旧连接、重开、重算指纹、更新 isAvailable，返回重载前后行数 / 日期区间；
 //   5) startWatching(interval:)：前台定时指纹检查（指纹未变则什么都不做）+ 回前台立即检查一次；
-//   6) **写入**：`mergeBucket(atPath:)` 把云端分片（`bkt_meta` + `bkt_daily`）合并进本地
-//      `live_meta` + `live_daily`（INSERT OR REPLACE，同 date 以分片为准）；
-//      `rebuildCurrentPeriodBars(referenceDate:mainDaily:)` 用「主库日线 ∪ 增量库日线」重算**当期**周/月 bar；
+//   6) **写入**：`upsertDaily(metas:bars:periodBars:updatedAt:)` 把清单日更 / 补缺口取到的当日K线按
+//      `(file, date)` UPSERT 进 `live_meta` + `live_daily` + 当期季/年 bar（先逐字段比对，同值完全跳过）；
+//      `rebuildCurrentPeriodBars(referenceDate:mainDaily:)` / `rebuildGapPeriods(...)` 用
+//      「主库日线 ∪ 增量库日线」在设备侧重算当期 / 缺口区间的周/月/季/年 bar；
 //      `trim(beforeDate:)` 删掉主库已有的冗余日期；本地库不存在时按 schema 新建。
 //  发布**五张**周期表（daily/weekly/monthly/quarterly/yearly），查询层统一「live 覆盖 main」。
-//  **云端分片只发日线**：周/月线由本类在设备侧从日线聚合（与季/年线同一思路），不再从分片读取。
+//  周/月/季/年线一律由本类**在设备侧从日线聚合**（当期窗口 → `rebuildCurrentPeriodBars`；
+//  缺口区间 → `rebuildGapPeriods`），不再依赖任何外部生成端。
 //  周/月/季/年的裁剪按**周期感知**只保留当期 bar —— 它们的 date = 该周期**首个交易日**（如周线 20260928、
 //  季线 20260701），远早于「最近 N 个交易日」，按 `date <= beforeDate` 裁会误删当期 bar。
 //
@@ -108,18 +110,18 @@ struct LiveStatusSnapshot {
     var path = LiveDataStore.writableDBPath
 }
 
-/// 分片合并结果（云端 `bucket_<id>.db` → 本地 `tdx_live.db`）
+/// 增量写入结果（清单日更 / 补缺口 / 周期聚合共用）
 struct LiveMergeResult {
     var ok = false
-    /// 本次实际写入（INSERT OR REPLACE）的各表行数
+    /// 本次实际写入的各表行数
     var dailyRows = 0
     var weeklyRows = 0
     var monthlyRows = 0
-    /// 当期季/年 bar 的写入行数（分片 / 每日路径写入 `live_quarterly`、`live_yearly`）
+    /// 当期季/年 bar 的写入行数（写入 `live_quarterly`、`live_yearly`）
     var quarterlyRows = 0
     var yearlyRows = 0
     var metaRows = 0
-    /// 合并后本地增量库覆盖的 file 数（live_meta 行数）
+    /// 写入后本地增量库覆盖的 file 数（live_meta 行数）
     var coveredFiles = 0
     var message = ""
 }
@@ -197,13 +199,6 @@ final class LiveDataStore: ObservableObject {
     /// 五张表全发布 → 查询层统一「live 覆盖 main」（季/年线不再回落主库）。
     static let periodTables = ["daily", "weekly", "monthly", "quarterly", "yearly"]
 
-    /// 云端分片表名 → 本地表名 的显式映射（分片由生成端发布，表名带 `bkt_` 前缀）。
-    /// **分片只发日线**：周/月线改由 `rebuildCurrentPeriodBars` 在设备侧从日线聚合，
-    /// 季/年线本来就由设备侧聚合（`WatchlistSyncManager`）——故映射里只有日线一张表。
-    static let bucketTableMap: [(local: String, bucket: String)] = [
-        ("live_daily", "bkt_daily"),
-    ]
-
     /// 本地表结构（v3：键为 `file`；本地增量库不存在时按此新建）。
     /// 全为 `CREATE TABLE IF NOT EXISTS` → 可**幂等**重复执行，用于补齐老库缺失的新周期表。
     private static let schemaSQL = """
@@ -221,7 +216,7 @@ final class LiveDataStore: ObservableObject {
                      close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));
         """
 
-    /// 旧版（`code` 键）增量库的表清理：增量内容可由分片完全重建，故直接丢弃
+    /// 旧版（`code` 键）增量库的表清理：增量内容可由设备侧取数完全重建，故直接丢弃
     private static let dropLegacySQL = """
         DROP TABLE IF EXISTS live_daily;
         DROP TABLE IF EXISTS live_weekly;
@@ -324,24 +319,12 @@ final class LiveDataStore: ObservableObject {
         queue.sync { _newestDatesLocked(limit: limit) }
     }
 
-    // MARK: - 写入：合并云端分片 / 裁剪冗余（**全部在自身队列上**）
+    // MARK: - 写入：当日K线 / 周期聚合 / 裁剪冗余（**全部在自身队列上**）
 
-    /// 把云端分片 `bucket_<id>.db` 合并进本地 `tdx_live.db`：
-    /// ATTACH 分片 → 单事务内 `INSERT OR REPLACE`（同 date 以分片为准）→ DETACH；
-    /// 本地增量库不存在时按 schema 新建。completion 在主线程回调。
-    func mergeBucket(atPath path: String, completion: @escaping (LiveMergeResult) -> Void) {
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            let result = self._mergeBucketLocked(atPath: path)
-            if result.ok { self._refreshAfterInternalWriteLocked(reason: "内部写入合并") }
-            DispatchQueue.main.async { completion(result) }
-        }
-    }
-
-    /// 直接写入「当日K线」（内存里的清单日更取数结果，非 sqlite 分片文件）：
+    /// 直接写入「当日K线」（内存里的清单日更 / 补缺口取数结果，非 sqlite 分片文件）：
     /// **先与库内逐字段比对，只写真正变化 / 新增的行**（浮点容差 1e-6），单事务内
-    /// `live_meta` 补缺失标的（`INSERT OR IGNORE`）+ `live_daily` 按 `(file, date)` UPSERT
-    /// （表名 / 字段顺序与 `_mergeBucketLocked` 一致）。本地增量库不存在时按既有 schema 新建。
+    /// `live_meta` 补缺失标的（`INSERT OR IGNORE`）+ `live_daily` 按 `(file, date)` UPSERT。
+    /// 本地增量库不存在时按既有 schema 新建。
     /// - Parameter periodBars: 可选「当期季/年 bar」（键 = `quarterly` / `yearly`，由调用方用
     ///   **主库当期 bar ⊕ 新日线** 合并得到），在同一事务内 UPSERT 进 `live_quarterly` / `live_yearly`；
     ///   同样只写与库内不一致的行。默认空 → 行为与改动前完全一致。
@@ -380,13 +363,13 @@ final class LiveDataStore: ObservableObject {
 
     /// 用「增量库日线 ∪ 主库日线」重算**当期**周/月 bar，写回 `live_weekly` / `live_monthly`。
     ///
-    /// 云端分片只发日线 → 周/月线必须在设备侧从日线聚合。口径与季/年线一致：
+    /// 周/月线在设备侧从日线聚合（增量库只存日线）。口径与季/年线一致：
     /// bar 的 `date` = 该周期**首个交易日**（当期窗口内最早一根日线），`open` 取首行、
     /// `high/low` 取极值、`close` 取末行、`vol/amo` 累加。
-    /// **每次都按当期窗口全量重算**（不在旧值上累加）→ 天然幂等，一次补多片 / 重复跑结果相同。
+    /// **每次都按当期窗口全量重算**（不在旧值上累加）→ 天然幂等，一次补多天 / 重复跑结果相同。
     /// 只保留**当期**：更早的周/月 bar 一律删除（历史周期由主库提供，留着会遮蔽主库正确值）。
     /// - Parameters:
-    ///   - referenceDate: 参考交易日（本批分片最新交易日）；<= 0 → 直接跳过
+    ///   - referenceDate: 参考交易日（本轮写入的最新交易日）；<= 0 → 直接跳过
     ///   - mainDaily: 主库日线（键 = file，date 升序），由调用方在 `DatabaseManager.dbQueue`
     ///     上**预先读好**再传入。本类队列内**绝不**回调 DatabaseManager（硬约束：禁止跨队列嵌套）。
     /// completion 在主线程回调。
@@ -454,7 +437,7 @@ final class LiveDataStore: ObservableObject {
         return summary
     }
 
-    /// 异步重载（Task 4 预留：云端拉取完成、原子替换文件后调用）；completion 在主线程回调
+    /// 异步重载（外部写入 / 内部写入收尾后调用）；completion 在主线程回调
     func reloadAsync(completion: ((LiveReloadSummary) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -474,7 +457,7 @@ final class LiveDataStore: ObservableObject {
         }
     }
 
-    /// Task 4 预留入口：外部（USB / 局域网 / 云端）写入完成后调用，立即检查指纹并按需热刷新
+    /// 外部（USB / 局域网）写入完成后调用，立即检查指纹并按需热刷新
     func notifyExternalWrite() {
         DebugLogger.shared.log("[Live] 收到外部写入通知 → 立即检查指纹")
         checkForChanges(reason: "外部写入")
@@ -577,7 +560,7 @@ final class LiveDataStore: ObservableObject {
         s.earliestDateBefore = earliestDate
         s.fingerprintBefore = fp?.display ?? "-"
         let previousKnown = (fp != nil) || available
-        // 内容变化判定以「最近一次已发布内容」为准（fp 可能已被内部写入刷新，见 mergeBucket/trim）
+        // 内容变化判定以「最近一次已发布内容」为准（fp 可能已被内部写入刷新，见 upsertDaily/trim）
         let oldHash = appliedHash ?? fp?.sha256
 
         // 1) 清缓存 + 关旧连接
@@ -634,7 +617,7 @@ final class LiveDataStore: ObservableObject {
         // 4b) 旧版结构（v2 及更早：`live_meta` 以 `code` 为键、无 `file` 列）→ 视为不可用。
         // 读路径若不放行这一步，查询会按 `WHERE file = ?` prepare 失败并静默返回空切片，
         // 结果就是"看起来加载成功（覆盖/行数都有），实际一条都没合并"——必须显式拦下。
-        // 真正的重建交给写入路径 `_ensureWritableSchemaLocked`（下一次分片合并时 DROP 重建，无数据损失）。
+        // 真正的重建交给写入路径 `_ensureWritableSchemaLocked`（下一次写入（当日K线 / 周期聚合）时 DROP 重建，无数据损失）。
         if _hasLegacySchemaLocked(handle!) {
             sqlite3_close(handle)
             s.isAvailable = false
@@ -642,7 +625,7 @@ final class LiveDataStore: ObservableObject {
             s.contentChanged = previousKnown && (s.wasAvailable || oldHash != newFP.sha256)
             appliedHash = nil
             s.elapsed = Date().timeIntervalSince(t0)
-            DebugLogger.shared.log("[Live] 增量库为旧版（code 键）结构 → 视为不可用，待下次分片合并时重建为 file 键 path=\(path)")
+            DebugLogger.shared.log("[Live] 增量库为旧版（code 键）结构 → 视为不可用，待下次写入时重建为 file 键 path=\(path)")
             return s
         }
 
@@ -798,7 +781,7 @@ final class LiveDataStore: ObservableObject {
     }
 
     /// 确保表结构是 v3（键为 `file`、五张周期表）：
-    /// - **旧版 `code` 键**（v2 及更早）→ 丢弃重建：增量内容可由分片完全重建，无数据损失；
+    /// - **旧版 `code` 键**（v2 及更早）→ 丢弃重建：增量内容可由设备侧取数完全重建，无数据损失；
     /// - 其余情况一律再执行一次 `schemaSQL`（全为 `CREATE TABLE IF NOT EXISTS`，幂等）→
     ///   补齐老库缺失的新周期表（`live_quarterly` / `live_yearly`），否则写入会因缺表整体回滚。
     private func _ensureWritableSchemaLocked(_ handle: OpaquePointer) -> Bool {
@@ -821,99 +804,6 @@ final class LiveDataStore: ObservableObject {
             if String(cString: c) == "file" { return false }
         }
         return true
-    }
-
-    /// ATTACH 分片文件为 `bkt`（路径单引号转义，避免 SQL 注入 / 语法错误）
-    private func _attachBucketLocked(_ handle: OpaquePointer, path: String) -> Bool {
-        let escaped = path.replacingOccurrences(of: "'", with: "''")
-        return sqlite3_exec(handle, "ATTACH DATABASE '\(escaped)' AS bkt;", nil, nil, nil) == SQLITE_OK
-    }
-
-    /// 通用存在性判断（raw SQL：可带 schema 前缀，如 `bkt.sqlite_master`）
-    private func _existsLocked(_ handle: OpaquePointer, sql: String) -> Bool {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(statement) }
-        return sqlite3_step(statement) == SQLITE_ROW
-    }
-
-    /// 分片 → 本地增量库：ATTACH + 单事务 INSERT OR REPLACE（显式字段顺序）
-    private func _mergeBucketLocked(atPath path: String) -> LiveMergeResult {
-        var r = LiveMergeResult()
-        guard FileManager.default.fileExists(atPath: path) else {
-            r.message = "分片文件不存在：\((path as NSString).lastPathComponent)"
-            return r
-        }
-        guard _ensureWritableOpenLocked(), let handle = db else {
-            r.message = "本地增量库不可写（打开失败）"
-            return r
-        }
-        guard _attachBucketLocked(handle, path: path) else {
-            r.message = "分片 ATTACH 失败：\(String(cString: sqlite3_errmsg(handle)))"
-            return r
-        }
-        defer { sqlite3_exec(handle, "DETACH DATABASE bkt;", nil, nil, nil) }
-
-        // 分片契约：至少要有 bkt_meta / bkt_daily
-        let hasMeta = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='bkt_meta' LIMIT 1;")
-        let hasDaily = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='bkt_daily' LIMIT 1;")
-        guard hasMeta, hasDaily else {
-            r.message = "分片缺少 bkt_meta/bkt_daily 表"
-            return r
-        }
-
-        // ATTACH 不能在事务内 → 先 ATTACH，再开事务
-        guard sqlite3_exec(handle, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
-            r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
-            return r
-        }
-        var failed: String?
-        // ① meta（显式字段顺序：file,code,name,type,updated_at）
-        if sqlite3_exec(handle,
-                        "INSERT OR REPLACE INTO live_meta(file,code,name,type,updated_at) "
-                        + "SELECT file,code,name,type,updated_at FROM bkt.bkt_meta;",
-                        nil, nil, nil) == SQLITE_OK {
-            r.metaRows = Int(sqlite3_changes(handle))
-        } else {
-            failed = String(cString: sqlite3_errmsg(handle))
-        }
-        // ② 五张周期表（分片表名 bkt_* → 本地 live_*，字段顺序 file,date,open,high,low,close,vol,amo）
-        //    分片缺某张表（如老分片没有 bkt_quarterly/bkt_yearly）→ 跳过该表，不影响其余
-        if failed == nil {
-            for m in Self.bucketTableMap {
-                let exists = _existsLocked(handle, sql: "SELECT 1 FROM bkt.sqlite_master WHERE type='table' AND name='\(m.bucket)' LIMIT 1;")
-                guard exists else { continue }
-                let sql = "INSERT OR REPLACE INTO \(m.local)(file,date,open,high,low,close,vol,amo) "
-                        + "SELECT file,date,open,high,low,close,vol,amo FROM bkt.\(m.bucket);"
-                guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else {
-                    failed = "\(m.bucket)：\(String(cString: sqlite3_errmsg(handle)))"
-                    break
-                }
-                let n = Int(sqlite3_changes(handle))
-                switch m.local {
-                case "live_daily":     r.dailyRows = n
-                case "live_weekly":    r.weeklyRows = n
-                case "live_monthly":   r.monthlyRows = n
-                case "live_quarterly": r.quarterlyRows = n
-                case "live_yearly":    r.yearlyRows = n
-                default: break
-                }
-            }
-        }
-        if let failed = failed {
-            sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
-            r.message = "合并失败（已回滚）\(failed)"
-            return r
-        }
-        guard sqlite3_exec(handle, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
-            sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
-            r.message = "提交失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
-            return r
-        }
-        r.ok = true
-        r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
-        r.message = "合并完成 meta=\(r.metaRows) daily=\(r.dailyRows) weekly=\(r.weeklyRows) monthly=\(r.monthlyRows) quarterly=\(r.quarterlyRows) yearly=\(r.yearlyRows) 覆盖=\(r.coveredFiles)只"
-        return r
     }
 
     /// 清单日更当日K线 → 本地增量库：**先比对后写入**（单事务），全程预处理语句 + 绑定（不拼字符串 SQL），
@@ -981,7 +871,7 @@ final class LiveDataStore: ObservableObject {
             }
         }
 
-        // ③ 日线：按 (file,date) UPSERT（同 date 以本次为准；字段顺序与分片合并一致）
+        // ③ 日线：按 (file,date) UPSERT（同 date 以本次为准；字段顺序与周期表一致）
         if failed == nil && !changedBars.isEmpty {
             var statement: OpaquePointer?
             let sql = "INSERT OR REPLACE INTO live_daily(file,date,open,high,low,close,vol,amo) "
@@ -1409,7 +1299,7 @@ final class LiveDataStore: ObservableObject {
 
         // ② 单事务：**整表清空后按桶重写**（只留下本次重算的锚桶及之后各桶）。
         //   为什么是整表而不是 `date < 锚桶起始`：
-        //   云分片给「当期」bar 的 date 用的是**当天**（实测 live_weekly 全是 20260930），
+        //   历史上生成端给「当期」bar 的 date 用的是**当天**（实测 live_weekly 曾全是 20260930），
         //   而正确约定是「周期内首个交易日」（20260928）。若只删锚桶之前，
         //   那根 date=20260930 的陈旧行会与本次重算出的 date=20260928 **并存**
         //   → 查询层 merge 按 date 去重，两根都在 → 同一周显示两根。
@@ -1570,7 +1460,7 @@ final class LiveDataStore: ObservableObject {
         return out
     }
 
-    /// 内部写入（合并分片 / 裁剪）之后刷新缓存、行数与**自身指纹**：
+    /// 内部写入（当日K线 / 周期聚合 / 裁剪）之后刷新缓存、行数与**自身指纹**：
     /// 刷新 fp 是为了不让 5 分钟指纹轮询把自己的写入当成「外部写入」再触发一次重载；
     /// 内容变化判定另用 `appliedHash`（此处**不更新**，留给随后的 reloadAsync 统一发布）。
     private func _refreshAfterInternalWriteLocked(reason: String) {
@@ -1665,14 +1555,6 @@ final class LiveDataStore: ObservableObject {
 
     private static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// 按文件路径计算 sha256（供 `/sync/merge-bucket` 端点核对电脑侧推送的分片）
-    static func sha256Hex(ofFile path: String) -> String? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe) else {
-            return nil
-        }
-        return sha256Hex(data)
     }
 
     private static func ms(_ interval: TimeInterval) -> String {

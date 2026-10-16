@@ -8,14 +8,14 @@
 //
 //  五表一致性：除当日日线外，还会产出**当期**周/月/季/年 bar：
 //   - **周/月**：日线落库后立刻用「主库日线 ∪ 增量库日线」按当期窗口**重算**
-//     （`LiveDataStore.rebuildCurrentPeriodBars`，与云端分片路径同一套聚合）→ 一次补多日也不漏；
+//     （`LiveDataStore.rebuildCurrentPeriodBars`，与补缺口同一套设备侧聚合）→ 一次补多日也不漏；
 //   - **季/年**：用「**主库当期 bar ⊕ 新日线**」合并出当期季/年 bar（`live_quarterly` / `live_yearly`），
 //     与日线在同一事务写入增量库。
-//  口径与 `tdx_parser.period_key` 一致：季 `YYYYQ`、年 `YYYY`，`date` = 该周期**首个交易日**；
-//  当期周期允许是**进行中的**（与 `aggregate_full_periods` 既有约定一致）。
+//  口径：季 `YYYYQ`、年 `YYYY`，`date` = 该周期**首个交易日**；
+//  当期周期允许是**进行中的**。
 //
 //  硬约束：
-//   - **不依赖云端 manifest**：与 TdxSyncManager 各自独立触发、成败互不影响（云端源不可达也能跑）；
+//   - 与 TdxSyncManager 的到点调度各自独立触发、成败互不影响；
 //   - 门禁复用 TdxSyncConfig.enabled（总开关）与 tradingDaysOnly（交易日限制，由 TdxSyncManager 统一判定）；
 //   - 并集为空 → 记状态「跳过：清单为空」并直接返回，不写库、不报错；
 //   - 不新增任何监控触发机制：写入后只调 LiveDataStore.upsertDaily + reloadAsync，
@@ -90,26 +90,34 @@ final class WatchlistSyncManager: ObservableObject {
 
     private init() {}
 
+    /// 本次执行的结束回调（**只在主线程访问**；`finish` 消费后置 nil）
+    private var pendingCompletion: (() -> Void)?
+
     // MARK: - 对外入口（主线程）
 
     /// 触发一次「清单标的当日K线」更新。
     /// - Parameters:
     ///   - reason: 触发来源（"定时检查" / "回前台检查" / "启动检查"）
     ///   - slot: 触发时刻文案（"11:00" 等）；nil → 记为「手动」
+    ///   - completion: 本次执行彻底结束（成功 / 跳过 / 失败 / 未启用 / 已在跑）后在主线程回调，
+    ///     供 `TdxSyncManager` 复位「链路进行中」守卫；手动触发一般不需要
     ///
-    /// 与 TdxSyncManager 独立：本方法不读写任何云端 manifest 状态。
-    func sync(reason: String, slot: String? = nil) {
+    /// 与云端分片无关：本方法不读写任何 manifest 状态。
+    func sync(reason: String, slot: String? = nil, completion: (() -> Void)? = nil) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             guard self.config.enabled else {
                 DebugLogger.shared.log("[WatchlistSync] \(reason)：总开关未启用，跳过")
+                completion?()
                 return
             }
             guard !self.isRunning else {
                 DebugLogger.shared.log("[WatchlistSync] \(reason)：已在执行中，忽略本次触发")
+                completion?()
                 return
             }
             self.isRunning = true
+            self.pendingCompletion = completion
             self.performSync(reason: reason, slot: slot)
         }
     }
@@ -371,6 +379,10 @@ final class WatchlistSyncManager: ObservableObject {
         }
         if isRunning { isRunning = false }
         DebugLogger.shared.log("[WatchlistSync] \(reason)：\(outcome.text) — \(text)")
+        // 结束后统一交付回调（供调度链路复位守卫）
+        let done = pendingCompletion
+        pendingCompletion = nil
+        done?()
     }
 
     // MARK: - 当期季/年 bar（主库当期 bar ⊕ 新日线）

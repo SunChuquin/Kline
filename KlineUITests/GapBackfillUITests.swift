@@ -43,7 +43,7 @@ final class GapBackfillUITests: XCTestCase {
             && f.minX >= s.minX && f.maxX <= s.maxX
     }
 
-    /// 个人中心内容很长（本地更新 / 数据同步 / 清单自动更新 / 直连对拍 / 补缺口 五组卡片），
+    /// 个人中心内容很长（本地更新 / 清单自动更新 / 补缺口 三组卡片），
     /// 「补缺口」在最底部：反复整屏上滑直到按钮完整进入屏幕。
     private func revealBackfillButton(_ app: XCUIApplication) -> XCUIElement {
         let button = app.buttons["gapBackfill.run"].firstMatch
