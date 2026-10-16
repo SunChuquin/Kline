@@ -374,8 +374,9 @@ final class GapBackfill: ObservableObject {
             }, completion: { [weak self] baseline in
                 guard let self = self else { Self.fire(completion); return }
                 self.queue.async {
+                    // 清单范围不合并主库（见 perform 里 mergeMain 分支说明）
                     self.perform(metas: metas, baseline: baseline, mainLatest: mainLatest,
-                                 today: today, completion: completion)
+                                 today: today, mergeMain: resolveScope == nil, completion: completion)
                 }
             })
         }
@@ -417,7 +418,8 @@ final class GapBackfill: ObservableObject {
     // MARK: - 主流程（只在 queue 上）
 
     private func perform(metas: [MetaItem], baseline: [String: [KlineItem]],
-                         mainLatest: Int, today: Int, completion: (() -> Void)? = nil) {
+                         mainLatest: Int, today: Int, mergeMain: Bool,
+                         completion: (() -> Void)? = nil) {
         let t0 = Date()
 
         // ① 筛出「需要补 + 可映射 + 有基准行」的作业
@@ -613,6 +615,25 @@ final class GapBackfill: ObservableObject {
                 // ⑦ 自动合并入主库：五张表（日/周/月/季/年）+ meta.last_date，单事务 UPSERT；
                 //    合并器内部含「裁剪增量（保留最新 3 个交易日）→ 热刷新 → 通知全 App 重查」，
                 //    其 completion 在热刷新之后回调，此处无需再刷
+                guard mergeMain else {
+                    // 清单范围前置补缺口：只写增量库（图表按 主库 ∪ 增量库 读取，缺口日即时可见；
+                    // 周/月/季/年已由上面的周期聚合写进增量库）→ **不合并主库**：
+                    // 合并会把 meta.last_date 顶到今天，令 17:30 的全市场补缺口误判「已最新」而整轮跳过，
+                    // 非清单标的的缺口就再也没人补。主库合并留给 17:30 全市场档。
+                    self.state = .ok
+                    self.statusText = "缺口已补（清单范围，未合并主库）"
+                    self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
+                    self.verdictText = "缺口已补（清单范围）：\(gapFiles) 只 / \(outBars.count) 行 · 新写入 \(merge.dailyRows) 行"
+                        + " · 量纲 1x \(ratio1) / 100x \(ratio100) / 指数折算 \(ratio10000)"
+                        + " · 仅补价格 \(priceOnlyCount) · 单源腾讯"
+                        + " · 口径异常 \(anomalyCount) · 取数失败 \(failureCount)"
+                        + periodText
+                        + " · 未合并主库（留给 17:30 全市场档） · 覆盖 \(dateSpan)"
+                    self.detailLines = lines
+                    DebugLogger.shared.log("[GapBackfill] 清单范围：跳过合并主库（留给 17:30 全市场档）")
+                    Self.fire(completion)
+                    return
+                }
                 self.publish { self.statusText = "合并入主库…" }
                 MainDBMerger.shared.mergeIncrementIntoMainDB { merged in
                     DebugLogger.shared.log("[GapBackfill] 自动合并主库：\(merged.ok ? "成功" : "失败") \(merged.message)")
