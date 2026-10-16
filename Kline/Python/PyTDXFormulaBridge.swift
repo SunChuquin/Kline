@@ -130,14 +130,17 @@ enum PyTDXFormulaBridge {
         }
     }
 
-    /// text op 结果 dict → 该请求全部单元的输出行（失败单元跳过；PyTDXWave 主图波次用）
+    /// text op 结果 dict → 该请求**每单元的目标行**（单元最后一行；失败/缺行单元跳过）。
+    /// ⚠️ 只取目标行、不可 flatMap 全行：单元文本自身含依赖闭包，依赖里若也是输出行
+    /// （如 CDJ 的 J 依赖 K/D），会被重新求值得行——flatMap 会把它们重复计入（K 出现 3 次、
+    /// D 2 次），副图直传整式经此通道即表现为「3 根线变 6 根」。主图调用方本就只取 .last。
     static func decodeUnitLines(_ dict: [String: Any]) -> [TDXOutputLine] {
         let units = (dict["units"] as? [[String: Any]]) ?? []
-        // 单元文本解析后恰为一个输出行单元；行内含依赖行时目标行在最后
-        return units.flatMap { u -> [TDXOutputLine] in
+        return units.compactMap { u -> TDXOutputLine? in
             guard (u["ok"] as? Bool) == true,
-                  let raw = u["lines"] as? [[String: Any]] else { return [] }
-            return raw.compactMap(assembleTextLine)
+                  let raw = u["lines"] as? [[String: Any]],
+                  let last = raw.last else { return nil }
+            return assembleTextLine(last)
         }
     }
 
