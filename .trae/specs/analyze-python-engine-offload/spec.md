@@ -1,3 +1,8 @@
+> ⚠️ **部分内容已弃用（2026-10-16）**：本文档中东财取数 / secid 映射 / 云端分片相关章节所描述的实现
+> （`EastmoneyQuoteFetcher`、`quote_parse.py` 的 `em_snapshot`/`secid`、`universe_secids.txt`、
+> `src/live_db_builder.py`、`src/txt_patch_builder.py`、`sync-live-db.yml`）已随「单源腾讯化」删除；
+> 其余口径（周期聚合、模板解析等）仍然有效。
+
 # 假定捆绑 Python3 引擎：功能下沉可行性与选型分析
 
 > 本文档为分析交付物。分析对象为 Kline 项目当前代码；本文档不含任何代码改动。

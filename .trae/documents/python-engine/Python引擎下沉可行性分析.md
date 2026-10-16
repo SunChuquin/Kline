@@ -4,7 +4,7 @@
 
 ## Why
 
-当前 Kline 项目约 **5.4 万行 Swift（154 个文件，不含空行）** 承担了从图表渲染、指标计算、公式解析到数据摄取与同步的全部职责；同时仓库已有约 **4400 行 Python**（`src/` 的 PC 侧数据管线 + `check_indicators.py` 编译期校验）在实现**同一批口径**——周期聚合规则、东财/腾讯取数字段序号、`.tdx` 指标模板解析。
+当前 Kline 项目约 **5.4 万行 Swift（154 个文件，不含空行）** 承担了从图表渲染、指标计算、公式解析到数据摄取与同步的全部职责；同时仓库已有约 **4400 行 Python**（`src/` 的 PC 侧数据管线 + `check_indicators.py` 编译期校验）在实现**同一批口径**——周期聚合规则、腾讯取数字段序号、`.tdx` 指标模板解析。
 
 两套实现目前靠源码注释里的「改这里前先读那边」维持一致，已经出现明确的漂移风险点。本分析回答：假定必须在 App 内捆绑 Python3 引擎，**哪些功能下沉更合适**（可读性 / 可维护性 / 版本更新灵活性 / 避免造轮子四维，**外加一条「通用性」判据**，见 §2.1）、**哪些必须留原生**，以及「Xcode 内嵌 + CI 剥离 + 运行时获取」双路径方案**是否可行**。
 
@@ -16,6 +16,11 @@
 
 ### 1.1 Swift 侧运行时承担的计算类职责
 
+> **2026-10-16 阶段 3 更新（单源腾讯化）**：设备侧已删除**云端分片链路**与**东财取数**，
+> 现行取数为**单源腾讯直连**（`GapBackfill` 补缺口 + `WatchlistSyncManager` 清单范围日更 +
+> `TdxSyncManager` 四时刻调度）。下表带 `*` 的行已按此更新（`*` 为**非空行数**，含注释；
+> 其余行仍为阶段 3 之前的 cloc 快照，口径不同），请以代码现状为准。
+
 | 职责 | 文件 | 行数 | 算法一句话 |
 | --- | --- | --- | --- |
 | TDX 公式引擎 | [FormulaEngine.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Formula/FormulaEngine.swift) | 1570 | 手写词法 → 递归下降语法 → 求值；**22 个具名内置函数**（另 3 个小写别名、11 个序列键）；支持**分块增量求值**（递归指标跨块续算） |
@@ -23,13 +28,13 @@
 | 回测引擎 | [StrategyBacktestEngine.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Backtest/StrategyBacktestEngine.swift) | 854 | 逐 bar 推进，T+1 / 涨跌停 / 费率口径；网格与分批状态机；复用 `StrategyCondGenerator.drafts` 与 `SimCondRule` 口径 |
 | 条件单结算（含预警） | [SimCondEngine.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Trading/SimCondEngine.swift) + [SimCondRule.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Trading/SimCondRule.swift) + [SimCondKit.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Trading/SimCondKit.swift) | 308 + 424 + 124 | 行情刷新时结算全部 monitoring 条件单：重入保护 → 有效期 → 快照 → 纯函数判定 → 组装委托。**「仅提醒」（预警）是同一引擎的 `isAlertOnly` 形态，不是独立引擎** |
 | 模拟交易规则 | [SimTradingRules.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Trading/SimTradingRules.swift) | 158 | T+1 / 整手 / 佣金 / 印花税 / 涨跌停 / 交易时段的集中规则表与校验；注释明写「规则层是纯计算，校验失败不产生任何数据写入」 |
-| 东财取数 | [EastmoneyQuoteFetcher.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/EastmoneyQuoteFetcher.swift) | 432 | 批量快照（≤100 secid/批）；secid 前缀映射；f17/f15/f16/f2 取 OHLC；f124 按 UTC+8 换算交易日；指数退避重试 |
-| 补缺口（多源直连） | [GapBackfill.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/GapBackfill.swift) | 766 | 主库 `meta.last_date` 之后缺口 → **腾讯 newfqkline + 东财 push2his 双源按 job 序号轮转**（4 条 h2 连接 × 24 路并发，失败按序兜底）；基准日自校准（价格逐字段相等、量比吸附 1/100、额比≈1），不合则整只丢弃；缺口行写增量库并重算锚桶及之后的周/月/季/年 |
-| 分片同步 | [TdxSyncManager.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/TdxSyncManager.swift) | 872 | manifest v3 日分片：按主库缺口选相交分片（≤30 片）→ 逐片下载 → sha256 校验 → 合并 → 单次热刷新 |
-| 增量库读写 | [LiveDataStore.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Data/LiveDataStore.swift) | 1127 | 五表增量库；按 `file` 建键；分片合并 / **周期感知裁剪**；指纹（size+mtime+sha256）轮询 |
+| ~~东财取数~~（**已删除 2026-10-16**） | ~~`EastmoneyQuoteFetcher.swift`~~ | ~~432~~ | 东财批量快照取数；「单源腾讯化」后整体下线（清单日更改走腾讯 `newfqkline`） |
+| 取数（单源腾讯） | [GapBackfill.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/GapBackfill.swift) | 1085* | 主库 `meta.last_date` 之后缺口 → 腾讯 `newfqkline`（4 条 h2 连接 × 24 路并发）；基准日自校准（价格逐字段相等、量比吸附 1/100/1e-4/1e-7、额比≈1），不合则整只丢弃；缺口行写增量库并重算锚桶及之后的周/月/季/年 |
+| 到点调度（原「分片同步」已删除） | [TdxSyncManager.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/TdxSyncManager.swift) | 202* | 仅保留四时刻（11:00 / 14:30 / 15:05 / 17:30）到点判定与触发：先补「清单并集」范围缺口再写当日 bar；17:30 档为全市场补缺口（含自动合并主库）。**无 manifest / 无分片 / 无补丁** |
+| 增量库读写 | [LiveDataStore.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Data/LiveDataStore.swift) | 1453* | 五表增量库；按 `file` 建键；当日K线 UPSERT / 当期与缺口周期聚合 / **周期感知裁剪**；指纹（size+mtime+sha256）轮询 |
 | 主库合并 | [MainDBMerger.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Data/MainDBMerger.swift) | 272 | 单事务 `BEGIN IMMEDIATE` + 预编译 `INSERT OR REPLACE`，按 `(meta_id,date)` UPSERT 并同步 `meta.last_date` |
-| 清单自动更新编排 | [WatchlistSyncManager.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/WatchlistSyncManager.swift) | 291 | 清单并集 → 东财取当日 K 线 → 直写增量库；并用「主库当期 bar ⊕ 新日线」合并出当期季/年 bar |
-| 本地 HTTP 服务 | [KlineHTTPServer.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/KlineHTTPServer.swift) | 1707 | Network.framework 手写 HTTP，前台监听 5051；暴露 Downloads 目录 IPA 供 TrollStore 安装 |
+| 清单自动更新编排 | [WatchlistSyncManager.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/WatchlistSyncManager.swift) | 552* | 清单并集 → **腾讯**取当日 K 线 → 直写增量库；并用「主库当期 bar ⊕ 新日线」合并出当期季/年 bar |
+| 本地 HTTP 服务 | [KlineHTTPServer.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Infrastructure/KlineHTTPServer.swift) | 1281* | Network.framework 手写 HTTP，前台监听 5051；暴露 Downloads 目录 IPA 供 TrollStore 安装（**2026-10-16 已删云端分片/补丁路由**） |
 | 指标模板解析 | [SystemIndicatorStore.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Formula/SystemIndicatorStore.swift) | 251 | 解析 `Kline/Indicators/*.tdx` 的 NAME / SCOPE / GROUP / FORMULA |
 | 策略 DSL | [StrategyFormula.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Formula/StrategyFormula.swift) + [FormulaKind.swift](file:///c:/Users/sunck/home/projects/ios/Kline/Kline/Formula/FormulaKind.swift) | 617 + 348 | 策略文档 TRADE / RULES 段的解析与展开 |
 | 图表渲染与交互 | `Kline/Chart/*`（18 文件） | 8515 | 主副图绘制、十字光标、手势识别、惯性动画、图例与数据栏 |
@@ -41,13 +46,15 @@
 | 文件 | 行数 | 用途 | 第三方依赖 |
 | --- | --- | --- | --- |
 | `src/tdx_parser.py` | 754 | 通达信 txt → SQLite 全量导入；定义五表 + meta 表结构；`period_key` 周期键与周期聚合 | **无**（`sqlite3/os/re/sys/time/threading/platform/datetime`） |
-| `src/txt_patch_builder.py` | 1080 | 新 txt 目录 + 基线库 → `patch_<seq>.db`；区分 append / rewrite / new 三类差分 | **无** |
-| `src/live_db_builder.py` | 1131 | 日分片增量库生成；东财批量快照取数；secid 映射；manifest + bucket + `.changed` | **无**（含 `urllib`） |
+| ~~`src/txt_patch_builder.py`~~ | ~~1080~~ | **已删除 2026-10-16**（随云端分片链路删除）；原为：新 txt 目录 + 基线库 → `patch_<seq>.db`，区分 append / rewrite / new 三类差分 | — |
+| ~~`src/live_db_builder.py`~~ | ~~1131~~ | **已删除 2026-10-16**（随云端分片链路删除）；原为：日分片增量库生成 + 东财批量快照取数 + secid 映射 + manifest/bucket | — |
 | `src/txt_changes.py` | 282 | 新旧 txt 目录变更判定（stat / content / bc 三种 mode），全项目唯一一份实现 | **无**（含 `hashlib/subprocess/xml.etree`） |
 | `src/tdx_gui.py` | 1071 | PC 侧 GUI 操作入口 | **PySide2**（Qt 绑定，全项目唯一第三方依赖） |
 | `check_indicators.py` | 103 | **编译期**校验 `.tdx` 模板；复刻 `SystemIndicatorStore.parse()` 的解析规则 | **无** |
 
-> 关键事实：**承载口径逻辑的五个数据模块全部为标准库实现，没有 pandas / numpy / requests**；全项目唯一的第三方依赖是 GUI 壳 `src/tdx_gui.py`（PySide2），它不承载任何口径规则。这直接影响「避免造轮子」这一维度的兑现方式——见 §3.5。
+> 关键事实：**承载口径逻辑的数据模块全部为标准库实现，没有 pandas / numpy / requests**（阶段 3 删除
+> `txt_patch_builder.py` / `live_db_builder.py` 后余 `tdx_parser.py` / `txt_changes.py` / `check_indicators.py`）；
+> 全项目唯一的第三方依赖是 GUI 壳 `src/tdx_gui.py`（PySide2），它不承载任何口径规则。这直接影响「避免造轮子」这一维度的兑现方式——见 §3.5。
 
 ### 1.3 构建 / 签名 / 打包现状
 
@@ -59,14 +66,14 @@
 
 ### 1.4 `src/` 的定位（澄清一处前提，本版新增）
 
-`src/` 下的五个 Python 模块**目前不打算放进 Kline App 内运行**；它们与 App 放在同一仓库，目的是**统一版本管理，避免两份版本管理各自漂移**。
+`src/` 下的 Python 模块（2026-10-16 阶段 3 删除两个分片生成端后，余 `tdx_parser.py` / `txt_changes.py` / `tdx_gui.py` / `check_indicators.py` 等）**目前不打算放进 Kline App 内运行**；它们与 App 放在同一仓库，目的是**统一版本管理，避免两份版本管理各自漂移**。
 
 这个前提对结论有实质影响，而且是**有利**的：
 
-- 它意味着「同仓」目前只达成了**源码级统一**——两份实现仍在，靠人读注释对齐（`EastmoneyQuoteFetcher.swift` 头部那句「改这里前先读那边」正是这种对齐方式的写照）。
+- 它意味着「同仓」目前只达成了**源码级统一**——两份实现仍在，靠人读注释对齐（原 `EastmoneyQuoteFetcher.swift` 头部那句「改这里前先读那边」正是这种对齐方式的写照；该文件已于 2026-10-16 随单源腾讯化删除）。
 - 而**引擎下沉能达成运行时级统一**：App 侧的 Python 可以直接 `import` `src/tdx_parser.py` 里那份 `period_key` / 周期聚合，**同一份 `.py` 文件在两端执行**。这是「统一版本管理」的最终形态，也是本分析里**最强的下沉理由**——比「消除双实现」这个说法更准确：**它不是把 PC 代码搬进 App，而是让两端共用同一份源码。**
 - 代价要说清：一旦 App 侧 import 了 `src/` 的模块，`src/` 就**不再是纯 PC 工具**，而是「两端共享库」，随之带来约束——GUI 壳（`PySide2`）必须与共享模块**物理隔离**、不能假设 PC 的文件系统布局、标准库版本要兼容 iOS 侧的 Python 版本。
-- **好消息**：`tdx_parser.py` / `live_db_builder.py` / `txt_changes.py` 本来就无第三方依赖（已核实），天然满足共享前提；唯一带第三方依赖的 `tdx_gui.py` 恰好是纯 GUI 壳，隔离成本很低。
+- **好消息**：`tdx_parser.py` / `txt_changes.py` / `check_indicators.py` 本来就无第三方依赖（已核实），天然满足共享前提；唯一带第三方依赖的 `tdx_gui.py` 恰好是纯 GUI 壳，隔离成本很低。（原表内的 `live_db_builder.py` 已于 2026-10-16 删除。）
 
 ---
 
@@ -116,7 +123,7 @@ flowchart TB
 | 1 | 指标模板解析与校验 | 持平 | **强正** | 中 | 弱 | **推荐下沉** |
 | 2 | TDX 公式引擎 | 略正 | 中 | 中 | **强正** | **推荐下沉（解析层 + 函数库）；首帧调度留原生**（§3.6.1 上调） |
 | 3 | 周期聚合 | **强正** | **强正** | 中 | 中 | **推荐下沉** |
-| 4 | 多源取数口径（东财快照 + 腾讯/东财历史 K 线） | **强正** | **强正** | **强正** | 中 | **推荐下沉** |
+| 4 | 取数口径（**单源腾讯 `newfqkline`**；原「东财快照 + 多源历史 K 线」已于 2026-10-16 收窄） | **强正** | **强正** | **强正** | 中 | **推荐下沉** |
 | 5 | 策略 / 公式 DSL 解析 | 中 | 中 | 中 | 弱 | 中性 |
 | 6 | 回测引擎 | 略正 | **强负** | 中 | 弱 | **不建议下沉** |
 | 7a | 条件单 / 预警**判定层**（`SimCondRule` + `SimTradingRules` + `SimCondKit`） | 持平 | 中 | 中 | **零** | **中性偏不建议** |
@@ -286,11 +293,15 @@ flowchart TB
 - 避免造轮子：中（pandas 能显著简化，但要付体积代价）。
 - 反向约束：批量、低频、可缓存。**三关全过。**
 
-**候选 4：多源取数口径（推荐，本版扩围）**
-- **范围扩了**：取数口径现在不止东财一处——`EastmoneyQuoteFetcher.swift`（东财批量快照）之外，`GapBackfill.swift` 又实现了一整套**腾讯 `newfqkline` 历史 K 线 + 东财 `push2his`** 的取数与解析。原候选名「东财取数口径」已不能覆盖现状。
-- 可读性：**强正**。`requests`/`urllib` + `json` 比 432 + 766 行 Swift 简洁得多。
-- 可维护性：**强正，且漂移面又多了一处**。`EastmoneyQuoteFetcher.swift` 头部注释直接写着「取数口径与 PC 侧已验证可用的生成端 `src/live_db_builder.py` 逐条对齐（**改这里前先读那边**）」；GapBackfill 的**量纲自校准**（吸附窗口 1x/100x/÷10000、额折算）同样与 PC 端 `live_db_builder.py` 各有一套，是新增的双实现漂移面。
-- 版本更新灵活性：**强正，且是本项目收益最高的一项——证据比上一版更硬**。不只是东财字段序号（f17/f15/f16/f2/f5/f6/f124）与 secid 映射是外部供应商可变的；腾讯接口的隐蔽陷阱更凶——`param` 必须 6 段（缺第 6 段复权类型 → 全市场 3312 只全灭）、历史 K 线价格顺序是**开-收-高-低**（与快照的开-高-低-收不同）、起始日会被接口**向前扩**（须用根数控制）。这些在 GapBackfill 头注释里有整段实测记录，任何一条写错都是静默错值。今天变了要改 Swift → 重新构建 → 重新签名 → 重装 IPA；下沉后可推脚本。
+**候选 4：取数口径（推荐；2026-10-16 收窄为单源腾讯）**
+- **范围已收窄**：2026-10-16「单源腾讯化」删除了 `EastmoneyQuoteFetcher.swift`（东财批量快照）与东财 `push2his`
+  兜底，设备侧取数**只剩腾讯 `newfqkline` 一处**（`GapBackfill.swift` 的历史 K 线 + 量纲自校准，
+  `WatchlistSyncManager` 复用同一取数写当日 bar）。原候选名「多源取数口径」不再适用。
+- 可读性：**强正**。`requests`/`urllib` + `json` 比 1085 行 Swift 简洁得多。
+- 可维护性：**强正**。设备侧 `GapBackfill` 的**量纲自校准**（吸附窗口 1x/100x/1e-4/1e-7、额折算）
+  与 PC 端曾是又一处双实现漂移面；PC 端 `live_db_builder.py` 已于 2026-10-16 删除 → 漂移面**收敛为单侧 Swift**，
+  但也意味着设备侧口径**再无 PC 参照**，下沉后反而更需要契约测试锁死。
+- 版本更新灵活性：**强正，且是本项目收益最高的一项——证据比上一版更硬**。腾讯接口的隐蔽陷阱很凶——`param` 必须 6 段（缺第 6 段复权类型 → 全市场 3312 只全灭）、历史 K 线价格顺序是**开-收-高-低**、起始日会被接口**向前扩**（须用根数控制）；此外清单范围日更还叠加了「同日覆盖当日 bar / 主库已含当日 bar 时锚点回退」等语义。这些在 GapBackfill 头注释里有整段实测记录，任何一条写错都是静默错值。今天变了要改 Swift → 重新构建 → 重新签名 → 重装 IPA；下沉后可推脚本。
 - 避免造轮子：中。
 - 反向约束：后台串行/并发队列、非首帧、可重试。但**新增一道闸**——吞吐能力，见 §4 第 3 条。
 - **顺带收编一份口径知识**：新浪快照字段语义（`[1]`开 `[3]`收 `[4]`高 `[5]`低 `[8]`量(股)→÷100 四舍五入 `[9]`额(元)，≤300/批、GBK、需 Referer）原本记录在已下线的 `DirectQuoteProbe.swift`（对拍 PoC，2026-10-02 实测腾讯 3312/3312 逐只全等、新浪 ÷100 后 3307 只全等）头注释里。若未来接入新浪作第三源，这段口径就是起点；届时候选 4 的下沉范围应写成「**每个源一个模块**」的插件式结构。**三关全过（吞吐闸待 Phase-0 实测）。**
@@ -314,11 +325,11 @@ flowchart TB
 | 候选 | 版本更新灵活性 | 通用性 | 重排结果 |
 | --- | --- | --- | --- |
 | 2 TDX 公式引擎 | 中 | **强正**（DSL 求值器与函数库与平台无关） | 由「中性 / 可部分下沉」**上调**为「**推荐下沉（解析层 + 函数库），首帧调度留原生**」 |
-| 4 多源取数口径 | **强正** | **负**（绑死各源字段序号、secid/市场码规则与量纲折算，换宿主即失效；双源路由后 vendor-lock 略降但复杂度上升） | 维持**推荐下沉**，理由收窄为「版本灵活性」+「量纲自校准漂移面」两条，**不再宣称它通用** |
+| 4 取数口径（单源腾讯） | **强正** | **负**（绑死腾讯字段序号、市场码规则与量纲折算，换宿主即失效） | 维持**推荐下沉**，理由收窄为「版本灵活性」+「量纲自校准漂移面」两条，**不再宣称它通用** |
 | 12 K 线形态识别（新） | 中 | **强正** | **推荐下沉**（见 §3.6.3） |
 | 13 通用数学 / 统计函数库（新） | 中 | **强正** | **推荐下沉**（见 §3.6.2） |
 
-**候选 4 上两个维度方向相反**，这是全文唯一需要权衡的地方：它版本灵活性最高（字段是外部供应商可变的，今天改要重新构建 + 重新签名 + 重装 IPA；腾讯接口的隐蔽陷阱见 §3.4），但通用性最差（离开取数语境就无用）。**结论不变**——因为「设备侧直连行情源（腾讯 + 东财双源）」是项目既定事实（见项目约束），灵活性收益是实打实的；而通用性损失**本来就已经存在**，不是下沉带来的新增损失。
+**候选 4 上两个维度方向相反**，这是全文唯一需要权衡的地方：它版本灵活性最高（字段是外部供应商可变的，今天改要重新构建 + 重新签名 + 重装 IPA；腾讯接口的隐蔽陷阱见 §3.4），但通用性最差（离开取数语境就无用）。**结论不变**——因为「设备侧直连行情源（单源腾讯 `newfqkline`，东财已于 2026-10-16 下线）」是项目既定事实（见项目约束），灵活性收益是实打实的；而通用性损失**本来就已经存在**，不是下沉带来的新增损失。
 
 #### 3.6.2 候选 13：通用数学 / 统计函数库（新能力）
 
@@ -517,7 +528,7 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 
 | 阶段 | 内容 | 进入条件 |
 | --- | --- | --- |
-| **阶段 0** | 不引入引擎。`src/` 同仓统一管理**已在做**（§1.4），本阶段补的是把「靠注释对齐」升级为「**靠测试锁死**」：为周期聚合、东财取数口径、模板解析各写一份契约测试（PC 侧 Python 产出 golden 值，Swift 侧断言同值） | 无前置条件，**现在就可做，收益立刻兑现**；且**不需要引擎**，与「是否引入引擎」完全解耦 |
+| **阶段 0** | 不引入引擎。`src/` 同仓统一管理**已在做**（§1.4），本阶段补的是把「靠注释对齐」升级为「**靠测试锁死**」：为周期聚合、腾讯取数口径（行解析 + 量纲校准）、模板解析各写一份契约测试（PC 侧 Python 产出 golden 值，Swift 侧断言同值） | 无前置条件，**现在就可做，收益立刻兑现**；且**不需要引擎**，与「是否引入引擎」完全解耦 |
 | **阶段 1** | 引入引擎（Xcode 内嵌路径），承载候选 1 / 3 / 4 + **候选 2 的解析层与函数库** + **候选 13（数学栈）**，并定义分级降级矩阵 | 阶段 0 完成；Phase-0 实验全部通过；**已接受 §3.6.2 的体积代价**（或已决定放弃 numpy 生态） |
 | **阶段 2** | 候选 12（形态识别）落地。先做 §3.6.3 的「三件事定死」，再选路线 A（iOS framework，**不需引擎**）或路线 B（走引擎） | 阶段 1 稳定运行；参考实现与参数阈值已锁定；合成序列单测通过 |
 | **阶段 3** | 评估「CI 剥离 + 运行时获取」 | 阶段 1 / 2 稳定运行；引擎包独立分发通道就绪；剥离带来的体积收益经实测确认值得 |
@@ -529,7 +540,7 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 **阶段 1 试点批完成记录（2026-10-06，iPad mini 5th gen 模拟器 / iOS 26.5）**：经用户决策，阶段 1 首批收窄为**试点批**——候选 3（周期聚合）+ 候选 1（指标模板解析）先下沉，打通「生产桥接层 + 业务脚本随 bundle 分发 + 契约测试复用 golden + §5.3 降级矩阵」全链路；**numpy（候选 13）拆为第二批**，进入条件 = 试点批验收通过。实现与验证：
 
 - **生产桥接层** `Kline/Python/KlinePythonBridge.swift`：`ensureReady()`（后台串行队列一次初始化，状态非 `.installed` 不尝试，绝不同步触发）/ `call(script:input:timeout:)`（Bundle.main/PyScripts 定位脚本、UUID 临时文件 JSON in/out、base64 输入防注入包装、超时看门狗）/ `blockingCall`（禁主线程）。失败路径三类（引擎未就绪 / 超时 / 脚本报错）均 DebugLogger 可检索，调用方 Swift 降级。
-- **业务脚本** `Kline/PyScripts/`：`period_aggregate.py`（aggregate/merge 双操作，桶键=周期日历起始日，镜像 `src/tdx_parser.py` + `live_db_builder.aggregate_full_periods` 口径）、`template_parse.py`（逐条镜像 `SystemIndicatorStore.parse`，KIND≠TECH 拒载语义）。
+- **业务脚本** `Kline/PyScripts/`：`period_aggregate.py`（aggregate/merge 双操作，桶键=周期日历起始日，镜像 `src/tdx_parser.py` 口径）、`quote_parse.py`（`tencent_kline` 行解析 + `calibrate` 量纲校准，镜像 `GapBackfill`）、`template_parse.py`（逐条镜像 `SystemIndicatorStore.parse`，KIND≠TECH 拒载语义）。
 - **调用点切换**：`WatchlistSyncManager.currentPeriodBars` Python 优先 + Swift 原路径降级；`SystemIndicatorStore` 加载完成后台 Python 重解析对拍校准（同步路径零改动，差异以 Python 为准并记录明细）。**激活时机 = 惰性激活（ensureOnce）**：调用点发现引擎未就绪时会话内一次性后台触发加载（模拟器实测 43ms），首启早期先走 Swift 降级，就绪后自动切 Python——既满足「绝不同步阻塞首帧」，又保证试点候选在真实启动路径上实际生效（沙盒日志实证：`跳过 → 后台触发加载 → 加载成功（43ms）`三段记录）。
 - **验证结果**：有引擎构建 KlineTests **36/36 全绿**（PyBridge 契约 ×2 套件 vs golden + 引擎冒烟，xcresult 实证）；降级构建（`KLINE_SKIP_ENGINE_EMBED=1`）**36 tests / 4 skipped / 0 failures**（桥接契约 3 用例 + 冒烟 1 用例 XCTSkip，其余 32 个纯 Swift 路径全绿 = 聚合/模板行为与现状一致）。
 - **打包修正**：同步组把 `.py` 平铺进 bundle 根 → 新增 Copy PyScripts 构建阶段保住 `PyScripts/` 目录；Embed Python Engine 阶段跳过分支补 `rm -rf`（修复增量构建引擎残留）。
@@ -589,12 +600,16 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
    - **体积实测**：KlineEngine .tipa 22.0MB → **28.4MB**（+6.4MB，压缩态；远小于 §3.6.2 预估的数十 MB——wheel 内纯 C 回退无 OpenBLAS 二进制）。模拟器 KlineTests 37/37 全绿（含 numpy import + mean/dot/max 冒烟）。
    - **App 内引擎更新通道**：本地更新面板新增「更新引擎」行（构建号：远程取 Release 说明 run #N，当前取 Engine.app CFBundleVersion；下载走 sidecar + Release digest 双 sha256 校验 → TrollStore 安装）。真机实证：`发现新引擎 #9（当前 #7）` → 下载 24s → 双校验通过 → TrollStore 拉起。
 9. **候选 14（补缺口 GapBackfill）暂不立项**（用户决策，2026-10-06）：继续走既有 Swift 实现与测试闭环，不进 §3.1 表。
+10. **单源腾讯化（2026-10-16，阶段 3）**：设备侧删除**云端分片链路**（`live_db_builder.py` / `txt_patch_builder.py` /
+    `sync-live-db.yml` / manifest 分片 / 差分补丁 / 设备侧 `/sync/{merge-bucket,apply-patch,patch-session,probe}` 路由）
+    与**东财取数**（`EastmoneyQuoteFetcher.swift`、`quote_parse.py` 的 `em_snapshot`·`secid`、`universe_secids.txt`），
+    取数收敛为**单源腾讯 `newfqkline`**；候选 4 随之收窄为「腾讯取数口径」，§1.1 / §1.2 / §3.1 / §3.4 已同步修订。
 
 ### 8.2 待确认事项（下一轮讨论输入）
 
 | # | 事项 | 影响 |
 | --- | --- | --- |
-| 1 | **补缺口（GapBackfill）是否立为候选 14 单独评估？** 它是后台、批量、可缓存、非首帧，按 §2 判据可过三关；且其字段解析 / 量纲自校准与 PC 端 `live_db_builder.py` 是又一处双实现 | 若立项，§3.1 表加一行，阶段 1 内容相应扩 |
+| 1 | **补缺口（GapBackfill）是否立为候选 14 单独评估？** 它是后台、批量、可缓存、非首帧，按 §2 判据可过三关；字段解析 / 量纲自校准现已收敛为**设备侧单实现**（PC 端 `live_db_builder.py` 已于 2026-10-16 删除，不再有 PC 参照） | 若立项，§3.1 表加一行，阶段 1 内容相应扩 |
 | 2 | **新浪是否接入为第三源？** 前置：先实测新浪是否提供成交额（口径见 §3.4 收编的字段语义） | 影响候选 4 下沉范围是否写成「每源一个模块」的插件式结构 |
-| 3 | **WatchlistSyncManager（291 行，现东财单源）的多源并行改造是否落地？** | 落地后 §1.1 行数与候选 4 收益面需再更新 |
+| 3 | **WatchlistSyncManager（552 行，现腾讯单源）是否进一步与 GapBackfill 合并取数层？** | 若合并，§1.1 行数与候选 4 收益面需再更新 |
 | 4 | **主图 B/S/T 成交标记是否仍不存在？**（§3.3 的遗留待确认项） | 若已实现需补进 §1.1 基线表 |

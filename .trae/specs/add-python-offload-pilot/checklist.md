@@ -1,3 +1,8 @@
+> ⚠️ **部分内容已弃用（2026-10-16）**：本文档中东财取数 / secid 映射 / 云端分片相关章节所描述的实现
+> （`EastmoneyQuoteFetcher`、`quote_parse.py` 的 `em_snapshot`/`secid`、`universe_secids.txt`、
+> `src/live_db_builder.py`、`src/txt_patch_builder.py`、`sync-live-db.yml`）已随「单源腾讯化」删除；
+> 其余口径（周期聚合、模板解析等）仍然有效。
+
 # Checklist
 
 - [x] KlinePythonBridge 绝不从首帧/启动链同步触发引擎初始化（代码审查：isReady 只读、ensureReady 后台串行队列、call 未就绪即返回不触发加载；降级构建 32 测试全绿无 dlopen 副作用）

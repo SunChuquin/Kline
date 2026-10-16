@@ -1,3 +1,11 @@
+> ⚠️ **已弃用（2026-10-16）**：设备侧已改为**单源腾讯直连**（补缺口 + 清单范围日更），
+> **云端分片链路**（`src/live_db_builder.py`、`src/txt_patch_builder.py`、`.github/workflows/sync-live-db.yml`、
+> manifest 分片、差分补丁、PC 侧 `push_bucket_*`、设备侧 `/sync/{merge-bucket,apply-patch,patch-session,probe}` 路由）
+> 与**东财取数**（`EastmoneyQuoteFetcher`、`quote_parse.py` 的 `em_snapshot`/`secid`、`universe_secids.txt`）**均已删除**。
+> 本文档仅作历史记录，不再是现行架构。
+> 现行实现：`Kline/Infrastructure/{GapBackfill,WatchlistSyncManager,TdxSyncManager}.swift`；
+> 现行计划：`.trae/documents/single-source-tencent-plan.md`。
+
 # 周/月线从「云端分片」改「App 本地聚合」——实施计划
 
 > 状态：**阶段 1 + 阶段 2 已实现并推送**（2026-10-01，commit `33b25f4` / `309840f`），等待模拟器验证（需先把「数据同步」总开关 `kline.tdxsync.enabled` 打开）
