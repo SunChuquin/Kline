@@ -193,7 +193,7 @@ final class GapBackfill: ObservableObject {
     /// 12 流正常 → 4 条连接分摊，每条 ≤6 流
     static let sessionCount = 4
     static let requestTimeout: TimeInterval = 20
-    /// 严格照抄 PC 端 live_db_builder.py（原 DirectQuoteProbe.userAgent，探针下线后收编于此）
+    /// 腾讯行情接口的浏览器 UA（原 DirectQuoteProbe.userAgent，探针下线后收编于此）
     static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     /// 每只请求的**最大**根数（实测 320 有效）。正常缺口用 `barsCount(from:to:)` 动态算，
     /// 只有缺口超过 310 个自然日时才会用到这个上限（保留旧行为）

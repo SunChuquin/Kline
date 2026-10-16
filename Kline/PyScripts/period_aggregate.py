@@ -7,8 +7,7 @@
 对齐的权威实现（本脚本的输出必须与它们逐字段一致）
   - `src/tdx_parser.py` handle_data / period_key：主库 tdx.db 周期线口径，
     周期线 date = 该周期的第一个交易日（组内最早日线日期）。
-  - `src/live_db_builder.py` aggregate_full_periods：桶内聚合规则
-    （open=首行 / high=max / low=min / close=末行 / vol、amo=求和）。
+  - 桶内聚合规则：open=首行 / high=max / low=min / close=末行 / vol、amo=求和。
   - `Kline/Infrastructure/WatchlistSyncManager.swift` mergePeriodBar：
     op="merge" 的基期 bar ⊕ 新日线语义。
 

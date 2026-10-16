@@ -23,8 +23,7 @@ contract_golden.py —— PC 侧契约 golden 生成器（纯标准库 · 无网
 重新生成时机
 ------------
 以下任一口径改动后重跑本脚本，并连同对应 Swift 断言一起评审提交：
-  · 周期聚合口径（src/tdx_parser.py period_key/handle_data、
-    src/live_db_builder.py aggregate_full_periods/period_bounds/period_key）
+  · 周期聚合口径（src/tdx_parser.py period_key/handle_data）
   · 行情解析与自校准（Kline/Infrastructure/GapBackfill.swift 的行解析、calibrate 常量）
   · 指标模板解析（check_indicators.py parse_tdx、SystemIndicatorStore.parse）
 
@@ -33,13 +32,11 @@ contract_golden.py —— PC 侧契约 golden 生成器（纯标准库 · 无网
   period_aggregation.json
       → LiveDataStore.rebuildGapPeriods / WatchlistSyncManager.mergePeriodBar
         口径：周期 bar 的 date = 周期内首个交易日；停牌周期不产 bar。
-        golden 由主库权威实现 src/tdx_parser.TDXDataGenerator.handle_data 计算（周/月/季/年四周期），
-        并用 live_db_builder.aggregate_full_periods（全窗口）对 weekly/monthly 做逐字段交叉自检，
-        两路不一致立即失败——确保「主库 tdx.db 口径」与「增量库口径」在同一份 golden 上闭合。
+        golden 由主库权威实现 src/tdx_parser.TDXDataGenerator.handle_data 计算（周/月/季/年四周期）。
   quote_parsing.json
       · tencentKline → GapBackfill.fetchSourceBars
         行数组 11 字段：[0]日期 [1]开 [2]收 [3]高 [4]低 [5]量(手) [6]{} [7]换手% [8]额(万元)
-        （价格顺序开-收-高-低，与东财快照的开-高-低-收不同）。Python 侧无既有实现，
+        （价格顺序为 开-收-高-低）。Python 侧无既有实现，
         本脚本按 GapBackfill.fetchSourceBars(:699-709) 的取数语义解析。
       · calibration → GapBackfill.calibrate
         ⚠ 校准无 Python 侧实现：本脚本按 GapBackfill.calibrate(:584-639) 的常量与判定顺序
@@ -79,7 +76,6 @@ OUT_DIR = os.path.join(REPO_ROOT, "KlineTests", "Fixtures")
 sys.path.insert(0, SRC_DIR)
 sys.path.insert(0, REPO_ROOT)
 
-import live_db_builder as ldb            # noqa: E402  复用：aggregate_full_periods
 import tdx_parser                        # noqa: E402  复用：TDXDataGenerator.period_key / handle_data
 import check_indicators                  # noqa: E402  复用：parse_tdx
 
@@ -121,7 +117,6 @@ def write_json(name, payload):
 # ---------------------------------------------------------------------------
 # ① period_aggregation.json —— 周期聚合 golden
 #    复用：tdx_parser.TDXDataGenerator.handle_data（主库权威口径）
-#          live_db_builder.aggregate_full_periods（交叉自检）
 # ---------------------------------------------------------------------------
 
 def _make_tdx_instance():
@@ -170,16 +165,6 @@ def _period_golden(db, daily):
     golden = {}
     for period, rows in zip(("weekly", "monthly", "quarterly", "yearly"), result[1:]):
         golden[period] = [[num6(v) for v in row[1:]] for row in rows]
-    # 交叉自检：weekly/monthly 必须与增量库口径（全窗口）逐字段一致
-    dict_bars = [dict(zip(("date", "open", "high", "low", "close", "vol", "amo"), b))
-                 for b in daily]
-    for period in ("weekly", "monthly"):
-        via_ldb = ldb.aggregate_full_periods(dict_bars, period, 19900101, 20991231)
-        expect = [[num6(b["date"]), num6(b["open"]), num6(b["high"]), num6(b["low"]),
-                   num6(b["close"]), num6(b["vol"]), num6(b["amo"])] for b in via_ldb]
-        if expect != golden[period]:
-            raise SystemExit("[contract_golden] 交叉自检失败(%s)：handle_data 与 "
-                             "aggregate_full_periods 口径不一致" % period)
     return golden
 
 
@@ -256,8 +241,7 @@ def build_period_aggregation():
     return {
         "notes": "周期聚合契约：周期 bar 的 date = 该周期内第一个交易日（组内最早日线日期），"
                  "open=首日开 / high=max / low=min / close=末日收 / vol=Σ / amo=Σ；停牌周期不产 bar。"
-                 "golden 由 src/tdx_parser.TDXDataGenerator.handle_data（主库权威实现）计算，"
-                 "weekly/monthly 另经 live_db_builder.aggregate_full_periods 全窗口交叉自检。"
+                 "golden 由 src/tdx_parser.TDXDataGenerator.handle_data（主库权威实现）计算。"
                  "日线与周期 bar 字段序均为 [date,open,high,low,close,vol,amo]，date 为 YYYYMMDD 整数。",
         "cases": cases,
     }

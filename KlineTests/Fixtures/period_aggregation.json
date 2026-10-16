@@ -1,5 +1,5 @@
 {
-  "notes": "周期聚合契约：周期 bar 的 date = 该周期内第一个交易日（组内最早日线日期），open=首日开 / high=max / low=min / close=末日收 / vol=Σ / amo=Σ；停牌周期不产 bar。golden 由 src/tdx_parser.TDXDataGenerator.handle_data（主库权威实现）计算，weekly/monthly 另经 live_db_builder.aggregate_full_periods 全窗口交叉自检。日线与周期 bar 字段序均为 [date,open,high,low,close,vol,amo]，date 为 YYYYMMDD 整数。",
+  "notes": "周期聚合契约：周期 bar 的 date = 该周期内第一个交易日（组内最早日线日期），open=首日开 / high=max / low=min / close=末日收 / vol=Σ / amo=Σ；停牌周期不产 bar。golden 由 src/tdx_parser.TDXDataGenerator.handle_data（主库权威实现）计算。日线与周期 bar 字段序均为 [date,open,high,low,close,vol,amo]，date 为 YYYYMMDD 整数。",
   "cases": [
     {
       "caseName": "crossYearWeek",

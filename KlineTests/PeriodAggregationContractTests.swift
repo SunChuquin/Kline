@@ -6,8 +6,7 @@
 //
 //  契约来源：src/contract_golden.py 产出的 KlineTests/Fixtures/period_aggregation.json
 //  （fixtures 无独立版本字段，以文件内 notes 为口径说明；golden 由主库权威实现
-//  src/tdx_parser.TDXDataGenerator.handle_data 计算，weekly/monthly 另经
-//  live_db_builder.aggregate_full_periods 全窗口交叉自检，两路不一致时生成即失败）。
+//  src/tdx_parser.TDXDataGenerator.handle_data 计算）。
 //
 //  被测函数：WatchlistSyncManager.mergePeriodBar(file:daily:base:)（增量合并语义）
 //          + KlinePeriod.periodDateRange(_:date:)（Swift 侧周期桶规则：周桶键=周一、
