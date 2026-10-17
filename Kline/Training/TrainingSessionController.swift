@@ -38,6 +38,9 @@ final class TrainingSessionController: ObservableObject {
     /// 训练态条件单使用的占位账户 id（训练不落任何真实模拟账户）
     static let trainingAccountID = SimStore.allAccountID
 
+    /// 引擎不可用的显式拒绝文案（§9.10 fail-closed：不下单 / 不结算，绝不静默用 Swift 兜底）
+    static let engineUnavailableText = "Python 引擎不可用，暂不能交易，请稍后重试"
+
     /// 训练标的；非 nil 即处于训练态
     @Published private(set) var meta: MetaItem?
     /// 训练账户类型（百分比 / 仓位金额）
@@ -87,6 +90,10 @@ final class TrainingSessionController: ObservableObject {
     // MARK: - 派生状态
 
     var isActive: Bool { meta != nil }
+
+    /// 条件单结算重入守卫（§11.18.2 约束 5）：`.engine` 下上一轮 `await` 未回时不得再扫，
+    /// 否则同一条件单可能被两轮并发结算重复触发（双份成交）。
+    private var condSweepInFlight = false
 
     /// 日线中 date <= trainingDate 的最后一根 close（bars 升序）
     var currentClose: Double? {
@@ -233,7 +240,7 @@ final class TrainingSessionController: ObservableObject {
 
     /// 推进一根 K 线；推进后先结算隔日委托（仅对新训练日有效），再结算条件单 / 预警，最后判是否到最新日。
     /// 隔日委托的成交日 = 推进后的新训练日（永远等于「当前训练日」，不会出现未来日期的成交）
-    func advanceOneBar() {
+    func advanceOneBar() async {
         guard isActive, !isFinished else { return }
         guard let i = bars.firstIndex(where: { $0.date == trainingDate }) else { return }
         let next = i + 1
@@ -242,9 +249,9 @@ final class TrainingSessionController: ObservableObject {
         // 进入新训练日：T+1 标的昨日买入的份额当日解锁
         lockedQtyValue = 0
 
-        settlePendingOrders()
+        await settlePendingOrders()
 
-        sweepConditions(reason: "ADVANCE")
+        await sweepConditions(reason: "ADVANCE")
 
         if trainingDate == latestDate {
             TrainingStore.shared.finishSession(id: sessionID, endDate: latestDate)
@@ -255,7 +262,7 @@ final class TrainingSessionController: ObservableObject {
     /// 结算隔日委托队列（仅对刚推进到的新训练日有效）：
     /// 逐笔判断该日行情是否触及委托价（买入：最低价 ≤ 委托价；卖出：最高价 ≥ 委托价），
     /// 触及则按委托价成交（成交日 = 新训练日），未触及 / 校验失败即作废并提示；队列一律清空。
-    private func settlePendingOrders() {
+    private func settlePendingOrders() async {
         guard !pendingOrders.isEmpty else { return }
         let queued = pendingOrders
         pendingOrders = []
@@ -273,9 +280,9 @@ final class TrainingSessionController: ObservableObject {
                                + "（\(dateText) 区间 \(SimFormat.price(bar.low))~\(SimFormat.price(bar.high))），隔日委托已作废")
                 continue
             }
-            if let rejection = settleTrade(direction: order.direction, qty: order.qty, note: order.note,
-                                           trigger: .manual, condKind: nil,
-                                           price: order.price, date: trainingDate) {
+            if let rejection = await settleTrade(direction: order.direction, qty: order.qty, note: order.note,
+                                                 trigger: .manual, condKind: nil,
+                                                 price: order.price, date: trainingDate) {
                 notices.append("隔日委托未成交（\(dateText)）：\(rejection)")
             }
         }
@@ -323,7 +330,7 @@ final class TrainingSessionController: ObservableObject {
     ///   - condKind: 触发它的条件单类型中文名（手动为 nil）
     func placeTrade(direction: SimOrderDirection, qty: Int, note: String,
                     limitPrice: Double? = nil,
-                    trigger: TrainTradeTrigger = .manual, condKind: String? = nil) -> String? {
+                    trigger: TrainTradeTrigger = .manual, condKind: String? = nil) async -> String? {
         guard isActive else { return "当前无进行中的训练" }
         guard let close = currentClose, close > 0 else { return "当前训练日无可用行情" }
 
@@ -344,10 +351,24 @@ final class TrainingSessionController: ObservableObject {
                     + (queuedSell > 0 ? "（已挂卖单 \(SimFormat.shares(queuedSell)) 股）" : "")
             }
             if direction == .buy, accountType == .fixedAmount {
+                // 挂单校验：费用 / 可买复核走引擎；引擎不可用 → 显式拒绝不挂单（§9.10）
                 let amount = price * Double(qty)
-                let fee = SimTradingRules.default.fee(amount: amount, direction: .buy)
+                let fee: Double
+                do {
+                    fee = try await SimRulesBridge.tradeFee(amount: amount, direction: .buy)
+                } catch {
+                    DebugLogger.shared.log("[Training] placeTrade：引擎不可用（挂单校验）\(error)")
+                    return Self.engineUnavailableText
+                }
                 if amount + fee > cash {
-                    return "可用资金不足，可买 \(SimTradingRules.default.affordableQty(cash: cash, price: price)) 股（可用 \(SimFormat.amount(cash))）"
+                    let affordable: Int
+                    do {
+                        affordable = try await SimRulesBridge.tradeAffordableQty(cash: cash, price: price)
+                    } catch {
+                        DebugLogger.shared.log("[Training] placeTrade：引擎不可用（可买复核）\(error)")
+                        return Self.engineUnavailableText
+                    }
+                    return "可用资金不足，可买 \(affordable) 股（可用 \(SimFormat.amount(cash))）"
                 }
             }
             pendingOrders.append(TrainPendingOrder(direction: direction, qty: qty, price: price,
@@ -358,8 +379,8 @@ final class TrainingSessionController: ObservableObject {
             return nil
         }
 
-        return settleTrade(direction: direction, qty: qty, note: note,
-                           trigger: trigger, condKind: condKind, price: close, date: trainingDate)
+        return await settleTrade(direction: direction, qty: qty, note: note,
+                                 trigger: trigger, condKind: condKind, price: close, date: trainingDate)
     }
 
     /// 可卖上限拒绝文案（T+1 标的区分「当日买入锁定」与「持仓不足」）
@@ -371,17 +392,33 @@ final class TrainingSessionController: ObservableObject {
     }
 
     /// 真正成交一笔：以 price 在训练日 date 落库并维护持仓 / 资金 / 盈亏统计
+    ///
+    /// A5-4（Training 路径）：费用 / 可买复核走引擎（`.swift` 模式同步直通现状）。
+    /// 引擎不可用 → 返回显式拒绝文案，**不落库**（§9.10 fail-closed，对齐 `SimStore.submit`）。
     private func settleTrade(direction: SimOrderDirection, qty: Int, note: String,
                              trigger: TrainTradeTrigger, condKind: String?,
-                             price: Double, date: Int) -> String? {
+                             price: Double, date: Int) async -> String? {
         // 训练不支持做空；可卖上限按标的交收规则（T+1 扣当日买入锁定、T+0 全可卖）
         if direction == .sell, qty > sellableQty { return sellRejectionText(qty: qty) }
 
         let amount = price * Double(qty)
-        let fee = SimTradingRules.default.fee(amount: amount, direction: direction)
-        // 仓位金额账户：买入前校验资金（百分比账户不校验，永远买得起）
+        let fee: Double
+        do {
+            fee = try await SimRulesBridge.tradeFee(amount: amount, direction: direction)
+        } catch {
+            DebugLogger.shared.log("[Training] settleTrade：引擎不可用（费用）\(error)")
+            return Self.engineUnavailableText
+        }
+        // 仓位金额账户：买入前校验资金（百分比账户不校验，永远买得起）；
+        // 拒绝文案用的可买数也走引擎（仅资金不足时才取）
         if direction == .buy, accountType == .fixedAmount, amount + fee > cash {
-            let affordable = SimTradingRules.default.affordableQty(cash: cash, price: price)
+            let affordable: Int
+            do {
+                affordable = try await SimRulesBridge.tradeAffordableQty(cash: cash, price: price)
+            } catch {
+                DebugLogger.shared.log("[Training] settleTrade：引擎不可用（可买复核）\(error)")
+                return Self.engineUnavailableText
+            }
             return "可用资金不足，可买 \(affordable) 股（可用 \(SimFormat.amount(cash))）"
         }
         let pnl: Double? = direction == .sell ? (price - avgCostValue) * Double(qty) - fee : nil
@@ -445,12 +482,15 @@ final class TrainingSessionController: ObservableObject {
     // MARK: - 条件单 / 预警管理
 
     /// 条件单编辑器的训练后端（取数走训练日快照，保存写训练库并立即结算）
+    ///
+    /// ⚠️ `save` 是同步闭包（`SimCondEditorView` 的编辑器协议，模拟态同形）：结算已在
+    /// `.engine` 下只能 async，故内部起 Task 跑（`.swift` 模式同步 resume，时序不变）。
     var condEditorBackend: TrainingCondBackend {
         TrainingCondBackend(
             account: condEditorAccount,
             position: { [weak self] in self?.trainingPositionSnapshot },
             snapshot: { [weak self] order in self?.condSnapshot(for: order) ?? SimCondSnapshot() },
-            save: { [weak self] order in self?.upsertCondition(order) })
+            save: { [weak self] order in Task { await self?.upsertCondition(order) } })
     }
 
     /// 条件单编辑器用的训练账户快照：资金按当前账户类型给（百分比账户 = 名义本金，金额账户 = 可用资金）
@@ -473,12 +513,12 @@ final class TrainingSessionController: ObservableObject {
     }
 
     /// 新建 / 修改一条训练条件单（创建训练日 = 当前训练日），随后立即结算一次
-    func upsertCondition(_ order: SimCondOrder) {
+    func upsertCondition(_ order: SimCondOrder) async {
         guard isActive, !sessionID.isEmpty else { return }
         _ = TrainingStore.shared.upsertCondition(sessionID: sessionID, order: order,
                                                  createdDate: trainingDate)
         reloadConditions()
-        sweepConditions(reason: "CREATE")
+        await sweepConditions(reason: "CREATE")
     }
 
     /// 删除一条训练条件单
@@ -500,9 +540,24 @@ final class TrainingSessionController: ObservableObject {
     // MARK: - 结算引擎
 
     /// 结算全部监控中的训练条件单：
-    /// 有效期（按训练日）→ 取训练日快照 → SimCondRule 判定 → 命中写训练库
-    func sweepConditions(reason: String) {
+    /// 有效期（按训练日）→ 取训练日快照 → 引擎判定 → 命中写训练库
+    ///
+    /// A5-4（Training 路径）：非时间条件的判定走引擎（`.swift` 模式同步直通现状）；
+    /// 引擎未就绪 / 异常 → 本轮不结算（条件单保持 monitoring，§9.10 fail-closed，
+    /// 对齐 `SimCondEngine.sweepConditions`）。时间条件仍按训练日本地判定（引擎不适用）。
+    func sweepConditions(reason: String) async {
         guard isActive, !sessionID.isEmpty, !conditions.isEmpty else { return }
+        guard SimRulesBridge.judgmentAvailable else {
+            DebugLogger.shared.log("[Training] 条件单结算(\(reason))：引擎未就绪，本轮不结算")
+            return
+        }
+        // 重入守卫：结算已在进行中直接返回（对齐 `SimCondEngine.sweepConditions`）
+        guard !condSweepInFlight else {
+            DebugLogger.shared.log("[Training] 条件单结算(\(reason))：上一轮结算未完成，跳过本轮")
+            return
+        }
+        condSweepInFlight = true
+        defer { condSweepInFlight = false }
 
         var list = conditions
         var dirty = false
@@ -525,13 +580,23 @@ final class TrainingSessionController: ObservableObject {
                 continue
             }
 
-            // 2) 判定：时间条件按训练日比较，其余复用 SimCondRule 纯函数
+            // 2) 判定：时间条件按训练日比较，其余走引擎（A 组 `cond_evaluate`）
             let snapshot = condSnapshot(for: record.order)
             let decision: SimCondDecision
             if record.order.kind == .time {
                 decision = trainingTimeDecision(order: record.order, snapshot: snapshot)
             } else {
-                decision = SimCondRule.evaluate(order: record.order, snapshot: snapshot)
+                do {
+                    guard let d = try await SimRulesBridge.evaluateCond(order: record.order,
+                                                                        snapshot: snapshot, now: now) else {
+                        DebugLogger.shared.log("[Training] 条件单结算(\(reason))：判定输出形状非法，本轮中止")
+                        return
+                    }
+                    decision = d
+                } catch {
+                    DebugLogger.shared.log("[Training] 条件单结算(\(reason))：引擎异常，本轮中止 \(error)")
+                    return
+                }
             }
 
             // 3) 结果落库
@@ -561,7 +626,7 @@ final class TrainingSessionController: ObservableObject {
                 dirty = true
 
             case .fire(let qty, let at):
-                list[index] = fireCondition(record, qty: qty, at: at, snapshot: snapshot, now: now)
+                list[index] = await fireCondition(record, qty: qty, at: at, snapshot: snapshot, now: now)
                 dirty = true
                 fired = true
             }
@@ -584,7 +649,7 @@ final class TrainingSessionController: ObservableObject {
 
     /// 「仅提醒」不下单；普通条件单以训练日收盘价写入一笔训练成交
     private func fireCondition(_ record: TrainCondRecord, qty: Int, at triggerPrice: Double,
-                               snapshot: SimCondSnapshot, now: Date) -> TrainCondRecord {
+                               snapshot: SimCondSnapshot, now: Date) async -> TrainCondRecord {
         var target = record
         let order = target.order
         target.order.runtime.lastEvaluatedAt = now
@@ -603,9 +668,9 @@ final class TrainingSessionController: ObservableObject {
         }
 
         let direction = SimStore.shared.fireDirection(order: order, triggerPrice: triggerPrice)
-        let rejection = placeTrade(direction: direction, qty: qty,
-                                   note: "条件单：\(order.kind.title)",
-                                   trigger: .cond, condKind: order.kind.title)
+        let rejection = await placeTrade(direction: direction, qty: qty,
+                                         note: "条件单：\(order.kind.title)",
+                                         trigger: .cond, condKind: order.kind.title)
         if rejection == nil {
             target.order.triggeredCount += 1
             if order.kind.repeatable {

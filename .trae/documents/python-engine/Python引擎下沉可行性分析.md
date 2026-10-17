@@ -1606,11 +1606,12 @@ done
 
 #### 11.18.5 建议的下一步顺序（下一会话）
 
-> ✅ 1 已由 §11.20–§11.23 推进（交易规则 + 判定结算 + C 组展示面）；✅ 2（D 组 · 策略映射）已由 §11.24 推进；下表保留原顺序，剩下 E 组 / Training / A5-5。
+> ✅ 1 已由 §11.20–§11.23 推进（交易规则 + 判定结算 + C 组展示面）；✅ 2（D 组 · 策略映射）已由 §11.24 推进；✅ 3（E 组 · 策略 DSL）已由 §11.25 推进；✅ Training 自有同步路径已由 §11.26 推进（§11.18.3 清单**全部清零**）。
 
 1. **合并子步：条件单判定·结算 + 交易规则**（§11.18.2 的耦合）——`sweepConditions` async 化（含重入守卫）+ `submit` async 化 + 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入（编辑器走防抖投影）；**[✅ §11.20 / §11.21 / §11.22 / §11.23]**
 2. **D 组 · 策略映射**（`StrategyCondGenerator`，6 处，含 `.summary` 文案 → 投影）；**[✅ §11.24]**
-3. **E 组 · 策略 DSL**（`Formula/` 族 §11.18.3；编辑器实时路径 → 防抖 + 投影；`FormulaKind.parse/serialize` 文件读写 → 单次 `await`）；
+3. **E 组 · 策略 DSL**（`Formula/` 族 §11.18.3；编辑器实时路径 → 防抖 + 投影；`FormulaKind.parse/serialize` 文件读写 → 单次 `await`）；**[✅ §11.25]**
+3b. **Training 自有同步路径**（§11.18.3 第 5 行；另一套结算与账户模型，单独成步）；**[✅ §11.26]**
 4. `SimFormat` **按拍板结果**处理（§11.18.4）；**[✅ D5 = 归 GUI，219 处不下沉]**
 5. A5-5：把 `SimRulesBridge.mode` 默认翻 `.engine`；A6：删 Swift 实现 + fixture 冻结（§10.10 六闸门）。
 
@@ -1713,10 +1714,10 @@ done
 
 | 项 | 位置 | 备注 |
 | --- | --- | --- |
-| C 组**展示面** | `SimulationLayoutA/B/CView`、`TradeTicketView.rules`、`QuickPanelLayoutsBC`、`Training*`（5 处） | 每帧展示 → 须配投影缓存（同 A5-3 形态），否则展示值与引擎裁决值可能不一致 |
-| Training 自有同步路径 | `TrainingSessionController:534`（`evaluate`）+ 5 处 `SimTradingRules` | 训练态是另一套结算（`sweepConditions(reason:)`），须单独排 |
-| D 组 · 策略映射 | `StrategyCondGenerator`（6 处） | |
-| E 组 · 策略 DSL | `Formula/` 族（约 30 处，含 `.tdx` 文件读写） | |
+| C 组**展示面** | `SimulationLayoutA/B/CView`、`TradeTicketView.rules`、`QuickPanelLayoutsBC`、`Training*`（5 处） | 每帧展示 → 须配投影缓存（同 A5-3 形态），否则展示值与引擎裁决值可能不一致 **[✅ §11.23]** |
+| Training 自有同步路径 | `TrainingSessionController:534`（`evaluate`）+ 5 处 `SimTradingRules` | 训练态是另一套结算（`sweepConditions(reason:)`)，须单独排 **[✅ §11.26]** |
+| D 组 · 策略映射 | `StrategyCondGenerator`（6 处） | **[✅ §11.24]** |
+| E 组 · 策略 DSL | `Formula/` 族（约 30 处，含 `.tdx` 文件读写） | **[✅ §11.25]** |
 
 > 至此 **§11.18.2 的「合并子步」在主线生产路径上完成**（下单授权 + 条件单判定·结算）；剩余为 C 组展示面 / Training 路径 / D / E 组 + A5-5（默认 `mode` 翻 `.engine`）。
 
@@ -1932,6 +1933,33 @@ done
 
 1. 策略库在 `.engine` 模式下启动会有一次真实异步加载（`.swift` 模式无差异，仍同步）；期间列表为空。
 2. `strategyLoadError` 的「引擎就绪后自动恢复」依赖用户重新进入公式管理页（`StrategyProjection.resetToken` 那套重排队机制**不覆盖**本 store）；A5-5 补空态时一并加「引擎就绪后自动 `reloadStrategy()`」的接线。
+
+### 11.26 A5-4 第六步：Training 自有同步路径下沉（2026-10-17）
+
+> §11.18.3 盘点的最后一项：训练态是另一套结算（`sweepConditions(reason:)`）与账户模型（`TrainAccountRule`），单独成步。**至此 §11.18.3 清单全部清零**（A5-4 只剩 A5-5 翻 `mode` 与 A6 删 Swift 实现）。
+
+**调用点盘点与分类（Training 三文件共 9 处）**
+
+| 调用 | 位置 | 处置 |
+| --- | --- | --- |
+| `SimCondRule.evaluate` | `TrainingSessionController.sweepConditions`（原 :534） | **下沉** → `SimRulesBridge.evaluateCond`（A 组 `cond_evaluate`，门面已在 §11.21 就绪） |
+| `SimTradingRules.fee` | `settleTrade` / `placeTrade`（隔日委托挂单校验）/ `TrainAccountRule.minCapital` | **下沉** → `tradeFee`（C 组门面） |
+| `SimTradingRules.affordableQty` | `settleTrade` / `placeTrade` 的拒绝文案 | **下沉** → `tradeAffordableQty`（仅资金不足生成文案时才取，与原语义一致） |
+| `SimTradingRules.lotSize` | `placeTrade` 整手校验 / `TrainingSetupSheet` 两处 | **不下沉**：§11.22 分工——lotSize 是**信任链镜像常量**（`SimTradeRuleConstants.lotSize`），两种模式同步可读且两端一致；C 组下沉时同样保留 Swift |
+
+**async 化链（对齐 `SimStore.submit` / `SimCondEngine.sweepConditions` 先例）**
+
+- **由内向外全链 async**：`settleTrade` → `placeTrade` → `fireCondition` → `sweepConditions` / `settlePendingOrders` → `advanceOneBar` / `upsertCondition`；`TrainAccountRule.minCapital` → `pickAffordable` → `pickRandom` / `startTraining`。
+- **降级三口径（全部 fail-closed，§9.10）**：
+  1. **下单 / 成交**（`placeTrade` / `settleTrade`）：引擎不可用 → 返回显式拒绝文案 `TrainingSessionController.engineUnavailableText`（"Python 引擎不可用，暂不能交易，请稍后重试"），**不挂单 / 不落库**；
+  2. **条件单结算**（`sweepConditions`）：开头 `guard SimRulesBridge.judgmentAvailable`（`.engine` 未就绪 → 本轮不结算，条件单保持 monitoring）；判定异常 / 输出形状非法 → log + 本轮中止不写回（对齐 `SimCondEngine`）；并加**重入守卫** `condSweepInFlight`（§11.18.2 约束 5：`.engine` 下上一轮 `await` 未回时再进 sweep 会重复触发条件单——双份成交）；
+  3. **开训预检**（`startTraining` / `pickRandom`）：引擎不可用 → `errorText` 显式报错，不开训 / 不抽取。
+- **时间条件保持本地**：`trainingTimeDecision`（训练日口径）不走引擎——`SimCondRule.evaluate` 用真实 `Date()`，训练不适用（原注释即如此声明）；引擎 `cond_evaluate` 对 `.time` 条件同样不适用，故该分支维持现状。
+- **编辑器后端不破同步协议**：`TrainingCondBackend.save` 是同步闭包（`SimCondEditorView` 与模拟态同形），内部改 `Task { await upsertCondition(order) }`（`.swift` 模式同步 resume，时序不变）。
+- **调用点 Task 化（5 处）**：`FloatingAccessoryWheel`（推进一根 K 线）、`TradeTicketView.performSubmit`（训练态下单）、`TrainingCondListView`（立即检查）、`TrainingSetupSheet`（随机抽取 / 开始训练）。
+- **主线程归属**：`TrainingSessionController` 与 `SimStore` 同为非 `@MainActor` 的 ObservableObject 单例，async 调用全部从主线程 UI 闭包的 `Task` 发起（与 SimStore 既有约定一致，Swift 5.0 无 strict concurrency）。
+
+**测试**：`SimRulesAsyncTests.runAllParity` 新增 Training 段——`TrainAccountRule.minCapital` 三组价格 × 手数（10.0/2、3.45/2、128.6/3）两 mode 与现状公式（`amount + fee`）逐值相等。结算 / 下单链路的判定 op（`cond_evaluate` / `trade_calc.fee` / `trade_calc.affordableQty`）已有 A / C 组 fixture 对拍覆盖，Training 层为调用方等价改造，增量以全量回归覆盖。
 
 ---
 

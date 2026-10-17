@@ -254,6 +254,17 @@ final class SimRulesAsyncTests: XCTestCase {
             }
         }
 
+        // ---- Training 路径（§11.26）：TrainAccountRule.minCapital（费用走引擎，
+        //      外层再叠加「本金 × 手数」金额；训练开训预检 / 随机抽取共用）
+        let lot = SimTradeRuleConstants.lotSize
+        for (price, lots) in [(10.0, 2), (3.45, 2), (128.6, 3)] {
+            let amount = price * Double(lot * lots)
+            let got = try await TrainAccountRule.minCapital(price: price, lotSize: lot, lots: lots)
+            let want = amount + SimTradingRules.default.fee(amount: amount, direction: .buy)
+            XCTAssertEqual(got, want, accuracy: 1e-9,
+                           "\(mode) training.minCapital price=\(price) lots=\(lots)")
+        }
+
         // ---- D 组：strategy_drafts（纯映射；本组专验 `strategyDraftFromJSON` 反解无损失）
         for c in cases(sim, "mapping", op: "strategy_drafts") {
             let i = input(c)

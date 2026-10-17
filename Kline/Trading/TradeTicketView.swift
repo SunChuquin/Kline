@@ -709,12 +709,15 @@ struct TradeTicketView: View {
         successText = nil
         // 训练态：只写训练 sqlite（不调 store.submit），成功就地反馈「已成交」，失败复用错误文案位
         if training.isActive {
-            if let reason = training.placeTrade(direction: dir, qty: qty, note: "", limitPrice: price) {
-                errorText = reason
-            } else {
-                successText = training.tradeMode == .nextDayClose
-                    ? "已挂单 · 下一训练日触及委托价成交"
-                    : "已成交"
+            // 结算费用 / 可买复核在 .engine 下走引擎（async）；引擎不可用 → placeTrade 返回显式拒绝文案
+            Task {
+                if let reason = await training.placeTrade(direction: dir, qty: qty, note: "", limitPrice: price) {
+                    errorText = reason
+                } else {
+                    successText = training.tradeMode == .nextDayClose
+                        ? "已挂单 · 下一训练日触及委托价成交"
+                        : "已成交"
+                }
             }
             return
         }

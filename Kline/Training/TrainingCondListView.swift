@@ -316,7 +316,7 @@ struct TrainingCondListView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button {
-                training.sweepConditions(reason: "MANUAL")
+                Task { await training.sweepConditions(reason: "MANUAL") }
             } label: {
                 Text("立即检查")
                     .font(.system(size: 12.5, weight: .semibold))

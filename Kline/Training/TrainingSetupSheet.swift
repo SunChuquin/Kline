@@ -302,7 +302,7 @@ struct TrainingSetupSheet: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                Button("随机抽取") { pickRandom() }
+                Button("随机抽取") { Task { await pickRandom() } }
                     .font(.system(size: 13, weight: .medium))
                     .buttonStyle(.plain)
                     .foregroundColor(.accentColor)
@@ -417,7 +417,7 @@ struct TrainingSetupSheet: View {
             }
             .buttonStyle(.plain)
 
-            Button { startTraining() } label: {
+            Button { Task { await startTraining() } } label: {
                 Text("开始训练")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(canStart ? .white : .secondary)
@@ -540,7 +540,7 @@ struct TrainingSetupSheet: View {
         }
     }
 
-    private func pickRandom() {
+    private func pickRandom() async {
         let pool = trainablePool
         guard !pool.isEmpty else {
             errorText = "该分类下暂无可训练的标的（需至少 65 天历史）"
@@ -555,7 +555,16 @@ struct TrainingSetupSheet: View {
             return
         }
         // 仓位金额账户：随机抽取只在「起始日收盘价买得起 2 手」的标的里挑
-        guard let picked = pickAffordable(from: pool) else {
+        // （预检费用走引擎；引擎不可用 → 显式报错，不静默兜底，§9.10）
+        let picked: (meta: MetaItem, date: Date)?
+        do {
+            picked = try await pickAffordable(from: pool)
+        } catch {
+            DebugLogger.shared.log("[TrainingSetup] pickRandom：引擎不可用 \(error)")
+            errorText = TrainingSessionController.engineUnavailableText
+            return
+        }
+        guard let picked else {
             errorText = "该分类下没有满足条件的标的（当前本金买不起 2 手，请提高本金或换个分类）"
             return
         }
@@ -566,7 +575,7 @@ struct TrainingSetupSheet: View {
 
     /// 金额账户随机抽取：逐个随机候选（每只最多随机 2 个起始日）校验「2 手可买」，命中即返回。
     /// 上限 60 只，避免极端本金下长时间扫库；全部不满足则返回 nil。
-    private func pickAffordable(from pool: [MetaItem]) -> (meta: MetaItem, date: Date)? {
+    private func pickAffordable(from pool: [MetaItem]) async throws -> (meta: MetaItem, date: Date)? {
         let lot = SimTradingRules.default.lotSize
         let capital = capitalValue
         for meta in pool.shuffled().prefix(60) {
@@ -575,8 +584,9 @@ struct TrainingSetupSheet: View {
             for _ in 0..<2 {
                 guard let day = randomDate(lower: lower, upper: upper) else { continue }
                 guard let close = TrainingSessionController.shared.anchorClose(meta: meta,
-                                                                              startDate: TrainingDateMath.int(from: day)),
-                      capital >= TrainAccountRule.minCapital(price: close, lotSize: lot) else { continue }
+                                                                              startDate: TrainingDateMath.int(from: day)) else { continue }
+                let need = try await TrainAccountRule.minCapital(price: close, lotSize: lot)
+                guard capital >= need else { continue }
                 return (meta, day)
             }
         }
@@ -617,7 +627,7 @@ struct TrainingSetupSheet: View {
         startDate = randomDate(lower: lower, upper: upper)
     }
 
-    private func startTraining() {
+    private func startTraining() async {
         guard let meta = selectedMeta, let date = startDate else { return }
         errorText = nil
 
@@ -633,7 +643,15 @@ struct TrainingSetupSheet: View {
                 errorText = "该标的暂无行情数据，无法开始训练"
                 return
             }
-            let need = TrainAccountRule.minCapital(price: close, lotSize: SimTradingRules.default.lotSize)
+            // 预检费用走引擎；引擎不可用 → 显式报错不开训（§9.10）
+            let need: Double
+            do {
+                need = try await TrainAccountRule.minCapital(price: close, lotSize: SimTradingRules.default.lotSize)
+            } catch {
+                DebugLogger.shared.log("[TrainingSetup] startTraining：引擎不可用 \(error)")
+                errorText = TrainingSessionController.engineUnavailableText
+                return
+            }
             guard capitalValue >= need else {
                 reselectMessage = "「\(meta.name)」在起始日（\(TrainSessionRecord.dateText(startInt))）收盘价 \(SimFormat.price(close))，"
                     + "买入 2 手需 \(SimFormat.amount(need))，当前本金 \(SimFormat.amount(capitalValue)) 不足，请重新选择标的或提高本金。"

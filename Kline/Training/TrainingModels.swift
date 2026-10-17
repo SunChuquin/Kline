@@ -143,10 +143,13 @@ enum TrainAccountRule {
     static let notionalCapital: Double = 1_000_000
 
     /// 「至少能买 N 手」所需的最低资金（按 price 计，含买入费用）
-    static func minCapital(price: Double, lotSize: Int, lots: Int = minLots) -> Double {
+    ///
+    /// A5-4（Training 路径）：费用走引擎（`.swift` 模式同步直通现状）；引擎不可用 → 抛错，
+    /// 调用方显式降级（预检不通过），**不静默用 Swift 兜底**（§9.10）。
+    static func minCapital(price: Double, lotSize: Int, lots: Int = minLots) async throws -> Double {
         guard price > 0 else { return 0 }
         let amount = price * Double(lotSize * lots)
-        return amount + SimTradingRules.default.fee(amount: amount, direction: .buy)
+        return amount + (try await SimRulesBridge.tradeFee(amount: amount, direction: .buy))
     }
 }
 

@@ -157,7 +157,7 @@ struct FloatingAccessoryWheel: View {
                                     // 训练态：单击中心圆改为推进一个训练日（不再发 windowNudge，
                                     // 否则各 K 线图会各自移窗，且训练日不会被推进）
                                     if TrainingSessionController.shared.isActive {
-                                        TrainingSessionController.shared.advanceOneBar()
+                                        Task { await TrainingSessionController.shared.advanceOneBar() }
                                     } else {
                                         FloatingAccessoryCoordinator.shared.nudgeWindow(by: 1)
                                     }
