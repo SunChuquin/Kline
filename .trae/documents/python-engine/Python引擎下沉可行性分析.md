@@ -1187,7 +1187,7 @@ rejection     → {"code":"invalidQty", "lot":100,
 | **A5-1** | **信任链（套件 8）**：脚本 sha256 + apiVersion 配对 + 篡改检测 + §9.10 降级闸门 | ✅ 见 §11.15 |
 | **A5-2** | 生产编解码层：生产模型 → op 入参 JSON / 引擎出参 → 生产模型 | 🔶 回测子系统已落地，见 §11.16（其余随各子系统切换增量补齐） |
 | **A5-3** | 引擎会话 + 投影层（异步 + 防抖 + 缓存，供 GUI 同步读；§10.10 闸门 6） | 🔶 条件单文案族已落地，见 §11.17（其余子系统随切换增量补齐） |
-| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 🔶 回测已切（§11.16）；**交易规则（C 组）已切**（§11.20）；sweep 判定 op 与 C 组展示面待做 |
+| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 🔶 回测已切（§11.16）；**交易规则（§11.20）+ 条件单判定·结算（§11.21）已切**；余 C 组展示面 / Training 路径 / D 组 / E 组 |
 | **A5-5** | 默认 `SimRulesBridge.mode` 由 `.swift` 翻成 `.engine`（闸门生效） | 待做 |
 
 ### 11.9 A0 落地进度（2026-10-17）
@@ -1515,7 +1515,8 @@ done
 | A5-3 | 投影层 `SimRulesProjection` + 批量 op `cond_texts` | `d690465` | 3/3 + diff 一致性 |
 | A5-3（收口） | 全部文案调用点接入（Training 两处 + 编辑器草稿 + sweep 触发日志） | `939704f` | **`KlineTests` 全量 73/73 全绿 0 skip** |
 | A5-4（一） | 判定/结算/交易规则的 **async 门面** + 领域写回变换（§11.19） | `89d458f` | 2/2（领域级对拍）+ 全量 75/75 |
-| A5-4（二） | **交易规则（C 组）下沉** + `submit` / `sweepConditions` async 化（§11.20） | 见本次提交 | 全量 **75/75 全绿 0 skip** |
+| A5-4（二） | **交易规则（C 组）下沉** + `submit` / `sweepConditions` async 化（§11.20） | `7f536fc` | 全量 **75/75 全绿 0 skip** |
+| A5-4（三） | **条件单判定·结算（A/B 组）下沉**：sweep 的判定/有效期/档位推进/预警文案全走引擎（§11.21） | 见本次提交 | 全量 **75/75 全绿 0 skip** |
 
 #### 11.18.2 ⚠️ 关键耦合：交易规则（C 组）**不能**单独切
 
@@ -1673,6 +1674,48 @@ done
 
 1. **sweep 的判定 op 仍走 Swift**：`cond_evaluate`（`:89`）、`cond_expired_reason`、B 组（`fireDirection`/`executionPrice`/`advanceRepeatable`/`repeatableFinished`/`alertMessage`）——`SimRulesAsync` 里的对应包装已就绪，只差替换调用点（含 `TrainingSessionController:534` 训练态那条同步路径）；
 2. **C 组「展示面」仍走 Swift**：`SimulationLayoutA/B/CView`、`TradeTicketView.rules`、`QuickPanelLayoutsBC`、`Training*`（5 处）——这些是**每帧展示**（`lotSize` / `affordableQty` / `fee`），形态同 A5-3，须配投影缓存，否则「展示值」与「引擎裁决值」可能不一致（`.engine` 模式下）。
+
+---
+
+### 11.21 A5-4 第三步：条件单判定·结算（A/B 组）下沉（2026-10-17）
+
+**这一步把 §11.18.2 的「合并子步」后半落地**：`sweepConditions` 的**判定与结算推进全部改由引擎裁决**（此前 `submit` 已切，见 §11.20）。
+
+**改动（全部在 `SimCondEngine.swift`）**
+
+| 原调用 | 现调用 |
+| --- | --- |
+| `expiredReason(of:today:calendar:)` | `await SimRulesBridge.condExpiredReason(order:now:calendar:)`（B 组） |
+| `SimCondRule.evaluate(order:snapshot:)` | `await SimRulesBridge.evaluateCond(order:snapshot:now:)`（A 组） |
+| `fireDirection(order:triggerPrice:)` | `await condFireDirection(...)`（B 组） |
+| `executionPrice(directive:triggerPrice:)` | `await condExecutionPrice(...)`（B 组） |
+| `advanceRepeatable(order:triggerPrice:)` | `await condAdvance(...)`（B 组） |
+| `repeatableFinished(order:)` | `await condRepeatableFinished(order:)`（B 组） |
+| `alertMessage(order:triggerPrice:)` | `await condAlertMessage(...)`（B 组，`fireAlertOnly` 改 `async`） |
+
+**降级：新增 `SimRulesBridge.judgmentAvailable`（§9.10 显式降级判据）**
+
+`= (mode == .swift) || KlinePythonBridge.shared.isReady`。`sweepConditions` **入口即检查**：`.engine` 但引擎未就绪 → **本轮不结算**（条件单保持 `monitoring`，不写盘、不发委托），**不用 Swift 兜底**。放在入口（而非逐单 catch）是为了避免「半轮写回 + 半轮日志」的不一致。
+
+**语义影响与取舍（诚实登记）**
+
+1. **mid-sweep 引擎异常 → 本轮中止**（`return result`，不 `assignConditionalOrders` / 不 `saveToDisk`）；但**已发生的 `appendLog` 不回滚**。入口 guard 使该路径近乎不可达（仅引擎就绪后中途崩溃），故接受。
+2. **`runtime` 的 ISO8601 往返精度**：`cond_advance` / `.hold(runtime)` 的日期字段经「JSON → 反转」会截断到**整秒**（`ISO8601DateFormatter` 默认无小数秒）。已核实 `SimCondRule` **从不写 `lastEvaluatedAt`**，故该截断对「值未变则不写」的影响是**一次性**的（截断后即稳定），不会造成每轮发布风暴。
+3. **档位推进失败不回滚委托**：`submit` 成功但 `condAdvance` 抛错时，委托已生成，条件单保持 `monitoring` 并记「已成交（档位推进待下次结算）」→ 下次结算继续推进（不丢档）。
+4. **`.engine` 模式的「引擎不可用」UI 面待补**：§9.10 要求显式空态；当前条件单页在引擎不可用时**静默不结算**（只在 Debug 日志留痕）。列入 A5-5 待办。
+
+**测试**：`KlineTests` 全量 **75/75 全绿 0 skip**（A/B 组域类型对拍见 §11.19 的 `SimRulesAsyncTests`：`evaluateCond` / `condExpiredReason` / `condFireDirection` / `condExecutionPrice` / `condAdvance` / `condRepeatableFinished` / `condAlertMessage` 两模式逐条与 Swift 现状相等）。
+
+**本步之后仍未切（清单见 §11.18.3 / §11.20 末）**
+
+| 项 | 位置 | 备注 |
+| --- | --- | --- |
+| C 组**展示面** | `SimulationLayoutA/B/CView`、`TradeTicketView.rules`、`QuickPanelLayoutsBC`、`Training*`（5 处） | 每帧展示 → 须配投影缓存（同 A5-3 形态），否则展示值与引擎裁决值可能不一致 |
+| Training 自有同步路径 | `TrainingSessionController:534`（`evaluate`）+ 5 处 `SimTradingRules` | 训练态是另一套结算（`sweepConditions(reason:)`），须单独排 |
+| D 组 · 策略映射 | `StrategyCondGenerator`（6 处） | |
+| E 组 · 策略 DSL | `Formula/` 族（约 30 处，含 `.tdx` 文件读写） | |
+
+> 至此 **§11.18.2 的「合并子步」在主线生产路径上完成**（下单授权 + 条件单判定·结算）；剩余为 C 组展示面 / Training 路径 / D / E 组 + A5-5（默认 `mode` 翻 `.engine`）。
 
 ---
 

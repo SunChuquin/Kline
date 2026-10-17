@@ -83,6 +83,17 @@ enum SimRulesBridge {
         }
     }
 
+    /// 判定 / 结算可用性判据（§9.10 显式降级）：
+    /// `.swift` 恒可用；`.engine` 需引擎自身就绪 —— 未就绪时条件单**不结算**（保持 monitoring），
+    /// **不用 Swift 兜底**（避免双语义）。
+    @MainActor
+    static var judgmentAvailable: Bool {
+        switch mode {
+        case .swift:  return true
+        case .engine: return KlinePythonBridge.shared.isReady
+        }
+    }
+
     /// 引擎后端：调 `sim_rules.py`，原样返回 `kline_result`（含 `ok:true`）。
     /// 引擎未就绪 → `.engineNotReady`（**不触发** ensureReady / 不加载）。
     static func enginePayload(op: String, input: [String: Any], timeout: TimeInterval = 30,

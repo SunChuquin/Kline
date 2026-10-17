@@ -53,6 +53,12 @@ extension SimStore {
     func sweepConditions(trigger: SimCondTrigger) async -> SimCondSweepResult {
         var result = SimCondSweepResult()
         guard !condSweepInFlight else { return result }
+        // A5-4：`.engine` 模式下有效期 / 判定 / 档位推进 / 授权全走引擎；引擎未就绪 → 本轮不结算
+        // （条件单保持 monitoring，等引擎就绪后的下一次触发结算），**不用 Swift 兜底**（§9.10）。
+        guard SimRulesBridge.judgmentAvailable else {
+            DebugLogger.shared.log("[SimCondEngine] sweep：引擎未就绪，本轮不结算")
+            return result
+        }
         condSweepInFlight = true
         defer { condSweepInFlight = false }
 
@@ -62,7 +68,6 @@ extension SimStore {
         var list = conditionalOrders
         let now = Date()
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: now)
         var dirty = false
 
         for candidate in monitoring {
@@ -70,8 +75,16 @@ extension SimStore {
             guard list[idx].status == .monitoring else { continue }
             result.evaluated += 1
 
-            // 1) 有效期优先判定
-            if let reason = expiredReason(of: list[idx], today: today, calendar: calendar) {
+            // 1) 有效期优先判定（B 组 `cond_expired_reason`）
+            let expireReason: String?
+            do {
+                expireReason = try await SimRulesBridge.condExpiredReason(order: list[idx], now: now,
+                                                                          calendar: calendar)
+            } catch {
+                DebugLogger.shared.log("[SimCondEngine] sweep：引擎异常，本轮中止 \(error)")
+                return result
+            }
+            if let reason = expireReason {
                 list[idx].status = .expired
                 list[idx].updatedAt = now
                 list[idx].runtime.lastEvaluatedAt = now
@@ -84,9 +97,21 @@ extension SimStore {
                 continue
             }
 
-            // 2) 取快照 → 3) 纯函数判定 → 4) 下发
+            // 2) 取快照 → 3) 判定（A 组 `cond_evaluate`，引擎侧纯函数）→ 4) 下发
             let snapshot = SimCondSnapshotCenter.snapshot(for: list[idx])
-            switch SimCondRule.evaluate(order: list[idx], snapshot: snapshot) {
+            let decision: SimCondDecision
+            do {
+                guard let d = try await SimRulesBridge.evaluateCond(order: list[idx],
+                                                                   snapshot: snapshot, now: now) else {
+                    DebugLogger.shared.log("[SimCondEngine] sweep：判定输出形状非法，本轮中止")
+                    return result
+                }
+                decision = d
+            } catch {
+                DebugLogger.shared.log("[SimCondEngine] sweep：引擎异常，本轮中止 \(error)")
+                return result
+            }
+            switch decision {
 
             case .hold(let runtime):
                 // 值未变则不写（避免 @Published 发布风暴）
@@ -142,13 +167,27 @@ extension SimStore {
                                snapshot: SimCondSnapshot, now: Date,
                                result: inout SimCondSweepResult) async -> SimCondOrder {
         if order.directive.isAlertOnly {
-            return fireAlertOnly(order, triggerPrice: triggerPrice,
-                                 snapshot: snapshot, now: now, result: &result)
+            return await fireAlertOnly(order, triggerPrice: triggerPrice,
+                                       snapshot: snapshot, now: now, result: &result)
         }
 
+        // 触发方向 / 执行价（B 组）：引擎裁决；任一异常 → 跳过本单（不改状态、不下单）
         var target = order
-        let direction = fireDirection(order: order, triggerPrice: triggerPrice)
-        let price = executionPrice(directive: order.directive, triggerPrice: triggerPrice)
+        let direction: SimOrderDirection
+        let price: Double?
+        do {
+            guard let dir = try await SimRulesBridge.condFireDirection(order: order,
+                                                                      triggerPrice: triggerPrice) else {
+                DebugLogger.shared.log("[SimCondEngine] fire：触发方向输出非法，跳过 \(order.name)")
+                return order
+            }
+            direction = dir
+            price = try await SimRulesBridge.condExecutionPrice(directive: order.directive,
+                                                               triggerPrice: triggerPrice)
+        } catch {
+            DebugLogger.shared.log("[SimCondEngine] fire：引擎异常，跳过 \(order.name) \(error)")
+            return order
+        }
 
         var draft = SimOrderDraft(accountID: order.accountID, metaID: order.metaID,
                                   code: order.code, name: order.name, direction: direction,
@@ -166,15 +205,23 @@ extension SimStore {
             target.triggeredCount += 1
             result.fired += 1
             if target.kind.repeatable {
-                // 多触发：档位 / 批次推进后继续监控，走完则已完成
-                target.runtime = advanceRepeatable(order: target, triggerPrice: triggerPrice)
-                if repeatableFinished(order: target) {
-                    target.status = .completed
-                    target.runtime.lastMessage = target.kind == .grid ? "已完成全部档位" : "已完成全部批次"
-                } else if target.kind == .grid {
-                    target.runtime.lastMessage = "已成交第 \(target.runtime.gridLevel ?? 0) 档"
-                } else {
-                    target.runtime.lastMessage = "已成交第 \(target.runtime.batchDone) 批"
+                // 多触发：档位 / 批次推进后继续监控，走完则已完成（B 组：推进与完成判定都走引擎）
+                do {
+                    target.runtime = try await SimRulesBridge.condAdvance(order: target,
+                                                                         triggerPrice: triggerPrice)
+                    let finished = try await SimRulesBridge.condRepeatableFinished(order: target)
+                    if finished {
+                        target.status = .completed
+                        target.runtime.lastMessage = target.kind == .grid ? "已完成全部档位" : "已完成全部批次"
+                    } else if target.kind == .grid {
+                        target.runtime.lastMessage = "已成交第 \(target.runtime.gridLevel ?? 0) 档"
+                    } else {
+                        target.runtime.lastMessage = "已成交第 \(target.runtime.batchDone) 批"
+                    }
+                } catch {
+                    // 委托已生成（不回滚），仅档位推进失败：保持 monitoring，待下次结算再推进
+                    DebugLogger.shared.log("[SimCondEngine] fire：引擎异常（档位推进）\(error)")
+                    target.runtime.lastMessage = "已成交（档位推进待下次结算）"
                 }
             } else {
                 target.status = .triggered
@@ -208,9 +255,17 @@ extension SimStore {
     /// 多触发类型（网格 / 分批）与下单分支同口径推进档位 / 批次，且**每次触发都追加一条记录**。
     private func fireAlertOnly(_ order: SimCondOrder, triggerPrice: Double,
                                snapshot: SimCondSnapshot, now: Date,
-                               result: inout SimCondSweepResult) -> SimCondOrder {
+                               result: inout SimCondSweepResult) async -> SimCondOrder {
         var target = order
-        let message = alertMessage(order: order, triggerPrice: triggerPrice)
+        // 预警文案（B 组 `cond_alert_message`）；引擎异常 → 跳过本单（不记预警、不改状态）
+        let message: String
+        do {
+            message = try await SimRulesBridge.condAlertMessage(order: order,
+                                                                triggerPrice: triggerPrice)
+        } catch {
+            DebugLogger.shared.log("[SimCondEngine] alert：引擎异常，跳过 \(order.name) \(error)")
+            return order
+        }
 
         target.runtime.lastEvaluatedAt = now
         target.runtime.lastPrice = snapshot.last ?? target.runtime.lastPrice
@@ -219,11 +274,18 @@ extension SimStore {
         target.updatedAt = now
 
         if target.kind.repeatable {
-            target.runtime = advanceRepeatable(order: target, triggerPrice: triggerPrice)
-            if repeatableFinished(order: target) {
-                target.status = .completed
-                target.runtime.lastMessage = target.kind == .grid ? "已完成全部档位" : "已完成全部批次"
-            } else {
+            do {
+                target.runtime = try await SimRulesBridge.condAdvance(order: target,
+                                                                     triggerPrice: triggerPrice)
+                let finished = try await SimRulesBridge.condRepeatableFinished(order: target)
+                if finished {
+                    target.status = .completed
+                    target.runtime.lastMessage = target.kind == .grid ? "已完成全部档位" : "已完成全部批次"
+                } else {
+                    target.runtime.lastMessage = message
+                }
+            } catch {
+                DebugLogger.shared.log("[SimCondEngine] alert：引擎异常（档位推进）\(error)")
                 target.runtime.lastMessage = message
             }
         } else {
