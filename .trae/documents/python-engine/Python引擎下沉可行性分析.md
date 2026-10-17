@@ -1840,6 +1840,47 @@ done
 
 ---
 
+### 11.25 A5-4 第五步：策略 DSL（E 组）下沉（2026-10-17）
+
+**目标与范围**：把 `Formula/` 族的**纯解析 / 校验 / 预览**从 Swift 现状切到引擎（op 契约 §11.3 早已落地、`strategy_dsl.json` 54 例 golden 亦早已覆盖，缺的只是生产接线）。
+
+> ⚠️ **`FormulaKind` 的整体文件格式不下沉**：`.tdx` 的 `KIND=` / `NAME=` / `PICKREF=` / `PICK:` / `RULES:` 段落切分属**文件格式层（GUI 侧）**，§11.3 无对应 op。E 组只下沉其中的 **TRADE 段**（`trade_parse` / `trade_serialize`）与 **RULES 段**（`strategy_parse` / `strategy_rule_line`）。
+
+| op | 入参 | 出参 | 生产取值点 | 取值键（投影用） |
+| --- | --- | --- | --- | --- |
+| `strategy_parse` | `lines` | `rules` `errors` | 编辑器 init / 详情页规则卡 | `lines` 原文 |
+| `strategy_rule_line` | `call` | `line` | 编辑器每行 → RULES 文本 | `kind` + `params` |
+| `strategy_catalog` | `kind?` | `catalog`（含 `specs` / `knownKeys`） | 编辑器动态参数控件 | `kind`（**静态，永久缓存**） |
+| `strategy_validate` | `doc` `pickerExists` `pickSyntaxError?` | `issues` | 编辑器校验区（**每帧**） | doc JSON + 两个附加入参 |
+| `strategy_preview` | `doc` `pickerName?` `tzOffsetSeconds` | `summary` `pick` `trade` `executionNotice` `triggers` | 编辑器预览卡（**每帧**）/ 详情页 | doc JSON + `pickerName` + tz |
+| `trade_parse` | `lines` `tzOffsetSeconds` | `spec` `errors` | `.tdx` 加载（TRADE 段） | `lines` |
+| `trade_serialize` | `spec` `tzOffsetSeconds` | `text` | `.tdx` 保存（TRADE 段） | `spec` JSON + tz |
+| `trade_override` | `call` | `override` `isEmpty` `summary` | 编辑器每行的指令覆盖提示 | `kind` + `params` |
+
+> `tzOffsetSeconds` 出现在 `trade_parse` / `trade_serialize` / `strategy_preview` 三处（见 §11.3 表下注记），一律取 `TimeZone.current.secondsFromGMT()`。
+
+**第一步（本步已交付）：编解码 + async 门面**（纯新增，**不改任何生产调用点**，零行为变化）
+
+| 文件 | 改动 |
+| --- | --- |
+| `Python/SimRulesCodec.swift` | 新增「策略 DSL（双向，E 组）」段：`StrategyCatalogEntry` / `StrategyPreviewResult` 两个出参模型 + `ruleCallJSON` / `ruleCallFromJSON`（`kind` 非法即抛）+ `paramTypeName` / `paramTypeFromName` / `paramSpecJSON` / `paramSpecFromJSON` + `catalogFromJSON`（残缺条目跳过，不整批失败）+ `previewFromJSON` + `directiveOverrideJSON` / `directiveOverrideFromJSON` + `stringMap` |
+| `Python/SimRulesBridge.swift` | 删除与编解码层重复的 `ruleCallJSON` / `specJSON` / `paramTypeName`，改为委派 `SimRulesCodec`（`strategy_parse` 出参与 `strategy_catalog` 的 specs 编码同源） |
+| `Python/SimRulesAsync.swift` | 新增 E 组 8 个 async 门面：`strategyParse` / `strategyRuleLine` / `strategyCatalog` / `strategyValidate` / `strategyPreview` / `tradeParse` / `tradeSerialize` / `tradeOverride`（`tradeOverride` 出参含引擎侧 `isEmpty` / `summary`，摘要不在 Swift 复算） |
+
+**测试（第一步）**：`SimRulesAsyncTests` 新增 E 组 8 段领域级对拍（两种 `mode` 各跑一遍，`strategy_dsl.json` 全量入参）——
+`strategy_parse` 比 `rules`（键排序 JSON，含 `line` / `raw`）/ `errors`；`strategy_rule_line` 比文本；`strategy_catalog` 比 `title` / `conditionOrderTitle` / `knownKeys` / `specs`（`simCondKind` 只断言非空，因命名映射不属契约）；`strategy_validate` / `strategy_preview` / `trade_parse` / `trade_serialize` / `trade_override` 逐字段比 Swift 现状实现。
+**实测**：`BUILD SUCCEEDED`；`KlineTests` 全量 **82/82 全绿 0 skip**；本套件 2/2 全绿。本步未改 `sim_rules.py`，信任链哈希仍为 `3c814be9…16f6`。
+
+**后续步骤（待实施，同一 E 组内继续）**
+
+| 步骤 | 内容 | 形态 |
+| --- | --- | --- |
+| E-2 | `.tdx` 文件边界的 TRADE 段：`FormulaKind.parse` / `serialize` 拆出 async 变体（结构切分仍留 GUI 侧） | 单次 `await`（文件加载 / 保存各一次） |
+| E-3 | `StrategyDetailView` 4 处（`pickSummary` / `tradeSummary` / 规则卡 `parse` + `triggerText`） | 页面级 `.task {}` + `@State`（只读展示，无防抖必要） |
+| E-4 | `StrategyFormulaEditorView` 9 处（init `parse` / 每行 `line` / 每帧 `validate` / 每行 `specs` / 每行 `override` / 预览卡 3 处） | **防抖 + 投影**（闸门 6）：新建 `StrategyProjection`（同 A5-3 / §11.23 形态，`.swift` 直通） |
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture

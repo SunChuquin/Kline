@@ -328,6 +328,136 @@ nonisolated enum SimRulesCodec {
          "trade": tradeSpecJSON(doc.trade)]
     }
 
+    // MARK: - 策略 DSL（双向，E 组）
+
+    /// 规则目录条目（`strategy_catalog` 出参单元）。
+    struct StrategyCatalogEntry {
+        var title: String
+        var conditionOrderTitle: String
+        var simCondKind: String
+        var specs: [StrategyParamSpec]
+        var knownKeys: [String]
+    }
+
+    /// 语义预览结果（`strategy_preview` 出参，全为展示文案）。
+    struct StrategyPreviewResult {
+        var summary: String
+        var pick: String
+        var trade: String
+        var executionNotice: String
+        var triggers: [String]
+    }
+
+    /// `[String: Any]` → `[String: String]`（`JSONSerialization` 的字典值不是 `String` 静态类型）。
+    static func stringMap(_ v: Any?) -> [String: String] {
+        guard let d = v as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (k, val) in d { out[k] = str(val) ?? "" }
+        return out
+    }
+
+    /// 规则调用 → 引擎 JSON（`strategy_parse` 出参元素，亦是 `strategy_rule_line` / `trade_override` 的入参形状）。
+    static func ruleCallJSON(_ c: StrategyRuleCall) -> [String: Any] {
+        ["kind": c.kind.rawValue, "params": c.params, "raw": c.raw, "line": c.line]
+    }
+
+    /// 引擎 JSON → 规则调用。`kind` 非法即抛（形状非法不静默兜底）。
+    static func ruleCallFromJSON(_ any: Any?) throws -> StrategyRuleCall {
+        guard let d = any as? [String: Any],
+              let raw = str(d["kind"]),
+              let kind = StrategyRuleKind(rawValue: raw) else {
+            throw CodecError.badShape("ruleCall.kind")
+        }
+        return StrategyRuleCall(kind: kind, params: stringMap(d["params"]),
+                                raw: str(d["raw"]) ?? "", line: int(d["line"]) ?? 0)
+    }
+
+    static func paramTypeName(_ t: StrategyParamType) -> String {
+        switch t {
+        case .number: return "number"
+        case .percent: return "percent"
+        case .integer: return "integer"
+        case .text: return "text"
+        case .option: return "option"
+        }
+    }
+
+    static func paramTypeFromName(_ v: Any?) -> StrategyParamType? {
+        switch str(v) {
+        case "number": return .number
+        case "percent": return .percent
+        case "integer": return .integer
+        case "text": return .text
+        case "option": return .option
+        default: return nil
+        }
+    }
+
+    static func paramSpecJSON(_ s: StrategyParamSpec) -> [String: Any] {
+        ["key": s.key, "title": s.title, "type": paramTypeName(s.type),
+         "isOptional": s.isOptional, "placeholder": s.placeholder,
+         "options": s.options, "unit": s.unit]
+    }
+
+    /// 引擎 JSON → 参数规格（缺 `key` 或 `type` 非法 → nil，调用方按「未知规格」跳过）。
+    static func paramSpecFromJSON(_ any: Any?) -> StrategyParamSpec? {
+        guard let d = any as? [String: Any],
+              let key = str(d["key"]),
+              let type = paramTypeFromName(d["type"]) else { return nil }
+        return StrategyParamSpec(key: key, title: str(d["title"]) ?? key,
+                                 type: type,
+                                 isOptional: bool(d["isOptional"]) ?? false,
+                                 placeholder: str(d["placeholder"]) ?? "",
+                                 options: (d["options"] as? [String]) ?? [],
+                                 unit: str(d["unit"]) ?? "")
+    }
+
+    /// 引擎 JSON → 规则目录（`kind` 非法或有残缺的条目直接跳过，不整批失败）。
+    static func catalogFromJSON(_ any: Any?) -> [StrategyRuleKind: StrategyCatalogEntry] {
+        guard let d = any as? [String: Any] else { return [:] }
+        var out: [StrategyRuleKind: StrategyCatalogEntry] = [:]
+        for (raw, v) in d {
+            guard let kind = StrategyRuleKind(rawValue: raw),
+                  let e = v as? [String: Any] else { continue }
+            out[kind] = StrategyCatalogEntry(
+                title: str(e["title"]) ?? kind.title,
+                conditionOrderTitle: str(e["conditionOrderTitle"]) ?? kind.conditionOrderTitle,
+                simCondKind: str(e["simCondKind"]) ?? "",
+                specs: ((e["specs"] as? [Any]) ?? []).compactMap { paramSpecFromJSON($0) },
+                knownKeys: (e["knownKeys"] as? [String]) ?? [])
+        }
+        return out
+    }
+
+    static func previewFromJSON(_ any: Any?) -> StrategyPreviewResult? {
+        guard let d = any as? [String: Any] else { return nil }
+        return StrategyPreviewResult(summary: str(d["summary"]) ?? "",
+                                     pick: str(d["pick"]) ?? "",
+                                     trade: str(d["trade"]) ?? "",
+                                     executionNotice: str(d["executionNotice"]) ?? "",
+                                     triggers: (d["triggers"] as? [String]) ?? [])
+    }
+
+    static func directiveOverrideJSON(_ o: StrategyDirectiveOverride) -> [String: Any] {
+        ["dir": o.dir?.rawValue ?? NSNull(),
+         "qty": o.qty ?? NSNull(),
+         "amount": o.amount ?? NSNull(),
+         "priceType": o.priceType?.rawValue ?? NSNull(),
+         "offsetTicks": o.offsetTicks ?? NSNull()]
+    }
+
+    /// 引擎 JSON → 规则行内指令覆盖（`isEmpty` 由本地按字段推导，与 `StrategyDirectiveOverride.isEmpty` 同义）。
+    static func directiveOverrideFromJSON(_ any: Any?) -> StrategyDirectiveOverride {
+        let d = (any as? [String: Any]) ?? [:]
+        var o = StrategyDirectiveOverride()
+        o.dir = str(d["dir"]).flatMap(SimOrderDirection.init(rawValue:))
+        o.qty = int(d["qty"])
+        o.amount = num(d["amount"])
+        o.priceType = str(d["priceType"]).flatMap(SimPriceType.init(rawValue:))
+        o.offsetTicks = int(d["offsetTicks"])
+        return o
+    }
+
     // MARK: - 回测：生产模型 → op 入参 JSON
 
     /// 回测入参（与 `KlineTests/Fixtures/backtest_golden.json` 的 input 同形状）。

@@ -215,7 +215,7 @@ enum SimRulesBridge {
         // ---- E 组：策略 DSL 纯解析 / 校验 / 预览 ----
         case "strategy_parse":
             let out = StrategyRuleParser.parse(lines: str(input["lines"]) ?? "")
-            return ["rules": out.rules.map { ruleCallJSON($0) }, "errors": out.errors]
+            return ["rules": out.rules.map { SimRulesCodec.ruleCallJSON($0) }, "errors": out.errors]
         case "strategy_rule_line":
             let c = (input["call"] as? [String: Any]) ?? [:]
             let kind = StrategyRuleKind(rawValue: str(c["kind"]) ?? "")!
@@ -232,7 +232,7 @@ enum SimRulesBridge {
                     "title": k.title,
                     "conditionOrderTitle": k.conditionOrderTitle,
                     "simCondKind": Self.simKind(k).rawValue,
-                    "specs": StrategyRuleCatalog.specs(for: k).map { specJSON($0) },
+                    "specs": StrategyRuleCatalog.specs(for: k).map { SimRulesCodec.paramSpecJSON($0) },
                     "knownKeys": StrategyRuleCatalog.knownKeys(for: k).sorted(),
                 ]
             }
@@ -527,10 +527,6 @@ enum SimRulesBridge {
 
     // MARK: - E 组编码辅助
 
-    private static func ruleCallJSON(_ c: StrategyRuleCall) -> [String: Any] {
-        ["kind": c.kind.rawValue, "params": c.params, "raw": c.raw, "line": c.line]
-    }
-
     private static func simKind(_ k: StrategyRuleKind) -> SimCondKind {
         switch k {
         case .price: return .price
@@ -541,22 +537,6 @@ enum SimRulesBridge {
         case .maCross: return .maCross
         case .grid: return .grid
         case .batch: return .batch
-        }
-    }
-
-    private static func specJSON(_ s: StrategyParamSpec) -> [String: Any] {
-        ["key": s.key, "title": s.title, "type": paramTypeName(s.type),
-         "isOptional": s.isOptional, "placeholder": s.placeholder,
-         "options": s.options, "unit": s.unit]
-    }
-
-    private static func paramTypeName(_ t: StrategyParamType) -> String {
-        switch t {
-        case .number: return "number"
-        case .percent: return "percent"
-        case .integer: return "integer"
-        case .text: return "text"
-        case .option: return "option"
         }
     }
 

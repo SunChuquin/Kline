@@ -251,4 +251,98 @@ extension SimRulesBridge {
         guard let d = out["draft"], !(d is NSNull) else { return nil }
         return try SimRulesCodec.strategyDraftFromJSON(d)
     }
+
+    // MARK: - E 组：策略 DSL 纯解析 / 校验 / 预览
+
+    /// 解析 RULES 文本（`strategy_parse`）→ 规则数组 + 中文错误清单。
+    @MainActor
+    static func strategyParse(lines: String) async throws
+        -> (rules: [StrategyRuleCall], errors: [String]) {
+        let out = try await payloadAsync(op: "strategy_parse", input: ["lines": lines])
+        let rules = try ((out["rules"] as? [Any]) ?? []).map { try SimRulesCodec.ruleCallFromJSON($0) }
+        return (rules, (out["errors"] as? [String]) ?? [])
+    }
+
+    /// 一条规则 → RULES 文本（`strategy_rule_line`）。
+    @MainActor
+    static func strategyRuleLine(_ call: StrategyRuleCall) async throws -> String {
+        let out = try await payloadAsync(op: "strategy_rule_line",
+                                         input: ["call": SimRulesCodec.ruleCallJSON(call)])
+        guard let line = SimRulesCodec.str(out["line"]) else {
+            throw SimRulesCodec.CodecError.badShape("strategyRuleLine.line")
+        }
+        return line
+    }
+
+    /// 规则目录（`strategy_catalog`）：`kind` 传 nil 取全部 8 类。
+    @MainActor
+    static func strategyCatalog(kind: StrategyRuleKind? = nil) async throws
+        -> [StrategyRuleKind: SimRulesCodec.StrategyCatalogEntry] {
+        var input: [String: Any] = [:]
+        if let kind { input["kind"] = kind.rawValue }
+        let out = try await payloadAsync(op: "strategy_catalog", input: input)
+        return SimRulesCodec.catalogFromJSON(out["catalog"])
+    }
+
+    /// 静态校验（`strategy_validate`）→ 中文错误清单（空 = 通过）。
+    /// `pickSyntaxError` 由调用方的 TDX 试算得到，原样透传给引擎。
+    @MainActor
+    static func strategyValidate(doc: FormulaDoc, pickerExists: Bool,
+                                 pickSyntaxError: String?) async throws -> [String] {
+        var input: [String: Any] = ["doc": SimRulesCodec.formulaDocJSON(doc),
+                                    "pickerExists": pickerExists]
+        if let pickSyntaxError { input["pickSyntaxError"] = pickSyntaxError }
+        let out = try await payloadAsync(op: "strategy_validate", input: input)
+        return (out["issues"] as? [String]) ?? []
+    }
+
+    /// 语义预览（`strategy_preview`）：全为展示文案。
+    /// ⚠️ `tzOffsetSeconds` 必需（`trade` 摘要里的「有效期至 MM-dd」按本地壁钟）。
+    @MainActor
+    static func strategyPreview(doc: FormulaDoc, pickerName: String?) async throws
+        -> SimRulesCodec.StrategyPreviewResult {
+        var input: [String: Any] = ["doc": SimRulesCodec.formulaDocJSON(doc),
+                                    "tzOffsetSeconds": TimeZone.current.secondsFromGMT()]
+        if let pickerName { input["pickerName"] = pickerName }
+        let out = try await payloadAsync(op: "strategy_preview", input: input)
+        guard let r = SimRulesCodec.previewFromJSON(out) else {
+            throw SimRulesCodec.CodecError.badShape("strategyPreview")
+        }
+        return r
+    }
+
+    /// TRADE 段解析（`trade_parse`）→ 规格 + 中文错误清单。
+    /// ⚠️ `tzOffsetSeconds` 必需（`EXPIRES=YYYY-MM-DD` 要按本地日历拼日界）。
+    @MainActor
+    static func tradeParse(lines: [String]) async throws
+        -> (spec: StrategyTradeSpec, errors: [String]) {
+        let out = try await payloadAsync(op: "trade_parse",
+                                         input: ["lines": lines,
+                                                 "tzOffsetSeconds": TimeZone.current.secondsFromGMT()])
+        return (SimRulesCodec.tradeSpecFromJSON(out["spec"]), (out["errors"] as? [String]) ?? [])
+    }
+
+    /// TRADE 段序列化（`trade_serialize`）→ 文本。
+    @MainActor
+    static func tradeSerialize(_ spec: StrategyTradeSpec) async throws -> String {
+        let out = try await payloadAsync(op: "trade_serialize",
+                                         input: ["spec": SimRulesCodec.tradeSpecJSON(spec),
+                                                 "tzOffsetSeconds": TimeZone.current.secondsFromGMT()])
+        guard let text = SimRulesCodec.str(out["text"]) else {
+            throw SimRulesCodec.CodecError.badShape("tradeSerialize.text")
+        }
+        return text
+    }
+
+    /// 规则行内 ORD* 覆盖（`trade_override`）→ 覆盖值 + 是否为空 + 中文摘要。
+    /// `isEmpty` / `summary` 取引擎出参（摘要属展示口径，不从 Swift 复算）。
+    @MainActor
+    static func tradeOverride(_ call: StrategyRuleCall) async throws
+        -> (override: StrategyDirectiveOverride, isEmpty: Bool, summary: String?) {
+        let out = try await payloadAsync(op: "trade_override",
+                                         input: ["call": SimRulesCodec.ruleCallJSON(call)])
+        return (SimRulesCodec.directiveOverrideFromJSON(out["override"]),
+                SimRulesCodec.bool(out["isEmpty"]) ?? true,
+                out["summary"] as? String)
+    }
 }

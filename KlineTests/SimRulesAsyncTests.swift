@@ -288,6 +288,136 @@ final class SimRulesAsyncTests: XCTestCase {
             XCTAssertEqual(got.map(desc) ?? "<nil>", want.map(desc) ?? "<nil>",
                            "\(mode) strategy_entry_draft \(name(c))")
         }
+
+        // ---- E 组：策略 DSL 纯解析 / 校验 / 预览（本组覆盖 E 组全部新反解）
+        let dsl = try loadFixture("strategy_dsl")
+
+        for c in cases(dsl, "strategyParse") {
+            let lines = SimRulesCodec.str(input(c)["lines"]) ?? ""
+            let got = try await SimRulesBridge.strategyParse(lines: lines)
+            let want = StrategyRuleParser.parse(lines: lines)
+            XCTAssertEqual(got.rules.map(ruleDesc), want.rules.map(ruleDesc),
+                           "\(mode) strategy_parse.rules \(name(c))")
+            XCTAssertEqual(got.errors, want.errors, "\(mode) strategy_parse.errors \(name(c))")
+        }
+
+        for c in cases(dsl, "strategyRuleLine") {
+            guard let call = try? ruleCall(input(c)["call"]) else { continue }
+            let got = try await SimRulesBridge.strategyRuleLine(call)
+            XCTAssertEqual(got, StrategyRuleParser.line(for: call),
+                           "\(mode) strategy_rule_line \(name(c))")
+        }
+
+        for c in cases(dsl, "strategyCatalog") {
+            let kinds = SimRulesCodec.str(input(c)["kind"])
+                .flatMap(StrategyRuleKind.init(rawValue:)).map { [$0] } ?? StrategyRuleKind.allCases
+            let got = try await SimRulesBridge.strategyCatalog(kind: kinds.count == 1 ? kinds[0] : nil)
+            for kind in kinds {
+                guard let e = got[kind] else {
+                    XCTFail("\(mode) strategy_catalog 缺 \(kind.rawValue)（\(name(c))）"); continue
+                }
+                XCTAssertEqual(e.title, kind.title, "\(mode) catalog.title \(kind.rawValue)")
+                XCTAssertEqual(e.conditionOrderTitle, kind.conditionOrderTitle,
+                               "\(mode) catalog.conditionOrderTitle \(kind.rawValue)")
+                XCTAssertEqual(e.knownKeys, StrategyRuleCatalog.knownKeys(for: kind).sorted(),
+                               "\(mode) catalog.knownKeys \(kind.rawValue)")
+                XCTAssertEqual(e.specs.map(specDesc),
+                               StrategyRuleCatalog.specs(for: kind).map(specDesc),
+                               "\(mode) catalog.specs \(kind.rawValue)")
+                XCTAssertFalse(e.simCondKind.isEmpty, "\(mode) catalog.simCondKind 为空 \(kind.rawValue)")
+            }
+        }
+
+        for c in cases(dsl, "strategyValidate") {
+            let i = input(c)
+            let doc = SimRulesCodec.formulaDocFromJSON(i["doc"])
+            let exists = SimRulesCodec.bool(i["pickerExists"]) ?? false
+            let syntax = SimRulesCodec.str(i["pickSyntaxError"])
+            let got = try await SimRulesBridge.strategyValidate(doc: doc, pickerExists: exists,
+                                                               pickSyntaxError: syntax)
+            let want = StrategyValidator.validate(doc: doc, pickerExists: exists,
+                                                  pickSyntaxError: syntax)
+            XCTAssertEqual(got, want, "\(mode) strategy_validate \(name(c))")
+        }
+
+        for c in cases(dsl, "strategyPreview") {
+            let i = input(c)
+            let doc = SimRulesCodec.formulaDocFromJSON(i["doc"])
+            let pickerName = SimRulesCodec.str(i["pickerName"])
+            let got = try await SimRulesBridge.strategyPreview(doc: doc, pickerName: pickerName)
+            XCTAssertEqual(got.summary, StrategyPreview.summary(doc: doc, pickerName: pickerName),
+                           "\(mode) strategy_preview.summary \(name(c))")
+            XCTAssertEqual(got.pick, StrategyPreview.pickSummary(doc: doc, pickerName: pickerName),
+                           "\(mode) strategy_preview.pick \(name(c))")
+            XCTAssertEqual(got.trade, StrategyPreview.tradeSummary(doc: doc),
+                           "\(mode) strategy_preview.trade \(name(c))")
+            XCTAssertEqual(got.executionNotice, StrategyPreview.executionNotice,
+                           "\(mode) strategy_preview.executionNotice \(name(c))")
+            let (calls, _) = StrategyRuleParser.parse(lines: doc.rules)
+            XCTAssertEqual(got.triggers, calls.map { StrategyPreview.triggerText($0) },
+                           "\(mode) strategy_preview.triggers \(name(c))")
+        }
+
+        for c in cases(dsl, "tradeParse") {
+            let lines = tradeLines(input(c)["lines"])
+            let got = try await SimRulesBridge.tradeParse(lines: lines)
+            let want = StrategyTradeParser.parse(lines: lines)
+            XCTAssertEqual(jsonDesc(SimRulesCodec.tradeSpecJSON(got.spec)),
+                           jsonDesc(SimRulesCodec.tradeSpecJSON(want.spec)),
+                           "\(mode) trade_parse.spec \(name(c))")
+            XCTAssertEqual(got.errors, want.errors, "\(mode) trade_parse.errors \(name(c))")
+        }
+
+        for c in cases(dsl, "tradeSerialize") {
+            let spec = SimRulesCodec.tradeSpecFromJSON(input(c)["spec"])
+            let got = try await SimRulesBridge.tradeSerialize(spec)
+            XCTAssertEqual(got, StrategyTradeParser.serialize(spec),
+                           "\(mode) trade_serialize \(name(c))")
+        }
+
+        for c in cases(dsl, "tradeOverride") {
+            guard let call = try? ruleCall(input(c)["call"]) else { continue }
+            let got = try await SimRulesBridge.tradeOverride(call)
+            let want = StrategyTradeParser.override(in: call)
+            XCTAssertEqual(jsonDesc(SimRulesCodec.directiveOverrideJSON(got.override)),
+                           jsonDesc(SimRulesCodec.directiveOverrideJSON(want)),
+                           "\(mode) trade_override \(name(c))")
+            XCTAssertEqual(got.isEmpty, want.isEmpty, "\(mode) trade_override.isEmpty \(name(c))")
+            XCTAssertEqual(got.summary ?? "<nil>", want.summary ?? "<nil>",
+                           "\(mode) trade_override.summary \(name(c))")
+        }
+    }
+
+    // MARK: - E 组装配 / 比较
+
+    private func ruleCall(_ any: Any?) throws -> StrategyRuleCall {
+        try SimRulesCodec.ruleCallFromJSON(any)
+    }
+
+    /// `StrategyRuleCall` 的键排序文本（`params` / 行号 / 原文全参与）。
+    private func ruleDesc(_ c: StrategyRuleCall) -> String {
+        jsonDesc(SimRulesCodec.ruleCallJSON(c))
+    }
+
+    private func specDesc(_ s: StrategyParamSpec) -> String {
+        jsonDesc(SimRulesCodec.paramSpecJSON(s))
+    }
+
+    /// 任意 JSON 对象 → 键排序文本（字典顺序无关的比较）。
+    private func jsonDesc(_ o: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]),
+              let s = String(data: data, encoding: .utf8) else { return "<encode-failed>" }
+        return s
+    }
+
+    /// TRADE 段行：fixture 里既可能是字符串也可能是数组（与 `SimRulesBridge.tradeLines` 同义）。
+    private func tradeLines(_ any: Any?) -> [String] {
+        if let s = any as? String {
+            return s.replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+                .components(separatedBy: "\n")
+        }
+        return (any as? [Any])?.map { ($0 as? String) ?? "" } ?? []
     }
 
     // MARK: - D 组装配 / 比较
