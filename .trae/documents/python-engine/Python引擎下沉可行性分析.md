@@ -734,6 +734,9 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 | **D2** | 交易判定下沉后，**硬约束复核**放哪？ | ✅ **一并下沉**（2026-10-17 二次拍板）：下单授权与 `T+1 / 涨跌停 / 整手` 硬约束复核**都进引擎**，Swift 侧**不留**交易规则实现 → 红线 4 的缓解只剩**签名 + 版本锁 + 脚本哈希**（残余风险与验证见 §10.9） | `SimTradingRules` 整体进 `sim_rules.py`；红线 4 缓解强度下降，须由套件 8（信任链）兜住 |
 | **D3** | 是否需要**引擎主动推送**？ | 🔄 **认识已澄清（见 §9.11）**：解释器**本来就已经常驻**（进程内，L0，零代价）；缺的是「引擎自己醒来干活 / 主动推送」（L2/L3）。但**本项目「最新价」= 本地日线库最后一根 close（无盘中 tick）→ 条件单本来就只能在「数据更新 / App 激活」时结算**，后台常驻几乎无收益；且 iOS 退后台会挂起常驻线程。结论：**保持 L0 常驻（= 现状，零改动）；L1 为可选增强；不做 L2/L3** | 不建常驻 Python 线程 → 不做 push 通道的强制依赖（§9.8 的 pipe 变体降为可选增强，L1 收益与边界见 §9.11.1） |
 | **D4** | 跨平台目标是哪些平台？ | ✅ **凡支持 Python 引擎的平台均为潜在目标**；届时维护一套**完善的 GUI 文档**，实现某平台时按文档快速复刻 GUI | 明确「共享引擎 + 每平台复刻 GUI」的战略；Swift 只是 iOS 那份 GUI |
+| **D5** | `SimFormat`（数值 / 日期**文案格式化**，生产 **219** 处调用点，全在 SwiftUI 渲染路径）是否下沉进引擎？ | ✅ **格式化归 GUI**（2026-10-17 拍板）：**生产不调 `sim_format`**，`SimFormat.swift` 明确归入「GUI 层」；`sim_format` op **保留**（`_sim_format` 回归网 / 引擎内部 / fixture 用） | 修订 §11.3 的 op 适用面：`sim_format` 不再是生产契约面；「舍入口径单一来源」不再由引擎担任 → 靠 §11.9 的 macOS Foundation 探针 + `simFormat` fixture（23 条）保证两边同步（残余风险见 §11.18.4） |
+
+> D5 的由来：§11.18.4 盘点发现 `SimFormat.` 生产调用点 **219** 处（文档原估「约 90 处」严重偏低），且**每帧求值**。「每帧文案逐个走异步投影」不可行（缓存命中率≈0、需改 219 处签名），故按 D1「Swift 只保留 GUI + 平台适配 + 引擎宿主」的战略，把「展示文案格式化」显式划归 GUI 层——它本就是**呈现**而非**领域状态/判定**。
 
 > D4 修订了 §9.2 的口径：GUI 文档（而非 GUI 代码）才是跨平台的复用载体。因此「Swift 只做 GUI」的价值 = **让 GUI 成为唯一与平台相关的部分**，从而跨平台成本 ≈ 按文档复刻一套 GUI。
 
@@ -1113,7 +1116,7 @@ golden: `strategy_dsl.json`（**手写规格**）。
 | op | 入参键 | 出参键 | 对应 Swift |
 | --- | --- | --- | --- |
 | `backtest_run` | `doc` `params` `bars` `pickHits` `metas` `tzOffsetSeconds` `scannedCount?` | `params`（回显）`stats` `equity` `maxDrawdownRange` `trades` `scannedCount` `hitCount` `warnings` `skipped` | `StrategyBacktestEngine.run`（纯逻辑引擎） |
-| `sim_format` | `fn` ∈ {`amount`/`amount0`/`signed`/`signed0`/`pct`/`shares`/`price`/`time`/`dateTime`/`shortDate`} + `value`/`date` + `tzOffsetSeconds` | `text` | `SimFormat.*` |
+| `sim_format` | `fn` ∈ {`amount`/`amount0`/`signed`/`signed0`/`pct`/`shares`/`price`/`time`/`dateTime`/`shortDate`} + `value`/`date` + `tzOffsetSeconds` | `text` | `SimFormat.*`（⚠️ **生产不调用**，见 D5 / §11.18.4：格式化归 GUI；本 op 只作 `_sim_format` 回归网 / 引擎内部 / fixture） |
 
 > `bars`：`{metaID: [{date,open,high,low,close}…]}`（**升序**，date 为 `YYYYMMDD` 整数）；`pickHits`：`{metaID: [YYYYMMDD…]}`；`metas`：`{metaID: {code,name}}`（缺省用「标 #id」占位）。
 > `params` 缺省对齐 `BacktestParams`：`days=250` / `initialCapital=100000` / `executeNextOpen=true` / `includeEntry=true`（`pool` / `period` 是取数期参数，纯引擎不使用，传入即忽略）。
@@ -1583,7 +1586,7 @@ done
 | `Formula/FormulaCenterView.swift` | 1 | `parse`（文件读取） |
 | `Trading/StrategyCondGenerator.swift` | 1 · 1 | `StrategyRuleParser` / `StrategyTradeParser` |
 
-#### 11.18.4 🔴 拍板点：`SimFormat` 有 **219** 处生产调用点
+#### 11.18.4 ✅ 拍板点：`SimFormat` 有 **219** 处生产调用点（**已拍板 → D5 = ①「格式化归 GUI」**，2026-10-17）
 
 `SimFormat.`（数值 + 日期文案）在生产 Swift **219 处**，分布在 ~30 个文件（最多的 `Simulation/SimSharedViews.swift` 26、`SimulationLayoutBView.swift` 20、`Trading/TradeTicketView.swift` 16、`SimulationLayoutCView.swift` 16…），**全部在 SwiftUI 渲染路径**（每帧求值）。
 
@@ -1591,7 +1594,7 @@ done
 
 | 出路 | 内容 | 代价 |
 | --- | --- | --- |
-| **① 格式化归 GUI（待拍板，推荐）** | 修订 §11.3：`sim_format` op **保留**（`_sim_format` 回归网 / 引擎内部 / fixture 用），但**生产不调用**；`SimFormat.swift` 明确归入「GUI 层」（GUI 文档的展示规则）。 | `SimFormat` 舍入口径的「单一来源」不再是引擎 → 靠 §11.9 探针 + `simFormat` fixture（23 条）保证两边同步 |
+| **① 格式化归 GUI（✅ 已拍板 = D5）** | 修订 §11.3：`sim_format` op **保留**（`_sim_format` 回归网 / 引擎内部 / fixture 用），但**生产不调用**；`SimFormat.swift` 明确归入「GUI 层」（GUI 文档的展示规则）。 | `SimFormat` 舍入口径的「单一来源」不再是引擎 → 靠 §11.9 探针 + `simFormat` fixture（23 条）保证两边同步 |
 | ② 引擎出规则、Swift 执行 | 引擎返回 `{fn → 小数位/舍入模式/日期格式}`，`SimFormat` 按规则本地格式化 | 需重写 `SimFormat` 并证明等价（`NumberFormatter` 的 shortest-roundtrip 行为不易规则化） |
 | ③ 同步跨语言调用 | 219 处直接同步调引擎 | 需放开 `blockingCall` 的主线程禁令（与设计冲突）+ 每帧跨语言调用，**不推荐** |
 
