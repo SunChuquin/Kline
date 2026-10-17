@@ -125,6 +125,108 @@ nonisolated enum SimRulesCodec {
         try decodeJSON(SimCondOrder.self, from: any ?? [:] as [String: Any])
     }
 
+    /// 条件单指令 → 引擎 JSON（`cond_execution_price` 入参）。
+    static func directiveJSON(_ d: SimCondDirective) -> [String: Any] {
+        var o: [String: Any] = ["direction": d.direction.rawValue,
+                                "priceType": d.priceType.rawValue,
+                                "offsetTicks": d.offsetTicks,
+                                "qty": d.qty]
+        if let a = d.alertOnly { o["alertOnly"] = a }
+        return o
+    }
+
+    // MARK: - 判定 / 结算 / 交易规则（A5-4：领域模型的写出与写回）
+
+    /// 行情快照 → 引擎 JSON。**缺项不写键**（两侧同口径：缺键 = nil）。
+    static func snapshotJSON(_ s: SimCondSnapshot) -> [String: Any] {
+        var o: [String: Any] = [:]
+        if let v = s.last { o["last"] = v }
+        if let v = s.prevClose { o["prevClose"] = v }
+        if let v = s.high { o["high"] = v }
+        if let v = s.low { o["low"] = v }
+        if let v = s.changePct { o["changePct"] = v }
+        if let v = s.ma { o["ma"] = v }
+        return o
+    }
+
+    /// 条件单运行时 ← 引擎 JSON（缺失键取默认；与 `SimCondRuntime` 自身的宽容解码同口径）。
+    static func runtimeFromJSON(_ any: Any?) -> SimCondRuntime {
+        (try? decodeJSON(SimCondRuntime.self, from: any ?? [:] as [String: Any])) ?? SimCondRuntime()
+    }
+
+    /// 判定结果 ← 引擎 JSON（`cond_evaluate` 的 `result`）。
+    /// 形状见 §11.6 / `SimRulesBridge.decisionJSON`；未知 `decision` → nil（调用方按降级处理）。
+    static func condDecisionFromJSON(_ any: Any?) -> SimCondDecision? {
+        guard let d = any as? [String: Any], let kind = str(d["decision"]) else { return nil }
+        switch kind {
+        case "fire":     return .fire(qty: int(d["qty"]) ?? 0, at: num(d["at"]) ?? 0)
+        case "hold":     return .hold(runtimeFromJSON(d["runtime"]))
+        case "abort":    return .abort(str(d["reason"]) ?? "")
+        case "complete": return .complete(str(d["reason"]) ?? "")
+        default:         return nil
+        }
+    }
+
+    /// 建单拒绝 ← 引擎 JSON（`cond_validate_create` 的 `result`；nil = 通过）。
+    static func condRejectionFromJSON(_ any: Any?) -> SimCondRejection? {
+        guard let d = any as? [String: Any], let code = str(d["code"]) else { return nil }
+        switch code {
+        case "accountUnavailable": return .accountUnavailable
+        case "noQuote":            return .noQuote
+        case "noPosition":         return .noPosition
+        case "invalidOCORange":    return .invalidOCORange
+        case "invalidGridRange":   return .invalidGridRange
+        case "invalidGridStep":    return .invalidGridStep
+        case "invalidBatchCount":  return .invalidBatchCount
+        case "invalidFireDate":    return .invalidFireDate
+        case "invalidQty":         return .invalidQty(lot: int(d["lot"]) ?? 0)
+        case "batchTooSmall":      return .batchTooSmall(lot: int(d["lot"]) ?? 0)
+        case "missingParam":       return .missingParam(str(d["name"]) ?? "")
+        default:                   return nil
+        }
+    }
+
+    /// 下单拒绝 ← 引擎 JSON（`trade_validate` 的 `result`；nil = 通过）。
+    /// ⚠️ `insufficientCash` 的 `available` 是 Double、`insufficientShares` 的 `available` 是 Int
+    /// （与 `SimRulesBridge.orderRejectionJSON` 严格对称）。
+    static func orderRejectionFromJSON(_ any: Any?) -> SimOrderRejection? {
+        guard let d = any as? [String: Any], let code = str(d["code"]) else { return nil }
+        switch code {
+        case "emptyAccount":       return .emptyAccount
+        case "noQuote":            return .noQuote
+        case "notLotMultiple":     return .notLotMultiple(lot: int(d["lot"]) ?? 0)
+        case "insufficientCash":
+            return .insufficientCash(available: num(d["available"]) ?? 0,
+                                     affordableQty: int(d["affordableQty"]) ?? 0)
+        case "insufficientShares": return .insufficientShares(available: int(d["available"]) ?? 0)
+        case "priceOutOfLimit":    return .priceOutOfLimit(lower: num(d["lower"]) ?? 0,
+                                                           upper: num(d["upper"]) ?? 0)
+        default:                   return nil
+        }
+    }
+
+    /// 下单草稿 → 引擎 JSON（`trade_validate` 入参）。
+    static func orderDraftJSON(_ d: SimOrderDraft) -> [String: Any] {
+        var o: [String: Any] = ["accountID": d.accountID.uuidString,
+                                "metaID": d.metaID, "code": d.code, "name": d.name,
+                                "direction": d.direction.rawValue,
+                                "priceType": d.priceType.rawValue, "qty": d.qty]
+        if let p = d.price { o["price"] = p }
+        return o
+    }
+
+    /// 账户 → 引擎 JSON（`trade_validate` 入参；键集是 fixture `account` 的超集，多出的键两侧都不读）。
+    static func accountJSON(_ a: SimAccount) -> [String: Any] {
+        ["id": a.id.uuidString, "name": a.name, "cash": a.cash,
+         "initialCapital": a.initialCapital, "isArchived": a.isArchived]
+    }
+
+    /// 持仓 → 引擎 JSON（`trade_validate` / `trade_calc.sellableQty` 入参）。
+    static func positionJSON(_ p: SimPosition) -> [String: Any] {
+        ["accountID": p.accountID.uuidString, "metaID": p.metaID, "code": p.code, "name": p.name,
+         "qty": p.qty, "availableQty": p.availableQty, "costPrice": p.costPrice]
+    }
+
     // MARK: - 策略交易规格（双向）
 
     static func tradeSpecFromJSON(_ any: Any?) -> StrategyTradeSpec {

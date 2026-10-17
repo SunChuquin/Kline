@@ -1610,6 +1610,37 @@ done
 
 ---
 
+### 11.19 A5-4 第一步：async 门面 + 领域写回（2026-10-17）
+
+**目标**：把「一次 op」包装成 `async throws`（域类型进、域类型出），为 `SimStore.submit` / `sweepConditions` 的 `await` 化备好底座。**本步是纯新增，不改任何调用方**（树始终绿）。
+
+**新增 `Kline/Python/SimRulesAsync.swift`（`extension SimRulesBridge`）**
+
+| 层 | 内容 |
+| --- | --- |
+| 原语 | `payloadAsync(op:input:timeout:)`——对既有 `payload`（`mode` 分发）的 `withCheckedThrowingContinuation` 封装。`.swift` 立即返回；`.engine` 调引擎；未就绪 → 抛 `.engineNotReady`（**不静默兜底**） |
+| A 组 | `evaluateCond(order:snapshot:now:)` → `SimCondDecision?`；`validateCondCreate(order:account:position:snapshot:now:)` → `SimCondRejection?` |
+| B 组 | `condExpiredReason(order:now:calendar:)` / `condFireDirection` / `condExecutionPrice` / `condAdvance` / `condRepeatableFinished` / `condAlertMessage` |
+| C 组 | `tradeValidate(draft:account:position:lastPrice:prevClose:)`（**红线 4** 的引擎侧落点）/ `tradeFee` / `tradeAffordableQty` / `tradeSellableQty` / `tradeIsTradingSession` / `tradeLimitRange` |
+
+**新增写回变换（`SimRulesCodec`，A5-4 前只有「读出」而无「写回」）**
+
+`snapshotJSON` / `directiveJSON` / `runtimeFromJSON` / `condDecisionFromJSON` / `condRejectionFromJSON` / `orderRejectionFromJSON` / `orderDraftJSON` / `accountJSON` / `positionJSON`。
+
+> `runtimeFromJSON` 复用 `SimCondRuntime` 自身的宽容 `init(from:)`；`accountJSON`/`positionJSON`/`orderDraftJSON` 是 fixture 入参键集的**超集**（多出的键两侧都不读，不影响双跑一致）。
+
+**测试 `KlineTests/SimRulesAsyncTests.swift`（2 用例，领域级对拍）**
+
+- **与 `SimRulesDiffTests` 的分工**：那边比 **op 级 JSON**（两侧后端逐字段），这边比 **领域类型**——包装函数返回值 vs Swift 现状（`SimCondRule.evaluate` / `SimTradingRules.validate` / …）。两者合起来才证明「引擎输出 → 领域模型」的**反解**无损（只比 JSON 会漏掉「JSON 对了但反解错了」）。
+- 用例来源：三份 fixture 的**既有入参**（不新增 golden、不改 fixture）；同一批用例在 `.swift` 与 `.engine` 两种 `mode` 下各跑一遍（引擎未就绪 → `XCTSkip`）。
+- **实测**：`SimRulesAsyncTests` 2/2；`KlineTests` 全量 **75/75 全绿 0 skip**。
+
+**⚠️ 实测踩坑（已修，值得记住）**：`tradeIsTradingSession` 首版漏传 `tzOffsetSeconds` → 引擎按 UTC 判交易时段，`session_morning` / `session_open_boundary` / `session_close_boundary` 三条 `.engine` 模式下红。**凡时间相关 op 必须显式注入 `tzOffsetSeconds`**（本层取 `TimeZone.current.secondsFromGMT(for:)`，与 `.swift` 现状 `Calendar.current` 同口径）。这条与 §11.13 的「Swift 侧 dump 走 `DateFormatter` + 本机时区」是同一类口径依赖。
+
+**下一步（本子步剩余）**：把 `SimStore.submit` 改 `async` + `sweepConditions` 同步循环改 async 流水线（含 §11.18.2 的 5 条约束与重入守卫）+ 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入。
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture
