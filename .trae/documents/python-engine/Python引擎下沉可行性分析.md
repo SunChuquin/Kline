@@ -877,7 +877,7 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 
 | 项 | 约定 |
 | --- | --- |
-| 测试文件 | 过渡期 `KlineTests/SimRulesContractTests.swift`（Swift 现状 ↔ fixture）；长期 `KlineTests/PyBridgeSimRulesTests.swift`（Python ↔ fixture） |
+| 测试文件 | 过渡期 `KlineTests/SimRulesContractTests.swift`（Swift 现状 ↔ fixture，A1 已落地）；长期 `KlineTests/PyBridgeSimRulesTests.swift`（Python ↔ fixture，**A3 已落地**，见 §11.13）。二者同 golden、同比较口径；删 Swift 实现后过渡期文件随实现一并移除 |
 | fixture | `KlineTests/Fixtures/sim_rules.json`（计算类：evaluate / validateCreate / tradingRules / sweep / mapping）· `strategy_dsl.json`（解析类）· `backtest_golden.json`（回测净值） |
 | 生产流程（两阶段） | **A1** 由 Swift 现状**导出** golden（`sim_rules.json` 由一次「dump 模式」测试产出）→ **A2** 删 Swift 后 fixture 冻结为唯一 golden，`PyBridgeSimRulesTests` 继续对拍 |
 | 解析类 golden | `strategy_dsl.json` **手写为规格**（文本口径稳定），Swift 与 Python **同时**对其断言 |
@@ -1223,7 +1223,7 @@ python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json
 **契约发现 1（锁现状，不得顺手修正）**：`SimCondRule.evaluate` 开头 `guard let price = snapshot.last, price > 0 else { return .hold(order.runtime) }` 先于 `switch`。因此 `case .time` 里 `snapshot.last ?? snapshot.prevClose` 的**「无最新价退化用昨收」分支实际不可达**（能让它走到 `at` 的前提是 `last > 0`，此时 `??` 必然取 `last`）。
 → 契约测试按「`last` 缺失 → `hold`」**锁死现状**，用例 `eval.time_no_quote_holds` 已标注原因。这是「契约锁现状」原则的实例：**旧的意图分支已死，但改动它会改变外部可观察行为，故冻结在 A 阶段不动**。
 
-**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **A1 已落地**（Swift dump 导出三份 golden，见 §11.12 与 §12）；后续转入 A2 双跑（`SimRulesBridge.mode`）。
+**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **A1 已落地**（Swift dump 导出三份 golden，见 §11.12 与 §12）→ **A2/A3 已落地**（PC 侧零差异 + 引擎内零差异，见 §11.13）；后续转入 **A4** 差分双跑（`SimRulesBridge.mode` 切 `.swift` / `.engine` 逐字段比较，见 §11.8）。
 
 ### 11.10 D/E 组落地进度与实测发现（2026-10-17）
 
@@ -1305,6 +1305,44 @@ python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json
 
 **踩坑**：`[String: String]` 字面量里混 `NSNull()` 会编译期类型推断失败（回测/覆盖的 `null` 字段必须先声明 `[String: Any]`）；`xcodebuild test` 跑完偶发「收集诊断超时 600s」但 `TEST SUCCEEDED`（dump 的那次），后续以 stdout 为准。
 
+### 11.13 A2/A3 落地进度与实测发现（2026-10-17）
+
+**A2（PC 侧 Python↔golden 零差异）——已完成**：三份 fixture 全部逐位精确零差异（`--fixture` 为 tol=0 的严格比较）：
+
+```bash
+for f in sim_rules strategy_dsl backtest_golden; do
+  python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/$f.json
+done
+# → 191 / 54 / 7，失败 0（PC CPython 3.13.1）
+```
+
+**A3（引擎内跑通 `PyBridgeSimRulesTests`）——已完成**：
+
+| 产物 | 说明 |
+| --- | --- |
+| 新增 `KlineTests/PyBridgeSimRulesTests.swift` | 与 `SimRulesContractTests` **同 golden、同比较口径**（递归、对象键集必须完全一致、数值相对容差 `1e-9·max(1,|e|)`）；三个方法：`testPyBridgeSimRulesMatchesGolden`（八段）/ `testPyBridgeStrategyDSLMatchesGolden`（八段）/ `testPyBridgeBacktestMatchesGolden`（`cases`） |
+| 调用通道 | `KlinePythonBridge.call(script: "sim_rules", input: input+["op": op])`。`kline_result = {"ok": true, …op 输出…}` 即 fixture 的 `expected`（桥接 `readResult` 校验 `ok==true` 后**原样**返回 `_kres`，不额外包 `result`——这点与 `quote_parse.py` 的 `{"result": …}` 自包一层不同，故本套件读顶层 dict 而非 `obj["result"]`） |
+| skip 语义 | 引擎未就绪（无引擎构建 / `KLINE_SKIP_ENGINE_EMBED=1`）→ `ensureReady` 失败 → `XCTSkip`（降级路径非失败）；引擎就绪后 `call` 失败 = 真实缺陷 → 真 fail |
+| 实测 | **252/252 全绿（0 skip）**；同批回归既有桥接套件（quote_parsing / period_aggregation / candle_pattern / chan / mytt / numpy_smoke / template_parse）**18 项全过 0 skip**，证明桥接层改动无副作用 |
+
+**A3 抓手（真实差异，必须记档）——负零在传输层丢失**：
+
+- **现象**：首次实跑仅 2 条失败，且都是负零——`format.amount_neg_zero`（期望 `-0.00` 实得 `0.00`）、`format.amount0_neg_zero`（期望 `-0` 实得 `0`）。
+- **根因**（Foundation 探针实证）：`JSONSerialization.data(withJSONObject:)` 与 `JSONEncoder` **都把 `Double(-0.0)` 写成 `-0`**（不是 `-0.0`）；而 Python `json.load` 把 token `-0` 解析成 **int `0`**，负号在**入参传输层**就已丢失——脚本拿到的根本不是 `-0.0`，再怎么修 `sim_rules.py` 也无从恢复。PC 侧 `--fixture` 之所以绿，是因为 fixture 文件里的 `-0.0` 是 `gen_sim_rules_inputs.py`（Python `json.dumps`）写的，保住了 `.0`，从未过 Swift 的序列化器。
+- **修复（改传输，不改逻辑、不改 fixture）**：`KlinePythonBridge.assemblePyRun` 的读入由 `_kjson.load(_f)` 改为
+  ```python
+  _kjson.load(_f, parse_int=lambda s: -0.0 if s == "-0" else int(s))
+  ```
+  **依据**：JSON 的 `-0` 只可能来自 `Double(-0.0)`（Swift 的 `Int 0` 恒序列化为 `0`，不存在「负零整数」），故把该 token 精确还原为 `-0.0` 是**无损且唯一**的解释；其余整数解析不变（`parse_int` 仅对整数字面量生效）。影响面：所有脚本的入参，但仅此一个 token。
+- **旁证**：`signed_neg_zero`（期望 `+0.00`）与 `amount0_neg_zero` 在修复前**表现不一致**（前者恰因 `signed` 用显式 `v < 0` 判定、int `0` 不 `< 0` 而碰巧为 `+0.00`；后者同因丢失符号而错）——正是这条「一个大语料/一组边界才能同时暴露两个方向」的旧经验（§11.9 发现 3）在**传输层**的翻版。
+- **未覆盖面的诚实登记**：A0 内置用例（`verify_sim_rules.py`，PC）只走 Python 内部数值，**永远覆盖不到传输层**；负零/整值 Double 的「Swift 序列化 → Python 解析」一致性**只能由 A3 的引擎内套件守**。这是 A3 存在的另一层价值（不只是「换个进程跑同一批用例」）。
+
+**时区：A3 套件不依赖宿主时区（与 `SimRulesContractTests` 不同）**：`sim_rules.py` 的时间相关 op **一律吃入参 `tzOffsetSeconds`**（fixture 已逐条注入），不经本机时区；唯一取「真实 now」的是 `cond_evaluate` 的 `.time` 分支，用例用 2000/2099 远日期（对 now 不敏感）。故 `PyBridgeSimRulesTests` **不需要** `+08:00` 守卫——那条守卫是给「Swift 侧 dump」用的（`SimFormat.date*` 走 `DateFormatter` + 本机时区）。
+
+**版本差异（诚实登记）**：内嵌引擎为 **CPython 3.14.7**（beeware 3.14-b11），PC 侧对拍用 **3.13.1**。本套件全部 op 仅标准库（`json`/`math`/`datetime`/`decimal`），252 例实测两版本行为一致；若未来出现版本敏感的 `decimal`/`datetime` 行为差异，**以引擎版本为准**（fixture 是引擎前面那堵墙，不是 PC 前面那堵）。
+
+**下一步：A4 差分双跑**——引入 `SimRulesBridge.mode`（`.swift` / `.engine`）让同用例集在两侧各跑一遍、逐字段比较（入口开关见 §11.8；此时 Swift 实现仍在，故能真正「同用例双跑」而非「各自对 fixture」）。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
@@ -1371,7 +1409,7 @@ cd 仓库根 && xcodebuild test -scheme Kline -project Kline.xcodeproj \
 ### 12.4 差分与评审流程
 
 1. **A1**（已完成）跑 dump → `git diff` fixture：**逐条人工评审 `expected` 是否符合语义**（把现状固化成基准，必须有人看）；同时跑 `python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json`（Python↔golden 逐位）；
-2. **A2/A3** 跑 `SimRulesContractTests` + `PyBridgeSimRulesTests`：任一差异 → 修 Python（不修 fixture）；
+2. **A2/A3** 跑 `SimRulesContractTests` + `PyBridgeSimRulesTests`：任一差异 → 修 Python（不修 fixture）。**A2/A3 已完成（2026-10-17）**：PC 侧 191/54/7 零差异、引擎内 252/252 全绿（见 §11.13）；A3 抓到并修复「负零在传输层丢失」一例（改桥接 `parse_int`，非改逻辑）。
 3. **A4** 差分双跑：`SimRulesBridge.mode` 切 `.swift` 与 `.engine` 各跑一遍全部用例，逐字段比较；
 4. **A6** fixture **冻结**并加文件头注释「此文件为口径基准，改动必须走 PR 评审」。
 

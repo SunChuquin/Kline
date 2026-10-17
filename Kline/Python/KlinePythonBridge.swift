@@ -342,7 +342,11 @@ final class KlinePythonBridge {
                     _kc = compile(_f.read(), __kline_script__, "exec")
                 _kcode_cache[_kk] = _kc
             with open(__kline_in__, "r", encoding="utf-8") as _f:
-                _kinput = _kjson.load(_f)
+                # 负零保真：Foundation JSONSerialization 把 Double(-0.0) 写成 `-0`，
+                # Python json 默认把它解析成 int 0（负号丢失）→ 引擎看到的不是 -0.0。
+                # `-0` 只可能来自 Double(-0.0)（Swift 的 Int 0 恒写 `0`），故精确还原为 -0.0。
+                # 影响面：所有脚本的入参（仅这一个 token），其余整数解析不变。
+                _kinput = _kjson.load(_f, parse_int=lambda s: -0.0 if s == "-0" else int(s))
             # 零拷贝序列重建：地址 + 根数 → ctypes c_double 数组视图（无拷贝，进程内同地址空间）。
             # 数组由 Swift 侧调用闭包持有，本段执行期间地址恒有效；空序列落到空 list。
             _kptrs = _kinput.pop("__series_ptr__", None)
