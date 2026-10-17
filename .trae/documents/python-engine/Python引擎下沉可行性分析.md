@@ -1995,6 +1995,47 @@ done
 
 ---
 
+### 11.28 条件单空仓建仓修复 + 冒烟 XCUITest 落地（2026-10-18）
+
+**用户反馈两条，均成立**：① 验收清单不该全靠人工点，应交 UI 自动化；② 「新建条件单必须先持仓」不合理，空仓也应能建仓。
+
+**② 的成因（不是 A5-4/A5-5 引入）**
+
+| 层 | 现状 |
+| --- | --- |
+| 校验层 | **本就允许买入无持仓**——`SimCondRule.validateCreate` / 引擎 `cond_validate_create` 只对 `.sell` 方向要求 `sellableQty > 0`（`noPosition`） |
+| UI 入口 | `SimCondListView.startCreate` 只从 `candidatePositions`（`qty > 0`）取标的，空仓直接 toast 拒绝 → **限制纯在 UI 入口** |
+| 既有替代路径 | 自选 / 快捷面板「买入」→ 票面「条件单」按钮（`TradeTicketView.toCond`）——一直可对任意标的建单 |
+
+**修复（按「加搜索入口」口径）**
+
+- 新增 `Kline/Simulation/SimSymbolPickerView.swift`：全量标的搜索（`DatabaseManager.searchMetaAsync`）+ 空关键字浏览前 50 条（`metaList`）+ 搜索序号丢弃过期回调。
+- `SimCondListView`：「选择标的」弹窗增「搜索全部标的…」→ `.symbolSearch` 呈现态（走既有单一 `presentation`，与 `.editor` 同一宿主）；`startCreate` 改为只要求存在可用账户（`concreteAccountID`）。
+- **搜索选中标的默认买入方向**（`initialDirection: .buy`）——编辑器默认是 `.sell`，空仓会在 `noPosition` 被拦，这个默认必须改。
+
+**① 的落地：冒烟 XCUITest（`KlineUITests` target 本已存在，此前未用于业务验收）**
+
+新增 `KlineUITests/CondOrderSmokeUITests.swift`，4 例全绿（跑在可见模拟器上，共约 73s）：
+
+| 用例 | 覆盖 |
+| --- | --- |
+| `test01_SearchAnySymbol_ReachesEditor` | 模拟页 → 条件单 → 新建 → 搜索全部标的 → 选标的 → 编辑器且保存可点（**锁死空仓建仓入口不被回退**） |
+| `test02_TrainingSetup_Reachable` | 首页 → 训练快捷入口 → 训练设置窗「开始训练」 |
+| `test03_StrategyEditor_Reachable` | 模拟页 → 策略公式入口 → 公式中心新建 → 策略编辑器（保存/取消齐备） |
+| `test04_SimTicket_Reachable` | 模拟页 → 底部「买入」→ 下单票面（数量/提交齐备） |
+
+新增 identifier：`condList.new` / `condList.newEmpty` / `condList.symbolSearch` / `simSymbolPicker.{search,row.*,close}` / `trainingSetup.{start,cancel}` / `strategyEditor.{save,cancel}` / `formulaCenter.new`。
+
+**写 XCUITest 的三条通用教训（本项目适用）**
+
+1. SwiftUI 会把 `accessibilityIdentifier` 传播到内层 label → 同一按钮匹配到 **2 个**元素，查询一律用 `matching(identifier:).firstMatch`。
+2. **屏外元素调用 `isHittable` 会抛错**（`Activation point invalid and no suggested hit points based on element frame`），不能用它做「是否在屏」判断；须用 `frame` 判断可视区 + `coordinate(withNormalizedOffset:).tap()` 点击。
+3. 首页快捷入口在**横滑行**内（8 项合计宽 > 一屏），默认在屏外 → 需先取该 chip 的最近祖先 `ScrollView` 横滑带入可视区。
+
+**仍待补**：预警创建路径用例（自选长按 → `rowMenu.toggleAlert` → 弹窗应用）；「引擎不可用」橙色 banner（时序性，需加 launch 参数强制「引擎未就绪」才能稳定复现）。
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture

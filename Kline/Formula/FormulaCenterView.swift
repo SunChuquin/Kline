@@ -151,6 +151,7 @@ struct FormulaCenterView: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(Color.gray.opacity(0.12)).cornerRadius(8)
             }
+            .accessibilityIdentifier("formulaCenter.new")
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)

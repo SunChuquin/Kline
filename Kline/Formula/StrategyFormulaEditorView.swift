@@ -377,6 +377,7 @@ struct StrategyFormulaEditorView: View {
                 .foregroundColor(.gray)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
+                .accessibilityIdentifier("strategyEditor.cancel")
 
             Spacer(minLength: 4)
 
@@ -394,6 +395,7 @@ struct StrategyFormulaEditorView: View {
                 .cornerRadius(6)
                 .frame(minHeight: 44)
                 .disabled(!canSave)
+                .accessibilityIdentifier("strategyEditor.save")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

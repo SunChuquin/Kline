@@ -416,6 +416,7 @@ struct TrainingSetupSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("trainingSetup.cancel")
 
             Button { Task { await startTraining() } } label: {
                 Text("开始训练")
@@ -428,6 +429,7 @@ struct TrainingSetupSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(!canStart)
+            .accessibilityIdentifier("trainingSetup.start")
         }
         .padding(16)
     }
