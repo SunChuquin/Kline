@@ -128,6 +128,7 @@ final class KlinePythonBridge {
                     SimRulesTrust.shared.refresh()
                     SimRulesProjection.shared.requestAll()
                     SimTradeRulesProjection.shared.reset()
+                    StrategyProjection.shared.reset()
                     completion(.success(()))
                 }
                 return
@@ -144,6 +145,7 @@ final class KlinePythonBridge {
                             SimRulesTrust.shared.refresh()
                             SimRulesProjection.shared.requestAll()
                             SimTradeRulesProjection.shared.reset()
+                            StrategyProjection.shared.reset()
                             completion(.success(()))
                         }
                     case .failure(let e):

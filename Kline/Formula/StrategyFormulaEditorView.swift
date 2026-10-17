@@ -69,6 +69,9 @@ struct StrategyFormulaEditorView: View {
     @ObservedObject private var library = FormulaLibraryStore.shared
     /// 模拟交易总仓库（只读 accounts，列出可绑定账户；本页不写入任何模拟数据）
     @ObservedObject private var sim = SimStore.shared
+    /// 策略投影层（E-4）：规则目录 / 行文本 / 解析 / 校验 / 预览的引擎值缓存；
+    /// `.swift` 模式直通现状（零行为变化）。缓存更新经 `@Published` 触发重绘。
+    @ObservedObject private var projection = StrategyProjection.shared
 
     @State private var name: String
     /// 选股条件来源（内嵌 / 引用），切换只改显示，不清数据
@@ -93,6 +96,9 @@ struct StrategyFormulaEditorView: View {
     @State private var rows: [RuleRow]
     /// 初始 RULES 文本的解析报错（在规则区上方就地红字提示，仍允许继续编辑）
     @State private var parseErrors: [String]
+    /// `.engine` 模式下「上一次全部行都已就绪」的完整 RULES 文本：任一行未就绪时 `rulesText`
+    /// 回退用它，**绝不**用占位符拼文本（否则会写坏 doc / 落盘文件，不可逆）。
+    @State private var lastReadyRulesText: String
     /// 测试选股公式的结果文案
     @State private var testMessage: String?
     @State private var testIsError = false
@@ -121,6 +127,11 @@ struct StrategyFormulaEditorView: View {
         let parsed = StrategyRuleParser.parse(lines: initialDoc.rules)
         _rows = State(initialValue: parsed.rules.map { RuleRow(kind: $0.kind, params: $0.params) })
         _parseErrors = State(initialValue: parsed.errors)
+        // `.engine` 未就绪时的回退文本：init 时按 Swift 现状序列化一次（与 `.swift` 模式逐字一致），
+        // 保证 doc.rules 始终是完整、可解析的文本（见 `rulesText` 注释）。
+        _lastReadyRulesText = State(initialValue: parsed.rules
+            .map { StrategyRuleParser.line(for: $0) }
+            .joined(separator: "\n"))
         // 交易指令回显：数量优先（QTY 与 AMOUNT 互斥），未配置时两侧都空
         _trade = State(initialValue: initialDoc.trade)
         _sizeMode = State(initialValue: initialDoc.trade.qty != nil ? .qty
@@ -146,12 +157,80 @@ struct StrategyFormulaEditorView: View {
     }
 
     /// 规则行 → RULES 文本（逐行按 specs 顺序拼 KEY=VAL，行间换行）
+    ///
+    /// `.swift` 模式：与现状逐字一致（走 `StrategyRuleParser.line`）。
+    /// `.engine` 模式：走投影 `ruleLine`。⚠️ **若任一行未就绪，绝不把占位符拼进文本**——
+    /// 占位文本一旦进入 doc 就会被 `save()` 写库、且不可逆。故此时回退返回
+    /// `lastReadyRulesText`（上一次「全部行都已就绪」的完整文本），保证 doc.rules 始终完整
+    /// 且可解析；待全部行就绪后由 `.onChange(of: engineReadyRulesText)` 刷新它，
+    /// 并连带改写 docSignature → 触发校验 / 预览重算。
     private var rulesText: String {
+        if SimRulesBridge.mode == .swift { return swiftRulesText }
+        return engineReadyRulesText ?? lastReadyRulesText
+    }
+
+    /// `.swift` 模式的现状序列化（零行为变化）
+    private var swiftRulesText: String {
         rows.map { row in
             StrategyRuleParser.line(for: StrategyRuleCall(kind: row.kind, params: row.params, raw: ""))
         }
         .joined(separator: "\n")
     }
+
+    /// `.engine` 模式下「全部行都已就绪」的完整 RULES 文本；任一行未就绪 → `nil`。
+    private var engineReadyRulesText: String? {
+        var lines: [String] = []
+        lines.reserveCapacity(rows.count)
+        for row in rows {
+            guard let line = projection.ruleLine(kind: row.kind, params: row.params) else { return nil }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 规则行指纹（`kind` + 键排序参数 + 行序）：用作 `onChange(of:)` 的值。
+    /// ⚠️ 不用 `[RuleRow]`（含 UUID，每次重建都不等，会击穿 onChange，见 §11.24 `draftSignature` 教训）。
+    private var rowsSignature: String {
+        rows.map { row in
+            let params = row.params.sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+            return "\(row.kind.rawValue){\(params)}"
+        }.joined(separator: ";")
+    }
+
+    /// 文档指纹：用作 `onChange(of:)` 的值（**绝不**放 `Date()` / 新建 `UUID()`）。
+    private var docSignature: String {
+        let t = doc.trade
+        return [
+            doc.name, doc.pickBody, doc.pickRef ?? "", doc.rules,
+            t.direction?.rawValue ?? "",
+            t.qty.map(String.init) ?? "",
+            t.amount.map { String($0) } ?? "",
+            t.priceType?.rawValue ?? "",
+            t.offsetTicks.map(String.init) ?? "",
+            t.validity?.rawValue ?? "",
+            t.expiresAt.map(SimRulesCodec.isoString) ?? "",
+            t.accountIDs.map { $0.uuidString }.joined(separator: ","),
+            referencedPickerName ?? "",
+            pickerExists ? "1" : "0",
+            pickSyntaxError ?? ""
+        ].joined(separator: "|")
+    }
+
+    /// 当前规则行对应的 `StrategyRuleCall`（供投影 requestRules 批量请求）
+    private var currentCalls: [StrategyRuleCall] {
+        rows.map { StrategyRuleCall(kind: $0.kind, params: $0.params, raw: "") }
+    }
+
+    /// 引擎投影入队（首帧与引擎就绪重置后都走这里；`.swift` 模式下各 request* 内部直接 return）
+    private func enqueueProjectionRequests() {
+        projection.requestCatalog()
+        projection.requestRules(currentCalls)
+        projection.requestParse(rules: rulesText)
+        projection.requestValidate(doc: doc, pickerExists: pickerExists, pickSyntaxError: pickSyntaxError)
+        projection.requestPreview(doc: doc, pickerName: referencedPickerName)
+    }
+
 
     /// 引用模式下选中的选股公式名（预览用）
     private var referencedPickerName: String? {
@@ -196,25 +275,31 @@ struct StrategyFormulaEditorView: View {
         }
     }
 
-    /// 校验结论（每次字段变化即时重算）：名称 + 静态校验，静态校验不做任何求值 / 下单
-    private var issues: [String] {
+    /// 校验结论（每次字段变化即时重算）：名称 + 静态校验，静态校验不做任何求值 / 下单。
+    /// 返回 `nil` = 引擎校验结果未就绪（视图显示占位，**绝不**视为「已通过」）。
+    private var issues: [String]? {
         var list: [String] = []
         if name.trimmingCharacters(in: .whitespaces).isEmpty {
             list.append("请填写策略名称")
         }
-        list.append(contentsOf: StrategyValidator.validate(doc: doc,
-                                                           pickerExists: pickerExists,
-                                                           pickSyntaxError: pickSyntaxError))
+        guard let engineIssues = projection.issues(doc: doc,
+                                                    pickerExists: pickerExists,
+                                                    pickSyntaxError: pickSyntaxError) else {
+            return nil
+        }
+        list.append(contentsOf: engineIssues)
         return list
     }
 
     // MARK: - 页面
 
     var body: some View {
-        // 校验结论每帧只算一次（内嵌选股公式需要试算，避免同一帧里重复求值）
+        // 校验结论每帧只算一次（内嵌选股公式需要试算，避免同一帧里重复求值）。
+        // nil = 引擎校验结果未就绪 → 不可保存（按「计算中」处理，不放行）。
         let issues = self.issues
+        let canSave = (issues?.isEmpty == true)
         return VStack(spacing: 0) {
-            header(canSave: issues.isEmpty)
+            header(canSave: canSave)
 
             Divider()
 
@@ -236,12 +321,12 @@ struct StrategyFormulaEditorView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
-                            .background(issues.isEmpty ? Color.blue : Color.gray)
+                            .background(canSave ? Color.blue : Color.gray)
                             .cornerRadius(10)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!issues.isEmpty)
+                    .disabled(!canSave)
 
                     Color.clear.frame(height: 8)
                 }
@@ -256,6 +341,32 @@ struct StrategyFormulaEditorView: View {
         .onAppear { schedulePickSyntaxCheck() }
         .onChange(of: mode) { _ in schedulePickSyntaxCheck() }
         .onChange(of: pickBody) { _ in schedulePickSyntaxCheck() }
+        // 启动补算 + 首帧入队（onChange 不在首帧触发，这里补一次）
+        .task {
+            // `.engine` 模式下引擎可能已就绪：用引擎解析覆盖 init 的 Swift 占位解析。
+            // 启动即跑、用户尚未编辑，覆盖安全；`.swift` 模式不跑（保持逐字现状）。
+            if SimRulesBridge.mode == .engine,
+               let parsed = try? await SimRulesBridge.strategyParse(lines: initialDoc.rules) {
+                rows = parsed.rules.map { RuleRow(kind: $0.kind, params: $0.params) }
+                parseErrors = parsed.errors
+            }
+            enqueueProjectionRequests()
+        }
+        // 全部行就绪的完整文本回填（`.engine` 未就绪期 rulesText 回退它，见 `rulesText`）
+        .onChange(of: engineReadyRulesText) { text in
+            if let text { lastReadyRulesText = text }
+        }
+        // 规则行变化 → 批量请求 ruleLine + override
+        .onChange(of: rowsSignature) { _ in projection.requestRules(currentCalls) }
+        // 文档变化 → 请求 解析 / 校验 / 预览
+        .onChange(of: docSignature) { _ in
+            projection.requestParse(rules: rulesText)
+            projection.requestValidate(doc: doc, pickerExists: pickerExists,
+                                       pickSyntaxError: pickSyntaxError)
+            projection.requestPreview(doc: doc, pickerName: referencedPickerName)
+        }
+        // 引擎就绪（reset）→ 清空失效键后重新入队
+        .onChange(of: projection.resetToken) { _ in enqueueProjectionRequests() }
     }
 
     /// 页头：取消 / 标题 / 保存（字号沿用 IndicatorEditSheet 的页头令牌）
@@ -822,12 +933,12 @@ struct StrategyFormulaEditorView: View {
     /// 一条规则行：左侧类型下拉 + 条件单中文名，右侧按 specs 动态渲染的参数，末尾删除
     private func ruleRow(_ row: Binding<RuleRow>) -> some View {
         let kind = row.wrappedValue.kind
-        let specs = StrategyRuleCatalog.specs(for: kind)
+        // 参数规格走投影（`.swift` 直通 StrategyRuleCatalog；`.engine` 未就绪 → 空数组）
+        let specs = projection.specs(for: kind)
         let rowID = row.wrappedValue.id
-        // 规则行内的指令覆盖（ORD* 保留键）；只读展示，绝不改动 params，保证编辑其它参数时不丢
-        let directiveOverride = StrategyTradeParser.override(in: StrategyRuleCall(kind: kind,
-                                                                                 params: row.wrappedValue.params,
-                                                                                 raw: ""))
+        // 规则行内的指令覆盖（ORD* 保留键）；只读展示，绝不改动 params，保证编辑其它参数时不丢。
+        // `.engine` 未就绪 → nil（不显示指令提示行）。
+        let directiveOverride = projection.overrideSummary(kind: kind, params: row.wrappedValue.params)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -837,7 +948,8 @@ struct StrategyFormulaEditorView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.gray)
                     // 该规则自带的指令覆盖（优先于交易指令区块）
-                    if !directiveOverride.isEmpty, let summary = directiveOverride.summary {
+                    if let directiveOverride, !directiveOverride.isEmpty,
+                       let summary = directiveOverride.summary {
                         Text("指令：\(summary)")
                             .font(.system(size: 11))
                             .foregroundColor(.gray)
@@ -857,8 +969,16 @@ struct StrategyFormulaEditorView: View {
                 .buttonStyle(.plain)
             }
 
-            ForEach(specs, id: \.key) { spec in
-                paramControl(row: row, spec: spec)
+            if specs.isEmpty {
+                // `.engine` 目录未就绪：给显式占位，**不渲染空 specs**（以免用户误以为该规则无参数）
+                Text(StrategyProjection.placeholderText + " 参数加载中")
+                    .font(.system(size: 11))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(specs, id: \.key) { spec in
+                    paramControl(row: row, spec: spec)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -964,16 +1084,19 @@ struct StrategyFormulaEditorView: View {
     // MARK: - 预览卡
 
     private var previewCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(StrategyPreview.tradeSummary(doc: doc))
+        // 预览文案走投影（`.swift` 直通 StrategyPreview.*；`.engine` 未就绪 → nil → 占位）
+        let preview = projection.preview(doc: doc, pickerName: referencedPickerName)
+        let placeholder = StrategyProjection.placeholderText
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(preview?.trade ?? placeholder)
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(StrategyPreview.summary(doc: doc, pickerName: referencedPickerName))
+            Text(preview?.summary ?? placeholder)
                 .font(.system(size: 13))
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(StrategyPreview.executionNotice)
+            Text(preview?.executionNotice ?? placeholder)
                 .font(.system(size: 11))
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
@@ -987,23 +1110,31 @@ struct StrategyFormulaEditorView: View {
     // MARK: - 校验红字（就地展示，不弹 alert）
 
     @ViewBuilder
-    private func validationSection(_ list: [String]) -> some View {
-        if !list.isEmpty || saveError != nil {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(list.enumerated()), id: \.offset) { _, e in
-                    Text("✗ \(e)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+    private func validationSection(_ list: [String]?) -> some View {
+        if let list {
+            if !list.isEmpty || saveError != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(list.enumerated()), id: \.offset) { _, e in
+                        Text("✗ \(e)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let saveError {
+                        Text("✗ \(saveError)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                if let saveError {
-                    Text("✗ \(saveError)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            // 引擎校验结果未就绪（`.engine` 冷缓存）：显示占位，**绝不**显示「已通过」
+            Text("\(StrategyProjection.placeholderText) 校验中")
+                .font(.system(size: 12))
+                .foregroundColor(.gray)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1053,7 +1184,8 @@ struct StrategyFormulaEditorView: View {
 
     /// 保存的第二段（issues 已含最新语义校验结果）
     private func finishSave() {
-        guard issues.isEmpty else { return }
+        // issues 为 nil = 引擎校验结果未就绪 → 不放行（与保存按钮的 disabled 一致）
+        guard (issues?.isEmpty == true) else { return }
         guard let saved = library.save(doc) else {
             saveError = "保存失败，请检查公式内容"
             return

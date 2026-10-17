@@ -1877,7 +1877,7 @@ done
 | --- | --- | --- | --- |
 | E-2 | `.tdx` 文件边界的 TRADE 段：`FormulaKind.parse` / `serialize` 拆出 async 变体（结构切分仍留 GUI 侧） | 单次 `await`（文件加载 / 保存各一次） | ⬜ 待实施（**降级口径需先拍板**：引擎不可用时策略库「整体不可用」还是「仅 TRADE 段降级」） |
 | E-3 | `StrategyDetailView` 4 处（`pickSummary` / `tradeSummary` / 规则卡 `parse` + `triggerText`） | 页面级 `.task {}` + `@State`（只读展示，无防抖必要） | ✅ **已交付** |
-| E-4 | `StrategyFormulaEditorView` 9 处（init `parse` / 每行 `line` / 每帧 `validate` / 每行 `specs` / 每行 `override` / 预览卡 3 处） | **防抖 + 投影**（闸门 6）：新建 `StrategyProjection`（同 A5-3 / §11.23 形态，`.swift` 直通） | ⬜ 待实施 |
+| E-4 | `StrategyFormulaEditorView` 9 处（init `parse` / 每行 `line` / 每帧 `validate` / 每行 `specs` / 每行 `override` / 预览卡 3 处） | **防抖 + 投影**（闸门 6）：新建 `StrategyProjection`（同 A5-3 / §11.23 形态，`.swift` 直通） | ✅ **已交付** |
 
 **第二步（E-3）细节**：`StrategyDetailView` 的选股摘要 / 交易摘要 / 规则清单改为引擎取值。
 
@@ -1886,6 +1886,28 @@ done
 - 降级：引擎不可用 / 出参形状非法 → `engineUnavailable` → 显示 **`—`** 占位（取数中显示 `…`），**不静默用 Swift 兜底**。A5-5 补「引擎不可用」正式空态时一并收敛这两种占位。
 - 未下沉（E-2 范围）：`library.save` 写盘时的 TRADE 段序列化仍走 Swift（`.swift` 模式无差异；`.engine` 模式下见 E-2 待办）。
 - **实测**：`BUILD SUCCEEDED`；`KlineTests` 全量 **82/82 全绿 0 skip**。本步未改 `sim_rules.py`。
+
+**第三步（E-4）细节**：新建 `Kline/Python/StrategyProjection.swift` + `StrategyFormulaEditorView` 9 处接线。
+
+| 面 | 设计 |
+| --- | --- |
+| 缓存与键 | 目录（无键，静态永久）；`ruleLine` / `override` 键 = `kind.rawValue` + 键排序的 params；`parse` 键 = `lines` 原文；`validate` / `preview` 键 = `formulaDocJSON` 稳定串 + 附加参数（tz 由门面内注入，不入键） |
+| 取值 | 全部同步 getter；`.swift` 直通现状实现；`.engine` 未命中 → `nil` / 空数组（视图给 `placeholderText`）。**getter 无副作用**（不在 `body` 里入队，避免 "Publishing changes from within view updates"） |
+| 入队 | 视图 `.task` 首帧 + `.onChange(of: rowsSignature)` / `.onChange(of: docSignature)` / `.onChange(of: projection.resetToken)`；投影按「同键同内容」去重 + 50ms 防抖合并 |
+| 指纹 | `rowsSignature` / `docSignature` 均为 `String` 指纹（键排序参数 / doc 各字段 + `isoString(expiresAt)`），**不含 `Date()` / 新建 `UUID()`**（§11.24 `draftSignature` 教训） |
+| ⚠️ `rulesText` 防写坏 | `.engine` 模式下**任一行未就绪就整段回退** `lastReadyRulesText`（上一次「全部行就绪」的完整文本，init 时按 Swift 现状序列化一次作初值）——**绝不把 `…` 占位符拼进 doc**（否则会被 `save()` 落盘且不可逆）。全部行就绪后由 `.onChange(of: engineReadyRulesText)` 回填并连带触发校验 / 预览重算 |
+| 校验未就绪 | `issues` 返回 `[String]?`：`nil` → 校验区显示「`… 校验中`」、**保存按钮 disabled**（fail-closed，绝不按「已通过」放行） |
+| 目录未就绪 | 规则行 `specs` 为空 → 渲染「`… 参数加载中`」占位行，**不渲染空 specs**（以免用户误以为该规则无参数）；`override` 未就绪 → 不显示指令提示行 |
+| 启动补算 | `.engine` 且引擎已就绪 → `.task` 用 `strategyParse` 覆盖 init 的 Swift 占位解析（启动即跑、用户未编辑，安全）；`.swift` 模式不跑 |
+| 接线点 | `KlinePythonBridge.ensureReady` 两条成功路径各加 `StrategyProjection.shared.reset()`（与既有两个投影同处） |
+
+**测试（E-4）**：新增 `KlineTests/StrategyProjectionTests.swift`（5 用例）：① `.swift` 直通且**缓存全空、零请求**；② `.engine` 冷缓存给 `nil` / 空（显式空态），冲防抖后得引擎值；③ `.engine` 与 Swift 现状在 fixture 全量入参（catalog 8 类 / ruleLine / validate / preview）逐字段相等；④ 同内容重复请求被去重。**实测 `KlineTests` 全量 87/87 全绿 0 skip**（本步 +5）。
+
+**已知取舍（E-4 诚实登记）**
+
+1. **`.engine` 模式下「刚编辑完就立刻保存」的窗口**：`rows` 改了但该行 `ruleLine` 还没回时，`rulesText` 回退用 `lastReadyRulesText`（旧文本）→ 此时 `save()` 会把**旧 RULES 文本**写盘。`.swift` 模式无此问题（同步序列化）。**A5-5 前（`.engine` 非默认）不暴露**；修法在 E-2：`save()` 改为 `await strategyRuleLine`/`tradeSerialize` 取确定值后再写盘（同 A5-4「动作路径用 async 门面」口径）。
+2. `.task` 启动补算会丢弃 init 时生成的 `RuleRow.id`（仅内部标识，无外部引用，无影响）。
+3. 目录 / 校验 / 预览的首帧在 `.engine` 模式为占位（`.swift` 模式无感知）；A5-5 需把这些占位收敛为统一的「引擎不可用」空态。
 
 ---
 
