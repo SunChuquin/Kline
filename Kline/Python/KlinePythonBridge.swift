@@ -124,7 +124,10 @@ final class KlinePythonBridge {
             let t0 = CFAbsoluteTimeGetCurrent()
             if PythonEngineHost.shared.isLoaded {
                 DebugLogger.shared.log("[PyBridge] ensureReady：引擎已加载")
-                DispatchQueue.main.async { completion(.success(())) }
+                DispatchQueue.main.async {
+                    SimRulesTrust.shared.refresh()
+                    completion(.success(()))
+                }
                 return
             }
             switch PythonEngineHost.shared.status() {
@@ -135,7 +138,10 @@ final class KlinePythonBridge {
                     switch r {
                     case .success:
                         DebugLogger.shared.log(String(format: "[PyBridge] ensureReady：加载成功（%.0fms）", ms))
-                        completion(.success(()))
+                        DispatchQueue.main.async {
+                            SimRulesTrust.shared.refresh()
+                            completion(.success(()))
+                        }
                     case .failure(let e):
                         // 竞态兜底：另一路并发已把引擎加载完成，loadEngine 的「已加载」失败视为成功
                         if e.contains("引擎已加载") {

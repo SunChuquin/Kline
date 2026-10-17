@@ -46,6 +46,14 @@ _LIMIT_PCT = 0.10               # 涨跌停 ±10%
 _PRICE_TICK = 0.01              # 最小报价档位
 
 
+# --- 信任链版本声明（《Python引擎下沉可行性分析.md》§10.9 套件 8） --------------
+# ⚠️ 与 Swift 侧 Kline/Python/SimRulesTrust.swift 的常量配对；两者任一改动都必须
+#    同步——`scripts/gen_sim_rules_trust.py` 负责重新生成（同时更新 Swift 常量与
+#    fixture），KlineTests/SimRulesTrustTests 与 `verify_sim_rules.py --trust` 会拦下不一致。
+SIM_RULES_SCRIPT_VERSION = 1        # 本脚本契约版本（op 形状 / 语义变更时 +1）
+SIM_RULES_REQUIRED_API_VERSION = 1  # 本脚本要求配对的引擎 apiVersion（manifest.apiVersion）
+
+
 def _err(msg):
     return {"ok": False, "error": msg}
 

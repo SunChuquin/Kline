@@ -46,6 +46,10 @@ struct KlineApp: App {
         // 【首帧引擎实验】R1 启动后台预热：引擎加载 + tdx_eval 空转 text 调用（编译/AST 缓存
         // 一次性成本全部移出用户链路，首个真实求值直接进入稳态）；预热必须后台异步，绝不阻塞启动主线程
         KlinePythonBridge.shared.warmUp()
+
+        // 阶段 A5-1：交易域信任链（套件 8）——启动即校验脚本哈希 / 版本锁，
+        // 供 §9.10 降级矩阵判定交易可用性（过渡期 mode=.swift 时该闸门不生效）。
+        SimRulesTrust.shared.refresh()
     }
 
     var body: some Scene {

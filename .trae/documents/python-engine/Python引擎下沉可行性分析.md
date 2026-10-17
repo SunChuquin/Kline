@@ -1009,6 +1009,8 @@ golden: `strategy_dsl.json`（**手写规格**）。
 | 降级矩阵 | 引擎缺失/不可用 → 按 §9.10：交易 / 回测 / 条件单 / 预警**整体不可用**，引导与设置可用 |
 | 输入只读 | 引擎只接受 `sim.json` + 快照入参，**不接受任何「直接下委托」指令**（下委托仍须走完整校验链） |
 
+> **落地进度**：本套件已实现，见 §11.15（2026-10-17）。三处真源一致性（脚本 sha256 / 版本声明）由 `scripts/gen_sim_rules_trust.py` 维护，`KlineTests/SimRulesTrustTests` + `verify_sim_rules.py --trust` 把关。
+
 ### 10.10 通过判据（删 Swift 的闸门）
 
 阶段 A **允许删 Swift 实现**的条件（全部满足）：
@@ -1173,6 +1175,16 @@ rejection     → {"code":"invalidQty", "lot":100,
 | **A4** | 加 `SimRulesBridge` + 差分双跑 | Swift 与引擎在同用例集上逐字段相等 |
 | **A5** | 生产路径切到引擎 + 信任链（哈希 / 版本锁 / §9.10 降级） | 套件 8 全绿 |
 | **A6** | 删 Swift 实现 + fixture 冻结 | §10.10 六条闸门全过 |
+
+**A5 用户拍板（2026-10-17）= ③「一次性全切 + 信任链」**：条件单判定 / 交易规则 / 策略映射 / DSL 解析 / 回测**五个子系统一起切**，主线程同步调用点（`SimCondEngine` / SwiftUI 每帧取文案）改造为异步 + 投影（§10.10 闸门 6）。执行仍按「可交付检查点 = 一次 commit」切分：
+
+| 子步 | 内容 | 状态 |
+| --- | --- | --- |
+| **A5-1** | **信任链（套件 8）**：脚本 sha256 + apiVersion 配对 + 篡改检测 + §9.10 降级闸门 | ✅ 见 §11.15 |
+| **A5-2** | 生产编解码层：生产模型 → op 入参 JSON / 引擎出参 → 生产模型 | 待做 |
+| **A5-3** | 引擎会话 + 投影层（异步 + 防抖 + 缓存，供 GUI 同步读；§10.10 闸门 6） | 待做 |
+| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 待做 |
+| **A5-5** | 默认 `SimRulesBridge.mode` 由 `.swift` 翻成 `.engine`（闸门生效） | 待做 |
 
 ### 11.9 A0 落地进度（2026-10-17）
 
@@ -1370,6 +1382,42 @@ done
    **验证**：完整往返后 `git diff` **为空** → golden 重新生成**字节幂等**，`12.5` 的「CI 漂移检测（改 Swift 语义忘更新 fixture → dump 后 diff 非空）」由此可直接成立。
 
 **下一步：A5**——生产路径切 `.engine` + 信任链（脚本哈希 / 版本锁 / §9.10 降级矩阵），套件 8 全绿；随后 A6 删 Swift 实现 + fixture 冻结。
+
+---
+
+### 11.15 A5-1 信任链落地进度（套件 8，2026-10-17）
+
+**目标**：D2（硬约束复核一并下沉）把红线 4 的缓解压缩为「签名 + 版本锁 + 脚本哈希」→ 本子步即该缓解的 Swift 侧落点 + 验证（§10.9 套件 8）。
+
+**真源与三方一致**：`sim_rules.py` 是**唯一真源**，其 sha256 与两处版本声明被抽到三个消费点，任一漂移即被拦下：
+
+| 位置 | 角色 |
+| --- | --- |
+| `Kline/PyScripts/sim_rules.py` 顶部 `SIM_RULES_SCRIPT_VERSION` / `SIM_RULES_REQUIRED_API_VERSION` | 真源（脚本自我声明契约版本 + 要求配对的引擎 apiVersion） |
+| `Kline/Python/SimRulesTrust.swift` 编译期常量（`expectedScriptSHA256` / `scriptVersion` / `requiredAPIVersion`） | 运行时信任链读它（**自动生成，勿手改**） |
+| `KlineTests/Fixtures/sim_rules_trust.json` | 测试 / CI 读它（**自动生成**） |
+| `scripts/gen_sim_rules_trust.py` | **唯一规范写盘者**：从脚本算哈希 + 解析版本 → 写 Swift 常量 + fixture；`--check` 只校验 |
+
+**Swift 侧（新 `Kline/Python/SimRulesTrust.swift`，`@MainActor ObservableObject`）**：
+
+- `State { unknown, trusted, untrusted(原因) }`；`refresh()` 重算（只读 Bundle 与 manifest，**绝不触发引擎初始化**）。
+- 纯判定 `evaluate(scriptData:engineAPIVersion:)`（**判定顺序**：脚本缺失 → 哈希不匹配 → 版本声明缺失 → 契约版本不配对 → 要求 apiVersion 不配对 → **引擎 manifest 不可读** → **引擎 apiVersion 不配对** → `.trusted`）。哈希用 CryptoKit 流式 `SHA256`。
+- **降级闸门** `isTradingAvailable`（§9.10）：过渡期 `mode == .swift` → 可用（Swift 后端仍在，A6 删实现后失效）；`mode == .engine` → **仅 `trusted` 且引擎就绪才可用，否则交易 / 回测 / 条件单 / 预警整体禁用**（不允许半可用态）。拆出纯函数 `isTradingAvailable(mode:state:engineReady:)` 供测试注入。
+- 接线：`KlinePythonBridge.ensureReady` 两条成功路径（已加载 / 加载成功）→ 主线程 `refresh()`；`KlineApp.init` 启动即 `refresh()`（覆盖「未安装 → untrusted」）。
+
+**验证**：
+
+- `KlineTests/SimRulesTrustTests.swift`（新，10 用例）——①三方一致（fixture↔Swift 常量↔Bundle 脚本哈希↔脚本声明版本）；②真源判定（真脚本 + 真内嵌 manifest.apiVersion → `trusted`，无内嵌引擎则 skip）；③篡改检测（翻一位 → `untrusted`，含「哈希」）；④版本锁（apiVersion=999 / manifest 缺失 → `untrusted`）；⑤降级矩阵（五种 `(mode, state, ready)` 组合）；⑥声明解析（缺声明 → nil）。
+- `python3 scripts/verify_sim_rules.py --trust`（PC 侧）：三方一致（脚本 / Swift 常量 / fixture）。
+- **实测**：信任链 **10/10 全绿 0 skip**；同批较宽回归（`SimRulesContractTests` + `PyBridgeSimRulesTests` + `SimRulesDiffTests` + `SimRulesTrustTests`）**19/19 全绿 0 skip**；`--trust` OK；PC 侧内置 255 + 三份 golden 差分（191/54/7）仍全绿。
+- 当前值：`sha256=3acb46a0…e55a`、`scriptVersion=1`、`requiredApiVersion=1`。
+
+**抓手 / 已知取舍**：
+
+- 脚本的**声明版本**两处守卫在「哈希守卫在前」时**逻辑上不可达**（哈希一致即意味着脚本未被改，声明必与生成时一致）；保留它们是防御性冗余——真正的版本锁在「引擎 manifest.apiVersion ↔ 脚本要求」这一对（跨版本轴，可独立漂移）。
+- 每次改 `sim_rules.py`（**含仅注释**）都会改哈希 → **必须**重跑 `gen_sim_rules_trust.py`；否则 `SimRulesTrustTests` / `--trust` 会红。这是刻意的（哈希是信任链的锚）。
+
+**下一步**：A5-2 生产编解码层（生产模型 ↔ op JSON）。
 
 ---
 

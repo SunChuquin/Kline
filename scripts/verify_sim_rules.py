@@ -15,6 +15,7 @@
 用法:
   python3 scripts/verify_sim_rules.py                    # 跑内置 A0 用例
   python3 scripts/verify_sim_rules.py --fixture FILE     # 跑 fixture 差分
+  python3 scripts/verify_sim_rules.py --trust            # 套件 8 信任链三方一致性
 退出码 0 = 全过；非 0 = 有失败（逐条打印）。
 
 说明:
@@ -1629,7 +1630,50 @@ def _flatten_fixture(fixture):
     return cs
 
 
+def _verify_trust():
+    """套件 8 信任链（PC 侧）：脚本 sha256 / 版本声明 与 fixture + Swift 常量三方一致。"""
+    import hashlib
+    import re as _re
+    raw = open(SCRIPT, "rb").read()
+    text = raw.decode("utf-8")
+    sha = hashlib.sha256(raw).hexdigest()
+    sv = _re.search(r"^SIM_RULES_SCRIPT_VERSION\s*=\s*(\d+)", text, _re.M)
+    av = _re.search(r"^SIM_RULES_REQUIRED_API_VERSION\s*=\s*(\d+)", text, _re.M)
+    if not sv or not av:
+        print("FAIL sim_rules.py 缺版本声明")
+        return 1
+    want = {"script": "sim_rules", "sha256": sha,
+            "scriptVersion": int(sv.group(1)), "requiredApiVersion": int(av.group(1))}
+
+    fix_path = os.path.join(REPO, "KlineTests", "Fixtures", "sim_rules_trust.json")
+    if not os.path.exists(fix_path):
+        print("FAIL fixture 缺失：%s" % fix_path)
+        return 1
+    got = json.load(open(fix_path, encoding="utf-8"))
+    if got != want:
+        print("FAIL fixture 漂移：%s != %s" % (got, want))
+        return 1
+
+    swift_path = os.path.join(REPO, "Kline", "Python", "SimRulesTrust.swift")
+    swift = open(swift_path, encoding="utf-8").read()
+    for name, rx, val in (
+            ("expectedScriptSHA256", r'static let expectedScriptSHA256 = "([0-9a-f]{64})"', sha),
+            ("scriptVersion", r"static let scriptVersion = (\d+)", want["scriptVersion"]),
+            ("requiredAPIVersion", r"static let requiredAPIVersion = (\d+)", want["requiredApiVersion"])):
+        m = _re.search(rx, swift)
+        if not m or m.group(1) != str(val):
+            print("FAIL Swift 常量 %s：磁盘=%r 期望=%r" % (name, m.group(1) if m else None, val))
+            return 1
+
+    print("OK 信任链三方一致：sha256=%s scriptVersion=%d requiredApiVersion=%d"
+          % (sha, want["scriptVersion"], want["requiredApiVersion"]))
+    return 0
+
+
 def main():
+    if "--trust" in sys.argv:
+        return _verify_trust()
+
     if len(sys.argv) >= 3 and sys.argv[1] == "--fixture":
         fixture = json.load(open(sys.argv[2], encoding="utf-8"))
         cs = _flatten_fixture(fixture)
