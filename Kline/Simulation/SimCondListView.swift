@@ -71,6 +71,7 @@ enum SimCondPresentation: Identifiable {
     case editor(SimCondEditorRequest)
     case detail(SimCondOrder)
     case alerts                         // 预警记录页（「仅提醒」触发后写入的记录）
+    case symbolSearch                   // 搜索全部标的（空仓建单入口；买入方向不要求持仓）
 
     var id: String {
         switch self {
@@ -78,6 +79,7 @@ enum SimCondPresentation: Identifiable {
         case .editor(let req):   return "editor-\(req.id.uuidString)"
         case .detail(let order): return "detail-\(order.id.uuidString)"
         case .alerts:            return "alerts"
+        case .symbolSearch:      return "symbolSearch"
         }
     }
 }
@@ -142,6 +144,10 @@ struct SimCondListView: View {
             case .alerts:
                 // 预警记录页：与其它二级页一样挂在本页唯一的 fullScreenCover 上
                 AlertRecordView { presentation = nil }
+            case .symbolSearch:
+                // 搜索全部标的：选中后直接进编辑器（空仓亦可，买入方向不要求持仓）
+                SimSymbolPickerView(onPick: { presentCreate(with: $0) },
+                                    onClose: { presentation = nil })
             }
         }
     }
@@ -159,6 +165,12 @@ struct SimCondListView: View {
     /// 新建条件单的标的来源（优先已有持仓；全部账户汇总时按持仓所属账户建单）
     private var candidatePositions: [SimPosition] {
         store.positions(accountID: accountID).filter { $0.qty > 0 }
+    }
+
+    /// 建单账户：指定账户优先，否则取首个可用模拟账户（「全部账户汇总」时用）
+    private var concreteAccountID: UUID? {
+        if let accountID, accountID != SimStore.allAccountID { return accountID }
+        return store.activeAccounts.first?.id
     }
 
     // MARK: 导航栏
@@ -195,6 +207,7 @@ struct SimCondListView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("condList.new")
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
@@ -282,6 +295,7 @@ struct SimCondListView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("condList.newEmpty")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -419,6 +433,9 @@ struct SimCondListView: View {
             ForEach(candidatePositions) { position in
                 Button("\(position.name) \(position.code)") { presentCreate(with: position) }
             }
+            // 空仓 / 非持仓标的建单：搜索全量标的（买入方向不要求持仓）
+            Button("搜索全部标的…") { presentation = .symbolSearch }
+                .accessibilityIdentifier("condList.symbolSearch")
             Button("取消", role: .cancel) { presentation = nil }
         }
     }
@@ -492,11 +509,10 @@ struct SimCondListView: View {
         presentation = .editor(SimCondEditorRequest(editing: order))
     }
 
-    /// 新建：以持仓为标的来源（全部账户汇总时按持仓所属账户建单）
+    /// 新建：持仓快选 + 搜索全部标的（空仓也能建单——买入方向不要求持仓）
     private func startCreate() {
-        let list = candidatePositions
-        guard !list.isEmpty else {
-            showToast("当前账户无持仓，请先建仓或从持仓页创建条件单")
+        guard concreteAccountID != nil else {
+            showToast("请先创建模拟账户")
             return
         }
         presentation = .listPicker
@@ -507,5 +523,16 @@ struct SimCondListView: View {
                                                     metaID: position.metaID,
                                                     code: position.code,
                                                     name: position.name))
+    }
+
+    /// 搜索选中任意标的（不需持仓）：默认**买入**方向（空仓建仓；卖出方向无持仓本就建不了）
+    private func presentCreate(with meta: MetaItem) {
+        guard let acc = concreteAccountID else {
+            showToast("请先创建模拟账户")
+            return
+        }
+        presentation = .editor(SimCondEditorRequest(accountID: acc, metaID: meta.id,
+                                                    code: meta.code, name: meta.name,
+                                                    initialDirection: .buy))
     }
 }
