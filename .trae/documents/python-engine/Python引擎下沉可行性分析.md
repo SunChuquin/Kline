@@ -224,7 +224,7 @@ flowchart TB
 | 缓解手段 | 作用 |
 | --- | --- |
 | 引擎包**签名 + 版本锁定 + 哈希校验** | 让「设备上跑的是哪一版判决逻辑」重新可回答（对应上一版第 ①④ 条） |
-| **native 硬约束复核闸门**：T+1 / 涨跌停 / 整手 / 可卖数量**仍留在 Swift** | 把风险**压缩到「错但合法」**——脚本判错最多产生一笔不该下的合法委托，无法产生非法委托。这与「原生 `switch` 里有 bug」是**同一风险类** |
+| **native 硬约束复核闸门**：T+1 / 涨跌停 / 整手 / 可卖数量**仍留在 Swift** | 把风险**压缩到「错但合法」**——脚本判错最多产生一笔不该下的合法委托，无法产生非法委托。这与「原生 `switch` 里有 bug」是**同一风险类**。⚠️ **本行已被 §9.7 D2 推翻（2026-10-17）**：硬约束复核亦下沉，Swift 不再保留；红线 4 缓解只剩签名 + 版本锁 + 脚本哈希（验证见 §10.9） |
 | 引擎缺失 / 校验不过 → **禁用条件单**，而非静默降级 | 避免「判决逻辑悄悄变成另一个东西」 |
 
 缓解之后**唯一不缩小的部分**：判决逻辑的更新权限从「必须发新 IPA」变成「推引擎包」。若引擎包与 IPA 走**同一 CI、同一发布通道**（本仓库现在就是 `latest` Release），增量风险很小——你本来就在信任这条通道；若引擎包走独立通道，则必须配签名与版本锁定。
@@ -604,6 +604,26 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
     `sync-live-db.yml` / manifest 分片 / 差分补丁 / 设备侧 `/sync/{merge-bucket,apply-patch,patch-session,probe}` 路由）
     与**东财取数**（`EastmoneyQuoteFetcher.swift`、`quote_parse.py` 的 `em_snapshot`·`secid`、`universe_secids.txt`），
     取数收敛为**单源腾讯 `newfqkline`**；候选 4 随之收窄为「腾讯取数口径」，§1.1 / §1.2 / §3.1 / §3.4 已同步修订。
+11. **目标态评估新增 §9（2026-10-17，用户提出）**：把目标从「挑能搬的搬」上调为 **「Swift 只做 GUI + 调用引擎，前后端分离」**，
+    明确**条件单与预警也应进引擎**。§9 给出：量化基线（渲染层 39.8k / 宿主平台层 ≈5.2k 不可搬 / 领域逻辑 ≈12k 可进引擎）、
+    四条红线（引擎硬依赖 / 每帧路径 / 网络吞吐 / 下单授权）、逐子系统可行性矩阵、桥接「无 push」这一结构性缺口，
+    以及 A（判定成对下沉）→B（状态所有权反转，引擎持有 `sim.json`）→C（拆 `MarketRowCache`/`SimQuoteCenter` 共享枢纽）→D（永不动）的分阶段建议与四个决策点（§9.7）。
+    **结论：领域逻辑层可行且方向正确；平台/宿主层与高频投影结构上搬不走。**
+    **2026-10-17 追加（用户拍板 + 两个技术追问）**：D1 **接受引擎硬依赖**（缺失时按 §9.10 降级矩阵显式空态，阶段 B 不保留 Swift 影子实现）；
+    D2 **硬约束复核一并下沉**（`SimTradingRules` 整体进引擎，Swift 不留交易规则实现 → 红线 4 缓解降为「签名+版本锁+脚本哈希」）；D3 **保持 L0 解释器常驻（= 现状，零改动），L1 为可选增强，不做 L2/L3**；D4 **凡支持 Python 引擎的平台均为潜在目标**（跨平台靠「一套 GUI 文档 + 每平台复刻 GUI」）。
+    追问「桥接能否推」→ 新增 **§9.8**：可以，生产为进程内，推荐 **pipe 变体（零新 libpython 符号）**，但建议只作可选增强、主模型仍「Swift 驱动 / 引擎响应」；
+    追问「共享枢纽怎么拆」→ 新增 **§9.9**：按「计算下沉 / 数据留投影」的 S1–S5 步骤拆 `MarketRowCache`/`SimQuoteCenter`/`DatabaseManager`，判据 = **Swift 侧不再 `import SQLite3`**；
+    决策 D1 配套新增 **§9.10 降级矩阵**（哪些功能缺引擎可用 / 不可用）；
+    D3 认识澄清 → 新增 **§9.11**：解释器**本来已常驻**（L0，零代价）；「引擎主动推送」分 L0–L3，L2（进程内常驻线程）有 GIL / 崩溃 / 耗电 / 后台挂起代价，且**本项目「最新价」= 本地日线收盘、无盘中 tick → 条件单本来只能在数据更新 / App 激活时结算，后台常驻几无收益** → **定 L0 常驻（现状），L1 可选、不做 L2 / L3**；追问「L1 有什么好处」→ 新增 **§9.11.1**（回测进度 / 扫描增量 / 可取消 / 诊断流式四个实例 + 只对长调用有意义的边界）；
+    阶段 A 落地设计 → 新增 **§11 `sim_rules.py` op 契约**（19 个 op + 字段映射 + `SimFormat` 复刻的 half-even 陷阱 + 时区注入 + 返回模型 + `SimRulesBridge` 双跑 + A0–A6 顺序）；
+    fixture 导出 → 新增 **§12**（三 fixture 结构、dump 模式 env 门与生成命令、沙盒兜底、差分评审流程、CI 漂移检测）；
+    新增 **§10 阶段 A 契约测试用例清单**（8 套件：条件单判定 / 建单校验 / 交易规则 / 结算状态机 / 策略→条件单映射 / 回测 / 策略 DSL / 信任链与降级，含 fixture 生产流程与「允许删 Swift」的 6 条闸门）。
+12. **阶段 A 开工，A0 完成（2026-10-17）**：产出 `Kline/PyScripts/sim_rules.py`（骨架 + op 分发 + `_sim_format` + A 组条件单判定/建单校验/文案 + B 组结算纯推进 + C 组交易规则校验/计算；D/E/F 组挂**显式未实现**占位）与 `scripts/verify_sim_rules.py`（内置 172 条用例，`python3 scripts/verify_sim_rules.py` → **172/172 全绿**；A1 后走 `--fixture` 逐位差分）。
+    过程用 **macOS Foundation 原样探针**（25,242 项语料）实证出两处高风险口径并落定，均记入 **§11.9**：
+    ① **`NumberFormatter` 的 half-even 是对「最短往返十进制表示」生效**（`amount(2.675)="2.68"`，而 `Decimal(float(2.675))` 给 `"2.67"`）→ 必须 `Decimal(repr(v))`；
+    ② **`amount`/`price` 保留负零负号**（`amount(-0.0)="-0.00"`），A0 初版的「负零归一」被探针直接证伪；
+    ③ 网格倍数取整须自备「远离零」`_swift_round`（Python 内建 `round` 是 half-even，会静默错一位）；
+    ④ **契约发现**：`SimCondRule.evaluate` 顶部 `guard last > 0` 先于 `switch`，故 `time` 分支的「昨收回退」**实际不可达**，契约按「`last` 缺失 → hold」**锁现状**、不顺手修正。
 
 ### 8.2 待确认事项（下一轮讨论输入）
 
@@ -613,3 +633,756 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 | 2 | **新浪是否接入为第三源？** 前置：先实测新浪是否提供成交额（口径见 §3.4 收编的字段语义） | 影响候选 4 下沉范围是否写成「每源一个模块」的插件式结构 |
 | 3 | **WatchlistSyncManager（552 行，现腾讯单源）是否进一步与 GapBackfill 合并取数层？** | 若合并，§1.1 行数与候选 4 收益面需再更新 |
 | 4 | **主图 B/S/T 成交标记是否仍不存在？**（§3.3 的遗留待确认项） | 若已实现需补进 §1.1 基线表 |
+
+---
+
+## 九、目标态评估：Swift 只做 GUI + 调用引擎（前后端分离）
+
+> 本节回应一条**比 §6 结论更激进的目标**：不是「挑能搬的搬」，而是 **Swift 只保留 GUI 与引擎桥接，其余（含条件单、预警）全部进引擎**，以便跨平台时只重写 GUI。
+> 本节为评估，不含代码改动。结论见 §9.8。
+
+### 9.1 先把目标拆成可判定的形态
+
+「Swift 只做 GUI」在**单进程、离线、嵌入式**的 App 里，不等于 Web 的前后端分离。三处关键差异：
+
+| 维度 | Web 前后端 | 本项目 |
+| --- | --- | --- |
+| 通信 | HTTP / 连接常驻，后端可**主动推送** | 桥接是**文件型 request/response**（input JSON → PyRun → output JSON），**无 push 通道**（§9.5） |
+| 前端状态 | 前端基本无状态，按需拉取 | SwiftUI **每帧同步渲染**，必须有本地数据（K 线数组 / 行情表行 / 指标线） |
+| 部署 | 后端可独立升级 | 引擎与 GUI 同机同进程，取数/状态迁移后**引擎缺失 = 前端无数据** |
+
+因此精确的目标应表述为：
+
+> **Swift = 渲染 + 平台适配 + 引擎宿主；领域逻辑与状态归引擎。UI 通过「投影（projection）」读取，而不是每帧 FFI。**
+
+「投影」= GUI 渲染所需的、常驻在 Swift 内存里的数据副本；它由引擎产出，但**渲染本身不触发引擎调用**。
+
+### 9.2 量化基线：要搬的到底是哪一块
+
+按「是否含 `View`/`body`」切分（2026-10-17 实测，启发式口径，仅用于量级判断）：
+
+| 分层 | 行数 | 目标态归属 |
+| --- | --- | --- |
+| 含 `View` / `body`（渲染层） | 39,837 | **留 Swift**（跨平台时按平台重写的就是这一层） |
+| 非 View 总量 | 23,050 | 再切三份 ↓ |
+
+对 23,050 行「非 View」再分三类：
+
+| 类别 | 代表文件（行数） | 量级 | 目标态 |
+| --- | --- | --- | --- |
+| **引擎宿主 / 平台适配** | `PythonEngineHost`936 · `KlinePythonBridge`452 · `PyTDXFormulaBridge`382 · `KlineHTTPServer`1369 · `LANSync*`~1731 · `GitHubRemoteUpdate`231 · `DebugLogger`88 | **≈5.2k** | **永远留 Swift**（dlopen / GIL / Network.framework / 沙盒 / TrollStore 更新） |
+| **纯领域逻辑** | `LiveDataStore`1562 · `SimStore`1300 · `GapBackfill`1153 · `StrategyBacktestEngine`946 · `StrategyFormula`687 · `WatchlistSyncManager`596 · `DatabaseManager`591 · `SimCondRule`482 · `StrategyCondGenerator`429 · `SystemIndicatorStore`422 · `FormulaKind`396 · `SimCondEngine`357 · `SimConditionModels`356 · `MainDBMerger`312 · `StrategyTrade`268 · `TencentQuoteFetcher`239 · `TdxSyncManager`234 · `SimModels`223 · `SimTradingRules`186 … | **≈12k** | **引擎候选**（含条件单 / 预警 / 回测 / 策略 DSL） |
+| **GUI 状态与投影模型** | `FavoritesStore`794 · `PageLayoutEditorModel`747 · `TrainingStore`534 · `PageLayoutSchema`533 · `MarketConfigStore`297 · `HomePageModel`289 · `MarketRowCache`314 … | **≈5.8k** | 拆成「引擎产出 + Swift 投影缓存」；布局 schema（候选 11）可下沉但收益弱 |
+
+**结论**：「Swift 只做 GUI」在本仓的现实上限，是把第三类（**≈12k 行领域逻辑**）的绝大部分搬进引擎；宿主/平台层 ≈5.2k 行**结构上不可能**搬走。即 Swift 从 62.9k 降到约 **50k 量级**，但边界从「按目录」变成「按职责」。
+
+### 9.3 四条不可回避的红线（目标态与它们正面冲突）
+
+| # | 红线 | 出处 | 与「Swift 只留 GUI」的冲突 | 处理方式 |
+| --- | --- | --- | --- | --- |
+| 1 | **引擎不得成为核心可用性前置** | §4 第 2 闸 / §6.2 | 全搬后引擎缺失 = App 空壳 | **须拍板**（决策点 D1，§9.7） |
+| 2 | **引擎不进每帧路径** | §6.2 | 行情表滚动 / K 线首帧若每次问引擎，固定开销 bin 2.9ms / JSON 13.8ms 直接爆预算 | 只下沉**非帧**逻辑；帧内数据靠**投影** |
+| 3 | **网络吞吐** | §4 第 3 闸 | 取数网络层搬到 Python：17 req/s vs 原生 h2 差一个量级 | **网络层永远留 Swift**；引擎只做口径解析（已落地） |
+| 4 | **下单授权闸门** | §3.3 | 判决逻辑变成**可远程替换的脚本** | 签名 + 版本锁定 + 哈希（**D2 已定「硬约束复核也下沉」，故不再有 native 复核兜底**；残余风险与验证见 §10.9） |
+
+红线 1、4 是**本目标独有的新增决策**；红线 2、3 已有结论，不因目标变更而松动。注意红线 1「引擎不得进首帧」其实已被阶段 B 部分松动（图表指标前台求值已归 Python，靠 R1 预热兜底）——本次是把同一条红线从「图表」扩到「行情表 / 交易」。
+
+### 9.4 逐子系统：能不能进引擎
+
+| 子系统 | 行数 | 形状 | 能否进引擎 | 阻塞点 / 前提 |
+| --- | --- | --- | --- | --- |
+| 指标 / 公式 / 形态 / 缠论 / 周期聚合 | — | 纯计算 | **已进** | — |
+| 回测引擎 `StrategyBacktestEngine` | 946 | 纯函数、批量、`nonisolated` | **能** | 必须与候选 7a **成对**下沉（共用 `StrategyCondGenerator.drafts` + `SimCondRule`，否则两套交易语义） |
+| 条件单判定 `SimCondRule` + `SimTradingRules` | 482 + 186 | 纯函数 | **能** | 同上；配红线 4 的三重缓解 |
+| 条件单副作用 `SimStore` + `SimCondEngine` + `SimConditionModels` + 预警记录 | 1300 + 357 + 356 | JSON 落盘 + 纯算术 | **能，且是最大的一块** | 需「状态所有权反转」：引擎持有 `sim.json`，Swift 退化为投影（§9.6 阶段 B） |
+| 策略 DSL（解析 / 校验 / 预览）+ 生成器 | 687 + 268 + 396 + 429 | 纯文本 + 映射 | **部分能** | 编辑器**每帧同步校验**；生成器与交易语义绑定，随候选 7 走 |
+| 取数 / 补缺口 `GapBackfill` / `WatchlistSyncManager` / `TencentQuoteFetcher` | 1153 + 596 + 239 | 网络 + 编排 + 口径 | **口径已进；网络 / 编排不能** | 红线 3 |
+| SQLite 查询 / 写 `DatabaseManager` / `LiveDataStore` / `MainDBMerger` | 591 + 1562 + 312 | SQLite3 | **写路径能；读路径不能** | 读路径是图表 / 行情表**每帧数据源**（红线 2）；写路径是 batch 后台，可下沉但需事务与落盘一致性 |
+| `MarketRowCache` / `SimQuoteCenter` | 314 + ~30 | 行情行缓存 | **不能整搬** | **同时**是行情表 UI 数据源 **和** 条件单快照源；必须拆为「引擎快照 API」+「Swift 投影」 |
+| `TdxSyncManager` 四时刻调度 | 234 | 定时 | **触发留 Swift** | 用 `UIApplication.didBecomeActiveNotification`（平台 API）；动作已进引擎 |
+| 图表 / 手势 / 布局渲染 | ~20k | 渲染 | **不能** | 平台外壳层 |
+
+> **关于预警的澄清**：预警不是独立引擎，是条件单 `isAlertOnly` 形态（§3.3）。当前**全仓无 `UNUserNotificationCenter` 使用**——预警产出只是 `sim.json` 里的一条 `SimAlertRecord`（纯状态），因此**随副作用层一起下沉，无平台残留**。仅当未来要在 App 未运行时弹系统通知，才涉及平台侧（决策点 D3）。
+
+### 9.5 关键工程缺口：桥接是「拉」不是「推」
+
+`KlinePythonBridge` 的现行契约（代码事实）：
+
+- Swift 写 `input.json` → `PyRun_SimpleString` → Python 在 `__main__` 里 `exec` 业务脚本 → 写 `output.json` → Swift 读回；
+- **没有 Python→Swift 回调，也没有常驻服务对象 / 推送**；
+- 固定开销 bin **2.9ms** / JSON **13.8ms**；宿主 workQueue **串行**；`blockingCall` 禁主线程。
+
+对目标态的两个直接后果：
+
+1. **引擎不可能「主动触发」条件单结算**——仍必须由 Swift 侧（行情刷新 / 定时 / 手动）驱动调用，引擎只是**被调用方**。若要让引擎真正常驻 + 主动推送，需**新增 push 通道**（当前架构不具备，属额外工程）。
+2. **状态要么每次全量进出，要么落在双方都认的磁盘文件上**。**好消息**：交易状态本就是 `Documents/Simulation/sim.json`（纯 JSON，schema 3），引擎可直接读写 → 「状态所有权反转」的**物理载体已经存在**，这是本项目做这件事的天然优势。
+
+### 9.6 分阶段落地建议（含进入条件与验证）
+
+| 阶段 | 内容 | 进入条件 | 验证 |
+| --- | --- | --- | --- |
+| **A. 交易判定成对下沉** | 回测 + 条件单判定 + 策略 DSL 纯解析一起进引擎（`sim_rules.py`）；Swift 保留 `SimCondRule` 兜底或删除 | 红线 4 的三重缓解就位（签名 / 版本锁 / 硬约束复核） | golden 差分（复用 `StrategyBacktestModels` 既有口径）；`SimCondRule` 逐 kind 对拍 |
+| **B. 状态所有权反转**（本目标的实质） | 引擎持有 `sim.json`：`SimStore` 退化为「投影缓存 + 桥接客户端」；新增 `sim_state.py`（提交 / 成交 / 流水 / 预警记录 / 条件单管理） | 阶段 A 稳定；定义状态同步协议（revision + 全量快照，diff 留作优化） | `sim.json` schema 兼容测试；每类写操作前后状态对拍；UI 投影刷新时延实测 |
+| **C. 拆共享枢纽** | `MarketRowCache` / `SimQuoteCenter` 拆为「引擎快照 API」+「Swift 投影」；只把**非帧**的快照路径下沉 | 阶段 B 稳定；实测确认拆后行情表仍 60fps | 行情表滚动帧率；条件单快照与主库逐字段对拍 |
+| **D. 永不动** | 网络栈、图表 / 手势 / 布局、HTTP / LAN / 更新、引擎宿主、SQLite 每帧查询、定时触发源 | — | — |
+
+### 9.7 决策点（2026-10-17 用户拍板）
+
+| # | 决策 | 用户结论 | 影响 |
+| --- | --- | --- | --- |
+| **D1** | 引擎是否允许成为**硬依赖**（缺失 = 交易 / 回测不可用）？ | ✅ **接受硬依赖**；缺失时按「允许的功能与操作」清单降级（§9.10），不做静默兜底 | 红线 1 松动；阶段 B **不保留** Swift 影子实现 → 无双实现漂移面 |
+| **D2** | 交易判定下沉后，**硬约束复核**放哪？ | ✅ **一并下沉**（2026-10-17 二次拍板）：下单授权与 `T+1 / 涨跌停 / 整手` 硬约束复核**都进引擎**，Swift 侧**不留**交易规则实现 → 红线 4 的缓解只剩**签名 + 版本锁 + 脚本哈希**（残余风险与验证见 §10.9） | `SimTradingRules` 整体进 `sim_rules.py`；红线 4 缓解强度下降，须由套件 8（信任链）兜住 |
+| **D3** | 是否需要**引擎主动推送**？ | 🔄 **认识已澄清（见 §9.11）**：解释器**本来就已经常驻**（进程内，L0，零代价）；缺的是「引擎自己醒来干活 / 主动推送」（L2/L3）。但**本项目「最新价」= 本地日线库最后一根 close（无盘中 tick）→ 条件单本来就只能在「数据更新 / App 激活」时结算**，后台常驻几乎无收益；且 iOS 退后台会挂起常驻线程。结论：**保持 L0 常驻（= 现状，零改动）；L1 为可选增强；不做 L2/L3** | 不建常驻 Python 线程 → 不做 push 通道的强制依赖（§9.8 的 pipe 变体降为可选增强，L1 收益与边界见 §9.11.1） |
+| **D4** | 跨平台目标是哪些平台？ | ✅ **凡支持 Python 引擎的平台均为潜在目标**；届时维护一套**完善的 GUI 文档**，实现某平台时按文档快速复刻 GUI | 明确「共享引擎 + 每平台复刻 GUI」的战略；Swift 只是 iOS 那份 GUI |
+
+> D4 修订了 §9.2 的口径：GUI 文档（而非 GUI 代码）才是跨平台的复用载体。因此「Swift 只做 GUI」的价值 = **让 GUI 成为唯一与平台相关的部分**，从而跨平台成本 ≈ 按文档复刻一套 GUI。
+
+### 9.8 桥接 push 通道可行性（回应「桥接可以支持推吗」）
+
+**结论：可以。且生产链路是进程内的，push 成本不高——但「push」≠「引擎后台常驻」。**
+
+现有形态（代码事实）：
+
+- **生产 = 进程内**：`dlopen` libpython + `PyRun_SimpleString` + `PyGILState_Ensure/Release`（`PythonEngineHost.runPyBridge`，workQueue 串行）；
+- **实验 = 子进程**：`opener --py` 拉起 pyrunner（仅 Debug 实验室用，进程隔离）。
+
+四种实现（按代价升序）：
+
+| 变体 | 机制 | 需新增 | 适用 |
+| --- | --- | --- | --- |
+| **A′ 进程内管道（推荐最小实现）** | Swift `pipe()` 建管道，写端 fd 交 Python bootstrap；Python `os.write` 写 NDJSON；Swift `DispatchSourceRead` 收 | **零 libpython 新符号**（只用 `os.write`） | 生产首选 |
+| A 进程内 C 回调 | `PyImport_AddModule` + `PyCFunction_NewEx` + `PyUnicode_AsUTF8` 注册 `kline_host.emit()` | 3~4 个**简单** dlsym（不碰 `PyConfig`，符合宿主既有约定） | 想要结构化 API 时 |
+| B 子进程管道 | IPC（pipe / socket） | 隔离执行链路 + framing | 仅当生产切子进程隔离 |
+| C outbox 轮询 | Python 追加文件，Swift 定时轮询 | 无 | 降级兜底（弱） |
+
+三条硬约束（无论哪个变体）：
+
+1. **回调线程 = Python worker 线程**（非主线程）：必须 `DispatchQueue.main.async` 落 UI；**回调内禁止同步调回 Python**（重入 + GIL 死锁，宿主已在 `runPyBridge` 踩过 GIL 线程坑）。
+2. **push 只做通知、不做真相**：Swift 收到 `{topic, revision}` 后仍以「拉一次全量状态」为准；引擎崩溃 / 热重载丢事件不致命（对应阶段 B 的 revision 协议）。
+3. **「主动」需常驻线程**：当前 Python 只在 `PyRun_SimpleString` 被调用时执行；要让引擎**自己**触发，须一个专用 Python 线程 / 任务队列（替换 `runPyBridge` 模型）。但**在 iOS 上价值有限**——App 退后台会被挂起，`beginBackgroundTask` 仅有限时窗，且当前无 `BGTaskScheduler`。
+
+> **建议**：只加 **A′** 作为「调用期事件流 + 变更通知」原语，主模型保持「**Swift 驱动、引擎响应**」；不建常驻 daemon，除非 D3 明确要「UI 关闭也触发预警」并能接受 iOS 生命周期限制。
+>
+> 说明：**即使不 push，也能满足本目标**——条件单结算是被行情刷新驱动的，Swift 侧（`MarketRowCache.$rows`）已能检测刷新并调用引擎、引擎返回「触发 + 新状态」。push 是**可选增强**，不是前置。
+
+### 9.9 共享枢纽拆分方案（回应「共享枢纽怎么拆」）
+
+问题：`MarketRowCache`（314 行）**同时**服务高频 GUI（行情表 / 快捷面板）**与**领域（条件单快照）；`SimQuoteCenter` 同样是快捷面板（GUI）与交易引擎共用。按文件切无法解耦，必须按**「计算 vs 渲染数据」**切。
+
+**三条拆分原则**：
+
+1. **计算下沉、数据留投影**：字段公式 / 均线 / 快照组装 → 引擎；Swift 只存 plain DTO（无计算、无 DB 访问）。
+2. **交易快照与 GUI 缓存解绑**：条件单快照不再读 `MarketRowCache`，改由引擎直接算（引擎已能 sqlite3 直读库，模块 14 已证）。
+3. **渲染零 FFI**：`View`/`body` 求值期内**禁止任何 bridge 调用**；数据一律在事件（导航 / 刷新 / 生命周期）时批量备好。
+
+**落地步骤（风险递增）**：
+
+| 步 | 动作 | 解除的耦合 |
+| --- | --- | --- |
+| S1 | `MarketRow` 去计算 → 纯 DTO；新增引擎 `market_fields`（批量字段窗口 → 字段集，bin 通道） | 字段公式从 GUI 侧移走 |
+| S2 | `MarketRowCache` → `MarketRowProjection`：预取改为「批量请引擎算」；排序 / 筛选留 Swift（对投影做，零 FFI） | GUI 只读投影 |
+| S3 | 删 `SimCondSnapshotCenter` 对 `MarketRowCache` 的读；快照由引擎 `sim_snapshot` 直读库算 | **交易彻底不依赖 GUI 缓存** |
+| S4 | `DatabaseManager` 读路径下沉为 `db_query` op；Swift 侧退化为薄 facade（DTO 转换 + `dataVersion` 触发重取） | 读路径统一到引擎 |
+| S5 | 写路径（`LiveDataStore` / `MainDBMerger`）下沉为 `db_write`，**单一写者**（引擎或 Swift 二选一，禁止双写） | 写路径统一 |
+
+**可分界指标**：一旦引擎持有 DB 读写，**Swift 侧不再出现 `import SQLite3`**——这是「前后端分离」是否真落地的硬判据。
+
+### 9.10 引擎缺失时的降级矩阵（决策 D1 配套）
+
+用户已定：**引擎为硬依赖**；缺失时按「允许的功能与操作」清单显式降级（非静默）。
+
+| 分类 | 功能 | 缺引擎时 |
+| --- | --- | --- |
+| **引导（必须可用）** | 「更新引擎」通道（`LocalUpdateView` + `KlineHTTPServer` + `GitHubRemoteUpdate`）、TrollStore 安装 | ✅ 可用（否则无法自愈） |
+| **平台** | 导航 / 空态渲染、设置 / 关于、LAN 传输、诊断日志 | ✅ 可用 |
+| **数据入口** | 取数（网络留 Swift，但口径 / 写库在引擎） | ⚠️ 二选一：禁用取数，或保留 Swift 冷路径写库（引入双写风险，待细化） |
+| **计算类** | 图表指标 / 公式 / 选股 / 形态 / 缠论 | ❌ 禁用（空图 + 明确提示） |
+| **行情** | 行情表字段 / 快捷面板数值 | ❌ 空态 |
+| **交易** | 条件单 / 预警 / 下单 / 回测 | ❌ **整体禁用**（授权闸门无实现 = 落在安全侧） |
+
+要点：**降级 = 显式空态 + 引擎修复入口**，不是「悄悄没数据」；且**交易必须整体禁用**，不允许「GUI 还能点但引擎不下单」的半可用态。
+
+### 9.11 D3 追问：「引擎常驻」分四层，代价各异（回应「引擎本来就要常驻」）
+
+**先纠正一个前提**：当前架构里**解释器已经常驻**——进程内 `dlopen` libpython + `Py_Initialize` 一次，进程存活期一直留在内存（`isLoaded=true`）。这部分**零代价，也不需要改**。
+但 **Python 只在 `PyRun_SimpleString` 被调用时才执行**：没有 Python 侧的循环或线程。所以「常驻」要分清是「解释器在内存」还是「引擎自己会醒来干活 / 主动推送」——**只有后者需要新东西**。
+
+| 层 | 含义 | 现状 | 代价 |
+| --- | --- | --- | --- |
+| **L0 解释器常驻** | 解释器在内存、随时可调 | ✅ 已成立 | **0** |
+| **L1 调用期事件流** | 一次 call 内 Python 经管道向 Swift 发进度 / 事件 | ❌ 需加 pipe | **小**（pipe + `DispatchSourceRead`；无新 libpython 符号、无新线程模型） |
+| **L2 专用 Python 线程**（进程内常驻工作者） | Python 侧一个循环线程，自己排队 / 推进 / 推送 | ❌ | **中-高**（见下） |
+| **L3 独立常驻引擎进程** | 引擎是独立进程长期存活，Socket / 管道双向 | 实验室仅「一次一个 pyrunner 子进程」 | **高**（IPC / 签名 / 脆弱性 / 生命周期） |
+
+**L2 的坏处（你问的「有什么不好的」）**：
+
+1. **GIL / 线程模型复杂化**：现在 `runPyBridge` = workQueue 串行 + `PyGILState_Ensure/Release`；宿主已因「`Py_Initialize` 在线程 A、PyRun 在线程 B」踩过**原生段错误**。再引入一个长期持解释器的线程，两条路径抢 GIL，必须把所有调用**收敛到那一个线程的队列**（等于重写 `runPyBridge`）。风险实打实。
+2. **崩溃暴露面变大**：进程内 Python 跑得越久，原生崩溃杀掉整个 App 的概率越高。当前「短调用、串行、可预测」是它的保护壳，常驻循环会削弱它。
+3. **换引擎 / 热更新变难**：现在解释器进程内只 init 一次；要换版本得停线程 → finalize → 重启。
+4. **UI 更新变异步推送**：需引入 revision / 顺序 / 去重纪律，契约测试的「确定请求-响应」假设被打破，测试与排障难度上升。
+5. **耗电**：轮询式循环会持续唤醒 CPU（条件变量等待会好些，但仍是常驻唤醒源）。
+
+**最关键的一条（不是实现难点，而是天花板）**：
+
+6. **本项目对「后台常驻」几乎没有需求**：`SimCondRule` 头注释明确——**「最新价」是本地日线库最后一根 K 线的 `close`，没有盘中 tick 推送**。也就是说条件单**本来就只能在「数据更新 / App 激活」时结算**，后台空转不会有新价格可判。**后台常驻对条件单几乎零收益**。
+7. 而且 **iOS 后台挂起是硬约束**：App 退后台，进程被挂起，**你的常驻 Python 线程也一起冻结**——L2 **拿不到**「UI 关闭也能触发预警」。要「无 UI 也跑」只有 **L3**（TrollStore root-spawn 独立进程），代价是 IPC 协议 + 签名/沙盒 + 进程生命周期 + 孤儿进程管理，且**与「跨平台」冲突**（Android/Windows 等价物要另做）。
+
+**结论（2026-10-17 用户拍板）**：**只保持 L0（解释器常驻，= 现状，零改动）**；**L1 为可选增强，按需再补**（好在哪、实例与边界见 §9.11.1）；L2 除非有明确刚需（长任务要边算边刷 UI），不划算；L3 是唯一能「后台常驻」的路，但代价陡增且不可跨平台移植，**不建议为预警去走 L3**。
+
+**预警「无 UI 也触发」的替代方案**：结算在 **App 下次激活时补跑**（Swift 驱动，本来就是这个时机），若要提醒，用 `UNUserNotificationCenter` 本地通知把「错过的触发」补发（可标注为历史记录）。用户感知近似真后台，成本只是「激活时补跑 + 补发通知」，无需 L2/L3。
+
+#### 9.11.1 L1 到底买到什么（举实例）
+
+你问「L1 有什么好处」——**一句话：让「一次长调用」从黑箱变成可观察、可中断的流**。它不改变主模型（仍是 Swift 驱动、引擎响应），只是在**单次 `call` 期间**多一条 Swift 可读的事件旁路（pipe + `DispatchSourceRead`），Python 在跑的过程中往管道里写 NDJSON 事件。
+
+**具体例子（都由本次「成对下沉」直接产生需求）：**
+
+1. **回测进度条**。`backtest_run` 一次要吃 3000+ 标的的日线并逐标的推进净值。下沉后这段在 `PyRun` 里跑，Swift 在调用结束前**拿不到任何中间量**——UI 只能转圈。有 L1 后 Python 每处理完 N 个标的写一条：
+
+   ```json
+   {"topic":"backtest.progress","done":1234,"total":3312,"equity":1028446.5}
+   ```
+
+   Swift 收到就更新进度条，并可用 `equity` **边算边画**净值曲线（渐进结果，用户不用等全程）。
+
+2. **全市场扫描 / 选股**。扫到命中项立即推一条 `{"topic":"scan.hit","code":"600519.SH","score":0.82}`，列表**边扫边长**，用户可以先点开第一个命中的标的——不必等 3312 个扫完。
+
+3. **可取消（这条最实际）**。现在 `blockingCall` 的 timeout 只是**放弃等待**，底层 Python 仍会把整轮回测跑完（§9.5 已记录）。L1 给了反向通道：Swift 往管道写一个 cancel 信号，Python 在**检查点（chunk 边界）**检测到就提前中止。没有 L1，长任务是「不可中断」的。
+
+4. **诊断流式回传**。Python 的耗时分解、缓存命中率、`traceback` 可直接回到 Swift 日志，不必靠 stderr 文件或等最终错误对象。
+
+**诚实的边界（避免过度设计）：**
+
+- **只对长调用（≳200ms）有意义**。bin 通道固定开销 2.9ms、JSON 13.8ms——短调用上 L1 是纯开销。
+- **它不带来「后台常驻」能力**。事件只在「一次 call 进行中」存在；App 退后台被挂起时，pipe 也冻结。要「无 UI 也跑」仍需 L3（§9.11 结论不变）。
+- **它不破坏「确定请求-响应」契约主体**：事件是**旁路**，最终仍返回那一份 `kline_result`；事件通道**可开关**（关掉即退回今状），契约测试仍按「一请求一响应」写。
+
+**结论**：L1 是**可选增强**，收益集中在「长任务的可观察性 + 可取消」，与「常驻」无关；先按 L0 落地，待阶段 A/B 出现真实的长调用 UI 需求（回测进度、扫描增量）再补 L1，**不提前建**。
+
+### 9.12 一句话结论
+
+> **目标在「领域逻辑」这一层可行且方向正确**（≈12k 行可进引擎，含交易——判定与副作用都能进，且 `sim.json` 已是现成的状态载体）；**但「Swift 只留 GUI」有约 5.2k 行平台 / 宿主层结构上搬不走**。
+> 两个被追问的技术点均已论证可行：**桥接 push 可行**（进程内，推荐 pipe 变体，零新 libpython 符号；但建议只作可选增强，主模型仍「Swift 驱动、引擎响应」，§9.8）；**共享枢纽可按「计算下沉 / 数据留投影」三步拆开**（§9.9）。真正的工程重心不是「能不能用 Python 写」，而是：① 阶段 B 的**状态所有权反转**（引擎持有 `sim.json` + revision 协议）；② **共享枢纽拆分**（`MarketRowCache`/`SimQuoteCenter`）；③ **降级矩阵**（引擎硬依赖下的显式空态，§9.10）。建议按 A→B→C 推进，D 永不进引擎。
+
+---
+
+## 十、阶段 A 契约测试用例清单（2026-10-17）
+
+> 阶段 A = **交易判定成对下沉**：把 `SimCondRule`（482）· `SimTradingRules`（186，D2 后含硬约束）· `StrategyCondGenerator`（429）· `StrategyBacktestEngine`（946）· 策略 DSL 纯解析（`StrategyRuleParser` / `StrategyTradeParser` / `StrategyRuleCatalog` / `StrategyValidator` / `StrategyPreview`）一次性搬进 `Kline/PyScripts/sim_rules.py`。
+> 本清单是**「删 Swift 实现」的前置闸门**：清单全绿才允许删。全部为**离线**用例（不发网络、不打库）。
+
+### 10.1 测试形态与 fixture 生产
+
+沿用既有契约测试范式（对齐 `QuoteParsingContractTests` / `PyBridgeQuoteParsingTests`）：
+
+| 项 | 约定 |
+| --- | --- |
+| 测试文件 | 过渡期 `KlineTests/SimRulesContractTests.swift`（Swift 现状 ↔ fixture）；长期 `KlineTests/PyBridgeSimRulesTests.swift`（Python ↔ fixture） |
+| fixture | `KlineTests/Fixtures/sim_rules.json`（计算类：evaluate / validateCreate / tradingRules / sweep / mapping）· `strategy_dsl.json`（解析类）· `backtest_golden.json`（回测净值） |
+| 生产流程（两阶段） | **A1** 由 Swift 现状**导出** golden（`sim_rules.json` 由一次「dump 模式」测试产出）→ **A2** 删 Swift 后 fixture 冻结为唯一 golden，`PyBridgeSimRulesTests` 继续对拍 |
+| 解析类 golden | `strategy_dsl.json` **手写为规格**（文本口径稳定），Swift 与 Python **同时**对其断言 |
+| 数值容差 | 价格/金额 `1e-6`；比例（pct / 费率 / 均线）`1e-12`；`date` 整形精确；**文案精确相等**（含标点与空格） |
+| 枚举断言 | 用 `rawValue` 字符串（`"fire"` / `"hold"` / `"abort"` / `"complete"`；`"invalidQty"` / `"noPosition"` …） |
+| 时间注入 | **必须注入** `now` / `today` / `TimeZone`（`SimTradingRules.isTradingSession`、`validateCreate`、`expiredReason` 都依赖系统时区与当前时间）→ fixture 记固定 `now` 与 `tz` |
+
+### 10.2 套件 1：条件单判定 `SimCondRule.evaluate`（8 kind × 四态）
+
+golden: `sim_rules.json → evaluate[]`，每条 `{caseName, kind, params, directive, runtime, snapshot, expected{decision, qty, at, runtime?}}`。
+
+**总闸**（先于一切）：`snapshot.last` 为 nil 或 ≤0 → 一律 `hold`（不误触发）。
+
+| kind | 用例 | 关注点 |
+| --- | --- | --- |
+| price | 上破命中 / 下破命中 / 未达 / `compareUp` 缺省(=true) / `triggerPrice` 缺失或 ≤0→abort / last=nil→hold / last=0→hold | 成交价 = 触发价（at=trigger） |
+| stopLoss | 单止盈命中 / 单止损命中 / **双边同时满足→取止损腿** / 两腿全缺→abort / 都不满足→hold | 风控优先优先级 |
+| trailing | 首次未突破→hold(runtime 不变) / 已突破推进 extreme 但未够回落→hold+extreme 更新 / 回落够→fire(at=price) / **保底价触发先于突破判定** / breakout 缺→abort / trailPct 缺或 0→hold / 连续两次评估 extreme 单调 | 极值只在评估点采样 |
+| time | now<fireDate→hold / now≥fireDate 且有 last→fire(at=last) / last 缺但 prevClose 有→fire(at=prevClose) / 两者都无→hold / fireDate 缺→abort | 成交价退化链 |
+| changePct | 正阈值 pct≥thr→fire / 负阈值 pct≤thr→fire / 未达→hold / thr 缺或 0→abort / changePct 缺→hold | 符号语义 |
+| maCross | 上穿(prev<ma && price≥ma)→fire / 下破(prev>ma && price≤ma)→fire / 同侧→hold / ma 或 prevClose 缺→hold / period 或 maAbove 缺→abort | **bar 对 bar**（避免持续满足反复触发） |
+| grid | 首触发(drop 或 rise≥step)→fire / **倍数因子 level∈{0,1,4,5} × multiplier∈{1,2,3,5}**（cap4 / cap5 / 下限 1）/ 越出区间→complete / 未达 step→hold 且初始化 gridLevel、gridLastPrice / 仅提醒下 perLevel 缺或 0→放行 / 普通单 perLevel 缺或 0→abort / lower/upper/step 缺→abort | `factor=mult^min(level,4)`，`qty=perLevel×round(factor)` |
+| batch | 买入越跌越买(target 递减) / 卖出越涨越卖(target 递增) / 未达→hold / index>count→complete / 仅提醒下 total 缺或 0→放行 / 普通单 total 缺或 0→abort / count<2 或 first≤0 或 step≤0→abort | **batchQty 均分向下取整到手 + 末批吃余数**，覆盖 `total=250,count=3,lot=100` 类边界 |
+
+### 10.3 套件 2：建单校验 `SimCondRule.validateCreate`
+
+golden: `sim_rules.json → validateCreate[]`，`{caseName, order, account, position, snapshot, now, expectedRejection | nil}`。
+
+**判序敏感** → 必须含「前因遮蔽后因」的用例（如「数量非法 + 无行情」应报数量）。
+
+| 序 | 用例 |
+| --- | --- |
+| 1 账户 | `isArchived`→accountUnavailable；`id` 不匹配→accountUnavailable |
+| 2 数量（非仅提醒） | grid perLevel≤0 或非整手→invalidQty(lot)；batch total≤0 或非整手→invalidQty(lot)；其余 qty≤0 或非整手→invalidQty(lot)；**仅提醒整段放行**（数量可为 0） |
+| 3 行情 | last nil 或 ≤0→noQuote |
+| 4 持仓 | 非仅提醒 + 卖出 + sellableQty≤0→noPosition；仅提醒卖出无持仓→放行 |
+| 5 类型参数 | price 缺 trigger→missingParam("触发价")；stopLoss 两腿全缺→missingParam / `baseMode=.price` 且 take≤base→invalidOCORange / stop≥base→invalidOCORange；trailing 缺 breakout→missingParam / 缺 trailPct→missingParam / floorEnabled 缺 floor→missingParam("保底价")；time 缺 fireDate→missingParam / fireDate≤now→invalidFireDate；changePct 缺或 0→missingParam；maCross period∉{5,10,20,60}→missingParam / maAbove nil→missingParam；grid 缺 base→missingParam("基准价") / 缺 lower/upper→missingParam / upper≤lower→invalidGridRange / step≤0→invalidGridStep；batch count<2 或 >5→invalidBatchCount / 缺 first→missingParam / 缺 step→missingParam / total<count×lot→batchTooSmall |
+| 6 有效期 | `untilDate` 且 `expiresAt=nil`→missingParam("有效期到期日") |
+| 7 通过 | → nil |
+
+### 10.4 套件 3：交易规则 `SimTradingRules`（D2 后整体下沉）
+
+golden: `sim_rules.json → tradingRules[]`。
+
+| 函数 | 用例 |
+| --- | --- |
+| commission | 费率分支（大额）/ 最低佣金分支（小额）/ **两者相等边界** |
+| stampTax | 卖出=额×千一；买入=0 |
+| fee | 买 = 佣金；卖 = 佣金 + 印花税 |
+| isTradingSession | 09:29 / 09:30 / 11:30 / 11:31 / 12:59 / 13:00 / 15:00 / 15:01 八个边界；周六、周日；**注入固定时区** |
+| limitRange | prevClose nil / 0 / 负→nil；正常→±10% |
+| affordableQty | 费率上界 vs 最低佣金上界取小；**现金不足最低佣金→0**；price≤0 或 cash≤0→0；向下取整到手 |
+| sellableQty | T+1 开→availableQty；关→qty；无持仓→0；向下取整到手 |
+| validate | 判序 账户→整手→行情/报价→涨跌停→资金/股数；emptyAccount / notLotMultiple / noQuote（市价无 last；限价无或 ≤0）/ **priceOutOfLimit 仅限价单且 prevClose 缺失时跳过** / 买入 insufficientCash（回报 affordableQty）/ 卖出 insufficientShares（回报 sellable）/ 通过 nil |
+
+### 10.5 套件 4：结算状态机（纯部分）
+
+golden: `sim_rules.json → sweep[]`。`sweepConditions` 本身依赖 `submit`（Stage B），故本套件只锁**纯推进函数**；「触发→下单」整链在 Stage B 的 `sim_state` 对拍里覆盖。
+
+| 函数 | 用例 |
+| --- | --- |
+| expiredReason | `day` 跨日失效（createdAt 前一天）/ 同日不失效；`untilDate` 过期/未过期；`longTerm` 永不失效；`untilDate` 但 expiresAt=nil→不失效 |
+| fireDirection | grid：price<base→buy；≥base→sell；非 grid→directive.direction |
+| executionPrice | market→nil；limit→trigger+offset×tick，**下限 0.01** |
+| advanceRepeatable | grid→gridLevel+1 且 gridLastPrice=trigger；batch→batchDone+1；其他不变 |
+| repeatableFinished | grid level≥gridLevelCount / batch done≥count / 其他 false |
+| gridLevelCount | base/upper/lower/step 组合（对数档位）+ 缺参退 1 |
+| alertMessage | 8 kind 文案（含 trailing 保底/回落两分支、changePct 正负、grid、batch 批次号） |
+| 状态迁移（mock submit） | 单次成功→triggered / 单次失败→rejected（不重试）/ 多触发成功→monitoring+推进 / 多触发走完→completed / **仅提醒→不产生委托 + 每触发都 appendAlertRecord** / 重入保护（inFlight）/ 整轮只落盘一次（dirty=false 不写） |
+
+### 10.6 套件 5：策略 → 条件单映射 `StrategyCondGenerator`
+
+golden: `sim_rules.json → mapping[]`（`drafts()` / `entryDraft()`）。
+
+| 用例组 | 关注点 |
+| --- | --- |
+| 8 kind × (TRADE 全配 / 缺省) | → `SimCondParams` **逐字段**对拍 |
+| stopLoss | MODE 缺省=PCT / MODE=PRICE / BASE 缺省=COST / BASE=LAST / 百分数→价格 `base×(1±p/100)` / **未持仓 costPrice=nil → 价格腿为 nil** |
+| trailing | breakout=lastPrice；FLOOR 有/无 → floorPrice + floorEnabled |
+| changePct | `OP='<='`→负阈值；OP 缺省→正 |
+| maCross | DIR=UP→true / DOWN→false / 缺省或非法→nil（交 validateCreate 报「穿越方向」） |
+| grid | BASE/LOW/HIGH/STEP/QTY/MULT → params；STEP 直传；MULT 缺省=1 |
+| batch | **`GAP`（元）→ `batchStepPct`（%）换算 = GAP/FIRST×100**（关键单位换算） |
+| 指令优先级 | ORD* 覆盖 > TRADE > 内置默认；`resolvedDirection`（batch 缺省 buy、其余缺省 sell）；`resolvedQty`（grid→perLevel / batch→total / 其他 ORDQTY→ORDAMT→lotQty→TRADE.qty→TRADE.amount→lotQty→0）；`lotQty`（amount/last/100 向下取整，≥1 手；不可折算→0） |
+| entryDraft | 无 direction→nil；lastPrice≤0→nil；compareUp=true + triggerPrice=lastPrice；validity 缺省 longTerm；expiresAt 仅 untilDate |
+| 映射失败原因 | 8 kind 各一条中文原因（与 `skips[].reason` 精确对拍） |
+| （Stage B 前置） | `generate()` 的三维展开 / 去重键 / 双重限额截断 —— 依赖 `SimStore`，归 Stage B 对拍 |
+
+### 10.7 套件 6：回测引擎 `StrategyBacktestEngine.run`
+
+golden: `backtest_golden.json`（现状 Swift 导出的净值曲线 + 明细）。
+
+| 用例组 | 关注点 |
+| --- | --- |
+| 净值守恒 | 「净值 = 初始 + 已实现盈亏 + 期末浮动盈亏」精确成立（成本价含买入费用口径） |
+| 成交口径 | 信号次日开盘成交；涨跌停无法成交（一字板）；费率 / T+1 / 涨跌停复用 `SimTradingRules` |
+| 规则映射 | `planRules` 复用 `StrategyCondGenerator.drafts`（**两处必须同源**） |
+| 分支 | evaluateFullExit / evaluateGrid / evaluateBatch / evaluatePriceBuy 各给正反例 |
+| 档位/批次 | `gridQty` / `batchQty` / `gridLevelCount` 与 `SimCondRule` 同口径（**跨模块一致性**） |
+| 确定性 | 同参数重复调用结果逐字节一致（排序显式、无字典序依赖） |
+| 未来函数 | `futureFunctionWarnings` / `containsNegativeRef`（含负引用文本） |
+| 边界 | 空数据 / 单 bar / 数据不足 MA 周期 / 全部标的一字板 |
+| 取消 | `BacktestCancelBox` 中途取消 → 半途结果不落 |
+
+### 10.8 套件 7：策略 DSL 解析 / 序列化
+
+golden: `strategy_dsl.json`（**手写规格**）。
+
+| 被测 | 用例 |
+| --- | --- |
+| `StrategyRuleParser.parse` | 正常行 / 多规则 / `{...}` 注释 / 空行 / **全角符号归一化** / 缺键 / 未知键 / 类型转换（number/percent/integer/text/option）/ option 非法取值 |
+| `StrategyRuleParser.line` | **往返一致** `parse(line(call)) == call` |
+| `StrategyRuleCatalog.specs` / `knownKeys` | 8 kind 的键集与类型（快照） |
+| `StrategyTradeParser.parse` | 8 键各一 / 未知键报错 / 全角归一化 / 大小写容忍（buy/BUY、limit/LIMIT）/ `ACCOUNTS` 多值与非法 UUID / `EXPIRES` 非法格式 |
+| `StrategyTradeParser.serialize` | 只输出非 nil、**顺序固定** DIRECTION→QTY→AMOUNT→PRICETYPE→OFFSETTICKS→VALIDITY→EXPIRES→ACCOUNTS / 往返一致 |
+| `StrategyTradeParser.override` | ORD* 5 键（含 `isReservedKey` 大小写不敏感） |
+| `StrategyValidator.validate` | 各 kind 参数校验文案 + early-return 顺序 |
+| `StrategyPreview` | summary / pickSummary / tradeSummary / triggerText 文案 |
+
+### 10.9 套件 8：信任链与降级（D2 配套 · 红线 4 缓解）
+
+> D2 已定「硬约束复核也下沉」→ **Swift 侧不再有交易规则实现**，红线 4 缓解只剩「签名 + 版本锁 + 脚本哈希」。本套件即该缓解的验证，**是 D2 的下沉代价必须付的账**。
+
+| 用例 | 期望 |
+| --- | --- |
+| 脚本哈希 | `sim_rules.py` 的 sha256 纳入引擎/脚本版本校验；fixture 记固定哈希 |
+| 篡改检测 | 脚本被替换 → 哈希不匹配 → **拒绝加载 + 交易整体禁用**（不静默降级） |
+| 版本锁定 | `apiVersion` 与脚本版本配对；不匹配 → 交易禁用 |
+| 降级矩阵 | 引擎缺失/不可用 → 按 §9.10：交易 / 回测 / 条件单 / 预警**整体不可用**，引导与设置可用 |
+| 输入只读 | 引擎只接受 `sim.json` + 快照入参，**不接受任何「直接下委托」指令**（下委托仍须走完整校验链） |
+
+### 10.10 通过判据（删 Swift 的闸门）
+
+阶段 A **允许删 Swift 实现**的条件（全部满足）：
+
+1. `SimRulesContractTests`（Swift 现状 ↔ fixture）与 `PyBridgeSimRulesTests`（Python ↔ fixture）**同 golden 零差异**；
+2. 套件 8（信任链）全绿；
+3. 文案类断言**精确相等**（含标点），不接受「语义等价」；
+4. 回测净值曲线**逐点相等**（容差 `1e-6`）；
+5. 跨模块一致性用例（`gridLevelCount` / `batchQty` 在 `SimCondRule` 与 `StrategyBacktestEngine` 两处同值）通过；
+6. 不回归：`SimCondEditorView` 的**每帧同步校验**改走「防抖 + 投影」后，编辑体验不劣化（§前一轮分析：这是策略 DSL 下沉的唯一 UI 阻碍）。
+
+---
+
+## 十一、阶段 A 落地设计：`sim_rules.py` op 契约（2026-10-17）
+
+### 11.1 脚本形态与调用通道
+
+- **单文件** `Kline/PyScripts/sim_rules.py`，**仅标准库**（`json` / `math` / `datetime` / `decimal`）；
+- **op 分发**对齐 `quote_parse.py`：模块末 `kline_result = _main()`，`_OPS = {...}` 按 `kline_input["op"]` 分发，异常由包装层统一捕获；
+- **通道**：绝大多数 op 走 `KlinePythonBridge.call`（JSON，小对象）；`backtest_run` 走 `callBin`（净值曲线 / 明细大数组零拷贝回传）；
+- **入参由 Swift 侧 `JSONEncoder` 生成**（不手拼字典）：统一用 `.iso8601` 日期策略 + `nonConformingFloatEncodingStrategy = .throw`（出现 NaN/Inf 即缺陷，不静默）；编好后 `JSONSerialization` 转 `[String: Any]` 交给桥接 → **键名与 Swift 属性名一致**（见 11.2），避免两套命名漂移；
+- ⚠️ **时区不用 IANA 名**：`zoneinfo` 依赖系统 `tzdata`，iOS 沙盒不保证存在。统一传 **`tzOffsetSeconds`（整数偏移）**——A 股只用 Asia/Shanghai 且无夏令时，足够且零依赖。
+
+### 11.2 数据契约：类型 ↔ JSON 映射（只列有坑的）
+
+| Swift | JSON | 说明 |
+| --- | --- | --- |
+| `Date` | **ISO8601 字符串** | 与 `SimStore` 落盘同口径（`.iso8601`，UTC 带 `Z`） |
+| `UUID` | 大写字符串 | Swift 默认编码，Python 原样透传 |
+| `Double` | number | NaN/Inf 编码期即抛错 |
+| `Int` / `Bool` | number / bool | 直传 |
+| 枚举 | **`rawValue` 字符串** | `SimCondKind` = `"stopLoss"` / `"changePct"`（**驼峰**）；`direction` = `"buy"`/`"sell"`；`priceType` = `"limit"`/`"market"`；`status`/`validity`/`baseMode` = 小写 |
+| `SimCondParams` | 扁平对象，**键 = 属性名**（`compareUp` / `triggerPrice` / `gridStepPct` …） | 与 `CodingKeys` 一致，无需映射表 |
+| `SimCondDirective.alertOnly` | bool，**nil 时省略键** | 复刻旧档案兼容语义 |
+| `SimCondDecision` | 见 11.6 | 四态判别用 `decision` 字段 |
+
+### 11.3 op 清单
+
+**A 组 · 条件单判定**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `cond_evaluate` | `order` `snapshot` | `decision`（+`qty`/`at`/`runtime`/`reason`） | `SimCondRule.evaluate` |
+| `cond_validate_create` | `order` `account` `position?` `snapshot` `now` | `rejection`（或 `null`） | `SimCondRule.validateCreate` |
+| `cond_grid_level_count` | `order` | `count` | `SimCondRule.gridLevelCount` |
+| `cond_text` | `order` `field` ∈ {`condition`/`directiveCore`/`directive`/`validity`/`preview`} | `text` | `conditionSummary` / `directiveCore` / `directiveSummary` / `validitySummary` / `previewSentence` |
+
+**B 组 · 结算纯推进（`sweepConditions` 的无副作用部分）**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `cond_expired_reason` | `order` `now` `tzOffsetSeconds` | `reason`（或 `null`） | `expiredReason`（`day`/**`untilDate`**/`longTerm`） |
+| `cond_fire_direction` | `order` `triggerPrice` | `direction` | `fireDirection` |
+| `cond_execution_price` | `directive` `triggerPrice` | `price`（或 `null`） | `executionPrice` |
+| `cond_advance` | `order` `triggerPrice` | `runtime` | `advanceRepeatable` |
+| `cond_repeatable_finished` | `order` | `finished` | `repeatableFinished` |
+| `cond_alert_message` | `order` `triggerPrice` | `message` | `alertMessage` |
+
+**C 组 · 交易规则（D2 后整体下沉）**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `trade_validate` | `draft` `account` `position?` `lastPrice?` `prevClose?` | `rejection`（或 `null`） | `SimTradingRules.validate` |
+| `trade_calc` | `calc` ∈ {`commission`/`stampTax`/`fee`/`limitRange`/`affordableQty`/`sellableQty`/`isTradingSession`} + 各自参数 | 见下 | 同名方法 |
+| ↳ `isTradingSession` | + `at` `tzOffsetSeconds` | `bool` | |
+| ↳ `limitRange` | + `prevClose` | `{lower,upper}` 或 `null` | |
+| ↳ `affordableQty` | + `cash` `price` | `qty` | |
+| ↳ `sellableQty` | + `position` | `qty` | |
+
+**D 组 · 策略 → 条件单映射**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `strategy_drafts` | `rules` `trade` `meta` `accountID` `lastPrice` `costPrice?` `tzOffsetSeconds` | `drafts` `skips` | `StrategyCondGenerator.drafts`（纯映射部分） |
+| `strategy_entry_draft` | `trade` `meta` `accountID` `lastPrice` | `draft`（或 `null`） | `StrategyCondGenerator.entryDraft` |
+
+> `strategy_drafts` 需要 `tzOffsetSeconds` 仅因 `TIME` 规则的 `DATE`+`AT` 要按本地壁钟拼 `fireDate`（`Calendar.current.date(from:)`）；`strategy_entry_draft` 不落日期（`expiresAt` 由 `trade` 原样透传 ISO 串），故不需要。
+> `drafts[]` 键：`accountID` `metaID` `code` `name` `kind` `params` `directive` `validity`（+ `expiresAt` 仅 `validity == untilDate`）；`skips[]` 键：`title` `reason`。**刻意省略 `StrategyCondDraft.id`**（Swift 侧是随机 UUID，回传会破坏确定性；由 Swift 装配时补）。
+| （Stage B）`strategy_generate` | + `accounts` `monitoring` | `drafts` `skips` `truncated` | `StrategyCondGenerator.generate`（三维展开 / 去重 / 限额，依赖 `SimStore`） |
+
+**E 组 · 策略 DSL**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `strategy_parse` | `lines` | `rules` `errors` | `StrategyRuleParser.parse` |
+| `strategy_rule_line` | `call` | `line` | `StrategyRuleParser.line` |
+| `strategy_catalog` | `kind?` | `{kind: {specs, knownKeys}}` | `StrategyRuleCatalog` |
+| `strategy_validate` | `doc` `pickerExists` `pickSyntaxError?` | `issues` | `StrategyValidator.validate` |
+| `strategy_preview` | `doc` `pickerName?` `tzOffsetSeconds` | `{summary, pick, trade, executionNotice, triggers}` | `StrategyPreview` |
+| `trade_parse` | `lines` `tzOffsetSeconds` | `spec` `errors` | `StrategyTradeParser.parse` |
+| `trade_serialize` | `spec` `tzOffsetSeconds` | `text` | `StrategyTradeParser.serialize` |
+| `trade_override` | `call` | `override` `isEmpty` `summary` | `StrategyTradeParser.override` |
+
+> `tzOffsetSeconds` 出现在 `trade_parse`（`EXPIRES=YYYY-MM-DD` 要按本地日历拼日界）、`trade_serialize`（`EXPIRES` 回写本地日期串）、`strategy_preview`（`trade` 摘要里的「有效期至 MM-dd」）三处。
+> `spec` 是**全键**对象（8 键恒在，nil 即 `null`）：`direction` `qty` `amount` `priceType` `offsetTicks` `validity` `expiresAt` `accountIDs`——不接受「nil 省略键」（与 `SimCondParams` 的省略规则相反，因为这里编的是入参而非实体）。
+
+**F 组 · 回测**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `backtest_run` | `doc` `params` `bars` `pickHits` `metas` `tzOffsetSeconds` `scannedCount?` | `params`（回显）`stats` `equity` `maxDrawdownRange` `trades` `scannedCount` `hitCount` `warnings` `skipped` | `StrategyBacktestEngine.run`（纯逻辑引擎） |
+| `sim_format` | `fn` ∈ {`amount`/`amount0`/`signed`/`signed0`/`pct`/`shares`/`price`/`time`/`dateTime`/`shortDate`} + `value`/`date` + `tzOffsetSeconds` | `text` | `SimFormat.*` |
+
+> `bars`：`{metaID: [{date,open,high,low,close}…]}`（**升序**，date 为 `YYYYMMDD` 整数）；`pickHits`：`{metaID: [YYYYMMDD…]}`；`metas`：`{metaID: {code,name}}`（缺省用「标 #id」占位）。
+> `params` 缺省对齐 `BacktestParams`：`days=250` / `initialCapital=100000` / `executeNextOpen=true` / `includeEntry=true`（`pool` / `period` 是取数期参数，纯引擎不使用，传入即忽略）。
+> ⚠️ **A0 期 `equity` 走普通 JSON 数组**（约 250 个点，体积可忽略）；§11.1 说的 `callBin` 零拷贝通道留到接入期（届时入参形状不变，只换运输方式）。
+> `scannedCount` 引擎恒为 `len(bars)`；运行器会覆盖成「实际取数过的标的数」——**运行器侧的取数/as-of 命中不属于本 op**（那是 IO，见 §11.7），故提供可选 `scannedCount` 入参承接覆盖值。
+
+### 11.4 数值与文案口径（最易踩的一处）
+
+`sim_rules.py` 必须内置一个 `_sim_format`，**逐条复刻 `SimFormat`**：
+
+- 千分位 `","`、小数点 `"."`、固定小数位（金额/价格/百分比 2 位；`amount0`/`shares` 0 位）；**locale 固定 `en_US_POSIX`**；
+- **舍入 = 银行家舍入（half-even），但对「最短往返十进制表示」生效，不是对二进制精确值**（⚠️ 2026-10-17 用 macOS Foundation 探针在 2.5 万个值上实证，见 §11.9 发现 2）：
+  - `amount(2.675)` → `"2.68"`（最短表示 `"2.675"` → half-even）；而 Python `format(2.675,".2f")` → `"2.67"`（精确二进制 2.67499…）；
+  - `amount(0.005)` → `"0.00"`、`amount(0.015)` → `"0.02"`、`amount(0.025)` → `"0.02"`（都是最短表示上的 half-even结果）；
+  - **正确复刻** = `Decimal(repr(v)).quantize(..., ROUND_HALF_EVEN)`；**既不能用 `"%.2f"`，也不能用 `Decimal(float(v))`**；
+- `signed` / `pct` 是「先 `abs` 再拼前缀」（负号由显式 `v < 0` 判定）；而 **`amount` / `price` 直接保留 Decimal 符号 → `amount(-0.0) == "-0.00"`、`amount(-0.004) == "-0.00"`**（不可做「负零归一」，见 §11.9 发现 3）；
+- 日期文案 `HH:mm:ss` / `MM-dd HH:mm` / `MM-dd` 用**注入的 `tzOffsetSeconds`**。
+
+> ⚠️ **必须专门加 `.5` 边界用例**：`0.005` / `0.015` / `0.025` / `1.005` / `2.675` / `0.125` / `-0.0` / `-0.004`（二进制不可精确表示，且 2.675 与 0.005 两类的偏差方向相反）。
+
+### 11.5 时间与时区
+
+- 所有时间相关 op 显式接收 **`now`**（ISO8601）与 **`tzOffsetSeconds`**；
+- `Calendar.current.startOfDay(for:)` → 用 `tzOffsetSeconds` 求当日 00:00；
+- ⚠️ 现有代码存在**「`sim.json` 以 UTC 存储 + `Calendar.current` 按本地日历比较」**的既有行为（`expiredReason`、`validateCreate` 的 `fireDate <= now`）。**契约测试必须锁现状，不允许「顺手修正」**——否则跨零点/跨时区行为会静默改变。
+
+### 11.6 返回模型（枚举编码）
+
+```
+cond_evaluate → {"decision":"fire",     "qty":300, "at":1500.0}
+              | {"decision":"hold",     "runtime":{...}}
+              | {"decision":"abort",    "reason":"触发价缺失"}
+              | {"decision":"complete", "reason":"价格已越出网格区间"}
+
+rejection     → {"code":"invalidQty", "lot":100,
+                 "message":"委托数量需为 100 股的整数倍且大于 0"}
+              | null
+```
+
+- `code` = `SimCondRejection` / `SimOrderRejection` 的 case 名（**关联值展平成同级键**，如 `lot` / `lower` / `upper` / `available` / `affordableQty`）；
+- **同时回传 `message`**：文案是 UI 可见面，属契约的一部分，必须逐字对拍（不接受「语义等价」）。
+
+### 11.7 Swift 侧接入形态（过渡期双跑）
+
+新增门面 `Kline/Python/SimRulesBridge.swift`：
+
+- 提供 `evaluate(order:snapshot:completion:)` / `validateCreate(...)` / `tradeValidate(...)` / `drafts(...)` / `backtest(...)`，**语义与现有静态方法一一对应**；
+- **运行开关** `SimRulesBridge.mode: .swift | .engine`（默认 `.swift`，可被单测与 Debug 页切换）；
+- **降级**：引擎未就绪 → 返回 `nil`，调用方按 §9.10 走显式降级（不静默用 Swift 兜底，避免双语义）；
+- 过渡期保留 `SimCondRule` / `SimTradingRules` / `StrategyCondGenerator` / `Backtest` 的 Swift 实现，仅用于**同进程差分测试**（`mode` 双跑 + 逐字段比较），阶段 A 闸门通过后整体删除。
+
+### 11.8 落地顺序
+
+| 步 | 内容 | 出口条件 |
+| --- | --- | --- |
+| **A0** | `sim_rules.py` 骨架 + op 分发 + `_sim_format` + PC 侧纯 Python 单测 | PC 侧跑通全部 fixture（不依赖引擎） |
+| **A1** | Swift **dump 模式**导出 golden（§12） | fixture 生成并可评审 |
+| **A2** | Python 对拍 golden **零差异** | PC 侧零差异 |
+| **A3** | 引擎内跑通 `PyBridgeSimRulesTests` | 引擎对拍零差异 |
+| **A4** | 加 `SimRulesBridge` + 差分双跑 | Swift 与引擎在同用例集上逐字段相等 |
+| **A5** | 生产路径切到引擎 + 信任链（哈希 / 版本锁 / §9.10 降级） | 套件 8 全绿 |
+| **A6** | 删 Swift 实现 + fixture 冻结 | §10.10 六条闸门全过 |
+
+### 11.9 A0 落地进度（2026-10-17）
+
+**已产出（可跑，PC 侧不依赖引擎 / Swift）：**
+
+| 产物 | 路径 | 说明 |
+| --- | --- | --- |
+| 引擎脚本 | `Kline/PyScripts/sim_rules.py` | 骨架 + op 分发 + `_sim_format` + A/B/C/D/E 组 op |
+| PC 侧验证 | `scripts/verify_sim_rules.py` | 内置 245 条用例（期望值由 Swift 现状手工推得）+ `--fixture` 差分模式 |
+
+```bash
+python3 scripts/verify_sim_rules.py                                  # A0 内置用例（当前 245/245 全绿）
+python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json   # A1 后：逐位精确差分
+```
+
+**op 覆盖**：`sim_format`（9 数值 fn + 3 日期 fn）+ A 组（`cond_evaluate` / `cond_validate_create` / `cond_grid_level_count` / `cond_text`）+ B 组（`cond_expired_reason` / `cond_fire_direction` / `cond_execution_price` / `cond_advance` / `cond_repeatable_finished` / `cond_alert_message`）+ C 组（`trade_validate` / `trade_calc`）+ D 组（`strategy_drafts` / `strategy_entry_draft`）+ E 组（`strategy_parse` / `strategy_rule_line` / `strategy_catalog` / `strategy_validate` / `strategy_preview` / `trade_parse` / `trade_serialize` / `trade_override`）+ F 组（`backtest_run`）。
+**§11.3 的全部 op 已无占位**：未知 op 与形状非法的入参一律返回 `{"ok": false, "error": …}`——**不是静默空结果**。
+自检用例：**255 条，全绿**（含 D/E 组 60 余条、F 组 10 条）。
+
+**A0 期落定的口径决策（后续所有 op 沿用）：**
+
+1. **half-even 复刻（含「对什么舍入」这一层）**：`NumberFormatter` 默认 `.halfEven`，但**它舍入的对象是「最短往返十进制表示」，不是二进制精确值**。正确写法 = `Decimal(repr(v)).quantize(..., ROUND_HALF_EVEN)` + 手工千分位分组。**既不能用 `"%.2f"`，也不能用 `Decimal(float(v))`**（见发现 2）。
+2. **`amount` / `price` 保留负号**：`amount(-0.0) == "-0.00"`、`amount(-0.004) == "-0.00"`（NumberFormatter 的行为）。**不可做「负零归一」**（见发现 3）。`signed*` / `pct` 的符号另由显式 `v < 0` 判定，故 `signed(-0.0) == "+0.00"`。
+3. **网格倍数取整用「远离零」**：Swift `Int(round(factor))` 是 half away from zero，而 Python 内建 `round` 是 half-even → 脚本内自备 `_swift_round`。**这是静默错一位的经典坑。**
+4. **周末判定**：`isoweekday() > 5`（等价 Swift `weekday` 2…6 = 周一至周五）。
+5. **时区**：只用 `tzOffsetSeconds`（整型秒），本地日比较 = `dt.astimezone(tz).date()`（等价 `Calendar.current.startOfDay` 的比较语义，避开 IANA / tzdata 依赖）。
+
+**A0 的两项实测发现（用 macOS Foundation 原样探针，而非猜测）：**
+
+> 方法：把仓库里的 `SimFormat.swift` **原样**搬进一个 `swift` 脚本（数值 + 日期），对一个 25,242 项语料（`n/1000`、`n/100`、随机 4 位小数、大整数、显式 `.5` 边界）输出结果，再与 `sim_rules.py` 逐值对拍。**结论：0 不一致**（172 条 A0 用例中的 `format.amount_shortest_roundtrip_*` / `format.amount_neg_*` 即这次发现固化的回归点）。
+>
+> **可复现配方**（本机有 Xcode 时，约 5 分钟；不需要 iOS 工程）：
+> ```swift
+> // probe.swift：把 SimFormat 的 makeNumberFormatter / text 原样复制过来
+> let f = makeNumberFormatter(minFraction: 2, maxFraction: 2)   // 与仓库逐字一致
+> print(f.string(from: NSNumber(value: 2.675))!)                // 关键：看它给 "2.68" 还是 "2.67"
+> // 日期同理：DateFormatter + timeZone = TimeZone(secondsFromGMT: tz)
+> ```
+> ```bash
+> swift probe.swift   # 与 python3 -c 'from decimal import Decimal; ...' 逐值比对
+> ```
+> **要点：语料要成规模（≥1 万）**——`0.125`（碰巧一致）与 `2.675` / `0.005`（两个方向相反）会互相掩盖，小样本必然误判。
+> 这套探针在阶段 B/C 继续移植任何 `NumberFormatter` / `DateFormatter` 依赖时可直接复用（`StrategyCondGenerator` 与回测引擎都经 `SimFormat` 出文案）。
+
+- **发现 2：舍入基准是最短往返十进制，不是二进制精确值。** `amount(2.675)` → Swift `"2.68"`（最短表示 `"2.675"` 上的 half-even，7 为奇 → 进位），而 `Decimal(float(2.675))`（精确二进制 2.67499…）→ `"2.67"`；反向例子 `amount(0.005)` → Swift `"0.00"` 而精确二进制（0.005000…0104）→ `"0.01"`。**两个方向的偏差都存在，所以「碰巧一致」的少数用例会误导**——必须用大语料对拍。
+- **发现 3：`amount` / `price` 保留负零与「舍入到零的负数」的负号。** `amount(-0.0)` → `"-0.00"`、`amount(-0.004)` → `"-0.00"`。A0 初版做了「负零归一」，**探针直接证伪**（修正前 162 项里 4 项不一致）。
+
+**契约发现 1（锁现状，不得顺手修正）**：`SimCondRule.evaluate` 开头 `guard let price = snapshot.last, price > 0 else { return .hold(order.runtime) }` 先于 `switch`。因此 `case .time` 里 `snapshot.last ?? snapshot.prevClose` 的**「无最新价退化用昨收」分支实际不可达**（能让它走到 `at` 的前提是 `last > 0`，此时 `??` 必然取 `last`）。
+→ 契约测试按「`last` 缺失 → `hold`」**锁死现状**，用例 `eval.time_no_quote_holds` 已标注原因。这是「契约锁现状」原则的实例：**旧的意图分支已死，但改动它会改变外部可观察行为，故冻结在 A 阶段不动**。
+
+**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **转入 A1**（Swift dump 导出 golden，§12），跑通 §10 八套件与 6 条「允许删 Swift」闸门。
+
+### 11.10 D/E 组落地进度与实测发现（2026-10-17）
+
+**已完成**：D 组（`strategy_drafts` / `strategy_entry_draft`）+ E 组（`strategy_parse` / `strategy_rule_line` / `strategy_catalog` / `strategy_validate` / `strategy_preview` / `trade_parse` / `trade_serialize` / `trade_override`）。自检用例从 172 条扩到 **245 条，全绿**。D/E 组引入了一类前几组没有的依赖：**把 Swift 源码里到处出现的 `Double(s)` / `Int(s)` / `UUID(uuidString:)` / `DateFormatter` / `Calendar.date(from:)` 也当契约复刻**（策略 DSL 是用户手打文本，全是字符串入口）。这些 API 的宽松/严格边界与 Python 内建函数**系统性不同**，故逐项用 macOS Foundation 探针实测后落进 `sim_rules.py`（探针脚本可复现，配方见 §11.9 发现 2 上方注明的方法）。
+
+| 被测 API | 实测行为（关键差异） | 复刻方式 |
+| --- | --- | --- |
+| `Double(s)` | **拒绝首尾空白**（含 `\t`/`\n`）与 `_`；**接受十六进制**（`"0x10"`→16.0、`"0x1p3"`→8.0）；接受 `.5` / `5.` / `+.5` / `1e3` / `1E+3`；接受 `nan`/`inf`/`infinity`（大小写不限）；**溢出 `1e400`→inf 而非 nil**；全角数字 `１０`、阿拉伯数字 `٣` 一律拒绝 | `_swift_double`：`strip()` 自检 + 两个正则（十进制 / 十六进制，字符类写 `[0-9]` 而非 `\d`——**Python 的 `\d` 会吃 Unicode 数字**） |
+| `Int(s)` | 无空白 / 无 `_` / **无十六进制** / 无小数 / 无指数；容忍前导 0（`"007"`→7）；64 位溢出 → nil | `_swift_int`：`[+-]?[0-9]+\Z` + 2⁶³ 区间判定 |
+| `UUID(uuidString:)` | 严格 8-4-4-4-12 十六进制；**不接受紧凑 32 位形式、不接受花括号、不接受首尾空白**；大小写均收 | `_uuid`：正则限定 + 输出统一大写（对齐 `uuidString`） |
+| `DateFormatter("yyyy-MM-dd")`（`en_US_POSIX`，`isLenient=false`） | 接受首尾空白、月日不补零（`"2026-1-5"`）、**分隔符容忍 `-` / `/` / `.`**（`"2026/10/01"`、`"2026.10.01"`）、分隔符两侧可有空格（`"2026 - 10 - 01"`）、**日可 3 位**（`"2026-10-001"`）、**年按原样用**（`"26-10-01"`→年 26，不补世纪）；**拒绝**非法月/日（`2026-13-01` / `2026-02-30` / `2026-10-32` / 月 0 / 日 0）、拒绝 `"20261001"`、拒绝带时间的 `"2026-10-01T00:00"` | `_date_from_text`：`^\s*(年)\s*[-/.]\s*(月)\s*[-/.]\s*(日)\s*$` + `datetime.date` 严格校验 |
+| `Calendar.date(from:)`（`.gregorian` + 本地时区） | **越界一律归一化、绝不返回 nil**：月 13→次年 1 月、月 0→上年 12 月、日 32→下月 1 日、日 0→上月最后一天、时 25→次日 01:00、分 75→+1h15m（年 2026/月 2/日 30 → `2026-03-02`） | `_fire_date`：先「年 + 总月数」求 `(year2, month2, 1)`，再把 `day-1` / 小时 / 分钟当 `timedelta` 相加 |
+
+**D/E 组的口径决策（沿用 §11.9 的 5 条之外新增）：**
+
+6. **`String(format:)` 的 nil locale ≡ POSIX ≡ Python `%`**：实测 `String(format:"%.2f", locale: Locale(identifier:"de_DE"), v)` 才出 `1.234,50`，而**不传 locale 的 `String(format:"%.2f", v)` 永远出 `1234.50`**（`Locale.current` 是 `zh_CN` 时也一样），且不做千分位分组。故 `StrategyPreview` 的 `"%.2f"` / `"%.0f"` / `"%g"` 可直接用 Python `%` 复刻——13,815 值语料 **0 不一致**。
+7. **`String(Double)` ≡ Python `repr(float)`**：即 `Double.description` 的最短往返表示与 Python 的切换指数阈值（`>= 1e16` / `< 1e-4`）完全一致——13,815 值语料 **0 不一致**。故 `amountText` 的非整数分支直接写 `repr(v)`。
+8. **`StrategyPreview` 的减号是 U+2212（`−`），不是 ASCII `-`**（Swift 源码字节 `e2 88 92`）。脚本里显式写 `_MINUS = "\u2212"`，避免「看起来一样」的静默错位。
+9. **`Int()` 向零截断**用于 `lotQty = amount / lastPrice / 100`：正数即 `floor`；不足 1 手补足 1 手（`max(lots,1)*100`）；无法折算（缺价 / 非正数）→ 0。
+10. **`ORD*` 覆盖 > `TRADE` 段**；`qty` 优先于 `amount`；`grid` / `batch` 的数量恒取规则自身参数（`gridQtyPerLevel` / `batchTotalQty`），**不受 `ORD*` 与 `TRADE` 影响**——这是 `StrategyCondGenerator` 的既有分支顺序，逐条对齐。
+
+**已知不复刻项（登记在案，A1 dump 时若命中则以 dump 为准）：**
+
+- `Calendar` 的年 < 1 分支（Swift 得到 era/LMT 混合怪值，如 `year=0` → `0001-01-01T01:24:17Z`）→ 脚本返回 `None`（该规则进 `skips`）；
+- **1901 年以前** Asia/Shanghai 的历史 LMT 偏移（`+08:05:43`）：脚本只支持注入的固定偏移（A 股策略日期 ≥ 2000，不受影响）；
+- `DateFormatter` 的完整 ICU 语法（只复刻上表已探针到的子集）；
+- `String(oneLine.prefix(24))` 的 **grapheme cluster** 语义（Python 按码点计数）——仅影响含 emoji / 组合字符的选股条件摘要截断；
+- 归一化后年 > 9999（Python `datetime` 上限）→ `None`。
+
+**踩坑记录（值得复用）：** D/E 组首次跑自检 7 条失败，其中 **5 条是我的期望值写错、实现是对的**（`StrategyRuleParser` 遇单个坏参数只跳过该 token 但仍产出规则本体；`CHANGE_PCT` 预览用的是 `PCT` 原文而非 `drafts` 里的取负值；`String(prefix(24))` 的截断点），另 **1 条**是校验脚本 `_cmp` 不递归列表导致列表内浮点走了精确比对（已修为逐元素递归）。**这正是「期望值由 Swift 现状产生、不能手推」的证据**——§12 的 dump 模式因此不是可选项。
+
+### 11.11 F 组落地进度（`backtest_run`，2026-10-17）
+
+**已完成**：`backtest_run` 移植 `StrategyBacktestEngine.run`（946 行里的**纯逻辑部分**，即 `nonisolated enum StrategyBacktestEngine` 全体；`StrategyBacktestRunner` 属 IO/运行时，不下沉）。用例 245 → **255 条，全绿**。
+
+**下沉范围的切分（照 §9.9「计算下沉、数据留投影」的判据）**：
+
+| 部分 | 归属 | 理由 |
+| --- | --- | --- |
+| `run`（窗口/交易日历/账本/逐日推进/指标/回撤区间） | ✅ 引擎 | 纯函数，无 IO，无随机，遍历全排序 |
+| `futureFunctionWarnings` / `containsNegativeRef` | ✅ 引擎 | 纯文本扫描 |
+| `gridLevelCount` / `gridQty` / `batchQty` / `fillPrice` / `daysBetween` | ✅ 引擎 | 纯计算（`gridLevelCount` 与 A 组 op 同口径，脚本内单点实现） |
+| `StrategyBacktestRunner.start`（取数 / as-of 命中 / 进度推送 / 取消 token） | ❌ Swift | 全是 `DatabaseManager` + `MarketRowCache` + 主线程 `@Published` IO |
+| `preparedHits` 的生成（`PyTDXFormulaBridge.evaluateText` 一次全量求值取 as-of） | ❌ 保持现状 | 引擎侧已有公式求值链路（模块 13），不再搬一次 |
+
+**F 组的口径决策（沿用 §11.9 的 5 条 + §11.10 的 6–10 条之外新增）：**
+
+11. **规则 → 参数映射不重新实现**：回测里 `planRules` 每个 bar 现场重算，直接**复用 D 组的 `_build_draft`**（Swift 里同样是 `StrategyCondGenerator.drafts`）。这是「成对下沉」的收益：D 组一处改口径，F 组自动跟随。脚本内为此外层化了 `_build_draft` 的返回值（额外回传**内部参数 dict**，因为回测需要 `fireDate` 的原始 `datetime` 与 `gridMultiplier` 的数值，而不是 JSON 投影）。
+12. **`executeNextOpen` 的两种成交路径都要有**：`true`（默认）→ 入 pending 队列，**信号日当日不成交**，顺延到该标的下一根 bar 的开盘（停牌自然跳过）；`false` → 信号当日按收盘价直接成交。**T+1 释放必须早于当日成交执行**（否则次日开盘的卖出单会因 `availableQty` 仍为 0 被误拒并永久丢弃）——这个次序是既有代码用注释标明的坑，照抄次序，不改。
+13. **网格「先下后上」、分批「单批一步」**：网格同一 bar 内可走多档，但**先跑下移买入循环、再跑上移卖出循环**；分批每 bar 最多推进一批，且**只有成交才推进 `batchDone`**。
+14. **`gridStopped` 是单向闩**：价格越出 `[gridLower, gridUpper]` 即永久停止该规则并记一条 warning（`%.2f` 文案），不重置。
+15. **收尾不强制平仓**：未平仓按最后交易日收盘价计入净值，并追加「期末仍有 N 只标的未平仓…」；该 warning 的位置在**固定口径说明之前**（§11.9 的 warning 顺序也是契约的一部分）。
+16. **指标口径**：`annualized = pow(1 + totalReturn, 252 / max(交易日数, 1)) - 1`（`base <= 0` 时为 `-1`）；`profitFactor = Σ盈利 / |Σ亏损|`（无亏损记 0）；`winRate = 盈利平仓笔数 / 平仓笔数`（无平仓记 0）；`maxDrawdown` 用「峰值逐步抬高」的单趟扫描，`maxDrawdownRange` 是**下标闭区间**（画图高亮用）。**净值里 `lastClose` 缺失时退化用成本价**（当日无 bar 的持仓）。
+
+**F 组的一个真实缺陷（测试抓到的）**：跳空 warning 的文案里含**字面百分号**（`> 11%`），首次用 `"…11%，…" % count` 触发 Python 的格式化解析错误 → 报 `not enough arguments for format string`。改为 `%%` 后通过。**这类「文案里带 `%` 又要插值」的坑在中文文案较多的项目里会反复出现**，后续新增 warning/文案一律先过一遍 `%` 转义。
+
+**F 组的测试口径**：A0 期为**手工推导**（入场 + 止盈止损成交明细 / 网格上下各一档 / 分批首批 / 空结果 / 不接入场 / 同 bar 成交 / 非法入参 9 条），其中公式型指标（`annualized` / `maxDrawdown`）在测试内**按源码写明的公式独立表达**而不是抄回输出。⚠️ **F 组的最终权威仍是 A1 的 Swift dump**（§12 的 `backtest_golden.json`）：回测是最容易「看着数值像对的就放过」的一环，净值曲线必须逐点对拍。
+
+---
+
+## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
+
+### 12.1 三个 fixture
+
+| 文件 | 内容 | golden 来源 |
+| --- | --- | --- |
+| `KlineTests/Fixtures/sim_rules.json` | `evaluate` / `validateCreate` / `tradingRules` / `sweep` / `mapping` / `simFormat` 六段 | **Swift 现状 dump 生成**（A1），A6 后冻结 |
+| `KlineTests/Fixtures/strategy_dsl.json` | 解析 / 序列化 / catalog / 校验 / 预览 | **手写为规格**（文本口径稳定） |
+| `KlineTests/Fixtures/backtest_golden.json` | 净值曲线 + 明细 + 警告 | **Swift 现状 dump 生成** |
+
+### 12.2 用例作者规范（输入手工、输出来自 dump）
+
+`sim_rules.json` 顶层：
+
+```json
+{
+  "schema": 1,
+  "generatedBy": "SimRulesContractTests dump (Swift 现状)",
+  "generatedAt": "2026-10-17",
+  "tzOffsetSeconds": 28800,
+  "now": "2026-10-17T02:30:00Z",
+  "evaluate": [
+    {
+      "caseName": "price_up_hit",
+      "input": {
+        "kind": "price",
+        "params": {"compareUp": true, "triggerPrice": 1500.0},
+        "directive": {"direction": "sell", "priceType": "market", "offsetTicks": 0, "qty": 300},
+        "runtime": {},
+        "snapshot": {"last": 1501.0, "prevClose": 1480.0}
+      },
+      "expected": { "decision": "fire", "qty": 300, "at": 1500.0 }
+    }
+  ],
+  "validateCreate": [ { "caseName": "…", "input": {…}, "expected": null } ],
+  "tradingRules": [ { "caseName": "…", "input": {…}, "expected": {…} } ],
+  "sweep": [ … ],
+  "mapping": [ … ],
+  "simFormat": [ { "caseName": "price_grouping", "input": {"fn":"price","value":1500.0}, "expected": {"text":"1,500.00"} } ]
+}
+```
+
+规则：
+- **`input` 手写**（评审用例是否覆盖边界）；**`expected` 只能由 dump 写**，禁止手工编辑（避免「按读数反推实现」）；
+- 每段一个 `caseName`，失败信息直接回显它；
+- 时间类用例固定 `tzOffsetSeconds` + 顶层 `now`；
+- `.5` 边界、仅提醒、判序遮蔽、grid 倍数、batch 余数这些**必须单独占一条 case**。
+
+### 12.3 dump 模式
+
+在 `SimRulesContractTests` 内加一个**环境变量门**：
+
+```swift
+// KLINE_DUMP_SIM_RULES=1 时：不 assert，改为把每个 case 的输入跑一遍 Swift 现状，
+// 生成 expected 覆盖写回 fixture；否则走正常断言。
+let dump = ProcessInfo.processInfo.environment["KLINE_DUMP_SIM_RULES"] == "1"
+```
+
+**生成命令**：
+
+```bash
+# 首选：macOS 目标（双路径打包已有 macOS 内嵌构建；非沙盒，可直接写仓库路径）
+KLINE_DUMP_SIM_RULES=1 \
+KLINE_DUMP_OUT="$PWD/KlineTests/Fixtures/sim_rules.json" \
+xcodebuild -scheme Kline-macOS test \
+  -only-testing:KlineTests/SimRulesContractTests
+```
+
+**沙盒兜底（只有 iOS 模拟器目标时）**：模拟器进程受沙盒限制，**写不到仓库路径**。此时 dump 改为把结果打到 stdout（哨兵 + base64），由脚本落盘：
+
+```bash
+xcodebuild -scheme Kline test -only-testing:KlineTests/SimRulesContractTests 2>&1 \
+  | python3 scripts/extract_sim_rules_golden.py   # 抓 KLINE_SIM_RULES_GOLDEN_B64:<…> 并写 fixture
+```
+
+（`extract_sim_rules_golden.py` 约 30 行：正则抓哨兵行 → base64 解码 → 写 `KlineTests/Fixtures/sim_rules.json`。）
+
+### 12.4 差分与评审流程
+
+1. **A1** 跑 dump → `git diff` fixture：**逐条人工评审 `expected` 是否符合语义**（这一步是在「把现状固化成基准」，必须有人看，不能盲信）；
+2. **A2/A3** 跑 `SimRulesContractTests` + `PyBridgeSimRulesTests`：任一差异 → 修 Python（不修 fixture）；
+3. **A4** 差分双跑：`SimRulesBridge.mode` 切 `.swift` 与 `.engine` 各跑一遍全部用例，逐字段比较；
+4. **A6** fixture **冻结**并加文件头注释「此文件为口径基准，改动必须走 PR 评审」。
+
+### 12.5 更新时机（与 `contract_golden.py` 同规则）
+
+以下任一口径改动后，**必须重跑 dump 并连同 Swift/Python 两侧断言一起评审提交**：
+
+- `SimCondRule` / `SimTradingRules` / `StrategyCondGenerator` / `StrategyBacktestEngine` 语义变化；
+- `SimFormat` 格式化规则（尤其舍入 / 小数位）。**改前先跑 §11.9 的 macOS Foundation 探针**（本机 5 分钟、不依赖 iOS 工程），确认 Python 复刻同步——这是唯一能在 dump 之前发现「舍入基准」这类偏差的手段；
+- `StrategyRuleCatalog` 参数键集 / `StrategyTradeParser` 保留键；
+- `SimCondParams` 字段增删（schema 变更）。
+
+**CI 钩子（建议）**：CI 跑 dump 到临时文件并与仓库 fixture 对比，**有差异即失败**——这样「改了 Swift 语义但忘了更新 fixture」会被立刻发现（等价于 `contract_golden.py` 的漂移检测）。
+
+### 12.6 A1 之前的临时基准：A0 内嵌用例（2026-10-17）
+
+A1 的 Swift dump 尚未产出，为避免 A0 期「写完脚本无回归网」，**先由 `scripts/verify_sim_rules.py` 内嵌一份 172 条用例**（期望值**由 Swift 现状逐条手工推得**，非 dump）。
+
+- **定位**：临时基准，**不能替代** §12.2 的 dump fixture；A1 落地后它与 fixture **并存**——内嵌用例继续守 A0 已确认的口径（尤其 half-even / `.5` 边界 / `time` 死分支），fixture 负责全量逐位对拍。
+- **比较口径差异**：内嵌用例用 `rel_tol=1e-9`（容忍手写浮点字面量 1 ULP，公式级错误仍暴露）；`--fixture` 模式**逐位精确**（契约权威）。
+- **为何不直接手写 fixture**：`expected` 只能来自 Swift 现状 dump（§12.2 规范），手写会退化成「我用 Python 猜 Swift」，失去对拍意义。内嵌用例的量级刻意压小、只覆盖口径最易错的点。
