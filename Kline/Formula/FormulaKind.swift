@@ -62,10 +62,23 @@ final class FormulaLibraryStore: ObservableObject {
     @Published private(set) var pickers: [FormulaDoc] = []
     @Published private(set) var strategies: [FormulaDoc] = []
 
+    /// 策略库不可用说明（E-2）：引擎不可用时置文案（列表同时置空）——§9.10 fail-closed 显式空态。
+    @Published private(set) var strategyLoadError: String?
+
     private let fileExt = "tdx"
 
+    /// 引擎不可用时策略库的统一文案（§9.10：交易 / 回测 / 条件单 / 预警整体不可用）
+    static let strategyUnavailableText = "Python 引擎不可用，交易策略暂不可用"
+
     private init() {
-        reloadAll()
+        // 选股公式库不涉引擎（无 TRADE 段）→ 同步加载，零行为变化
+        reload(kind: .picker)
+        // 策略库：`.swift`（过渡期默认）→ 同步加载，零行为变化；`.engine` → 异步（TRADE 段走引擎）
+        if SimRulesBridge.mode == .swift {
+            reload(kind: .strategy)
+        } else {
+            Task { await reloadStrategy() }
+        }
     }
 
     // MARK: - 目录
@@ -218,6 +231,93 @@ final class FormulaLibraryStore: ObservableObject {
         reload(kind: .strategy)
     }
 
+    // MARK: - 策略库（引擎感知 · E-2）
+
+    /// 重新加载交易策略库（TRADE 段走引擎）。
+    /// - `.swift` 模式：走同步 `reload`（零行为变化）。
+    /// - `.engine` 模式：逐个 `.tdx` 走 `FormulaKind.parseAsync`；**任一文件因引擎不可用失败 →
+    ///   整体不可用**（列表置空 + `strategyLoadError`，§9.10 fail-closed），返回 `false`。
+    @discardableResult
+    @MainActor
+    func reloadStrategy() async -> Bool {
+        guard SimRulesBridge.mode == .engine else {
+            reload(kind: .strategy)
+            return true
+        }
+        let dir = Self.dir(for: .strategy)
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        var result: [FormulaDoc] = []
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+            for f in files.sorted() where f.hasSuffix(".\(fileExt)") {
+                let id = (f as NSString).deletingPathExtension
+                let content = (try? String(contentsOfFile: dir + "/" + f, encoding: .utf8)) ?? ""
+                do {
+                    if let parsed = try await Self.parseAsync(content: content, id: id,
+                                                             kind: .strategy) {
+                        result.append(parsed)
+                    }
+                } catch {
+                    DebugLogger.shared.log("[FormulaLibraryStore] 策略库加载失败：\(error)")
+                    strategies = []
+                    strategyLoadError = Self.strategyUnavailableText
+                    return false
+                }
+            }
+        }
+        // 值未变不写（与同步 `reload` 同口径）
+        if strategies != result { strategies = result }
+        strategyLoadError = nil
+        return true
+    }
+
+    /// 保存交易策略（TRADE 段走引擎）。`.swift` 模式走同步 `save`（零行为变化）。
+    /// 引擎不可用 → 不落盘、返回 nil 并置 `strategyLoadError`（fail-closed，**不静默用 Swift 序列化**）。
+    @discardableResult
+    @MainActor
+    func saveStrategy(_ doc: FormulaDoc) async -> FormulaDoc? {
+        guard doc.kind == .strategy else { return save(doc) }
+        guard SimRulesBridge.mode == .engine else { return save(doc) }   // `.swift` 直通
+        var d = doc
+        if d.id.isEmpty {
+            d.id = nextID(kind: .strategy)
+            if d.name.trimmingCharacters(in: .whitespaces).isEmpty { d.name = d.id }
+        }
+        let file = CustomIndicatorStore.sanitized(d.id)
+        guard !file.isEmpty, let dir = Self.ensureDir(.strategy) else { return nil }
+        d.id = file
+        let text: String
+        do {
+            text = try await Self.serializeAsync(d)
+        } catch {
+            DebugLogger.shared.log("[FormulaLibraryStore] 策略序列化失败：\(error)")
+            strategyLoadError = Self.strategyUnavailableText
+            return nil
+        }
+        do {
+            try text.write(toFile: dir + "/\(file).\(fileExt)", atomically: true, encoding: .utf8)
+        } catch {
+            return nil
+        }
+        await reloadStrategy()
+        return self.doc(kind: .strategy, id: d.id)
+    }
+
+    /// 删除交易策略。`.swift` 模式走同步 `delete`（零行为变化）。
+    @MainActor
+    func deleteStrategy(id: String) async {
+        guard SimRulesBridge.mode == .engine else {
+            delete(kind: .strategy, id: id)
+            return
+        }
+        let file = CustomIndicatorStore.sanitized(id)
+        guard !file.isEmpty, !Self.dir(for: .strategy).isEmpty else { return }
+        let path = Self.dir(for: .strategy) + "/\(file).\(fileExt)"
+        if FileManager.default.fileExists(atPath: path) {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        await reloadStrategy()
+    }
+
     /// 目录内最大序号 +1：picker → "PICK_<n>"，strategy → "STR_<n>"
     func nextID(kind: FormulaKind) -> String {
         let prefix: String
@@ -283,6 +383,24 @@ final class FormulaLibraryStore: ObservableObject {
     // MARK: - 序列化 / 解析
 
     static func serialize(_ doc: FormulaDoc) -> String {
+        serialize(doc, tradeText: doc.trade.isEmpty ? nil : StrategyTradeParser.serialize(doc.trade))
+    }
+
+    /// 同 `serialize`，但 TRADE 段走引擎（`.engine` 模式的生产写盘路径，E-2）。
+    /// 结构切分（KIND= / NAME= / PICKREF= / PICK: / RULES:）仍留在 GUI 侧（§11.25）。
+    /// ⚠️ 引擎不可用 → 抛错（调用方 fail-closed，见 `FormulaLibraryStore.saveStrategy`）。
+    static func serializeAsync(_ doc: FormulaDoc) async throws -> String {
+        var tradeText: String?
+        if doc.kind == .strategy, !doc.trade.isEmpty {
+            tradeText = try await SimRulesBridge.tradeSerialize(doc.trade)
+        } else if !doc.trade.isEmpty {
+            tradeText = StrategyTradeParser.serialize(doc.trade)
+        }
+        return serialize(doc, tradeText: tradeText)
+    }
+
+    /// 序列化正文（`tradeText` 已由调用方按后端取好；nil = 不输出 TRADE: 段）
+    private static func serialize(_ doc: FormulaDoc, tradeText: String?) -> String {
         var out = "KIND=\(doc.kind.rawValue)\n"
         out += "NAME=\(doc.name)\n"
         if doc.kind == .strategy {
@@ -291,8 +409,8 @@ final class FormulaLibraryStore: ObservableObject {
             if let ref = doc.pickRef, !ref.isEmpty {
                 out += "PICKREF=\(ref)\n"
             }
-            if !doc.trade.isEmpty {
-                out += "TRADE:\n" + StrategyTradeParser.serialize(doc.trade) + "\n"
+            if let tradeText {
+                out += "TRADE:\n" + tradeText + "\n"
             }
             if !doc.pickBody.isEmpty {
                 out += "PICK:\n\(doc.pickBody)\n"
@@ -304,8 +422,10 @@ final class FormulaLibraryStore: ObservableObject {
         return out
     }
 
-    /// 解析 .tdx 内容；KIND= 缺失、或与 kind 参数不一致时返回 nil（未识别的类型一律跳过）
-    static func parse(content: String, id: String, kind: FormulaKind) -> FormulaDoc? {
+    /// 段落切分（纯文件格式，GUI 侧职责）：KIND= 缺失、或与 kind 参数不一致时返回 nil。
+    /// 返回的 `doc` **不含** TRADE 段取值（由调用方按后端补：`parse` 走 Swift / `parseAsync` 走引擎）。
+    private static func structure(content: String, id: String, kind: FormulaKind)
+        -> (doc: FormulaDoc, tradeLines: [String])? {
         var parsedKind: FormulaKind? = nil
         var name: String? = nil
         var pickRef: String? = nil
@@ -389,9 +509,28 @@ final class FormulaLibraryStore: ObservableObject {
         if kind == .strategy {
             doc.pickRef = pickRef
             doc.rules = ruleLines.joined(separator: "\n")
-            // TRADE 段缺失（旧文件）→ 保持默认空值；段内解析错误不阻断文件加载，交给校验层报出
-            doc.trade = StrategyTradeParser.parse(lines: tradeLines).spec
         }
-        return doc
+        return (doc: doc, tradeLines: tradeLines)
+    }
+
+    /// 解析 .tdx 内容（`.swift` 直通：TRADE 段走 `StrategyTradeParser`，零行为变化）
+    static func parse(content: String, id: String, kind: FormulaKind) -> FormulaDoc? {
+        guard var r = structure(content: content, id: id, kind: kind) else { return nil }
+        if kind == .strategy {
+            // TRADE 段缺失（旧文件）→ 保持默认空值；段内解析错误不阻断文件加载，交给校验层报出
+            r.doc.trade = StrategyTradeParser.parse(lines: r.tradeLines).spec
+        }
+        return r.doc
+    }
+
+    /// 同 `parse`，但 TRADE 段走引擎（`.engine` 模式的生产加载路径，E-2）。
+    /// ⚠️ 引擎不可用 / 出参形状非法 → 抛错（调用方 fail-closed：策略库整体不可用，见
+    /// `FormulaLibraryStore.reloadStrategy`）。
+    static func parseAsync(content: String, id: String, kind: FormulaKind) async throws -> FormulaDoc? {
+        guard var r = structure(content: content, id: id, kind: kind) else { return nil }
+        if kind == .strategy {
+            r.doc.trade = try await SimRulesBridge.tradeParse(lines: r.tradeLines).spec
+        }
+        return r.doc
     }
 }

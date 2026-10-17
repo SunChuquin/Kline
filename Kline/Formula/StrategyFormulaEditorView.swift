@@ -1174,20 +1174,22 @@ struct StrategyFormulaEditorView: View {
                 DispatchQueue.main.async {
                     pickSyntaxCheckToken += 1
                     pickSyntaxError = err
-                    finishSave()
+                    Task { await finishSave() }
                 }
             }
             return
         }
-        finishSave()
+        Task { await finishSave() }
     }
 
     /// 保存的第二段（issues 已含最新语义校验结果）
-    private func finishSave() {
+    private func finishSave() async {
         // issues 为 nil = 引擎校验结果未就绪 → 不放行（与保存按钮的 disabled 一致）
         guard (issues?.isEmpty == true) else { return }
-        guard let saved = library.save(doc) else {
-            saveError = "保存失败，请检查公式内容"
+        // E-2：`.swift` 模式内部走同步 `save`（零行为变化）；`.engine` 模式 TRADE 段走引擎
+        // （引擎不可用 → 返回 nil 且不落盘，fail-closed）
+        guard let saved = await library.saveStrategy(doc) else {
+            saveError = library.strategyLoadError ?? "保存失败，请检查公式内容"
             return
         }
         onSaved(saved)

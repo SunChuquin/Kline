@@ -1875,7 +1875,7 @@ done
 
 | 步骤 | 内容 | 形态 | 状态 |
 | --- | --- | --- | --- |
-| E-2 | `.tdx` 文件边界的 TRADE 段：`FormulaKind.parse` / `serialize` 拆出 async 变体（结构切分仍留 GUI 侧） | 单次 `await`（文件加载 / 保存各一次） | ⬜ 待实施（**降级口径需先拍板**：引擎不可用时策略库「整体不可用」还是「仅 TRADE 段降级」） |
+| E-2 | `.tdx` 文件边界的 TRADE 段：`parse` / `serialize` 拆出 async 变体（结构切分仍留 GUI 侧） | 单次 `await`（文件加载 / 保存各一次） | ✅ **已交付**（降级口径经用户 2026-10-17 拍板 = **fail-closed：引擎不可用 → 策略库整体不可用**） |
 | E-3 | `StrategyDetailView` 4 处（`pickSummary` / `tradeSummary` / 规则卡 `parse` + `triggerText`） | 页面级 `.task {}` + `@State`（只读展示，无防抖必要） | ✅ **已交付** |
 | E-4 | `StrategyFormulaEditorView` 9 处（init `parse` / 每行 `line` / 每帧 `validate` / 每行 `specs` / 每行 `override` / 预览卡 3 处） | **防抖 + 投影**（闸门 6）：新建 `StrategyProjection`（同 A5-3 / §11.23 形态，`.swift` 直通） | ✅ **已交付** |
 
@@ -1908,6 +1908,30 @@ done
 1. **`.engine` 模式下「刚编辑完就立刻保存」的窗口**：`rows` 改了但该行 `ruleLine` 还没回时，`rulesText` 回退用 `lastReadyRulesText`（旧文本）→ 此时 `save()` 会把**旧 RULES 文本**写盘。`.swift` 模式无此问题（同步序列化）。**A5-5 前（`.engine` 非默认）不暴露**；修法在 E-2：`save()` 改为 `await strategyRuleLine`/`tradeSerialize` 取确定值后再写盘（同 A5-4「动作路径用 async 门面」口径）。
 2. `.task` 启动补算会丢弃 init 时生成的 `RuleRow.id`（仅内部标识，无外部引用，无影响）。
 3. 目录 / 校验 / 预览的首帧在 `.engine` 模式为占位（`.swift` 模式无感知）；A5-5 需把这些占位收敛为统一的「引擎不可用」空态。
+
+**第四步（E-2）细节**：`.tdx` 文件边界的 TRADE 段下沉（降级口径 = **fail-closed**，用户 2026-10-17 拍板）。
+
+> ⚠️ 先纠正一处文档笔误：`parse` / `serialize` **不是** `FormulaKind` 的成员，而是 **`FormulaLibraryStore` 的静态方法**（`FormulaKind.swift` 里两个类型共存）。
+
+| 面 | 设计 |
+| --- | --- |
+| 段落切分留 GUI | 抽出 `private static func structure(content:id:kind:) -> (doc:tradeLines:)`：`KIND=` / `NAME=` / `PICKREF=` / `PICK:` / `RULES:` 的切分属**文件格式层**（§11.3 无对应 op），不进引擎 |
+| 同步（`.swift` 直通） | `parse(content:id:kind:)` / `serialize(_:)` **保持原签名与原实现**（TRADE 段走 `StrategyTradeParser`）→ 零行为变化 |
+| 异步（`.engine`） | `parseAsync(content:id:kind:)` / `serializeAsync(_:)`：TRADE 段改走 `trade_parse` / `trade_serialize`；**引擎不可用 → 抛错**（不静默回退 Swift） |
+| 选股公式不受影响 | `.picker` 无 TRADE 段 → `parseAsync` 内部不调引擎；`importPicker`（被 `FavoritesStore.migrate…` **同步**调用）继续走同步 `save` → **无级联改动** |
+| 策略库 API | 新增 `@MainActor` 的 `reloadStrategy() -> Bool` / `saveStrategy(_:) -> FormulaDoc?` / `deleteStrategy(id:)`：`.swift` 模式**内部直通**旧同步实现（零行为变化）；`.engine` 模式走引擎 |
+| 降级（fail-closed） | 加载任一个 `.tdx` 因引擎不可用失败 → **整体不可用**：`strategies = []` + `@Published strategyLoadError`（文案 `strategyUnavailableText`）；保存失败 → **不落盘**、返回 nil 并置同一文案 |
+| 显式空态 | `FormulaCenterView.strategySection`：`strategyLoadError != nil` → 空态卡显示该文案（优先于「还没有策略公式」） |
+| init 分流 | `FormulaLibraryStore.init`：picker 恒同步加载；strategy 在 `.swift` 同步（零行为变化）、在 `.engine` `Task { await reloadStrategy() }` |
+| 调用点 | `StrategyFormulaEditorView.finishSave()` 改 `async`（`save()` 内改 `Task {}`）；`FormulaCenterView` 策略删除改 `Task { await library.deleteStrategy(id:) }` |
+| 未改（无调用者） | `rename(kind:id:to:)` 仍用同步 `serialize`；当前全仓库无调用者，若将来启用需按 E-2 口径一并切 |
+
+**测试（E-2）**：新增 `KlineTests/StrategyTdxBoundaryTests.swift`（4 用例）：① 全字段 TRADE 段在两种后端序列化**逐字一致**；② 无 TRADE 段的策略 / 选股公式两种后端一致；③ 序列化 → 解析往返，两种后端解析出的 TRADE 段（`tradeSpecJSON` 键排序比对）与段落切分一致；④ `KIND=` 与期望类型不符 → 两种后端都返回 nil（引擎参与不改变「跳过」语义）。**实测 `KlineTests` 全量 91/91 全绿 0 skip**（本步 +4）。
+
+**已知取舍（E-2 诚实登记）**
+
+1. 策略库在 `.engine` 模式下启动会有一次真实异步加载（`.swift` 模式无差异，仍同步）；期间列表为空。
+2. `strategyLoadError` 的「引擎就绪后自动恢复」依赖用户重新进入公式管理页（`StrategyProjection.resetToken` 那套重排队机制**不覆盖**本 store）；A5-5 补空态时一并加「引擎就绪后自动 `reloadStrategy()`」的接线。
 
 ---
 

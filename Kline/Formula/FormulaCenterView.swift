@@ -355,7 +355,10 @@ struct FormulaCenterView: View {
         VStack(alignment: .leading, spacing: 14) {
             infoBanner("交易策略公式：由选股条件 + 交易规则组成，用于策略回测与信号提示")
 
-            if library.strategies.isEmpty {
+            if let loadError = library.strategyLoadError {
+                // E-2 / §9.10 fail-closed：引擎不可用 → 策略库整体不可用（显式空态，不静默降级）
+                emptyCard(loadError, "引擎就绪后自动恢复；交易 / 回测 / 条件单在此期间整体不可用")
+            } else if library.strategies.isEmpty {
                 emptyCard("还没有策略公式", "点击下方「新建策略公式」创建：选股条件（内嵌或引用）+ 交易规则")
             } else {
                 VStack(spacing: 0) {
@@ -411,7 +414,9 @@ struct FormulaCenterView: View {
             }
             .buttonStyle(.plain)
             Button {
-                library.delete(kind: .strategy, id: doc.id)
+                // E-2：策略删除后要重载策略库（`.engine` 模式下 TRADE 段走引擎）
+                let id = doc.id
+                Task { await library.deleteStrategy(id: id) }
             } label: {
                 Text("删除")
                     .font(.system(size: 13))
