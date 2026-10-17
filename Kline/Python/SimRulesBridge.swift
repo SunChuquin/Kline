@@ -148,6 +148,18 @@ enum SimRulesBridge {
             default: text = SimCondRule.conditionSummary(order)
             }
             return ["text": text]
+        case "cond_texts":
+            // 文案族一次性取全（A5-3 投影层用）；与逐字段 cond_text / cond_grid_level_count 逐字一致
+            let order = try decodeOrder(input["order"])
+            let condition = SimCondRule.conditionSummary(order)
+            let core = SimCondRule.directiveCore(order)
+            let validity = SimCondRule.validitySummary(order)
+            return ["text": ["condition": condition,
+                             "directiveCore": core,
+                             "directive": SimCondRule.directiveSummary(order),
+                             "validity": validity,
+                             "preview": SimCondRule.previewSentence(order),
+                             "gridLevelCount": SimCondRule.gridLevelCount(order: order)]]
         // ---- B 组：结算纯推进 ----
         case "cond_expired_reason":
             let order = try decodeOrder(input["order"])
@@ -282,25 +294,16 @@ enum SimRulesBridge {
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from any: Any) throws -> T {
-        let data = try JSONSerialization.data(withJSONObject: any)
-        let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
-        return try dec.decode(type, from: data)
+        try SimRulesCodec.decodeJSON(type, from: any)
     }
 
     private static func jsonObject<T: Encodable>(_ value: T) throws -> [String: Any] {
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        let data = try enc.encode(value)
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw Failure.badOutput
-        }
-        return obj
+        try SimRulesCodec.encodeJSON(value)
     }
 
     private static func decodeOrder(_ any: Any?) throws -> SimCondOrder {
         // 逐项兜底解码（缺失键取默认），空对象也可
-        try decode(SimCondOrder.self, from: any ?? [:] as [String: Any])
+        try SimRulesCodec.condOrderFromJSON(any)
     }
 
     private static func decodeDirective(_ any: Any?) throws -> SimCondDirective {
@@ -309,30 +312,15 @@ enum SimRulesBridge {
     }
 
     private static func snapshot(_ any: Any?) -> SimCondSnapshot {
-        let d = (any as? [String: Any]) ?? [:]
-        return SimCondSnapshot(last: num(d["last"]), prevClose: num(d["prevClose"]),
-                               high: num(d["high"]), low: num(d["low"]),
-                               changePct: num(d["changePct"]), ma: num(d["ma"]))
+        SimRulesCodec.snapshotFromJSON(any)
     }
 
     private static func account(_ any: Any?) -> SimAccount {
-        let d = (any as? [String: Any]) ?? [:]
-        return SimAccount(id: uuid(d["id"]) ?? UUID(),
-                          name: str(d["name"]) ?? "账户", badge: "主", colorHex: "#1E5FA8",
-                          initialCapital: num(d["initialCapital"]) ?? 1_000_000,
-                          cash: num(d["cash"]) ?? 0,
-                          createdAt: Date(timeIntervalSince1970: 0),
-                          isArchived: bool(d["isArchived"]) ?? false)
+        SimRulesCodec.accountFromJSON(any)
     }
 
     private static func position(_ any: Any?) -> SimPosition? {
-        guard let any, let d = any as? [String: Any] else { return nil }
-        return SimPosition(id: UUID(), accountID: uuid(d["accountID"]) ?? UUID(),
-                           metaID: int(d["metaID"]) ?? 0, code: str(d["code"]) ?? "",
-                           name: str(d["name"]) ?? "",
-                           qty: int(d["qty"]) ?? 0, availableQty: int(d["availableQty"]) ?? 0,
-                           costPrice: num(d["costPrice"]) ?? 0,
-                           openedAt: Date(timeIntervalSince1970: 0))
+        SimRulesCodec.positionFromJSON(any)
     }
 
     // MARK: - 出参编码（严格对齐 sim_rules.py，见 §11.6）

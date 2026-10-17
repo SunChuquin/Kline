@@ -21,7 +21,7 @@ PC 侧差分脚本 scripts/verify_sim_rules.py）。
   - 日期一律 ISO8601 字符串（与 SimStore 落盘同口径，UTC 带 Z）。
 
 op 一览（阶段 A 已实现 A/B/C/D/E/F 组 + sim_format）
-  A 组  cond_evaluate / cond_validate_create / cond_grid_level_count / cond_text
+  A 组  cond_evaluate / cond_validate_create / cond_grid_level_count / cond_text / cond_texts
   B 组  cond_expired_reason / cond_fire_direction / cond_execution_price
         / cond_advance / cond_repeatable_finished / cond_alert_message
   C 组  trade_validate / trade_calc
@@ -910,6 +910,25 @@ def _op_cond_text(inp):
     else:
         return _err("cond_text 未知 field: %r" % field)
     return {"text": text}
+
+
+def _op_cond_texts(inp):
+    """文案族一次性取全（A5-3 投影层用）：等价于对同一 order 逐字段调 cond_text +
+    cond_grid_level_count，但只一次往返（避免 GUI 刷新时 N×5 次调用）。
+    各字段与单字段 op **逐字一致**（由 SimRulesDiffTests 的 cond_texts 一致性用例把关）。"""
+    tz = int(inp.get("tzOffsetSeconds", 0) or 0)
+    order = inp.get("order") or {}
+    condition = _condition_summary(order, tz)
+    core = _directive_core(order)
+    validity = _validity_summary(order, tz)
+    return {"text": {
+        "condition": condition,
+        "directiveCore": core,
+        "directive": "触发后 " + core,
+        "validity": validity,
+        "preview": "当 %s %s 时，以 %s，%s" % (order.get("name", ""), condition, core, validity),
+        "gridLevelCount": _grid_level_count(order),
+    }}
 
 
 def _op_cond_expired_reason(inp):
@@ -2924,6 +2943,7 @@ _OPS = {
     "cond_validate_create": _op_cond_validate_create,
     "cond_grid_level_count": _op_cond_grid_level_count,
     "cond_text": _op_cond_text,
+    "cond_texts": _op_cond_texts,
     "cond_expired_reason": _op_cond_expired_reason,
     "cond_fire_direction": _op_cond_fire_direction,
     "cond_execution_price": _op_cond_execution_price,

@@ -94,6 +94,37 @@ nonisolated enum SimRulesCodec {
                                changePct: num(d["changePct"]), ma: num(d["ma"]))
     }
 
+    // MARK: - 通用 Codable 桥（引擎契约形状 == Swift Codable 形状，双向对称）
+
+    static func decodeJSON<T: Decodable>(_ type: T.Type, from any: Any) throws -> T {
+        let data = try JSONSerialization.data(withJSONObject: any)
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        return try dec.decode(type, from: data)
+    }
+
+    static func encodeJSON<T: Encodable>(_ value: T) throws -> [String: Any] {
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        let data = try enc.encode(value)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CodecError.badShape("encodeJSON")
+        }
+        return obj
+    }
+
+    // MARK: - 条件单（双向）
+
+    /// live 条件单 → 引擎 `order` JSON（Codable 对称编码，见 `condOrderFromJSON`）。
+    static func condOrderJSON(_ order: SimCondOrder) -> [String: Any]? {
+        try? encodeJSON(order)
+    }
+
+    /// 引擎 `order` JSON → `SimCondOrder`（缺失键取默认；空对象也可）。
+    static func condOrderFromJSON(_ any: Any?) throws -> SimCondOrder {
+        try decodeJSON(SimCondOrder.self, from: any ?? [:] as [String: Any])
+    }
+
     // MARK: - 策略交易规格（双向）
 
     static func tradeSpecFromJSON(_ any: Any?) -> StrategyTradeSpec {

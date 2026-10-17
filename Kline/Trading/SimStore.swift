@@ -246,6 +246,9 @@ final class SimStore: ObservableObject {
 
     func assignConditionalOrders(_ value: [SimCondOrder]) {
         if conditionalOrders != value { conditionalOrders = value }
+        // A5-3：条件单文案投影刷新（防抖合并；`SimRulesBridge.mode == .swift` 时本层惰性 no-op，
+        // 见 Kline/Python/SimRulesProjection.swift）。所有条件单写入都经此口子 → 一处收口。
+        SimRulesProjection.shared.request(value)
     }
 
     /// 预警记录写入守卫（private：外部只能通过 append / delete / clear 三个口子改）

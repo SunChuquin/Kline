@@ -94,7 +94,8 @@ struct SimCondListView: View {
     var initialSegment: SimCondSegment
 
     @ObservedObject private var store = SimStore.shared
-
+    /// A5-3：条件单文案投影（引擎算好的文案缓存；观察它才能在缓存更新后重绘）
+    @ObservedObject private var projection = SimRulesProjection.shared
     @State private var segment: SimCondSegment
     @State private var toastText: String? = nil
     /// 单一呈现目标：编辑器 / 详情走 fullScreenCover，选择标的走底部条上的 confirmationDialog
@@ -294,7 +295,7 @@ struct SimCondListView: View {
 
             HStack(spacing: 6) {
                 SimCondKindChip(kind: order.kind)
-                Text(SimCondRule.conditionSummary(order))
+                Text(SimRulesProjection.shared.conditionSummary(order))
                     .font(.system(size: 13))
                     .foregroundColor(Color.primary)
                     .lineLimit(2)
@@ -341,11 +342,11 @@ struct SimCondListView: View {
     /// 指令行：普通单据 = 委托摘要；「仅提醒」= 提醒说明
     /// （不下单，故不展示「触发后 市价卖出 xx 股」；本轮不改 SimCondRule 的文案层）
     private func directiveLine(_ order: SimCondOrder) -> String {
-        let validity = SimCondRule.validitySummary(order)
+        let validity = SimRulesProjection.shared.validitySummary(order)
         if order.directive.isAlertOnly {
             return "触发后只记录预警（不下单） · \(validity)"
         }
-        return "\(SimCondRule.directiveSummary(order)) · \(validity)"
+        return "\(SimRulesProjection.shared.directiveSummary(order)) · \(validity)"
     }
 
     private func progressDone(_ order: SimCondOrder) -> Int {
@@ -353,7 +354,7 @@ struct SimCondListView: View {
     }
 
     private func progressTotal(_ order: SimCondOrder) -> Int {
-        order.kind == .grid ? SimCondRule.gridLevelCount(order: order) : (order.params.batchCount ?? 0)
+        order.kind == .grid ? SimRulesProjection.shared.gridLevelCount(order) : (order.params.batchCount ?? 0)
     }
 
     // MARK: 底部常驻条

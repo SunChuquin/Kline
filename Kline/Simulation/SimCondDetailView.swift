@@ -14,6 +14,8 @@ struct SimCondDetailView: View {
     let onClose: () -> Void
 
     @ObservedObject private var store = SimStore.shared
+    /// A5-3：条件单文案投影（同 SimCondListView）
+    @ObservedObject private var projection = SimRulesProjection.shared
 
     @State private var showRelated = false
 
@@ -108,7 +110,7 @@ struct SimCondDetailView: View {
             }
             SimCondStatusTag(status: current.status)
             Spacer(minLength: 8)
-            Text(SimCondRule.conditionSummary(current))
+            Text(SimRulesProjection.shared.conditionSummary(current))
                 .font(.system(size: 12))
                 .foregroundColor(Color(.secondaryLabel))
                 .multilineTextAlignment(.trailing)
@@ -289,7 +291,7 @@ struct SimCondDetailView: View {
         let p = o.params
         var items: [(String, String, Color)] = [
             ("类型", o.kind.title, Color.primary),
-            ("条件", SimCondRule.conditionSummary(o), Color.primary)
+            ("条件", SimRulesProjection.shared.conditionSummary(o), Color.primary)
         ]
         switch o.kind {
         case .price:
@@ -354,7 +356,7 @@ struct SimCondDetailView: View {
 
     private func validityItems(_ o: SimCondOrder) -> [(String, String, Color)] {
         [
-            ("有效期", SimCondRule.validitySummary(o), Color.primary),
+            ("有效期", SimRulesProjection.shared.validitySummary(o), Color.primary),
             ("触发次数", "\(o.triggeredCount)", Color.primary),
             ("创建时间", SimFormat.dateTime(o.createdAt), Color(.secondaryLabel))
         ]
@@ -410,7 +412,7 @@ struct SimCondDetailView: View {
 
     private func progressTotal(_ o: SimCondOrder) -> Int {
         switch o.kind {
-        case .grid:  return SimCondRule.gridLevelCount(order: o)
+        case .grid:  return SimRulesProjection.shared.gridLevelCount(o)
         case .batch: return o.params.batchCount ?? 0
         default:     return 0
         }

@@ -173,4 +173,47 @@ final class SimRulesDiffTests: XCTestCase {
                                                  path: "dispatch.engine").isEmpty,
                       "mode=.engine 结果应等于 enginePayload")
     }
+
+    // MARK: - ③ cond_texts（A5-3 批量文案）一致性
+
+    /// `cond_texts` 是 A5-3 投影层用的批量 op（一次取全 6 字段）。本用例验证：
+    /// ① 两侧后端（Swift 投影 / 引擎）逐字一致；② 批量各字段 == 对应单字段 op（`cond_text` /
+    /// `cond_grid_level_count`）——即批量只是「合并往返」，不引入新语义。
+    func testCondTextsBatchedConsistency() throws {
+        try ensureEngineReady()
+        let fixture = try loadFixture("sim_rules")
+        guard let cases = fixture["text"] as? [[String: Any]] else {
+            XCTFail("sim_rules.json 缺段 text"); return
+        }
+        var checked = 0
+        for c in cases {
+            let input = (c["input"] as? [String: Any]) ?? [:]
+            guard let order = input["order"] as? [String: Any] else { continue }
+            let tz = input["tzOffsetSeconds"] ?? 0
+            let caseName = str(c["caseName"]) ?? "?"
+            let batchedIn: [String: Any] = ["order": order, "tzOffsetSeconds": tz]
+
+            let swift = try SimRulesBridge.swiftPayload(op: "cond_texts", input: batchedIn)
+            let engine = try enginePayload(op: "cond_texts", input: batchedIn)
+            let errs = SimRulesJSONCompare.report(expected: swift, actual: engine,
+                                                  path: "cond_texts.\(caseName)")
+            XCTAssertTrue(errs.isEmpty, "cond_texts 双跑差异 \(caseName)：\(errs)")
+
+            guard let t = engine["text"] as? [String: Any] else {
+                XCTFail("\(caseName)：cond_texts 无 text"); continue
+            }
+            for field in ["condition", "directiveCore", "directive", "validity", "preview"] {
+                let single = try enginePayload(op: "cond_text",
+                                               input: ["field": field, "order": order,
+                                                       "tzOffsetSeconds": tz])
+                XCTAssertEqual(str(t[field]), str(single["text"]),
+                               "\(caseName)：cond_texts.\(field) != cond_text(\(field))")
+            }
+            let gc = try enginePayload(op: "cond_grid_level_count", input: ["order": order])
+            XCTAssertEqual(t["gridLevelCount"] as? Int, gc["count"] as? Int,
+                           "\(caseName)：cond_texts.gridLevelCount != cond_grid_level_count")
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 0, "没有 text 用例参与 cond_texts 一致性检查")
+    }
 }

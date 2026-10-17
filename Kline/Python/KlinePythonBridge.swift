@@ -126,6 +126,7 @@ final class KlinePythonBridge {
                 DebugLogger.shared.log("[PyBridge] ensureReady：引擎已加载")
                 DispatchQueue.main.async {
                     SimRulesTrust.shared.refresh()
+                    SimRulesProjection.shared.requestAll()
                     completion(.success(()))
                 }
                 return
@@ -140,6 +141,7 @@ final class KlinePythonBridge {
                         DebugLogger.shared.log(String(format: "[PyBridge] ensureReady：加载成功（%.0fms）", ms))
                         DispatchQueue.main.async {
                             SimRulesTrust.shared.refresh()
+                            SimRulesProjection.shared.requestAll()
                             completion(.success(()))
                         }
                     case .failure(let e):

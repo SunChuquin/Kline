@@ -1057,6 +1057,7 @@ golden: `strategy_dsl.json`（**手写规格**）。
 | `cond_validate_create` | `order` `account` `position?` `snapshot` `now` | `rejection`（或 `null`） | `SimCondRule.validateCreate` |
 | `cond_grid_level_count` | `order` | `count` | `SimCondRule.gridLevelCount` |
 | `cond_text` | `order` `field` ∈ {`condition`/`directiveCore`/`directive`/`validity`/`preview`} | `text` | `conditionSummary` / `directiveCore` / `directiveSummary` / `validitySummary` / `previewSentence` |
+| `cond_texts` | `order` `tzOffsetSeconds` | `text{condition,directiveCore,directive,validity,preview,gridLevelCount}` | **A5-3 批量**：一次取全上面 5 个文案字段 + `gridLevelCount`（等价逐字段调 `cond_text` + `cond_grid_level_count`，只一次往返；一致性由 `SimRulesDiffTests.testCondTextsBatchedConsistency` 把关） |
 
 **B 组 · 结算纯推进（`sweepConditions` 的无副作用部分）**
 
@@ -1182,7 +1183,7 @@ rejection     → {"code":"invalidQty", "lot":100,
 | --- | --- | --- |
 | **A5-1** | **信任链（套件 8）**：脚本 sha256 + apiVersion 配对 + 篡改检测 + §9.10 降级闸门 | ✅ 见 §11.15 |
 | **A5-2** | 生产编解码层：生产模型 → op 入参 JSON / 引擎出参 → 生产模型 | 🔶 回测子系统已落地，见 §11.16（其余随各子系统切换增量补齐） |
-| **A5-3** | 引擎会话 + 投影层（异步 + 防抖 + 缓存，供 GUI 同步读；§10.10 闸门 6） | 待做 |
+| **A5-3** | 引擎会话 + 投影层（异步 + 防抖 + 缓存，供 GUI 同步读；§10.10 闸门 6） | 🔶 条件单文案族已落地，见 §11.17（其余子系统随切换增量补齐） |
 | **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 🔶 回测已切（§11.16）；其余待做 |
 | **A5-5** | 默认 `SimRulesBridge.mode` 由 `.swift` 翻成 `.engine`（闸门生效） | 待做 |
 
@@ -1449,6 +1450,47 @@ done
 **验证**：`KlineTests/SimRulesCodecTests.swift`（新，4 用例）——① 入参编解码**不动点**（`encode(decode(x))` 幂等）；② 出参反解无损（`backtestJSON(backtestResult(fixture.expected))` == `expected`）；③ 生产编码喂引擎得 golden；④ 生产入口 `.engine` 结果 == `.swift` 结果。**实测**：本套件 4/4 全绿；同批五套件（A1/A3/A4 + 信任链 + 编解码）**23/23 全绿 0 skip**。
 
 **注意**：`mode` 默认仍为 `.swift`（A5-5 才翻转）→ 上述回测切换目前**只被测试行使**，生产仍走 Swift，符合 §9.10「不允许半可用态」。
+
+---
+
+### 11.17 A5-3 引擎投影层落地进度（条件单文案族，2026-10-17）
+
+**用户拍板（2026-10-17）**：A5-3 采用 **运行时投影缓存**（而非「物化到模型并落盘」）——不改 `sim.json` schema，符合 §10.10 闸门 6「防抖 + 投影」字面。
+
+**新增 `Kline/Python/SimRulesProjection.swift`（`@MainActor ObservableObject` 单例）**：
+
+- `request(_ orders:)`：收快照（`order.id` → 最新 `SimCondOrder`），**防抖合并**（默认 50ms）+ **内容去重**（`JSONEncoder(.iso8601)` 字节相等则跳过）。
+- `flush()`：对内容有变化的单据调 `SimRulesBridge.payload(op: "cond_texts", ...)`（一次取全 6 字段），结果写入 `@Published condTexts`；失败置 `availability = .failed`。
+- 取值 API 与 `SimCondRule` 静态方法同名同义：`conditionSummary` / `validitySummary` / `directiveSummary` / `directiveCore` / `previewSentence` / `gridLevelCount`。
+  - **过渡期直通**：`SimRulesBridge.mode == .swift` → 直接调 `SimCondRule` 现状（**零行为变化**，且 `request` 直接 return，本层完全惰性）；
+  - `.engine` → 读缓存；未就绪给占位 `"…"`（显式空态，**不静默用 Swift 兜底**）。
+- `requestAll()`：引擎就绪 / 信任链重算后补刷「列表未变但引擎刚可用」的场景。
+
+**引擎侧新 op `cond_texts`**（`sim_rules.py`）：`{order, tzOffsetSeconds}` → `text{condition,directiveCore,directive,validity,preview,gridLevelCount}`。语义 = 逐字段 `cond_text` + `cond_grid_level_count` 的合并往返；`.swift` 后端（`SimRulesBridge.swiftBody`）同步实现，由 `SimRulesDiffTests.testCondTextsBatchedConsistency` 验证「两侧后端一致 + 批量 == 逐字段」。
+
+**接入点（一处收口 + 两处视图）**：
+
+| 位置 | 改动 |
+| --- | --- |
+| `SimStore.assignConditionalOrders(_:)` | 所有条件单写入都经此口子 → 在此 `SimRulesProjection.shared.request(value)`（**唯一收口**，无需在每个视图挂 `onChange`） |
+| `KlinePythonBridge.ensureReady` 两条成功路径 | `SimRulesProjection.shared.requestAll()` |
+| `SimCondListView` / `SimCondDetailView` | `SimCondRule.*` → `SimRulesProjection.shared.*`（8 处）；两视图加 `@ObservedObject private var projection`（否则缓存更新不触发重绘） |
+
+**验证**：
+
+- `SimRulesDiffTests.testCondTextsBatchedConsistency`（新）：对 `text` 段全部 19 条 order 验证 ① 两侧后端逐字一致；② 批量各字段 == 单字段 op；③ `gridLevelCount` == `cond_grid_level_count`。
+- `KlineTests/SimRulesProjectionTests.swift`（新，3 用例）：① `.swift` 直通（与 `SimCondRule` 全字段相等）；② `.engine` 投影 == Swift 现状（8 种 kind）；③ 同内容重复 request 被去重（不重置 `computing`）。
+- **实测**：`KlineTests` **全量 73/73 全绿 0 skip**（含上述新增）；PC 侧内置 255 + 三份 golden 差分（191/54/7）+ 19 条 `cond_texts` 一致性脚本全绿。
+
+**抓手 / 已知取舍**：
+
+- `cond_texts` **未进 fixture**（golden 不变）：它由「两侧后端 + 与逐字段 op 一致」的一致性用例覆盖，避免为「纯合并往返」的 op 再走一遍 dump/extract/gen 流程；A6 删 `.swift` 后端时该一致性用例随之删（届时只剩引擎侧，语义已由逐字段 op 锁定）。
+- **`gridLevelCount` 未就绪返回 0**：`.engine` 模式下视图会短暂呈现「约 0 档」。A5-5 翻 `mode` 后需评估改为「就绪前不渲染进度行」以免误导——**记入 A5-5 待办**。
+- **日期相关 kind（`.time`）**不纳入投影逐字比较（Swift `Calendar.current` 含 DST，引擎用固定 `tzOffsetSeconds`，§11.5 已知限制）；由 `cond_texts` 同入参两侧对拍兜住。
+- 尚未接入投影的文案调用点仍直调 `SimCondRule`（A6 删 `SimCondRule` 前必须全部切完）：`SimCondEditorView`（含实时草稿预览，需防抖）、`TrainingCondListView`、`TrainingRecordListView`、`SimCondEditorView` 的 alert 预览等 → 下一步补齐。
+- 每次改 `sim_rules.py` 都会改哈希 → 已按 §11.15 重跑 `gen_sim_rules_trust.py`（新哈希 `3c814be9…16f6`）。
+
+**下一步**：A5-3 剩余文案调用点（编辑器草稿预览 + Training 两处）→ A5-4 其余子系统（DSL/策略映射 → 交易规则 → 条件单判定·结算）。
 
 ---
 
