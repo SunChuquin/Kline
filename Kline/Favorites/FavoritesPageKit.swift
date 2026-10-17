@@ -535,8 +535,9 @@ final class FavoritesPageModel: ObservableObject {
     /// 失败原因由 FavoritesAlertKit 记 DebugLogger，不中断其余标的
     func applyBatchAlert(compareUp: Bool, triggerPrice: Double) {
         let metas = batchAlertTarget?.metas ?? []
-        FavoritesAlertKit.setAlerts(metas: metas, compareUp: compareUp, triggerPrice: triggerPrice)
         finishBatch()
+        // 建单校验走引擎（async）；引擎不可用 → 逐条显式失败并记日志，不中断其余标的
+        Task { await FavoritesAlertKit.setAlerts(metas: metas, compareUp: compareUp, triggerPrice: triggerPrice) }
     }
 
     /// 批量固顶 / 取消固顶：按列表当前显示顺序逐个执行（Set 无序，不能按点击顺序）；

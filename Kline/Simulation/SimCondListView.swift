@@ -96,6 +96,8 @@ struct SimCondListView: View {
     @ObservedObject private var store = SimStore.shared
     /// A5-3：条件单文案投影（引擎算好的文案缓存；观察它才能在缓存更新后重绘）
     @ObservedObject private var projection = SimRulesProjection.shared
+    /// A5-5：信任链 / 引擎就绪状态（决定「引擎不可用」显式空态）
+    @ObservedObject private var trust = SimRulesTrust.shared
     @State private var segment: SimCondSegment
     @State private var toastText: String? = nil
     /// 单一呈现目标：编辑器 / 详情走 fullScreenCover，选择标的走底部条上的 confirmationDialog
@@ -116,6 +118,9 @@ struct SimCondListView: View {
                                  triggered: counts.triggered,
                                  invalid: counts.invalid)
             segmentBar
+            if !trust.isTradingAvailable {
+                engineUnavailableBanner
+            }
             listContent
             bottomBar
         }
@@ -221,6 +226,27 @@ struct SimCondListView: View {
 
     // MARK: 列表 / 空态
 
+    /// A5-5：引擎不可用（信任链未过 / 引擎未就绪）→ 交易整体不可用的显式空态（§9.10：
+    /// 不允许「GUI 还能点但引擎不下单」的半可用态；此处如实告知「暂停结算，就绪后自动恢复」）
+    private var engineUnavailableBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 13))
+                .foregroundColor(.orange)
+            Text("Python 引擎未就绪，条件单暂停结算；引擎就绪后自动恢复")
+                .font(.system(size: 12))
+                .foregroundColor(Color(.secondaryLabel))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(8)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+    }
+
     @ViewBuilder
     private var listContent: some View {
         if rows.isEmpty {
@@ -309,9 +335,9 @@ struct SimCondListView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if order.kind.repeatable {
+            if order.kind.repeatable, let total = progressTotal(order) {
                 SimCondProgressBar(done: progressDone(order),
-                                   total: progressTotal(order),
+                                   total: total,
                                    triggered: order.triggeredCount,
                                    unit: order.kind == .grid ? "档" : "批")
             }
@@ -353,8 +379,10 @@ struct SimCondListView: View {
         order.kind == .grid ? (order.runtime.gridLevel ?? 0) : order.runtime.batchDone
     }
 
-    private func progressTotal(_ order: SimCondOrder) -> Int {
-        order.kind == .grid ? SimRulesProjection.shared.gridLevelCount(order) : (order.params.batchCount ?? 0)
+    private func progressTotal(_ order: SimCondOrder) -> Int? {
+        order.kind == .grid
+            ? SimRulesProjection.shared.gridLevelCountIfReady(order)
+            : (order.params.batchCount ?? 0)
     }
 
     // MARK: 底部常驻条

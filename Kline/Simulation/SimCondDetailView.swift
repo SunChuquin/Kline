@@ -44,9 +44,9 @@ struct SimCondDetailView: View {
                     }
                     sectionCard("有效期与进度") {
                         rows(validityItems(current))
-                        if current.isRepeatable {
+                        if current.isRepeatable, let total = progressTotal(current) {
                             SimCondProgressBar(done: progressDone(current),
-                                               total: progressTotal(current),
+                                               total: total,
                                                triggered: current.triggeredCount)
                                 .padding(.vertical, 10)
                         }
@@ -410,9 +410,9 @@ struct SimCondDetailView: View {
         }
     }
 
-    private func progressTotal(_ o: SimCondOrder) -> Int {
+    private func progressTotal(_ o: SimCondOrder) -> Int? {
         switch o.kind {
-        case .grid:  return SimRulesProjection.shared.gridLevelCount(o)
+        case .grid:  return SimRulesProjection.shared.gridLevelCountIfReady(o)
         case .batch: return o.params.batchCount ?? 0
         default:     return 0
         }

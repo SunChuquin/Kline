@@ -647,14 +647,14 @@ enum FavoritesAlertKit {
     /// 单个标的失败只记日志并继续处理其余标的（批量动作不因个别失败中断），
     /// 返回首个失败原因（全部成功返回 nil）供调用方按需使用。
     @discardableResult
-    static func setAlerts(metas: [MetaItem], compareUp: Bool, triggerPrice: Double) -> String? {
+    static func setAlerts(metas: [MetaItem], compareUp: Bool, triggerPrice: Double) async -> String? {
         guard let accID = accountID else { return "请先创建模拟账户" }
         let store = SimStore.shared
         var firstError: String?
         for meta in metas {
-            let result = store.createAlertOrder(accountID: accID, metaID: meta.id,
-                                                code: meta.code, name: meta.name,
-                                                compareUp: compareUp, triggerPrice: triggerPrice)
+            let result = await store.createAlertOrder(accountID: accID, metaID: meta.id,
+                                                      code: meta.code, name: meta.name,
+                                                      compareUp: compareUp, triggerPrice: triggerPrice)
             if case .failure(let rejection) = result {
                 DebugLogger.shared.log("[FavoritesAlert] \(meta.name) 预警创建失败：\(rejection.message)")
                 if firstError == nil { firstError = rejection.message }

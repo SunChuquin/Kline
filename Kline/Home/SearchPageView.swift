@@ -365,9 +365,9 @@ struct SearchPageView: View {
                                          onApply: { compareUp, price in
                                              let targets = model.alertSheetTargets
                                              closeAlertSheet()
-                                             FavoritesAlertKit.setAlerts(metas: targets,
-                                                                         compareUp: compareUp,
-                                                                         triggerPrice: price)
+                                             Task { await FavoritesAlertKit.setAlerts(metas: targets,
+                                                                                     compareUp: compareUp,
+                                                                                     triggerPrice: price) }
                                          },
                                          onCancel: { closeAlertSheet() })
             }

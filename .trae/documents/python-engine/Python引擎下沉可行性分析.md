@@ -1613,7 +1613,7 @@ done
 3. **E 组 · 策略 DSL**（`Formula/` 族 §11.18.3；编辑器实时路径 → 防抖 + 投影；`FormulaKind.parse/serialize` 文件读写 → 单次 `await`）；**[✅ §11.25]**
 3b. **Training 自有同步路径**（§11.18.3 第 5 行；另一套结算与账户模型，单独成步）；**[✅ §11.26]**
 4. `SimFormat` **按拍板结果**处理（§11.18.4）；**[✅ D5 = 归 GUI，219 处不下沉]**
-5. A5-5：把 `SimRulesBridge.mode` 默认翻 `.engine`；A6：删 Swift 实现 + fixture 冻结（§10.10 六闸门）。
+5. **A5-5**：把 `SimRulesBridge.mode` 默认翻 `.engine`（含翻转前 S1–S8 漏网直调收口与空态/自动重载）；**[✅ §11.27]**。**A6**：删 Swift 实现 + fixture 冻结（§10.10 六闸门）。
 
 ---
 
@@ -1960,6 +1960,38 @@ done
 - **主线程归属**：`TrainingSessionController` 与 `SimStore` 同为非 `@MainActor` 的 ObservableObject 单例，async 调用全部从主线程 UI 闭包的 `Task` 发起（与 SimStore 既有约定一致，Swift 5.0 无 strict concurrency）。
 
 **测试**：`SimRulesAsyncTests.runAllParity` 新增 Training 段——`TrainAccountRule.minCapital` 三组价格 × 手数（10.0/2、3.45/2、128.6/3）两 mode 与现状公式（`amount + fee`）逐值相等。结算 / 下单链路的判定 op（`cond_evaluate` / `trade_calc.fee` / `trade_calc.affordableQty`）已有 A / C 组 fixture 对拍覆盖，Training 层为调用方等价改造，增量以全量回归覆盖。
+
+---
+
+### 11.27 A5-5：默认后端翻 `.engine`（闸门生效）+ 漏网直调收口（2026-10-17）
+
+> 本项目**最高风险单步**：`SimRulesBridge.mode` 默认由 `.swift` 翻为 `.engine`，引擎自此成为生产后端。为把风险压到最低：**先补齐八项前置（S1–S8），全部在 `.swift` 默认下落地（树保持绿、零行为变化），最后一步才翻转**。
+
+**翻转前发现并收口的漏网直调（§11.26 曾登记「§11.18.3 清单全部清零」，实测仍有 3 处 —— 已更正）**
+
+| 项 | 位置 | 问题 | 处置 |
+| --- | --- | --- | --- |
+| **S1** | `SimStore.createAlertOrder`（原直调同步 `SimCondRule.validateCreate`） | 翻转后用 Swift 实现 → 与引擎裁决不一致；A6 删实现后编译不过 | 改 `async`，走 `SimRulesBridge.validateCondCreate`；引擎不可用 → 新增 **`SimCondRejection.engineUnavailable`** 显式降级且**不落盘**；调用链 `FavoritesAlertKit.setAlerts`（自选批量预警 / 行情页 / 搜索页三处）`Task` 化 |
+| **S2** | `SimCondEditorView.validateDraft`（`canSave` / `handleSave`） | 同上 | 新增 `validateDraftAsync`；`.task(id: draftSignature)` 防抖（50ms、取消即弃）维护 `engineValidationReady` / `engineValidationRejection` 供 `canSave`（未就绪 → 禁保存）；**保存路径直接 `await` 取确定值**（不复用防抖态）；`.swift` 保留同步直通 |
+| **S3** | `TrainingSessionController.fireCondition` 的 5 处 `SimStore.shared.*`（`fireDirection` / `advanceRepeatable` / `repeatableFinished` / `alertMessage`） | §11.26 只下沉了「判定 / 费用 / 可买」，**触发分支漏了** | 全改引擎 B 组门面（`cond_alert_message` / `cond_fire_direction` / `cond_advance` / `cond_repeatable_finished`）；**引擎异常 → 跳过本单**（不改状态、不下单），与 `SimCondEngine.fireAlertOnly` / `fire` 逐句对齐；`applyRepeatableProgress` 重构为 `advanceRepeatable` |
+
+**其余 A5-5 待办（本文档旧登记项，全部落地）**
+
+- **S4** `gridLevelCount` 未就绪返回 `0` →（§11.17 / §11.23 待办）新增 `gridLevelCountIfReady`（`nil` = 未就绪）；进度行与档位提示改为「未就绪即不渲染」，消除「约 0 档」误导（`SimCondListView` / `SimCondDetailView` / `TrainingCondListView` / 条件单编辑器）。
+- **S5** `SimRulesDiffTests.testModeDispatch` 的 `defer { mode = .swift }` 硬编码 → 改为捕获**进入时默认值**（翻转后硬编码会污染其它套件）。
+- **S6** 条件单页「引擎不可用」显式空态（§11.20 待办）：`SimCondListView` 观察 `SimRulesTrust.shared`，`!isTradingAvailable` 时列表顶部显示橙色 banner「Python 引擎未就绪，条件单暂停结算；引擎就绪后自动恢复」（§9.10：不允许「GUI 还能点但引擎不下单」的半可用态）。
+- **S7** E-4 取舍 #1（§11.25）：策略编辑器保存路径改 `definitiveDocAsync()`——RULES 文本逐行 `await strategyRuleLine` 取确定值，并用**确定值**重新 `strategyValidate`；**绝不**写回退的旧文本；任一步失败 → 显式报错不落盘。
+- **S8** E-2 取舍 #2（§11.25）：`KlinePythonBridge.ensureReady` 两条成功路径追加 `Task { await FormulaLibraryStore.shared.reloadStrategy() }`——引擎就绪后策略库 fail-closed **自动恢复**。
+
+**翻转与验证**
+
+- `SimRulesBridge.swift`：`static var mode: Mode = .swift` → **`.engine`**（注释同步改：引擎即生产后端，§10.10 闸门生效；`.swift` 退为单测对拍参考后端 + Debug 页临时回退）。
+- 引擎就绪链：App 启动 `KlineApp.swift:48` → `KlinePythonBridge.warmUp()` → `ensureReady` → 引擎加载后 `isReady = true`；**就绪前窗口期交易整体不可用**（fail-closed，条件单页有 banner），就绪后自动恢复。
+- **验证（默认即 `.engine`）**：`KlineTests` 全量 **91/91 全绿、0 skip、0 failed**；PC 三闸门 A0 **255/255**、`--fixture` 三份零差异、`--trust` 三方一致（sha256 `3c814be9…16f6` 未变）。
+- **测试侧影响**：仅 `SimRulesDiffTests` 的硬编码默认值需修（S5）；其余套件均显式 `ensureEngineReady()` + 捕获/设置 `mode`，翻转后语义反而**更真实**——如 `StrategyTdxBoundaryTests` 的 `serializeAsync` 由「`.swift` 下恒等自比」变为**真正走引擎后端**。
+- 注释清理：三个投影层与 `SimRulesTrust` 的「过渡期（A5-5 前）」措辞全部改为「A5-5 起默认 `.engine`」。
+
+**A5-5 之后**：仅剩 **A6**（删 Swift 实现 + fixture 冻结，§10.10 六闸门）。Swift 参考后端的唯一存在意义自此是「单测对拍 + Debug 回退」。
 
 ---
 

@@ -12,9 +12,9 @@
 //    · 到点后对**文案相关字段有变化的**单据批量调一次引擎 op `cond_texts`（一次取全 6 字段）；
 //    · 结果按 `order.id` 缓存进 `@Published`，视图同步读缓存（未就绪给占位）。
 //
-//  过渡期语义（A5-5 前 `SimRulesBridge.mode == .swift`）：本层**完全惰性**——
-//  `request` 直接 return，取值走 `SimCondRule` 现状（零行为变化）。A6 删 Swift 实现后，
-//  取值只剩「读缓存 / 占位」两条路。
+//  A5-5 起默认 `.engine`：本层常态生效（`request` 入队 → 防抖合并 → 引擎取文案）。
+//  仅当显式回退 `.swift`（单测对拍 / Debug 页）时本层完全惰性、取值直通 `SimCondRule` 现状。
+//  A6 删 Swift 实现后，取值只剩「读缓存 / 占位」两条路。
 //
 
 import Foundation
@@ -56,7 +56,7 @@ final class SimRulesProjection: ObservableObject {
     // MARK: - 请求（防抖合并 + 内容去重）
 
     func request(_ orders: [SimCondOrder]) {
-        guard SimRulesBridge.mode == .engine else { return }   // 过渡期零开销
+        guard SimRulesBridge.mode == .engine else { return }   // 仅 `.swift` 回退时零开销
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
         var changed = false
         for o in orders {
@@ -144,10 +144,17 @@ final class SimRulesProjection: ObservableObject {
         return condTexts[order.id]?.preview ?? Self.placeholderText
     }
 
-    /// 网格档位数。⚠️ 未就绪返回 `0`（视图中呈现为「约 0 档」的短暂占位；A5-5 翻 mode 后
-    /// 需评估是否改为「不渲染提示行」以免误导——记在 §11.17 待办）。
+    /// 网格档位数。⚠️ 未就绪返回 `0`；视图请改用 `gridLevelCountIfReady`（未就绪即不渲染，
+    /// 避免「约 0 档」误导——A5-5 已落地）。
     func gridLevelCount(_ order: SimCondOrder) -> Int {
         if SimRulesBridge.mode == .swift { return SimCondRule.gridLevelCount(order: order) }
         return condTexts[order.id]?.gridLevelCount ?? 0
+    }
+
+    /// 网格档位数（`nil` = 未就绪）：供进度行 / 档位文案决定「是否渲染」，
+    /// 避免 `.engine` 首帧显示「约 0 档」误导（§11.23 已知取舍 → A5-5）。`.swift` 模式恒有值。
+    func gridLevelCountIfReady(_ order: SimCondOrder) -> Int? {
+        if SimRulesBridge.mode == .swift { return SimCondRule.gridLevelCount(order: order) }
+        return condTexts[order.id]?.gridLevelCount
     }
 }

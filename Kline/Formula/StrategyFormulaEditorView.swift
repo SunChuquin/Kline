@@ -1184,16 +1184,65 @@ struct StrategyFormulaEditorView: View {
 
     /// 保存的第二段（issues 已含最新语义校验结果）
     private func finishSave() async {
-        // issues 为 nil = 引擎校验结果未就绪 → 不放行（与保存按钮的 disabled 一致）
-        guard (issues?.isEmpty == true) else { return }
-        // E-2：`.swift` 模式内部走同步 `save`（零行为变化）；`.engine` 模式 TRADE 段走引擎
-        // （引擎不可用 → 返回 nil 且不落盘，fail-closed）
-        guard let saved = await library.saveStrategy(doc) else {
+        if SimRulesBridge.mode == .swift {
+            // 现状直通：issues 就绪 + 同步保存（零行为变化）
+            guard (issues?.isEmpty == true) else { return }
+            guard let saved = await library.saveStrategy(doc) else {
+                saveError = library.strategyLoadError ?? "保存失败，请检查公式内容"
+                return
+            }
+            onSaved(saved)
+            onClose()
+            return
+        }
+        // `.engine`：保存路径直接 await 取确定值（RULES 文本逐行 + 校验），
+        // 杜绝「刚编辑完立刻保存」窗口期把回退的旧 RULES 文本写盘（A5-5，§11.25 取舍 #1）
+        guard let target = await definitiveDocAsync() else {
+            saveError = "Python 引擎不可用，暂不能保存，请稍后重试"
+            return
+        }
+        do {
+            let found = try await SimRulesBridge.strategyValidate(doc: target, pickerExists: pickerExists,
+                                                                  pickSyntaxError: pickSyntaxError)
+            guard found.isEmpty else {
+                saveError = found.first
+                return
+            }
+        } catch {
+            DebugLogger.shared.log("[StrategyEditor] 保存：引擎校验失败 \(error)")
+            saveError = "Python 引擎不可用，暂不能保存，请稍后重试"
+            return
+        }
+        guard let saved = await library.saveStrategy(target) else {
             saveError = library.strategyLoadError ?? "保存失败，请检查公式内容"
             return
         }
         onSaved(saved)
         onClose()
+    }
+
+    /// `.engine` 模式下「取确定值」的文档：RULES 文本逐行 await 引擎 `ruleLine` 得到，
+    /// **绝不**复用 `rulesText` 的 `lastReadyRulesText` 回退值（那是显示/校验用的旧文本）。
+    /// 任一行取不到（引擎异常 / 未就绪）→ nil → 保存中止（fail-closed）。
+    private func definitiveDocAsync() async -> FormulaDoc? {
+        var lines: [String] = []
+        lines.reserveCapacity(rows.count)
+        do {
+            for row in rows {
+                let call = StrategyRuleCall(kind: row.kind, params: row.params, raw: "")
+                lines.append(try await SimRulesBridge.strategyRuleLine(call))
+            }
+        } catch {
+            DebugLogger.shared.log("[StrategyEditor] 保存：引擎取规则行失败 \(error)")
+            return nil
+        }
+        return FormulaDoc(id: initialDoc.id,
+                          kind: .strategy,
+                          name: name.trimmingCharacters(in: .whitespaces),
+                          pickBody: mode == .inline ? pickBody : "",
+                          pickRef: mode == .reference ? pickRef : nil,
+                          rules: lines.joined(separator: "\n"),
+                          trade: trade)
     }
 
     private func addRow() {

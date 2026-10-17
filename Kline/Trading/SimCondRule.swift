@@ -50,6 +50,7 @@ enum SimCondRejection: Error, Equatable {
     case invalidBatchCount                                      // 分批笔数不在 2...5
     case batchTooSmall(lot: Int)                                // 分批每批不足 1 手
     case invalidFireDate                                        // 时间条件为空或已过期
+    case engineUnavailable                                      // `.engine` 模式引擎未就绪 / 异常（显式降级，§9.10）
 
     var message: String {
         switch self {
@@ -75,6 +76,8 @@ enum SimCondRejection: Error, Equatable {
             return "分批总数量不足：每批至少 1 手（\(lot) 股）"
         case .invalidFireDate:
             return "时间条件需选择未来的触发时间"
+        case .engineUnavailable:
+            return "Python 引擎不可用，暂不能创建条件单，请稍后重试"
         }
     }
 }

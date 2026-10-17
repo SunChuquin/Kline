@@ -14,7 +14,8 @@
 //    · 结果按「op + 入参」为键写进 `@Published` 缓存，视图自然重绘；
 //    · 未命中 → 返回 `nil` / 空，由视图给显式占位（`placeholderText`）。
 //
-//  过渡期语义（A5-5 前 `SimRulesBridge.mode == .swift`）：本层**完全直通** Swift 现状实现
+//  A5-5 起默认 `.engine`：本层常态生效（`request*` 入队 → 防抖 → 引擎取值）。
+//  仅当显式回退 `.swift`（单测对拍 / Debug 页）时本层完全直通 Swift 现状实现
 //  （零行为变化、零引擎请求、零缓存写入）；`request*` 直接 return。
 //
 //  降级（§9.10 / §11.7）：引擎未就绪 / 出参形状非法 → 标记 `.failed`，取值给 `nil`，

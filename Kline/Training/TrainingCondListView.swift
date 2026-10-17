@@ -229,8 +229,8 @@ struct TrainingCondListView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if order.kind.repeatable {
-                SimCondProgressBar(done: progressDone(order), total: progressTotal(order),
+            if order.kind.repeatable, let total = progressTotal(order) {
+                SimCondProgressBar(done: progressDone(order), total: total,
                                    triggered: order.triggeredCount,
                                    unit: order.kind == .grid ? "档" : "批")
             }
@@ -267,8 +267,10 @@ struct TrainingCondListView: View {
         order.kind == .grid ? (order.runtime.gridLevel ?? 0) : order.runtime.batchDone
     }
 
-    private func progressTotal(_ order: SimCondOrder) -> Int {
-        order.kind == .grid ? SimRulesProjection.shared.gridLevelCount(order) : (order.params.batchCount ?? 0)
+    private func progressTotal(_ order: SimCondOrder) -> Int? {
+        order.kind == .grid
+            ? SimRulesProjection.shared.gridLevelCountIfReady(order)
+            : (order.params.batchCount ?? 0)
     }
 
     private func inlineButton(_ title: String, tint: Color = .blue,

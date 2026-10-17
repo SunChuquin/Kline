@@ -648,42 +648,68 @@ final class TrainingSessionController: ObservableObject {
     // MARK: - 结算辅助
 
     /// 「仅提醒」不下单；普通条件单以训练日收盘价写入一笔训练成交
+    ///
+    /// A5-5：触发分支全走引擎（B 组 `cond_alert_message` / `cond_fire_direction` / `cond_advance` /
+    /// `cond_repeatable_finished`）；**引擎异常 → 跳过本单**（不改状态、不下单），与
+    /// `SimCondEngine.fireAlertOnly` / `fire` 同口径。
     private func fireCondition(_ record: TrainCondRecord, qty: Int, at triggerPrice: Double,
                                snapshot: SimCondSnapshot, now: Date) async -> TrainCondRecord {
         var target = record
         let order = target.order
+
+        if order.directive.isAlertOnly {
+            // 预警文案（B 组）；引擎异常 → 跳过本单（不记预警、不改状态）
+            let message: String
+            do {
+                message = try await SimRulesBridge.condAlertMessage(order: order,
+                                                                   triggerPrice: triggerPrice)
+            } catch {
+                DebugLogger.shared.log("[Training] 条件单预警：引擎异常，跳过 \(order.name) \(error)")
+                return record
+            }
+            target.order.runtime.lastEvaluatedAt = now
+            target.order.runtime.lastPrice = snapshot.last ?? order.runtime.lastPrice
+            target.order.runtime.lastTriggerPrice = triggerPrice
+            target.order.triggeredCount += 1
+            target.order.updatedAt = now
+            _ = TrainingStore.shared.appendAlert(TrainAlertRecord(
+                id: UUID().uuidString, sessionID: sessionID, condID: order.id.uuidString,
+                tradeDate: trainingDate, price: triggerPrice, message: message, occurredAt: now))
+            await advanceRepeatable(&target.order, pendingMessage: message)
+            if !order.kind.repeatable {
+                target.order.status = .triggered
+                target.order.triggeredAt = now
+                target.order.runtime.lastMessage = message
+            }
+            return target
+        }
+
+        // 触发方向（B 组）：引擎裁决；异常 / 出参非法 → 跳过本单（不改状态、不下单）
+        let direction: SimOrderDirection
+        do {
+            guard let dir = try await SimRulesBridge.condFireDirection(order: order,
+                                                                      triggerPrice: triggerPrice) else {
+                DebugLogger.shared.log("[Training] 条件单触发：方向输出非法，跳过 \(order.name)")
+                return record
+            }
+            direction = dir
+        } catch {
+            DebugLogger.shared.log("[Training] 条件单触发：引擎异常，跳过 \(order.name) \(error)")
+            return record
+        }
+
         target.order.runtime.lastEvaluatedAt = now
         target.order.runtime.lastPrice = snapshot.last ?? order.runtime.lastPrice
         target.order.runtime.lastTriggerPrice = triggerPrice
         target.order.updatedAt = now
 
-        if order.directive.isAlertOnly {
-            let message = SimStore.shared.alertMessage(order: order, triggerPrice: triggerPrice)
-            _ = TrainingStore.shared.appendAlert(TrainAlertRecord(
-                id: UUID().uuidString, sessionID: sessionID, condID: order.id.uuidString,
-                tradeDate: trainingDate, price: triggerPrice, message: message, occurredAt: now))
-            target.order.triggeredCount += 1
-            applyRepeatableProgress(&target.order, alertMessage: message)
-            return target
-        }
-
-        let direction = SimStore.shared.fireDirection(order: order, triggerPrice: triggerPrice)
         let rejection = await placeTrade(direction: direction, qty: qty,
                                          note: "条件单：\(order.kind.title)",
                                          trigger: .cond, condKind: order.kind.title)
         if rejection == nil {
             target.order.triggeredCount += 1
             if order.kind.repeatable {
-                target.order.runtime = SimStore.shared.advanceRepeatable(order: target.order,
-                                                                        triggerPrice: triggerPrice)
-                if SimStore.shared.repeatableFinished(order: target.order) {
-                    target.order.status = .completed
-                    target.order.runtime.lastMessage = order.kind == .grid ? "已完成全部档位" : "已完成全部批次"
-                } else if order.kind == .grid {
-                    target.order.runtime.lastMessage = "已成交第 \(target.order.runtime.gridLevel ?? 0) 档"
-                } else {
-                    target.order.runtime.lastMessage = "已成交第 \(target.order.runtime.batchDone) 批"
-                }
+                await advanceRepeatable(&target.order)
             } else {
                 target.order.status = .triggered
                 target.order.triggeredAt = now
@@ -700,21 +726,26 @@ final class TrainingSessionController: ObservableObject {
         return target
     }
 
-    /// 「仅提醒」的多触发进度推进 / 单次类型置已触发
-    private func applyRepeatableProgress(_ order: inout SimCondOrder, alertMessage: String) {
-        if order.kind.repeatable {
-            order.runtime = SimStore.shared.advanceRepeatable(order: order,
-                                                             triggerPrice: order.runtime.lastTriggerPrice ?? 0)
-            if SimStore.shared.repeatableFinished(order: order) {
+    /// 多触发类型（网格 / 分批）的档位 / 批次推进（B 组：推进与完成判定都走引擎）。
+    /// 引擎异常 → 保持 monitoring 不推进（不抛出、不中断本轮结算，对齐 `SimCondEngine.fire`）。
+    /// - Parameter pendingMessage: 未走完时写入 `lastMessage` 的文案（nil = 「已成交第 N 档 / 批」默认文案）
+    private func advanceRepeatable(_ order: inout SimCondOrder, pendingMessage: String? = nil) async {
+        guard order.kind.repeatable else { return }
+        do {
+            order.runtime = try await SimRulesBridge.condAdvance(order: order,
+                                                                triggerPrice: order.runtime.lastTriggerPrice ?? 0)
+            if try await SimRulesBridge.condRepeatableFinished(order: order) {
                 order.status = .completed
                 order.runtime.lastMessage = order.kind == .grid ? "已完成全部档位" : "已完成全部批次"
+            } else if let pendingMessage {
+                order.runtime.lastMessage = pendingMessage
             } else {
-                order.runtime.lastMessage = alertMessage
+                order.runtime.lastMessage = order.kind == .grid
+                    ? "已成交第 \(order.runtime.gridLevel ?? 0) 档"
+                    : "已成交第 \(order.runtime.batchDone) 批"
             }
-        } else {
-            order.status = .triggered
-            order.triggeredAt = Date()
-            order.runtime.lastMessage = alertMessage
+        } catch {
+            DebugLogger.shared.log("[Training] 条件单档位推进：引擎异常 \(error)")
         }
     }
 

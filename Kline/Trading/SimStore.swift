@@ -1130,12 +1130,13 @@ final class SimStore: ObservableObject {
     }
 
     /// 创建一条「仅提醒」预警条件单（薄封装，供自选 / 行情页的长按面板与批量预警复用）：
-    /// 装配 `alertOnly = true` 的价格条件单 → 走既有 `SimCondRule.validateCreate` 校验
-    /// （alertOnly 自动放行数量与可卖持仓）→ `upsertCondOrder` 落盘。
+    /// 装配 `alertOnly = true` 的价格条件单 → 建单校验走引擎（`cond_validate_create`；
+    /// alertOnly 自动放行数量与可卖持仓）→ `upsertCondOrder` 落盘。
+    /// 引擎未就绪 / 异常 → 显式降级 `.engineUnavailable`（§9.10：不静默用 Swift 兜底，不落盘）。
     /// 不复制编辑器表单逻辑；表单仍归 SimCondEditorView 所有。
     @discardableResult
     func createAlertOrder(accountID: UUID, metaID: Int, code: String, name: String,
-                          compareUp: Bool, triggerPrice: Double) -> Result<SimCondOrder, SimCondRejection> {
+                          compareUp: Bool, triggerPrice: Double) async -> Result<SimCondOrder, SimCondRejection> {
         guard triggerPrice > 0 else { return .failure(.missingParam("触发价")) }
         guard let account = account(id: accountID) else { return .failure(.accountUnavailable) }
 
@@ -1153,11 +1154,16 @@ final class SimStore: ObservableObject {
                                  triggeredAt: nil, originOrderID: nil)
 
         let snapshot = SimCondSnapshotCenter.snapshot(for: order)
-        if let rejection = SimCondRule.validateCreate(order: order, account: account,
-                                                      position: position(accountID: accountID,
-                                                                         metaID: metaID),
-                                                      snapshot: snapshot) {
-            return .failure(rejection)
+        do {
+            if let rejection = try await SimRulesBridge.validateCondCreate(
+                order: order, account: account,
+                position: position(accountID: accountID, metaID: metaID),
+                snapshot: snapshot) {
+                return .failure(rejection)
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] createAlertOrder：引擎不可用（建单校验）\(error)")
+            return .failure(.engineUnavailable)
         }
         upsertCondOrder(order)
         return .success(order)

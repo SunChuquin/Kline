@@ -129,6 +129,9 @@ final class KlinePythonBridge {
                     SimRulesProjection.shared.requestAll()
                     SimTradeRulesProjection.shared.reset()
                     StrategyProjection.shared.reset()
+                    // A5-5：引擎就绪 → 策略库自动重载（E-2 取舍 #2；`.engine` 下按引擎加载，
+                    // 未就绪期曾整体不可用，此处 fail-closed 恢复）
+                    Task { await FormulaLibraryStore.shared.reloadStrategy() }
                     completion(.success(()))
                 }
                 return
@@ -146,6 +149,8 @@ final class KlinePythonBridge {
                             SimRulesProjection.shared.requestAll()
                             SimTradeRulesProjection.shared.reset()
                             StrategyProjection.shared.reset()
+                            // A5-5：引擎就绪 → 策略库自动重载（同上，fail-closed 恢复）
+                            Task { await FormulaLibraryStore.shared.reloadStrategy() }
                             completion(.success(()))
                         }
                     case .failure(let e):

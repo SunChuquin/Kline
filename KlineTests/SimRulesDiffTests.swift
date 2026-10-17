@@ -137,7 +137,8 @@ final class SimRulesDiffTests: XCTestCase {
 
     func testModeDispatch() throws {
         try ensureEngineReady()
-        defer { SimRulesBridge.mode = .swift }   // 恢复到默认（避免污染其它套件）
+        let saved = SimRulesBridge.mode
+        defer { SimRulesBridge.mode = saved }   // 恢复进入时值（A5-5 后默认已非 .swift）
 
         // 取一个 sim_rules 首例作代表（双跑覆盖全量已由 ① 完成，此处只验分发）
         let fixture = try loadFixture("sim_rules")

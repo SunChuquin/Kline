@@ -41,8 +41,10 @@ enum SimRulesBridge {
         case engine
     }
 
-    /// 运行开关：默认 `.swift`（= 现状）；单测与 Debug 页可切 `.engine`。
-    static var mode: Mode = .swift
+    /// 运行开关：**A5-5 起默认 `.engine`**——引擎即生产后端，§10.10 闸门正式生效。
+    /// `.swift` 退为「单测对拍参考后端 + Debug 页临时回退」；A6 删 Swift 实现后该分支一并消失。
+    /// 引擎未就绪 / 信任链未过 → 各调用点按 §9.10 显式降级（fail-closed），绝不静默回退 Swift。
+    static var mode: Mode = .engine
 
     /// 调用失败分类。`.engineNotReady` 即 §11.7 的「返回 nil」语义（显式降级）。
     enum Failure: Error, CustomStringConvertible {
@@ -361,7 +363,7 @@ enum SimRulesBridge {
         switch r {
         case .accountUnavailable, .noQuote, .noPosition,
              .invalidOCORange, .invalidGridRange, .invalidGridStep,
-             .invalidBatchCount, .invalidFireDate:
+             .invalidBatchCount, .invalidFireDate, .engineUnavailable:
             return ["code": condRejectCode(r), "message": r.message]
         case .invalidQty(let lot):
             return ["code": "invalidQty", "lot": lot, "message": r.message]
@@ -385,6 +387,7 @@ enum SimRulesBridge {
         case .invalidBatchCount: return "invalidBatchCount"
         case .batchTooSmall: return "batchTooSmall"
         case .invalidFireDate: return "invalidFireDate"
+        case .engineUnavailable: return "engineUnavailable"   // Swift 侧降级态，非引擎输出码
         }
     }
 

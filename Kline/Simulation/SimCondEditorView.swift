@@ -87,6 +87,10 @@ struct SimCondEditorView: View {
     /// 新建草稿的稳定 id（A5-3：投影按 id 缓存文案；`draftOrder()` 每次调用必须给同一 id，
     /// 否则投影永远命中不了。编辑既有单据时仍用 `editing.id`。）
     @State private var draftIdentity = UUID()
+    /// A5-5：`.engine` 模式建单校验的投影态（防抖异步更新，供 `canSave` 门控）。
+    /// `.swift` 模式恒不参与（`canSave` 走同步现状）。
+    @State private var engineValidationReady = false
+    @State private var engineValidationRejection: SimCondRejection?
 
     // MARK: - 初始化（显式 init：本视图含 private 存储属性，合成 memberwise init 会是 private）
 
@@ -154,6 +158,8 @@ struct SimCondEditorView: View {
         .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear(perform: handleAppear)
         .onChange(of: draftSignature) { _ in requestProjection() }
+        // A5-5：`.engine` 模式下沉建单校验（防抖 + 取消即弃；`.swift` 模式 return，零开销）
+        .task(id: draftSignature) { await refreshEngineValidation() }
     }
 
     /// A5-3：草稿输入指纹（触发投影刷新的**唯一**依据）。
@@ -434,7 +440,10 @@ struct SimCondEditorView: View {
         // 倍数只放大下单数量，不影响档位判定 → 仅提醒时置灰
         .disabled(alertOnly)
         .opacity(alertOnly ? 0.4 : 1)
-        hintRow("区间内约 \(SimRulesProjection.shared.gridLevelCount(draftOrder())) 档")
+        // `.engine` 未就绪时不渲染档位提示行（避免「约 0 档」误导；`.swift` 恒有值）
+        if let levels = SimRulesProjection.shared.gridLevelCountIfReady(draftOrder()) {
+            hintRow("区间内约 \(levels) 档")
+        }
     }
 
     @ViewBuilder
@@ -994,6 +1003,33 @@ struct SimCondEditorView: View {
                                           position: position, snapshot: snapshot, now: now)
     }
 
+    /// 建单校验（引擎门面，A5-5）；引擎未就绪 / 异常 → `.engineUnavailable`（显式降级，§9.10）
+    private func validateDraftAsync(_ draft: SimCondOrder) async -> SimCondRejection? {
+        guard let account = account else { return .accountUnavailable }
+        let position = position
+        let snapshot = trainingBackend.map { $0.snapshot(draft) } ?? SimCondSnapshotCenter.snapshot(for: draft)
+        let now = isTraining ? (trainingDateAsDate ?? Date()) : Date()
+        do {
+            return try await SimRulesBridge.validateCondCreate(order: draft, account: account,
+                                                              position: position, snapshot: snapshot, now: now)
+        } catch {
+            DebugLogger.shared.log("[SimCondEditor] 建单校验：引擎不可用 \(error)")
+            return .engineUnavailable
+        }
+    }
+
+    /// `.engine` 模式：草稿变化 → 防抖（50ms，`task(id:)` 取消即弃）后异步校验一次。
+    /// 结果供 `canSave` 门控保存按钮（未就绪 → 不可保存，fail-closed）；`.swift` 模式直接 return。
+    private func refreshEngineValidation() async {
+        guard SimRulesBridge.mode == .engine else { return }
+        do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
+        if Task.isCancelled { return }
+        let rejection = await validateDraftAsync(draftOrder())
+        if Task.isCancelled { return }
+        engineValidationRejection = rejection
+        engineValidationReady = true
+    }
+
     /// 当前训练日 0 点对应的 Date（非训练态 nil）
     private var trainingDateAsDate: Date? {
         guard isTraining else { return nil }
@@ -1008,7 +1044,11 @@ struct SimCondEditorView: View {
         return calendar.date(from: components)
     }
 
-    private var canSave: Bool { validateDraft(draftOrder()) == nil }
+    private var canSave: Bool {
+        // `.swift`：同步直通现状（零行为变化）；`.engine`：读防抖投影态（未就绪 → 不可保存）
+        if SimRulesBridge.mode == .swift { return validateDraft(draftOrder()) == nil }
+        return engineValidationReady && engineValidationRejection == nil
+    }
 
     // MARK: - 行为
 
@@ -1117,10 +1157,27 @@ struct SimCondEditorView: View {
     private func handleSave() {
         errorText = nil
         let draft = draftOrder()
-        if let rejection = validateDraft(draft) {
-            errorText = rejection.message
+        if SimRulesBridge.mode == .swift {
+            // 现状直通（零行为变化）
+            if let rejection = validateDraft(draft) {
+                errorText = rejection.message
+                return
+            }
+            finishSave(draft)
             return
         }
+        // `.engine`：保存路径直接 await 取确定值（不复用防抖态，避免窗口期写入非法单，A5-5）
+        Task {
+            if let rejection = await validateDraftAsync(draft) {
+                errorText = rejection.message
+                return
+            }
+            finishSave(draft)
+        }
+    }
+
+    /// 校验通过后的落库与收尾（训练态写训练库，模拟态写模拟库）
+    private func finishSave(_ draft: SimCondOrder) {
         if let backend = trainingBackend {
             backend.save(draft)
         } else {
