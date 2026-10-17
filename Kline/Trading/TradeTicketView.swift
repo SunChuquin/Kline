@@ -721,11 +721,13 @@ struct TradeTicketView: View {
                                   priceType: priceType,
                                   price: priceType == .limit ? price : nil,
                                   qty: qty)
-        switch store.submit(draft) {
-        case .success(let order):
-            onSubmit(order)
-        case .failure(let rejection):
-            errorText = rejection.message
+        Task {
+            switch await store.submit(draft) {
+            case .success(let order):
+                onSubmit(order)
+            case .failure(let rejection):
+                errorText = rejection.message
+            }
         }
     }
 }

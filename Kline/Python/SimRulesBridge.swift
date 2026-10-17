@@ -379,7 +379,7 @@ enum SimRulesBridge {
 
     private static func orderRejectionJSON(_ r: SimOrderRejection) -> Any {
         switch r {
-        case .emptyAccount, .noQuote:
+        case .emptyAccount, .noQuote, .engineUnavailable:
             return ["code": orderRejectCode(r), "message": r.message]
         case .notLotMultiple(let lot):
             return ["code": "notLotMultiple", "lot": lot, "message": r.message]
@@ -401,6 +401,7 @@ enum SimRulesBridge {
         case .insufficientShares: return "insufficientShares"
         case .priceOutOfLimit: return "priceOutOfLimit"
         case .noQuote: return "noQuote"
+        case .engineUnavailable: return "engineUnavailable"   // Swift 侧降级态，非引擎输出码
         }
     }
 

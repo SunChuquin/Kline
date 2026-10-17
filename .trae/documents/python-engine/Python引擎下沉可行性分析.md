@@ -1187,7 +1187,7 @@ rejection     → {"code":"invalidQty", "lot":100,
 | **A5-1** | **信任链（套件 8）**：脚本 sha256 + apiVersion 配对 + 篡改检测 + §9.10 降级闸门 | ✅ 见 §11.15 |
 | **A5-2** | 生产编解码层：生产模型 → op 入参 JSON / 引擎出参 → 生产模型 | 🔶 回测子系统已落地，见 §11.16（其余随各子系统切换增量补齐） |
 | **A5-3** | 引擎会话 + 投影层（异步 + 防抖 + 缓存，供 GUI 同步读；§10.10 闸门 6） | 🔶 条件单文案族已落地，见 §11.17（其余子系统随切换增量补齐） |
-| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 🔶 回测已切（§11.16）；其余待做 |
+| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 🔶 回测已切（§11.16）；**交易规则（C 组）已切**（§11.20）；sweep 判定 op 与 C 组展示面待做 |
 | **A5-5** | 默认 `SimRulesBridge.mode` 由 `.swift` 翻成 `.engine`（闸门生效） | 待做 |
 
 ### 11.9 A0 落地进度（2026-10-17）
@@ -1514,6 +1514,8 @@ done
 | A5-4（回测） | `SimRulesBridge.backtestRun` 分派；`StrategyBacktestRunner` 走该入口 | `b3cd1ed` | 同批 23/23 |
 | A5-3 | 投影层 `SimRulesProjection` + 批量 op `cond_texts` | `d690465` | 3/3 + diff 一致性 |
 | A5-3（收口） | 全部文案调用点接入（Training 两处 + 编辑器草稿 + sweep 触发日志） | `939704f` | **`KlineTests` 全量 73/73 全绿 0 skip** |
+| A5-4（一） | 判定/结算/交易规则的 **async 门面** + 领域写回变换（§11.19） | `89d458f` | 2/2（领域级对拍）+ 全量 75/75 |
+| A5-4（二） | **交易规则（C 组）下沉** + `submit` / `sweepConditions` async 化（§11.20） | 见本次提交 | 全量 **75/75 全绿 0 skip** |
 
 #### 11.18.2 ⚠️ 关键耦合：交易规则（C 组）**不能**单独切
 
@@ -1638,6 +1640,39 @@ done
 **⚠️ 实测踩坑（已修，值得记住）**：`tradeIsTradingSession` 首版漏传 `tzOffsetSeconds` → 引擎按 UTC 判交易时段，`session_morning` / `session_open_boundary` / `session_close_boundary` 三条 `.engine` 模式下红。**凡时间相关 op 必须显式注入 `tzOffsetSeconds`**（本层取 `TimeZone.current.secondsFromGMT(for:)`，与 `.swift` 现状 `Calendar.current` 同口径）。这条与 §11.13 的「Swift 侧 dump 走 `DateFormatter` + 本机时区」是同一类口径依赖。
 
 **下一步（本子步剩余）**：把 `SimStore.submit` 改 `async` + `sweepConditions` 同步循环改 async 流水线（含 §11.18.2 的 5 条约束与重入守卫）+ 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入。
+
+---
+
+### 11.20 A5-4 第二步：交易规则（C 组）下沉 + `submit` / `sweepConditions` async 化（2026-10-17）
+
+**本步把 §11.18.2 的「合并子步」前半落地**：交易规则（授权 + 硬约束复核）改由引擎裁决，为此完成 `submit` 与整条结算链的 async 化。
+
+**改动清单**
+
+| 文件 | 内容 |
+| --- | --- |
+| `SimStore.submit` | 改 `async`。授权校验 → `await SimRulesBridge.tradeValidate(...)`；是否交易时段 → `tradeIsTradingSession`；费用 → `tradeFee`。**任一步抛错即 `.engineUnavailable` 且不写任何数据**（保留「校验不通过 → 不写任何数据」的既有语义，**fail-closed**） |
+| `SimStore.closeAll` | 改 `async`；可卖数量 → `await tradeSellableQty(position:)`（引擎不可用 → 返回 0，不写盘） |
+| `SimStore`（6 个结算触发点） | `_ = sweepConditions(...)` → `Task { _ = await self.sweepConditions(...) }`（`observeDatabase`×3 / `scheduleCondSweep` / T+1 日切 / 激活预取） |
+| `SimCondEngine` | `sweepConditions(trigger:)` 与 `fireCondOrder(...)` 改 `async`；`list[idx] = await fireCondOrder(...)`、`switch await submit(draft)` |
+| UI 适配 | `SimCondListView.manualCheck`（结果 toast 移入 `Task`）/ `QuickPanelLayouts.performFullBuy`（整手数量也改走引擎 + 提交）/ `performCloseAll` / `TradeTicketView` 提交 |
+
+**降级：新增 `SimOrderRejection.engineUnavailable`**（文案「交易引擎未就绪，暂时无法下单（可查看行情与已有记录）」）。它是**Swift 侧降级态**，不是引擎 / `.swift` 后端输出码 —— `.swift` 后端永远不产它，故 fixture 不受影响；`SimRulesBridge.orderRejectionJSON` / `orderRejectCode` 仅因 switch 穷尽性而登记该码。
+
+**async 化的语义影响（实测确认）**
+
+- **`.swift` 模式零行为变化**：`payloadAsync` 的 `withCheckedThrowingContinuation` 在 `.swift` 分支**同步 resume → 不真挂起**，故整轮结算仍在一次主线程同步执行内跑完，`condSweepInFlight` 的置位/清空时机与改造前一致。
+- **`.engine` 模式重入守卫才真正生效**：结算会真的挂起（逐单等引擎），此时 `condSweepInFlight` 才能挡住重叠扫描 —— 即 §11.18.2 第 1 条约束的落实方式。
+- 6 个触发点改 `Task {}` 后，结算由「同步立即」变为「下一轮主线程」；这些触发点本身已是**合并窗口 / `asyncAfter` 延时**语义（`scheduleCondSweep` 注释即「禁止在 sink 内同步结算」），故等价。
+- **已知取舍**：`.engine` 模式下若上一轮 sweep 仍挂起，`manualCheck` 会拿到空结果（提示「本次检查无触发」）。安全（不重叠扫描）但不理想，A5-5 评估是否改为「排队 + 等上一轮」。
+
+**测试**：`KlineTests` 全量 **75/75 全绿 0 skip**（C 组域类型对拍由 §11.19 的 `SimRulesAsyncTests` 覆盖，含 `tradeValidate` / `tradeFee` / `tradeIsTradingSession` 两模式逐条相等）。
+> `submit` 本身未加单测：它直接改 `SimStore.shared`（写成交/持仓/资金并落盘），在单测里会污染共享状态；其**纯逻辑部分**（授权、时段、费用、可卖、可买）已由 `SimRulesAsyncTests` 逐条对拍。
+
+**本步未覆盖（留下一步）**
+
+1. **sweep 的判定 op 仍走 Swift**：`cond_evaluate`（`:89`）、`cond_expired_reason`、B 组（`fireDirection`/`executionPrice`/`advanceRepeatable`/`repeatableFinished`/`alertMessage`）——`SimRulesAsync` 里的对应包装已就绪，只差替换调用点（含 `TrainingSessionController:534` 训练态那条同步路径）；
+2. **C 组「展示面」仍走 Swift**：`SimulationLayoutA/B/CView`、`TradeTicketView.rules`、`QuickPanelLayoutsBC`、`Training*`（5 处）——这些是**每帧展示**（`lotSize` / `affordableQty` / `fee`），形态同 A5-3，须配投影缓存，否则「展示值」与「引擎裁决值」可能不一致（`.engine` 模式下）。
 
 ---
 

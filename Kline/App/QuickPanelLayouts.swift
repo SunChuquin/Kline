@@ -653,20 +653,29 @@ struct QuickPanelAView: View {
             showMessage(SimOrderRejection.noQuote.message, isError: true)
             return
         }
-        let qty = rules.affordableQty(cash: account.cash, price: last)
-        guard qty > 0 else {
-            showMessage("可用资金不足，买不满 \(rules.lotSize) 股", isError: true)
-            return
-        }
-        let draft = SimOrderDraft(accountID: accountID, metaID: meta.id,
-                                  code: meta.code, name: meta.name,
-                                  direction: .buy, priceType: .limit,
-                                  price: last, qty: qty)
-        switch store.submit(draft) {
-        case .success(let order):
-            showMessage("全仓买入 \(SimFormat.shares(order.qty)) 股 · \(order.status.title)", isError: false)
-        case .failure(let rejection):
-            showMessage(rejection.message, isError: true)
+        // A5-4：整手数量与授权都走引擎侧的 C 组（`.engine` 模式）；引擎未就绪 → 显式降级
+        Task {
+            let qty: Int
+            do {
+                qty = try await SimRulesBridge.tradeAffordableQty(cash: account.cash, price: last)
+            } catch {
+                showMessage(SimOrderRejection.engineUnavailable.message, isError: true)
+                return
+            }
+            guard qty > 0 else {
+                showMessage("可用资金不足，买不满 \(rules.lotSize) 股", isError: true)
+                return
+            }
+            let draft = SimOrderDraft(accountID: accountID, metaID: meta.id,
+                                      code: meta.code, name: meta.name,
+                                      direction: .buy, priceType: .limit,
+                                      price: last, qty: qty)
+            switch await store.submit(draft) {
+            case .success(let order):
+                showMessage("全仓买入 \(SimFormat.shares(order.qty)) 股 · \(order.status.title)", isError: false)
+            case .failure(let rejection):
+                showMessage(rejection.message, isError: true)
+            }
         }
     }
 
@@ -682,8 +691,10 @@ struct QuickPanelAView: View {
             showMessage("请先在上方选择具体账户", isError: true)
             return
         }
-        let count = store.closeAll(accountID: accountID, metaID: meta.id)
-        showMessage(count > 0 ? "已一键清仓 \(meta.name)" : "无可卖数量", isError: count == 0)
+        Task {
+            let count = await store.closeAll(accountID: accountID, metaID: meta.id)
+            showMessage(count > 0 ? "已一键清仓 \(meta.name)" : "无可卖数量", isError: count == 0)
+        }
     }
 
     /// 展示动作反馈并在 3 秒后自动清空（令牌防止旧计时清掉新消息）

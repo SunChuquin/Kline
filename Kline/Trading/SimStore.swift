@@ -266,7 +266,8 @@ final class SimStore: ObservableObject {
         if DatabaseManager.shared.isLoaded && needsSeed {
             performSeed()
             needsSeed = false
-            _ = sweepConditions(trigger: .dataReload)
+            // A5-4：`sweepConditions` 改 async（`.engine` 模式下判定/授权要 await 引擎）→ 起 Task 跑
+            Task { _ = await self.sweepConditions(trigger: .dataReload) }
             didSweepForLoadedDatabase = true
         }
         databaseLoadedCancellable = DatabaseManager.shared.$isLoaded
@@ -280,7 +281,7 @@ final class SimStore: ObservableObject {
                 }
                 // @Published 会把当前值回放给新订阅者：上面分支已结算过时不再重复结算
                 guard !didSweepForLoadedDatabase else { return }
-                _ = self.sweepConditions(trigger: .dataReload)
+                Task { _ = await self.sweepConditions(trigger: .dataReload) }
             }
 
         // 增量库内容变化（dataVersion 仅在内容确实变化时自增）→ 与「数据库首次就绪」同路径重扫条件单
@@ -289,7 +290,7 @@ final class SimStore: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                _ = self.sweepConditions(trigger: .dataReload)
+                Task { _ = await self.sweepConditions(trigger: .dataReload) }
             }
     }
 
@@ -300,7 +301,7 @@ final class SimStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + condSweepCoalesceDelay) { [weak self] in
             guard let self = self else { return }
             self.condSweepScheduled = false
-            _ = self.sweepConditions(trigger: .quoteRefresh)
+            Task { _ = await self.sweepConditions(trigger: .quoteRefresh) }
         }
     }
 
@@ -687,20 +688,27 @@ final class SimStore: ObservableObject {
     // MARK: - 交易：下单
 
     @discardableResult
-    func submit(_ draft: SimOrderDraft) -> Result<SimOrder, SimOrderRejection> {
+    func submit(_ draft: SimOrderDraft) async -> Result<SimOrder, SimOrderRejection> {
         guard let account = account(id: draft.accountID) else {
             return .failure(.emptyAccount)
         }
-        let rules = SimTradingRules.default
         let pos = position(accountID: draft.accountID, metaID: draft.metaID)
         let lastPrice = SimQuoteCenter.lastPrice(metaID: draft.metaID)
         let prevClose = SimQuoteCenter.prevClose(metaID: draft.metaID)
 
-        // 校验不通过 → 不写任何数据
-        if let rejection = rules.validate(draft: draft, account: account, position: pos,
-                                          lastPrice: lastPrice, prevClose: prevClose) {
-            return .failure(rejection)
+        // 授权校验（C 组 `trade_validate`）：`.swift` = 现状实现；`.engine` = 引擎裁决
+        // （D2：整手 / 涨跌停 / 可卖复核都在引擎）。引擎未就绪 → **显式降级** `.engineUnavailable`
+        // （§9.10：不静默用 Swift 兜底）。校验不通过 → 不写任何数据。
+        let rejection: SimOrderRejection?
+        do {
+            rejection = try await SimRulesBridge.tradeValidate(draft: draft, account: account,
+                                                              position: pos, lastPrice: lastPrice,
+                                                              prevClose: prevClose)
+        } catch {
+            DebugLogger.shared.log("[SimStore] submit：引擎不可用（授权校验）\(error)")
+            return .failure(.engineUnavailable)
         }
+        if let rejection { return .failure(rejection) }
 
         let now = Date()
         // 校验已保证：限价单 draft.price > 0；市价单 lastPrice > 0
@@ -722,13 +730,27 @@ final class SimStore: ObservableObject {
                              updatedAt: now,
                              originCondID: draft.originCondID)
 
-        if rules.isTradingSession(at: now) {
+        let inSession: Bool
+        do {
+            inSession = try await SimRulesBridge.tradeIsTradingSession(at: now)
+        } catch {
+            DebugLogger.shared.log("[SimStore] submit：引擎不可用（交易时段）\(error)")
+            return .failure(.engineUnavailable)
+        }
+
+        if inSession {
             // 盘中：立即全部成交
             order.status = .filled
             order.filledQty = draft.qty
 
             let amount = execPrice * Double(draft.qty)
-            let fee = rules.fee(amount: amount, direction: draft.direction)
+            let fee: Double
+            do {
+                fee = try await SimRulesBridge.tradeFee(amount: amount, direction: draft.direction)
+            } catch {
+                DebugLogger.shared.log("[SimStore] submit：引擎不可用（费用）\(error)")
+                return .failure(.engineUnavailable)
+            }
 
             assignFills(fills + [SimFill(id: UUID(), orderID: order.id,
                                          accountID: draft.accountID, metaID: draft.metaID,
@@ -893,9 +915,16 @@ final class SimStore: ObservableObject {
 
     /// 一键平仓：按可卖数量生成一笔市价卖出委托，返回生成笔数（0 或 1）
     @discardableResult
-    func closeAll(accountID: UUID, metaID: Int) -> Int {
+    func closeAll(accountID: UUID, metaID: Int) async -> Int {
         guard let pos = position(accountID: accountID, metaID: metaID) else { return 0 }
-        let qty = SimTradingRules.default.sellableQty(position: pos)
+        // 可卖数量（C 组 `trade_calc.sellableQty`，含 T+1）；引擎未就绪 → 无法平仓（返回 0）
+        let qty: Int
+        do {
+            qty = try await SimRulesBridge.tradeSellableQty(position: pos)
+        } catch {
+            DebugLogger.shared.log("[SimStore] closeAll：引擎不可用（可卖数量）\(error)")
+            return 0
+        }
         guard qty > 0 else {
             appendLog(ActionLog(id: UUID(), accountID: accountID, module: .order,
                                 content: "一键平仓 \(pos.name)", result: "无可卖数量",
@@ -906,7 +935,7 @@ final class SimStore: ObservableObject {
         let draft = SimOrderDraft(accountID: accountID, metaID: metaID, code: pos.code,
                                   name: pos.name, direction: .sell, priceType: .market,
                                   price: nil, qty: qty)
-        switch submit(draft) {
+        switch await submit(draft) {
         case .success:
             return 1
         case .failure:
@@ -942,7 +971,7 @@ final class SimStore: ObservableObject {
 
         // 跨日结算一次：当日有效 / 指定日期条件单在此置为失效（tPlus1Key 日切守卫保证「每日一次」）。
         // 放在 T+1 可卖刷新之后，保证卖出类条件判定用的是刷新后的可卖数量
-        _ = sweepConditions(trigger: .dataReload)
+        Task { _ = await self.sweepConditions(trigger: .dataReload) }
     }
 
     // MARK: - 查询（accountID == nil 表示全部账户聚合）
@@ -1288,7 +1317,7 @@ final class SimStore: ObservableObject {
         }
         // 尽力而为的一次结算：此处刚注册预取，bars 尚未回来多半拿不到最新价；
         // 真正的自动触发靠 MarketRowCache.rows 就绪后的合并结算（scheduleCondSweep）
-        _ = sweepConditions(trigger: .quoteRefresh)
+        Task { _ = await self.sweepConditions(trigger: .quoteRefresh) }
     }
 
     // MARK: - 日志写入（internal：条件单引擎在另一文件中也需写日志）

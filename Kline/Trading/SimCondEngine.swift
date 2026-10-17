@@ -50,7 +50,7 @@ extension SimStore {
     /// 统一结算入口：先判有效期 → 取快照 → 判定 → 下发委托。
     /// 已在结算中直接返回空结果（不重入）。
     @discardableResult
-    func sweepConditions(trigger: SimCondTrigger) -> SimCondSweepResult {
+    func sweepConditions(trigger: SimCondTrigger) async -> SimCondSweepResult {
         var result = SimCondSweepResult()
         guard !condSweepInFlight else { return result }
         condSweepInFlight = true
@@ -120,8 +120,8 @@ extension SimStore {
                                        result: list[idx].status.title, at: now))
 
             case .fire(let qty, let at):
-                list[idx] = fireCondOrder(list[idx], qty: qty, at: at,
-                                          snapshot: snapshot, now: now, result: &result)
+                list[idx] = await fireCondOrder(list[idx], qty: qty, at: at,
+                                                snapshot: snapshot, now: now, result: &result)
                 dirty = true
             }
         }
@@ -140,7 +140,7 @@ extension SimStore {
     /// （「仅提醒」指令不进下单分支，见 `fireAlertOnly`）
     private func fireCondOrder(_ order: SimCondOrder, qty: Int, at triggerPrice: Double,
                                snapshot: SimCondSnapshot, now: Date,
-                               result: inout SimCondSweepResult) -> SimCondOrder {
+                               result: inout SimCondSweepResult) async -> SimCondOrder {
         if order.directive.isAlertOnly {
             return fireAlertOnly(order, triggerPrice: triggerPrice,
                                  snapshot: snapshot, now: now, result: &result)
@@ -160,7 +160,7 @@ extension SimStore {
         target.runtime.lastTriggerPrice = triggerPrice
         target.updatedAt = now
 
-        switch submit(draft) {
+        switch await submit(draft) {
         case .success(let generated):
             target.originOrderID = generated.id
             target.triggeredCount += 1

@@ -35,6 +35,9 @@ enum SimOrderRejection: Error, Equatable {
     case insufficientShares(available: Int)                         // "可卖数量不足（T+1：当日买入不可卖）"
     case priceOutOfLimit(lower: Double, upper: Double)              // "委托价超出涨跌停区间 a ~ b"
     case noQuote                                                    // "暂无该标的行情，无法下单"
+    /// 引擎未就绪（`.engine` 模式下 §9.10 的**显式降级**：下单不可用，不静默用 Swift 兜底）。
+    /// 仅由 `SimStore.submit` 在 `SimRulesBridge` 抛错时产出，**不是**引擎/`.swift` 后端的输出码。
+    case engineUnavailable
 
     var message: String {
         switch self {
@@ -50,6 +53,8 @@ enum SimOrderRejection: Error, Equatable {
             return "委托价超出涨跌停区间 \(SimFormat.price(lower)) ~ \(SimFormat.price(upper))"
         case .noQuote:
             return "暂无该标的行情，无法下单"
+        case .engineUnavailable:
+            return "交易引擎未就绪，暂时无法下单（可查看行情与已有记录）"
         }
     }
 }

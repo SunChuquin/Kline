@@ -449,8 +449,10 @@ struct SimCondListView: View {
 
     /// 立即检查：就地提示本轮结算结果（列表随 store 变化自动刷新）
     private func manualCheck() {
-        let result = store.sweepConditions(trigger: .manual)
-        showToast(result.message)
+        Task {
+            let result = await store.sweepConditions(trigger: .manual)
+            showToast(result.message)
+        }
     }
 
     private func cancel(_ order: SimCondOrder) {
