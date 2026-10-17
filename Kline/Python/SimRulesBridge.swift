@@ -486,35 +486,15 @@ enum SimRulesBridge {
     // MARK: - 策略映射（D 组）
 
     private static func specFromJSON(_ any: Any?) -> StrategyTradeSpec {
-        let d = (any as? [String: Any]) ?? [:]
-        var s = StrategyTradeSpec()
-        s.direction = (d["direction"] as? String).flatMap(SimOrderDirection.init(rawValue:))
-        s.qty = int(d["qty"])
-        s.amount = num(d["amount"])
-        s.priceType = (d["priceType"] as? String).flatMap(SimPriceType.init(rawValue:))
-        s.offsetTicks = int(d["offsetTicks"])
-        s.validity = (d["validity"] as? String).flatMap(SimCondValidity.init(rawValue:))
-        s.expiresAt = isoDate(d["expiresAt"])
-        s.accountIDs = (d["accountIDs"] as? [String])?.compactMap { UUID(uuidString: $0) } ?? []
-        return s
+        SimRulesCodec.tradeSpecFromJSON(any)
     }
 
     private static func formulaDoc(_ any: Any?) -> FormulaDoc {
-        let d = (any as? [String: Any]) ?? [:]
-        let kind = (d["kind"] as? String).flatMap(FormulaKind.init(rawValue:)) ?? .strategy
-        return FormulaDoc(id: "strategy", kind: kind,
-                          name: str(d["name"]) ?? "策略",
-                          pickBody: str(d["pickBody"]) ?? "",
-                          pickRef: str(d["pickRef"]),
-                          rules: str(d["rules"]) ?? "",
-                          trade: specFromJSON(d["trade"]))
+        SimRulesCodec.formulaDocFromJSON(any)
     }
 
     private static func metaItem(_ any: Any?) -> MetaItem {
-        let d = (any as? [String: Any]) ?? [:]
-        return MetaItem(id: int(d["id"]) ?? 0, file: str(d["file"]) ?? "",
-                        code: str(d["code"]) ?? "", name: str(d["name"]) ?? "标的",
-                        type: str(d["type"]) ?? "股票", firstDate: nil, lastDate: nil)
+        SimRulesCodec.metaItemFromJSON(any)
     }
 
     private static func draftJSON(_ d: StrategyCondDraft) throws -> [String: Any] {
@@ -595,14 +575,7 @@ enum SimRulesBridge {
     }
 
     private static func specToJSON(_ s: StrategyTradeSpec) -> [String: Any] {
-        ["direction": s.direction?.rawValue ?? NSNull(),
-         "qty": s.qty ?? NSNull(),
-         "amount": s.amount ?? NSNull(),
-         "priceType": s.priceType?.rawValue ?? NSNull(),
-         "offsetTicks": s.offsetTicks ?? NSNull(),
-         "validity": s.validity?.rawValue ?? NSNull(),
-         "expiresAt": s.expiresAt.map { isoString($0) } ?? NSNull(),
-         "accountIDs": s.accountIDs.map { $0.uuidString }]
+        SimRulesCodec.tradeSpecJSON(s)
     }
 
     private static func tradeLines(_ any: Any?) -> [String] {
@@ -618,62 +591,51 @@ enum SimRulesBridge {
     // MARK: - F 组：回测
 
     private static func runBacktest(_ input: [String: Any]) throws -> [String: Any] {
-        let doc = formulaDoc(input["doc"])
-        var bars: [Int: [KlineItem]] = [:]
-        for (k, v) in (input["bars"] as? [String: Any]) ?? [:] {
-            guard let mid = Int(k), let arr = v as? [[String: Any]] else { continue }
-            bars[mid] = arr.map { b in
-                KlineItem(date: int(b["date"]) ?? 0, open: num(b["open"]) ?? 0, high: num(b["high"]) ?? 0,
-                          low: num(b["low"]) ?? 0, close: num(b["close"]) ?? 0, volume: 0, turnover: 0)
+        let m = SimRulesCodec.backtestInputDecode(input)
+        let r = StrategyBacktestEngine.run(doc: m.doc, bars: m.bars, pickHits: m.pickHits,
+                                           metas: m.metas, params: m.params, shouldCancel: nil)
+        return SimRulesCodec.backtestJSON(r)
+    }
+
+    // MARK: - 生产入口（A5-4 回测子系统）
+
+    /// 生产回测入口（**后台线程**）：按 `mode` 分派。
+    /// - `.swift` → 现状 `StrategyBacktestEngine.run`；
+    /// - `.engine` → `SimRulesCodec` 编码 + `blockingCall(sim_rules, "backtest_run")` + 反解；
+    ///   引擎未就绪 → `.failure(.engineNotReady)`（调用方按 §9.10 显式降级，不静默用 Swift）。
+    ///
+    /// 取消语义：`.swift` 逐日检查 `shouldCancel`；`.engine` 是一次性阻塞调用，
+    /// 取消只在返回后生效（调用方在回调里再查取消标志，与现状的「取出结果前再查一次」一致）。
+    static func backtestRun(doc: FormulaDoc, bars: [Int: [KlineItem]], pickHits: [Int: Set<Int>],
+                            metas: [Int: MetaItem], params: BacktestParams,
+                            shouldCancel: (() -> Bool)?,
+                            timeout: TimeInterval = 120) -> Result<BacktestResult, Failure> {
+        switch mode {
+        case .swift:
+            return .success(StrategyBacktestEngine.run(doc: doc, bars: bars, pickHits: pickHits,
+                                                       metas: metas, params: params,
+                                                       shouldCancel: shouldCancel))
+        case .engine:
+            guard KlinePythonBridge.shared.isReady else { return .failure(.engineNotReady) }
+            var input = SimRulesCodec.backtestInput(doc: doc, bars: bars, pickHits: pickHits,
+                                                    metas: metas, params: params,
+                                                    tzOffsetSeconds: TimeZone.current.secondsFromGMT())
+            input["op"] = "backtest_run"
+            switch KlinePythonBridge.shared.blockingCall(script: "sim_rules", input: input,
+                                                         timeout: timeout) {
+            case .success(let data):
+                guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return .failure(.badOutput)
+                }
+                do { return .success(try SimRulesCodec.backtestResult(from: obj, params: params)) }
+                catch { return .failure(.badOutput) }
+            case .failure(let e):
+                return .failure(.callError(String(describing: e)))
             }
         }
-        var hits: [Int: Set<Int>] = [:]
-        for (k, v) in (input["pickHits"] as? [String: Any]) ?? [:] {
-            guard let mid = Int(k), let arr = v as? [Any] else { continue }
-            hits[mid] = Set(arr.compactMap { int($0) })
-        }
-        var metas: [Int: MetaItem] = [:]
-        for (k, v) in (input["metas"] as? [String: Any]) ?? [:] {
-            guard let mid = Int(k), let d = v as? [String: Any] else { continue }
-            metas[mid] = MetaItem(id: mid, file: "", code: str(d["code"]) ?? "",
-                                  name: str(d["name"]) ?? "", type: "股票",
-                                  firstDate: nil, lastDate: nil)
-        }
-        let pin = (input["params"] as? [String: Any]) ?? [:]
-        var params = BacktestParams()
-        params.days = int(pin["days"]) ?? 250
-        params.initialCapital = num(pin["initialCapital"]) ?? 100_000
-        params.executeNextOpen = bool(pin["executeNextOpen"]) ?? true
-        params.includeEntry = bool(pin["includeEntry"]) ?? true
-
-        let r = StrategyBacktestEngine.run(doc: doc, bars: bars, pickHits: hits,
-                                           metas: metas, params: params, shouldCancel: nil)
-        return backtestJSON(r)
     }
 
     private static func backtestJSON(_ r: BacktestResult) -> [String: Any] {
-        var o: [String: Any] = [:]
-        o["stats"] = ["initialCapital": r.stats.initialCapital, "finalEquity": r.stats.finalEquity,
-                      "totalReturn": r.stats.totalReturn, "annualized": r.stats.annualized,
-                      "winRate": r.stats.winRate, "profitFactor": r.stats.profitFactor,
-                      "maxDrawdown": r.stats.maxDrawdown, "tradeCount": r.stats.tradeCount,
-                      "roundTrips": r.stats.roundTrips, "avgHoldDays": r.stats.avgHoldDays]
-        o["equity"] = r.equity.map { ["date": $0.date, "equity": $0.equity] }
-        if let rg = r.maxDrawdownRange { o["maxDrawdownRange"] = [rg.lowerBound, rg.upperBound] }
-        else { o["maxDrawdownRange"] = NSNull() }
-        o["trades"] = r.trades.map { t -> [String: Any] in
-            ["signalDate": t.signalDate, "date": t.date, "metaID": t.metaID, "code": t.code,
-             "name": t.name, "ruleKind": t.ruleKind?.rawValue ?? NSNull(),
-             "direction": t.direction.rawValue, "qty": t.qty, "price": t.price,
-             "amount": t.amount, "fee": t.fee,
-             "realizedPnL": t.realizedPnL ?? NSNull(), "holdDays": t.holdDays ?? NSNull()]
-        }
-        o["scannedCount"] = r.scannedCount
-        o["hitCount"] = r.hitCount
-        o["warnings"] = r.warnings
-        o["skipped"] = r.skipped
-        o["params"] = ["days": r.params.days, "initialCapital": r.params.initialCapital,
-                       "executeNextOpen": r.params.executeNextOpen, "includeEntry": r.params.includeEntry]
-        return o
+        SimRulesCodec.backtestJSON(r)
     }
 }

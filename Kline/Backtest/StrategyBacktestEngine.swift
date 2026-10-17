@@ -905,12 +905,21 @@ final class StrategyBacktestRunner: ObservableObject {
                 self.setPhase(.simulating)
             }
 
-            var outcome = StrategyBacktestEngine.run(doc: doc, bars: preparedBars,
-                                                     pickHits: preparedHits, metas: preparedMetas,
-                                                     params: params,
-                                                     // 取消闭包只捕获锁保护的标志盒（@unchecked Sendable），
-                                                     // 不访问 @MainActor 上的属性，可在后台队列安全调用
-                                                     shouldCancel: { cancelBox.isCancelled })
+            // A5-4：回测子系统按 `SimRulesBridge.mode` 分派（`.swift` = 现状；`.engine` = 引擎）。
+            // 取消闭包只捕获锁保护的标志盒（@unchecked Sendable），不访问 @MainActor
+            // 上的属性，可在后台队列安全调用。
+            let runResult = SimRulesBridge.backtestRun(
+                doc: doc, bars: preparedBars, pickHits: preparedHits, metas: preparedMetas,
+                params: params, shouldCancel: { cancelBox.isCancelled })
+            guard case .success(var outcome) = runResult else {
+                var msg = "回测失败"
+                if case .failure(let f) = runResult { msg = f.description }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, token == self.runToken, !self.cancelBox.isCancelled else { return }
+                    self.setPhase(.failed(msg))
+                }
+                return
+            }
             // 扫描数 = 实际取数过的标的数（未命中标的的 bars 已释放，不能再取 bars.count）
             outcome.scannedCount = scannedTotal
             if !runnerSkips.isEmpty { outcome.skipped.append(contentsOf: runnerSkips) }

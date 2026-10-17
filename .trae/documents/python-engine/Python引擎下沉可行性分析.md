@@ -1181,9 +1181,9 @@ rejection     → {"code":"invalidQty", "lot":100,
 | 子步 | 内容 | 状态 |
 | --- | --- | --- |
 | **A5-1** | **信任链（套件 8）**：脚本 sha256 + apiVersion 配对 + 篡改检测 + §9.10 降级闸门 | ✅ 见 §11.15 |
-| **A5-2** | 生产编解码层：生产模型 → op 入参 JSON / 引擎出参 → 生产模型 | 待做 |
+| **A5-2** | 生产编解码层：生产模型 → op 入参 JSON / 引擎出参 → 生产模型 | 🔶 回测子系统已落地，见 §11.16（其余随各子系统切换增量补齐） |
 | **A5-3** | 引擎会话 + 投影层（异步 + 防抖 + 缓存，供 GUI 同步读；§10.10 闸门 6） | 待做 |
-| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 待做 |
+| **A5-4** | 逐子系统切 `.engine`：回测 → DSL/策略映射 → 交易规则 → 条件单判定/结算 | 🔶 回测已切（§11.16）；其余待做 |
 | **A5-5** | 默认 `SimRulesBridge.mode` 由 `.swift` 翻成 `.engine`（闸门生效） | 待做 |
 
 ### 11.9 A0 落地进度（2026-10-17）
@@ -1418,6 +1418,37 @@ done
 - 每次改 `sim_rules.py`（**含仅注释**）都会改哈希 → **必须**重跑 `gen_sim_rules_trust.py`；否则 `SimRulesTrustTests` / `--trust` 会红。这是刻意的（哈希是信任链的锚）。
 
 **下一步**：A5-2 生产编解码层（生产模型 ↔ op JSON）。
+
+---
+
+### 11.16 A5-2 / A5-4（回测子系统）落地进度（2026-10-17）
+
+**A5-2 生产编解码层**——新 `Kline/Python/SimRulesCodec.swift`（`nonisolated enum`），与 `SimRulesBridge` 分工：
+
+- `SimRulesBridge` = 过渡期**双跑门面**（JSON 入参 → JSON 出参；服务契约测试与 Swift dump）；
+- `SimRulesCodec` = **生产**编解码（领域模型 ↔ op JSON），业务调用点只与本层打交道。
+
+**单一来源**：JSON ↔ Swift 的**双向**转换只在本文件实现一次，`SimRulesBridge` 的 `specFromJSON` / `formulaDoc` / `metaItem` / `specToJSON` / `backtestJSON` 一律**委派**到本层（哪个方向漂了，A1/A3/A4 契约测试会红）。本步落地内容：
+
+| 方向 | 内容 |
+| --- | --- |
+| 通用 | `int/num/bool/str/uuid/isoDate/isoString/dateList`；`CodecError.badShape` |
+| JSON → Swift | `metaItemFromJSON` / `accountFromJSON` / `positionFromJSON` / `snapshotFromJSON` / `tradeSpecFromJSON` / `formulaDocFromJSON` / `backtestInputDecode` / `backtestResult(from:params:)` |
+| Swift → JSON | `tradeSpecJSON` / `formulaDocJSON` / `backtestInput` / `backtestJSON` |
+
+**A5-4（回测）**：`SimRulesBridge` 新增生产入口 `backtestRun(...)`（**后台线程**）：`.swift` → 现状 `StrategyBacktestEngine.run`；`.engine` → 编解码 + `blockingCall(sim_rules, "backtest_run")` + 反解，**引擎未就绪 → `.engineNotReady`**（不静默回退 Swift，避免双语义）。`StrategyBacktestRunner.start`（`MarketRowCache.computeQueue` 后台）改为经该入口分派；失败经 token/cancelBox 过滤后置 `.failed(原因)`。
+
+**抓手 / 已知取舍**：
+
+- **`blockingCall` 拒绝主线程**（有 assert）→ `backtestRun` 只能从后台调；回测本就在 `computeQueue` 上，天然满足。
+- **`op` 必须由调用方写入入参**：`KlinePythonBridge.call/blockingCall` 只透传 `input`，不像 `SimRulesBridge.enginePayload` 会自动补 `op` → 首次实测报 `未知 op: None`，已在 `backtestRun` 内显式 `input["op"] = "backtest_run"`。
+- **`tzOffsetSeconds`**：Swift 用 `Calendar.current`（含 DST），引擎用固定偏移；生产传 `TimeZone.current.secondsFromGMT()`（§11.5 已知限制，DST 时区可能差一小时；回测切日边界影响极小，暂不引入 IANA tzdata）。
+- **取消语义**：`.swift` 逐日检查 `shouldCancel`；`.engine` 是一次性阻塞调用，取消只在返回后生效（与现状「取出结果前再查一次」一致）。
+- **回测 `id`**：`BacktestTrade.id` 是本地 UUID，引擎 JSON 不含它 → 反解时重新生成；契约比较用 `backtestJSON`（不含 id），不受影响。
+
+**验证**：`KlineTests/SimRulesCodecTests.swift`（新，4 用例）——① 入参编解码**不动点**（`encode(decode(x))` 幂等）；② 出参反解无损（`backtestJSON(backtestResult(fixture.expected))` == `expected`）；③ 生产编码喂引擎得 golden；④ 生产入口 `.engine` 结果 == `.swift` 结果。**实测**：本套件 4/4 全绿；同批五套件（A1/A3/A4 + 信任链 + 编解码）**23/23 全绿 0 skip**。
+
+**注意**：`mode` 默认仍为 `.swift`（A5-5 才翻转）→ 上述回测切换目前**只被测试行使**，生产仍走 Swift，符合 §9.10「不允许半可用态」。
 
 ---
 
