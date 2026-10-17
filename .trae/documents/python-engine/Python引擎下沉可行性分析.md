@@ -877,7 +877,7 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 
 | 项 | 约定 |
 | --- | --- |
-| 测试文件 | 过渡期 `KlineTests/SimRulesContractTests.swift`（Swift 现状 ↔ fixture，A1 已落地）；长期 `KlineTests/PyBridgeSimRulesTests.swift`（Python ↔ fixture，**A3 已落地**，见 §11.13）。二者同 golden、同比较口径；删 Swift 实现后过渡期文件随实现一并移除 |
+| 测试文件 | 过渡期 `KlineTests/SimRulesContractTests.swift`（Swift 现状 ↔ fixture，A1 已落地）；长期 `KlineTests/PyBridgeSimRulesTests.swift`（Python ↔ fixture，**A3 已落地**，见 §11.13）。二者同 golden、同比较口径（共用 `KlineTests/SimRulesJSONCompare.swift`）；删 Swift 实现后过渡期文件随实现一并移除。另有 **A4** `KlineTests/SimRulesDiffTests.swift`（Swift ↔ 引擎**同用例双跑**，不读 expected，见 §11.14） |
 | fixture | `KlineTests/Fixtures/sim_rules.json`（计算类：evaluate / validateCreate / tradingRules / sweep / mapping）· `strategy_dsl.json`（解析类）· `backtest_golden.json`（回测净值） |
 | 生产流程（两阶段） | **A1** 由 Swift 现状**导出** golden（`sim_rules.json` 由一次「dump 模式」测试产出）→ **A2** 删 Swift 后 fixture 冻结为唯一 golden，`PyBridgeSimRulesTests` 继续对拍 |
 | 解析类 golden | `strategy_dsl.json` **手写为规格**（文本口径稳定），Swift 与 Python **同时**对其断言 |
@@ -1153,7 +1153,7 @@ rejection     → {"code":"invalidQty", "lot":100,
 - `code` = `SimCondRejection` / `SimOrderRejection` 的 case 名（**关联值展平成同级键**，如 `lot` / `lower` / `upper` / `available` / `affordableQty`）；
 - **同时回传 `message`**：文案是 UI 可见面，属契约的一部分，必须逐字对拍（不接受「语义等价」）。
 
-### 11.7 Swift 侧接入形态（过渡期双跑）
+### 11.7 Swift 侧接入形态（过渡期双跑）——**A4 已按此落地，见 §11.14**
 
 新增门面 `Kline/Python/SimRulesBridge.swift`：
 
@@ -1223,7 +1223,7 @@ python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json
 **契约发现 1（锁现状，不得顺手修正）**：`SimCondRule.evaluate` 开头 `guard let price = snapshot.last, price > 0 else { return .hold(order.runtime) }` 先于 `switch`。因此 `case .time` 里 `snapshot.last ?? snapshot.prevClose` 的**「无最新价退化用昨收」分支实际不可达**（能让它走到 `at` 的前提是 `last > 0`，此时 `??` 必然取 `last`）。
 → 契约测试按「`last` 缺失 → `hold`」**锁死现状**，用例 `eval.time_no_quote_holds` 已标注原因。这是「契约锁现状」原则的实例：**旧的意图分支已死，但改动它会改变外部可观察行为，故冻结在 A 阶段不动**。
 
-**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **A1 已落地**（Swift dump 导出三份 golden，见 §11.12 与 §12）→ **A2/A3 已落地**（PC 侧零差异 + 引擎内零差异，见 §11.13）；后续转入 **A4** 差分双跑（`SimRulesBridge.mode` 切 `.swift` / `.engine` 逐字段比较，见 §11.8）。
+**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **A1 已落地**（Swift dump 导出三份 golden，见 §11.12 与 §12）→ **A2/A3 已落地**（PC 侧零差异 + 引擎内零差异，见 §11.13）→ **A4 已落地**（差分双跑，见 §11.14）；后续转入 **A5** 生产路径切引擎 + 信任链（见 §11.8）。
 
 ### 11.10 D/E 组落地进度与实测发现（2026-10-17）
 
@@ -1341,7 +1341,35 @@ done
 
 **版本差异（诚实登记）**：内嵌引擎为 **CPython 3.14.7**（beeware 3.14-b11），PC 侧对拍用 **3.13.1**。本套件全部 op 仅标准库（`json`/`math`/`datetime`/`decimal`），252 例实测两版本行为一致；若未来出现版本敏感的 `decimal`/`datetime` 行为差异，**以引擎版本为准**（fixture 是引擎前面那堵墙，不是 PC 前面那堵）。
 
-**下一步：A4 差分双跑**——引入 `SimRulesBridge.mode`（`.swift` / `.engine`）让同用例集在两侧各跑一遍、逐字段比较（入口开关见 §11.8；此时 Swift 实现仍在，故能真正「同用例双跑」而非「各自对 fixture」）。
+**下一步：A4 差分双跑**（已落地，见 §11.14）。
+
+### 11.14 A4 落地进度与实测发现（差分双跑，2026-10-17）
+
+**已完成**：按 §11.7 新增生产门面 **`Kline/Python/SimRulesBridge.swift`**：
+
+- `Mode { .swift, .engine }` + `static var mode`（默认 `.swift`，单测 / Debug 页可切）；
+- `payload(op:input:timeout:completion:)` 按 `mode` 分发；
+- **`.swift`** → `swiftPayload(op:input:)`：把 Swift 现状投影成与 `sim_rules.py` **同形状 JSON**（含 `ok:true`）。⚠️ 该投影逻辑**原本在 `KlineTests/SimRulesContractTests.swift` 内，A4 迁到此处**——单一来源：dump 生产端与差分测试共用，避免两份漂移（A6 删 Swift 时随实现一并删）；
+- **`.engine`** → `enginePayload(...)`：经 `KlinePythonBridge.call` 调 `sim_rules.py`，原样返回 `kline_result`；**引擎未就绪 → `.failure(.engineNotReady)`**（= §11.7 的「返回 nil」，调用方按 §9.10 显式降级，不静默用 Swift 兜底）。
+
+**配套产物**：
+
+| 产物 | 说明 |
+| --- | --- |
+| `KlineTests/SimRulesJSONCompare.swift`（新） | A1/A3/A4 **共用**的 JSON 逐字段比较器（递归 / 键集必须完全一致 / 数值相对容差 `1e-9·max(1,|e|)`）——消除原先三份拷贝 |
+| `KlineTests/SimRulesDiffTests.swift`（新） | ① `testSwiftVsEngineSameCaseSet`：**不读 fixture 的 `expected`**，同用例集把 Swift 现状与引擎各自产出再逐字段对拍（拦「两边同源漂移」）；② `testModeDispatch`：`mode` 分发正确且两后端各自等价 |
+| `KlineTests/SimRulesContractTests.swift`（改） | 投影迁出后只留 fixture 读写 + dump/断言 + 时区守卫（行为不变，dump 结果不变——见下「幂等往返」实证） |
+
+**实测**：三套件同批 **9/9 全绿、0 skip**（`SimRulesContractTests` 4 + `SimRulesDiffTests` 2 + `PyBridgeSimRulesTests` 3）；252 用例双跑零差异。
+
+**A4 抓手（golden 生成管线）——负零与幂等往返**：为验证「投影迁出未改 dump 结果」，用 dump 模式重跑并与提交态 fixture 比对，抓到两点（都已修）：
+
+1. **extract 侧负零有损**（与 §11.13 桥接入参侧**同一坑**）：dump 产出是 Swift `.sortedKeys` JSON，`extract_sim_rules_golden.py` 的 `json.loads` 默认把 `-0` 解析成 int `0` → 3 条 `*_neg_zero` 的 **input** 被写成 `0`（`expected` 仍对，但下次 assert 必失败）。
+   **修 Python**：`json.loads(..., parse_int=lambda s: -0.0 if s == "-0" else int(s))`（依据同 A3：`-0` 只可能来自 `Double(-0.0)`）。
+2. **规范写盘者是 `gen_sim_rules_inputs.py`，extract 只是中转**：gen 拥有键序（`caseName/op/input/expected`）与最短往返表示；extract 写的是 Swift 顺序 + 17 位满表示（如 `2.675` 落成 `2.6749999999999998`），故两者**仅键序/表示不同、数值语义一致**。canonical 流程 = **dump → extract → gen**。
+   **验证**：完整往返后 `git diff` **为空** → golden 重新生成**字节幂等**，`12.5` 的「CI 漂移检测（改 Swift 语义忘更新 fixture → dump 后 diff 非空）」由此可直接成立。
+
+**下一步：A5**——生产路径切 `.engine` + 信任链（脚本哈希 / 版本锁 / §9.10 降级矩阵），套件 8 全绿；随后 A6 删 Swift 实现 + fixture 冻结。
 
 ---
 
@@ -1400,17 +1428,20 @@ cd 仓库根 && xcodebuild test -scheme Kline -project Kline.xcodeproj \
   -only-testing:KlineTests/SimRulesContractTests \
   -derivedDataPath build/DerivedData 2>&1 \
   | python3 scripts/extract_sim_rules_golden.py
+python3 scripts/gen_sim_rules_inputs.py        # ② 规范收口（键序 + 最短往返表示）
 # 首次（fixture 无 expected）会自动 dump；之后同一命令转为「断言 + 无输出」。
 # 强制重 dump：TEST_RUNNER_KLINE_DUMP_SIM_RULES=1 xcodebuild test …
 ```
 
-`extract_sim_rules_golden.py`：正则抓 `KLINE_SIM_RULES_GOLDEN_B64:<idx>:<chunk>` / `KLINE_BACKTEST_GOLDEN_B64:…`（按 idx 排序拼接）→ base64 解码 → 覆盖 `KlineTests/Fixtures/{sim_rules,backtest_golden}.json`。`SimRulesContractTests` 按 1000 字符分片 `print`，避开日志行长限制。
+`extract_sim_rules_golden.py`：正则抓 `KLINE_SIM_RULES_GOLDEN_B64:<idx>:<chunk>` / `KLINE_BACKTEST_GOLDEN_B64:…`（按 idx 排序拼接）→ base64 解码 → 覆盖 `KlineTests/Fixtures/{sim_rules,backtest_golden}.json`。`SimRulesContractTests` 按 1000 字符分片 `print`，避开日志行长限制。其 `json.loads` 用 `parse_int` 把 `-0` 还原为 `-0.0`（Foundation 把 `Double(-0.0)` 写成 `-0`，见 §11.13/§11.14）。
+
+⚠️ **②步不可省（A4 实测）**：dump 产出是 Swift `.sortedKeys` 顺序 + 17 位满表示，而**规范写盘者是 `gen_sim_rules_inputs.py`**（键序 + 最短往返表示，`_carry_expected` 保住 dump 的 `expected`）。完整 **dump → extract → gen** 往返后 `git diff` 应为空——这正是 §12.5 的 CI 漂移检测所依赖的**字节幂等性**（2026-10-17 实测通过）。
 
 ### 12.4 差分与评审流程
 
 1. **A1**（已完成）跑 dump → `git diff` fixture：**逐条人工评审 `expected` 是否符合语义**（把现状固化成基准，必须有人看）；同时跑 `python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json`（Python↔golden 逐位）；
 2. **A2/A3** 跑 `SimRulesContractTests` + `PyBridgeSimRulesTests`：任一差异 → 修 Python（不修 fixture）。**A2/A3 已完成（2026-10-17）**：PC 侧 191/54/7 零差异、引擎内 252/252 全绿（见 §11.13）；A3 抓到并修复「负零在传输层丢失」一例（改桥接 `parse_int`，非改逻辑）。
-3. **A4** 差分双跑：`SimRulesBridge.mode` 切 `.swift` 与 `.engine` 各跑一遍全部用例，逐字段比较；
+3. **A4**（已完成）差分双跑：`SimRulesBridge.mode` 切 `.swift` 与 `.engine` 各跑一遍全部用例，逐字段比较。实测三套件 9/9 全绿，252 用例双跑零差异；并顺带把 golden 往返做成字节幂等（见 §11.14）。
 4. **A6** fixture **冻结**并加文件头注释「此文件为口径基准，改动必须走 PR 评审」。
 
 ### 12.5 更新时机（与 `contract_golden.py` 同规则）

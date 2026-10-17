@@ -23,8 +23,9 @@
 //  远日期（对 now 不敏感）。故本套件**不依赖宿主时区**，无需 SimRulesContractTests 的
 //  +08:00 守卫（那条守卫是给「Swift 侧 dump」用的，不是给引擎用的）。
 //
-//  数值口径：与 SimRulesContractTests 逐位同口径——递归比较、数值相对容差 1e-9
-//  （abs(e-a) > 1e-9 * max(1, |e|)），对象键集必须完全一致（缺键/多键皆报错）。
+//  数值口径：与 SimRulesContractTests / SimRulesDiffTests 共用测试目标内的
+//  `SimRulesJSONCompare`（递归比较、数值相对容差 1e-9·max(1,|e|)、对象键集必须
+//  完全一致——缺键/多键皆报错）。
 //
 
 import XCTest
@@ -109,50 +110,7 @@ final class PyBridgeSimRulesTests: XCTestCase {
         }
     }
 
-    // MARK: - 递归比较（与 SimRulesContractTests.assertEqualJSON 逐位同口径）
-
-    private func assertEqualJSON(_ expected: Any, _ actual: Any, _ path: String) -> [String] {
-        if let e = expected as? [String: Any] {
-            guard let a = actual as? [String: Any] else {
-                return ["\(path)：期望对象，实得 \(actual)"]
-            }
-            var errs: [String] = []
-            for k in e.keys {
-                if let av = a[k] { errs += assertEqualJSON(e[k]!, av, "\(path).\(k)") }
-                else { errs.append("\(path).\(k)：缺失") }
-            }
-            for k in a.keys where e[k] == nil { errs.append("\(path).\(k)：多余字段") }
-            return errs
-        }
-        if let e = expected as? [Any] {
-            guard let a = actual as? [Any] else { return ["\(path)：期望数组，实得 \(actual)"] }
-            if e.count != a.count { return ["\(path)：长度 期望 \(e.count)，实得 \(a.count)"] }
-            var errs: [String] = []
-            for (i, pair) in zip(e, a).enumerated() {
-                errs += assertEqualJSON(pair.0, pair.1, "\(path)[\(i)]")
-            }
-            return errs
-        }
-        if expected is NSNull || actual is NSNull {
-            if !(expected is NSNull && actual is NSNull) {
-                return ["\(path)：期望 \(expected)，实得 \(actual)"]
-            }
-            return []
-        }
-        if let e = expected as? NSNumber, let a = actual as? NSNumber,
-           CFGetTypeID(e) != CFBooleanGetTypeID(), CFGetTypeID(a) != CFBooleanGetTypeID() {
-            if abs(e.doubleValue - a.doubleValue) > 1e-9 * max(1.0, abs(e.doubleValue)) {
-                return ["\(path)：期望 \(e)，实得 \(a)"]
-            }
-            return []
-        }
-        if let e = expected as? Bool, let a = actual as? Bool, e == a { return [] }
-        if let e = expected as? String, let a = actual as? String, e == a { return [] }
-        if String(describing: expected) == String(describing: actual) { return [] }
-        return ["\(path)：期望 \(expected)，实得 \(actual)"]
-    }
-
-    // MARK: - 通用分段落 runner
+    // MARK: - 通用分段落 runner（比较器 = 测试共享 SimRulesJSONCompare）
 
     private func runFixture(_ name: String, sections: [String]) throws {
         try ensureEngineReady()
@@ -174,7 +132,8 @@ final class PyBridgeSimRulesTests: XCTestCase {
                     continue
                 }
                 let actual = try callSimRules(op: op, input: input)
-                let errs = assertEqualJSON(expected, actual, "\(name).json.\(s).\(caseName)")
+                let errs = SimRulesJSONCompare.report(expected: expected, actual: actual,
+                                                      path: "\(name).json.\(s).\(caseName)")
                 if !errs.isEmpty {
                     // 单 case 聚合为一条失败：逐字段并列，便于定位，又不至于刷屏
                     XCTFail("❌ \(name).json.\(s).\(caseName)（op=\(op)）：\n  " + errs.joined(separator: "\n  "))

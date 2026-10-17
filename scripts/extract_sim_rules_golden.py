@@ -55,7 +55,12 @@ def main():
             continue
         b64 = "".join(parts[i] for i in sorted(parts))
         raw = base64.b64decode(b64)
-        obj = json.loads(raw.decode("utf-8"))
+        # 负零保真：Foundation JSONSerialization 把 Double(-0.0) 写成 `-0`，json 默认
+        # 解析成 int 0（负号丢失）——与 KlinePythonBridge 入参侧同一坑。`-0` 只可能来自
+        # Double(-0.0)（Swift 的 Int 0 恒写 `0`），故精确还原为 -0.0。
+        # 注：规范键序/最短表示由 gen_sim_rules_inputs.py 收口（本脚本是中转）。
+        obj = json.loads(raw.decode("utf-8"),
+                         parse_int=lambda s: -0.0 if s == "-0" else int(s))
         path = _TARGETS[sentinel]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2)
