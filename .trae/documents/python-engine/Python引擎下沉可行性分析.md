@@ -1873,11 +1873,19 @@ done
 
 **后续步骤（待实施，同一 E 组内继续）**
 
-| 步骤 | 内容 | 形态 |
-| --- | --- | --- |
-| E-2 | `.tdx` 文件边界的 TRADE 段：`FormulaKind.parse` / `serialize` 拆出 async 变体（结构切分仍留 GUI 侧） | 单次 `await`（文件加载 / 保存各一次） |
-| E-3 | `StrategyDetailView` 4 处（`pickSummary` / `tradeSummary` / 规则卡 `parse` + `triggerText`） | 页面级 `.task {}` + `@State`（只读展示，无防抖必要） |
-| E-4 | `StrategyFormulaEditorView` 9 处（init `parse` / 每行 `line` / 每帧 `validate` / 每行 `specs` / 每行 `override` / 预览卡 3 处） | **防抖 + 投影**（闸门 6）：新建 `StrategyProjection`（同 A5-3 / §11.23 形态，`.swift` 直通） |
+| 步骤 | 内容 | 形态 | 状态 |
+| --- | --- | --- | --- |
+| E-2 | `.tdx` 文件边界的 TRADE 段：`FormulaKind.parse` / `serialize` 拆出 async 变体（结构切分仍留 GUI 侧） | 单次 `await`（文件加载 / 保存各一次） | ⬜ 待实施（**降级口径需先拍板**：引擎不可用时策略库「整体不可用」还是「仅 TRADE 段降级」） |
+| E-3 | `StrategyDetailView` 4 处（`pickSummary` / `tradeSummary` / 规则卡 `parse` + `triggerText`） | 页面级 `.task {}` + `@State`（只读展示，无防抖必要） | ✅ **已交付** |
+| E-4 | `StrategyFormulaEditorView` 9 处（init `parse` / 每行 `line` / 每帧 `validate` / 每行 `specs` / 每行 `override` / 预览卡 3 处） | **防抖 + 投影**（闸门 6）：新建 `StrategyProjection`（同 A5-3 / §11.23 形态，`.swift` 直通） | ⬜ 待实施 |
+
+**第二步（E-3）细节**：`StrategyDetailView` 的选股摘要 / 交易摘要 / 规则清单改为引擎取值。
+
+- `.swift` 模式**直通现状实现**（`pickSummaryText` / `tradeSummaryText` / `parsedRules` 三个计算属性内 `mode == .swift` 分支直接调 `StrategyPreview.*` / `StrategyRuleParser.parse`）→ 零行为变化、零引擎请求。
+- `.engine` 模式：`.task(id: doc)` 进页面 / `doc` 变化时取一次 `strategy_preview`（一次拿全 `pick` / `trade` / `triggers`）+ `strategy_parse`（拿 `rules` / `errors`）；规则行触发文案**按索引取 `triggers[index]`**（与 `calls.map(triggerText)` 同序，不逐行再打引擎）。
+- 降级：引擎不可用 / 出参形状非法 → `engineUnavailable` → 显示 **`—`** 占位（取数中显示 `…`），**不静默用 Swift 兜底**。A5-5 补「引擎不可用」正式空态时一并收敛这两种占位。
+- 未下沉（E-2 范围）：`library.save` 写盘时的 TRADE 段序列化仍走 Swift（`.swift` 模式无差异；`.engine` 模式下见 E-2 待办）。
+- **实测**：`BUILD SUCCEEDED`；`KlineTests` 全量 **82/82 全绿 0 skip**。本步未改 `sim_rules.py`。
 
 ---
 

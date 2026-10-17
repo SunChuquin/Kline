@@ -43,6 +43,43 @@ struct StrategyDetailView: View {
     /// 页内浅蓝提示条文案（3 秒后自动消失）
     @State private var genToast: String? = nil
 
+    // MARK: - E 组取值（§11.25 E-3）
+
+    /// `.engine` 模式下由 `.task` 填充的引擎取值；`.swift` 模式恒 nil（走直通）。
+    @State private var enginePreview: SimRulesCodec.StrategyPreviewResult?
+    @State private var engineParse: (rules: [StrategyRuleCall], errors: [String])?
+    /// 引擎不可用 / 取数失败（显式降级，不静默用 Swift 兜底，§9.10）
+    @State private var engineUnavailable = false
+
+    /// 未就绪占位：「…」= 取数中，「—」= 引擎不可用
+    private var placeholder: String { engineUnavailable ? "—" : "…" }
+
+    /// 选股条件摘要：`.swift` 模式直通现状实现（零行为变化），`.engine` 模式读异步缓存。
+    private var pickSummaryText: String {
+        SimRulesBridge.mode == .swift
+            ? StrategyPreview.pickSummary(doc: doc, pickerName: library.pickerName(id: doc.pickRef))
+            : (enginePreview?.pick ?? placeholder)
+    }
+
+    /// 交易指令摘要（同上口径）
+    private var tradeSummaryText: String {
+        SimRulesBridge.mode == .swift
+            ? StrategyPreview.tradeSummary(doc: doc)
+            : (enginePreview?.trade ?? placeholder)
+    }
+
+    /// RULES 段解析结果（`.swift` 直通 / `.engine` 读异步缓存；未就绪 → nil → 占位）
+    private var parsedRules: (rules: [StrategyRuleCall], errors: [String])? {
+        SimRulesBridge.mode == .swift ? StrategyRuleParser.parse(lines: doc.rules) : engineParse
+    }
+
+    /// 规则行触发文案：`.swift` 直通；`.engine` 取 `strategy_preview.triggers`（同序，一次请求全取）。
+    private func triggerText(index: Int, call: StrategyRuleCall) -> String {
+        if SimRulesBridge.mode == .swift { return StrategyPreview.triggerText(call) }
+        guard let triggers = enginePreview?.triggers, triggers.count > index else { return placeholder }
+        return triggers[index]
+    }
+
     // 显式 init：本视图含 private 存储属性，合成 memberwise init 会是 private
     init(doc: FormulaDoc, onClose: @escaping () -> Void, onEdit: @escaping () -> Void) {
         self.doc = doc
@@ -82,6 +119,25 @@ struct StrategyDetailView: View {
             if case .finished = backtest.phase, backtest.result != nil {
                 showBacktestResult = true
             }
+        }
+        // E 组取值：引擎模式下进入 / doc 变化时取一次（只读展示，无需防抖）
+        .task(id: doc) { await loadEngineValues() }
+    }
+
+    /// `.engine` 模式下取「选股摘要 / 交易摘要 / 规则解析与触发文案」。
+    /// `.swift` 模式直接返回（视图各取值点走直通，零引擎请求、零行为变化）。
+    /// 引擎不可用 / 出参形状非法 → 置 `engineUnavailable`（显示 `—` 占位），**不静默用 Swift 兜底**。
+    private func loadEngineValues() async {
+        guard SimRulesBridge.mode == .engine else { return }
+        do {
+            enginePreview = try await SimRulesBridge.strategyPreview(
+                doc: doc, pickerName: library.pickerName(id: doc.pickRef))
+            engineParse = try await SimRulesBridge.strategyParse(lines: doc.rules)
+            engineUnavailable = false
+        } catch {
+            enginePreview = nil
+            engineParse = nil
+            engineUnavailable = true
         }
     }
 
@@ -134,8 +190,7 @@ struct StrategyDetailView: View {
 
     private var pickCard: some View {
         card("选股条件") {
-            Text(StrategyPreview.pickSummary(doc: doc,
-                                             pickerName: library.pickerName(id: doc.pickRef)))
+            Text(pickSummaryText)
                 .font(.system(size: 14))
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -147,7 +202,7 @@ struct StrategyDetailView: View {
     private var tradeCard: some View {
         card("交易指令与绑定账户") {
             if isTradeConfigured {
-                Text(StrategyPreview.tradeSummary(doc: doc))
+                Text(tradeSummaryText)
                     .font(.system(size: 14))
                     .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -177,31 +232,37 @@ struct StrategyDetailView: View {
     // MARK: - 规则清单卡
 
     private var rulesCard: some View {
-        let parsed = StrategyRuleParser.parse(lines: doc.rules)
-        return card("交易规则") {
-            if parsed.rules.isEmpty && parsed.errors.isEmpty {
-                Text("还没有交易规则")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-            } else {
-                ForEach(Array(parsed.rules.enumerated()), id: \.offset) { index, call in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(index + 1).")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                        Text(StrategyPreview.triggerText(call))
-                            .font(.system(size: 13))
-                            .foregroundColor(.primary)
+        card("交易规则") {
+            if let parsed = parsedRules {
+                if parsed.rules.isEmpty && parsed.errors.isEmpty {
+                    Text("还没有交易规则")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(Array(parsed.rules.enumerated()), id: \.offset) { index, call in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(index + 1).")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Text(triggerText(index: index, call: call))
+                                .font(.system(size: 13))
+                                .foregroundColor(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    ForEach(Array(parsed.errors.enumerated()), id: \.offset) { _, error in
+                        Text("✗ \(error)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
                             .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
                     }
                 }
-                ForEach(Array(parsed.errors.enumerated()), id: \.offset) { _, error in
-                    Text("✗ \(error)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            } else {
+                // `.engine` 模式下引擎未就绪 / 取数中：显式占位（不静默用 Swift 兜底）
+                Text(placeholder)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
             }
         }
     }
