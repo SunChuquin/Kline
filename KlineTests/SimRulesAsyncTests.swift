@@ -253,7 +253,64 @@ final class SimRulesAsyncTests: XCTestCase {
                 XCTFail("trade_calc 出现未覆盖的 calc：\(calc)（\(name(c))）")
             }
         }
+
+        // ---- D 组：strategy_drafts（纯映射；本组专验 `strategyDraftFromJSON` 反解无损失）
+        for c in cases(sim, "mapping", op: "strategy_drafts") {
+            let i = input(c)
+            let doc = strategyDoc(i["rules"], i["trade"])
+            let meta = SimRulesCodec.metaItemFromJSON(i["meta"])
+            let accountID = SimRulesCodec.uuid(i["accountID"]) ?? UUID()
+            let last = SimRulesCodec.num(i["lastPrice"]) ?? 0
+            let cost = SimRulesCodec.num(i["costPrice"])
+            let got = try await SimRulesBridge.strategyDrafts(doc: doc, meta: meta,
+                                                              accountID: accountID,
+                                                              lastPrice: last, costPrice: cost)
+            let want = StrategyCondGenerator.drafts(doc: doc, meta: meta, accountID: accountID,
+                                                    lastPrice: last, costPrice: cost)
+            XCTAssertEqual(got.drafts.map(desc), want.drafts.map(desc),
+                           "\(mode) strategy_drafts \(name(c))")
+            XCTAssertEqual(got.skips.map(skipDesc), want.skips.map(skipDesc),
+                           "\(mode) strategy_drafts.skips \(name(c))")
+        }
+
+        // ---- D 组：strategy_entry_draft（可选入场单，nil = 不生成）
+        for c in cases(sim, "mapping", op: "strategy_entry_draft") {
+            let i = input(c)
+            let doc = strategyDoc(nil, i["trade"])
+            let meta = SimRulesCodec.metaItemFromJSON(i["meta"])
+            let accountID = SimRulesCodec.uuid(i["accountID"]) ?? UUID()
+            let last = SimRulesCodec.num(i["lastPrice"]) ?? 0
+            let got = try await SimRulesBridge.strategyEntryDraft(doc: doc, meta: meta,
+                                                                  accountID: accountID,
+                                                                  lastPrice: last)
+            let want = StrategyCondGenerator.entryDraft(doc: doc, meta: meta, accountID: accountID,
+                                                        lastPrice: last)
+            XCTAssertEqual(got.map(desc) ?? "<nil>", want.map(desc) ?? "<nil>",
+                           "\(mode) strategy_entry_draft \(name(c))")
+        }
     }
+
+    // MARK: - D 组装配 / 比较
+
+    /// 与 `SimRulesBridge.runStrategyDrafts` 同法装配（RULES 段字符串 + TRADE 段 spec）。
+    private func strategyDoc(_ rules: Any?, _ trade: Any?) -> FormulaDoc {
+        FormulaDoc(id: "strategy", kind: .strategy, name: "策略",
+                   pickBody: "", pickRef: nil,
+                   rules: SimRulesCodec.str(rules) ?? "",
+                   trade: SimRulesCodec.tradeSpecFromJSON(trade))
+    }
+
+    /// `StrategyCondDraft` 非 Equatable（含 `id` / `Date`），投影成「键排序的 JSON 文本」比较——
+    /// 这样比较走的是**同一个编解码层**（`strategyDraftJSON`），能量出反解（`strategyDraftFromJSON`）
+    /// 是否丢字段或错类型。
+    private func desc(_ d: StrategyCondDraft) -> String {
+        guard let o = try? SimRulesCodec.strategyDraftJSON(d),
+              let data = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]),
+              let s = String(data: data, encoding: .utf8) else { return "<encode-failed>" }
+        return s
+    }
+
+    private func skipDesc(_ s: StrategyGenSkip) -> String { "\(s.title)|\(s.reason)" }
 
     private func directive(_ any: Any?) -> SimCondDirective {
         let d = (any as? [String: Any]) ?? [:]

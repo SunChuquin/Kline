@@ -498,21 +498,7 @@ enum SimRulesBridge {
     }
 
     private static func draftJSON(_ d: StrategyCondDraft) throws -> [String: Any] {
-        var o: [String: Any] = [
-            "accountID": d.accountID.uuidString,
-            "metaID": d.metaID,
-            "code": d.code,
-            "name": d.name,
-            "kind": d.kind.rawValue,
-            "params": try jsonObject(d.params),
-            "directive": ["direction": d.directive.direction.rawValue,
-                          "priceType": d.directive.priceType.rawValue,
-                          "offsetTicks": d.directive.offsetTicks,
-                          "qty": d.directive.qty],
-            "validity": d.validity.rawValue,
-        ]
-        if d.validity == .untilDate, let e = d.expiresAt { o["expiresAt"] = isoString(e) }
-        return o
+        try SimRulesCodec.strategyDraftJSON(d)
     }
 
     private static func runStrategyDrafts(_ input: [String: Any]) throws -> [String: Any] {

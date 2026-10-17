@@ -1797,6 +1797,49 @@ done
 
 ---
 
+### 11.24 A5-4 第四步：策略映射（D 组）下沉（2026-10-17）
+
+**目标**：把「策略 → 条件单草稿」的**生产调用点**从 Swift 现状实现切到引擎（op 契约 §11.3 早已落地、A1 golden 亦早已覆盖，缺的只是生产接线）。
+
+| 面 | 设计 |
+| --- | --- |
+| 映射（纯函数段） | `strategy_drafts`：账户 × 标的 × 规则 的**纯映射**部分。⚠️ `TIME` 规则要按本地壁钟拼 `fireDate`，故**必须注入 `tzOffsetSeconds`**（§11.20 踩坑的同一口径） |
+| 入场单（可选段） | `strategy_entry_draft`：无方向 / 无有效最新价 → 出参 `draft: null` → 领域层 `nil`（不生成，非错误）。不落日期（`expiresAt` 由 `trade` 透传），故**不需要** `tzOffsetSeconds` |
+| 保留在 GUI / 编排层 | `generate(...)` 的**三维展开 / 去重 / 账户限额截断**仍留 Swift（依赖 `SimStore` 全局态，属 §11.3 记的 Stage B `strategy_generate`，本步不下沉）；本步只切「单条映射 + 建单校验」两处裁决 |
+| 建单校验 | 逐条走 A 组 `cond_validate_create`（已下沉，§11.19）——与本步同批接线，故 D 组的 `validateCreate` 调用点一并消除 |
+
+**改动清单**
+
+| 文件 | 改动 |
+| --- | --- |
+| `Python/SimRulesCodec.swift` | 新增 `metaItemJSON`（标的 → 引擎 JSON）+ `strategyDraftJSON` / `strategyDraftFromJSON`（草稿**双向**单一来源；缺键 / 枚举非法即 `throw CodecError.badShape`，不静默兜底） |
+| `Python/SimRulesBridge.swift` | `draftJSON` 收敛为委派 `SimRulesCodec.strategyDraftJSON`（消除与 A5-2 编解码层的重复实现） |
+| `Python/SimRulesAsync.swift` | 新增 D 组 async 门面 `strategyDrafts(...)`（出参 `(drafts, skips)`）与 `strategyEntryDraft(...)`（出参 `nil` 表不生成） |
+| `Trading/StrategyCondGenerator.swift` | `generate(...)` 改 **`async`**：映射 → `SimRulesBridge.strategyDrafts`、入场单 → `strategyEntryDraft`、建单校验 → `validateCondCreate`；`StrategyCondDraft.summary`（`SimCondRule.previewSentence` 直读）**删除**，摘要改由投影提供 |
+| `Simulation/StrategyGenConfirmView.swift` | `recompute()` 改 `Task {}`（`generate` 已 async）；草稿摘要 `draft.summary` → `projection.previewSentence(draft.order())`，并在重算后 `projection.request(drafts.map { $0.order() })`（同 A5-3 接线形态；视图必须 `@ObservedObject` 持有投影） |
+
+**降级口径（fail-closed，不静默兜底）**
+
+- `.engine` 未就绪 / 出参形状非法 → `strategyDrafts` **抛错** → 该标的**整体跳过**，skip 文案写「策略映射不可用：…」；入场单同理写「入场单生成不可用：…」。
+- 建单校验抛错 → 该条跳过并写「建单校验不可用：…」，**不**按「校验通过」放过。
+- 会话摘要文案在投影未就绪时给占位（`SimRulesProjection.placeholderText`），与 A5-3 同一口径。
+- `.swift` 模式**零行为变化**：`payloadAsync` 在 `.swift` 分支同步 resume → `generate` 虽标 `async` 但不真挂起，整轮生成仍一次跑完（与 §11.20 的 6 个结算触发点同理）。
+
+**测试**
+
+- **op 级双跑**：`SimRulesDiffTests.testSwiftVsEngineSameCaseSet` 的 `mapping` 段（19 例 = `strategy_drafts` 15 + `strategy_entry_draft` 4）——Swift 后端（`runStrategyDrafts` / `runStrategyEntryDraft`）与引擎逐字段对拍，两例均在既有 fixture 内，**不新增 golden**。
+- **领域级对拍**：`SimRulesAsyncTests.runAllParity` 新增 D 组两块（两种 `mode` 各跑一遍）——把 fixture `mapping` 入参喂给新 async 门面，与 Swift 现状实现 `StrategyCondGenerator.drafts` / `entryDraft` 的产出**逐字段相等**（草稿以「键排序 JSON 文本」比较，走同一编解码层，专验 `strategyDraftFromJSON` 反解不丢字段 / 不错类型）。
+- **实测**：`xcodebuild build` → `BUILD SUCCEEDED`；`KlineTests` 全量 **82/82 全绿 0 skip**（引擎内对拍含 D 组）；`SimRulesAsyncTests` 2/2 全绿。
+- 本步**未改 `sim_rules.py`**，信任链哈希仍为 `3c814be9…16f6`；三份 fixture 未改。
+
+**已知取舍（诚实登记）**
+
+1. `generate(...)` 变 `async` 后，确认页首帧出现「生成中」的短暂空窗（`.swift` 模式下实际同步完成，无感知；`.engine` 模式下为真实异步）。
+2. `StrategyCondDraft.summary` 删除属**破坏性 API 变更**，但生产调用点仅确认页一处（已切投影）；fixture / 测试路径不受影响。
+3. D 组剩余**未下沉**：`Training` 自有同步路径与 E 组策略 DSL（§11.18.3 第 2、4 项），仍是 A5-5 翻 `mode` 的前置。
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture

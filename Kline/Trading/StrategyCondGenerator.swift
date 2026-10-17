@@ -48,9 +48,6 @@ struct StrategyCondDraft: Identifiable {
                             triggeredAt: nil,
                             originOrderID: nil)
     }
-
-    /// 一句话摘要（复用 SimCondRule.previewSentence 的口径）
-    var summary: String { SimCondRule.previewSentence(order()) }
 }
 
 /// 被跳过的条目（含原因，供确认页展示）
@@ -82,8 +79,12 @@ enum StrategyCondGenerator {
 
     // MARK: 全量生成（三维展开 + 校验 + 去重 + 限额）
 
-    /// 生成条件单草稿（不写盘）：账户 × 标的 × 规则 三维展开，逐条走 SimCondRule.validateCreate 校验与去重
-    static func generate(doc: FormulaDoc, metas: [MetaItem], includeEntry: Bool, accountIDs: [UUID]) -> StrategyGenOutcome {
+    /// 生成条件单草稿（不写盘）：账户 × 标的 × 规则 三维展开，逐条走引擎建单校验与去重。
+    ///
+    /// 映射与校验均走 `SimRulesBridge`（D 组 `strategy_drafts` / A 组 `cond_validate_create`）：
+    /// `.swift` 模式直通现状实现（零行为变化），`.engine` 模式由引擎裁决（§11.24）。
+    static func generate(doc: FormulaDoc, metas: [MetaItem], includeEntry: Bool,
+                         accountIDs: [UUID]) async -> StrategyGenOutcome {
         let store = SimStore.shared
         var outcome = StrategyGenOutcome()
 
@@ -108,15 +109,33 @@ enum StrategyCondGenerator {
                 let position = store.position(accountID: accountID, metaID: meta.id)
 
                 // 规则 → 草稿（纯映射，映射阶段失败的原因原样并入 skips）
-                let mapped = drafts(doc: doc, meta: meta, accountID: accountID,
-                                    lastPrice: lastPrice, costPrice: position?.costPrice)
+                let mapped: (drafts: [StrategyCondDraft], skips: [StrategyGenSkip])
+                do {
+                    mapped = try await SimRulesBridge.strategyDrafts(doc: doc, meta: meta,
+                                                                     accountID: accountID,
+                                                                     lastPrice: lastPrice,
+                                                                     costPrice: position?.costPrice)
+                } catch {
+                    // 映射整体失败（引擎未就绪 / 出参形状非法）→ 该标的整体跳过，不静默兜底
+                    outcome.skips.append(StrategyGenSkip(title: metaTitle(meta),
+                                                         reason: "策略映射不可用：\(error)"))
+                    continue
+                }
                 outcome.skips.append(contentsOf: mapped.skips)
 
                 var candidates = mapped.drafts
                 // 6. 可选入场单：仅在开启开关且 TRADE 段给了方向时追加
-                if includeEntry,
-                   let entry = entryDraft(doc: doc, meta: meta, accountID: accountID, lastPrice: lastPrice) {
-                    candidates.append(entry)
+                if includeEntry {
+                    do {
+                        if let entry = try await SimRulesBridge.strategyEntryDraft(doc: doc, meta: meta,
+                                                                                  accountID: accountID,
+                                                                                  lastPrice: lastPrice) {
+                            candidates.append(entry)
+                        }
+                    } catch {
+                        outcome.skips.append(StrategyGenSkip(title: metaTitle(meta),
+                                                             reason: "入场单生成不可用：\(error)"))
+                    }
                 }
 
                 for draft in candidates {
@@ -142,12 +161,19 @@ enum StrategyCondGenerator {
                                                              reason: "该标的已存在同类监控中条件单"))
                         continue
                     }
-                    // 3. 建单校验：被拒则把 SimCondRejection 的中文文案收进 skips
+                    // 3. 建单校验（走引擎）：被拒则把中文文案收进 skips
                     let order = draft.order()
-                    if let rejection = SimCondRule.validateCreate(order: order,
-                                                                  account: account,
-                                                                  position: position,
-                                                                  snapshot: SimCondSnapshotCenter.snapshot(for: order)) {
+                    let rejection: SimCondRejection?
+                    do {
+                        rejection = try await SimRulesBridge.validateCondCreate(
+                            order: order, account: account, position: position,
+                            snapshot: SimCondSnapshotCenter.snapshot(for: order))
+                    } catch {
+                        outcome.skips.append(StrategyGenSkip(title: title,
+                                                             reason: "建单校验不可用：\(error)"))
+                        continue
+                    }
+                    if let rejection {
                         outcome.skips.append(StrategyGenSkip(title: title, reason: rejection.message))
                         continue
                     }

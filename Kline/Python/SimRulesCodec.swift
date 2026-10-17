@@ -254,6 +254,58 @@ nonisolated enum SimRulesCodec {
          "accountIDs": s.accountIDs.map { $0.uuidString }]
     }
 
+    // MARK: - 策略条件单草稿（双向，D 组）
+
+    /// 标的 → 引擎 JSON（`strategy_drafts` / `strategy_entry_draft` 入参）。
+    static func metaItemJSON(_ m: MetaItem) -> [String: Any] {
+        ["id": m.id, "code": m.code, "name": m.name]
+    }
+
+    /// 策略草稿 → 引擎 JSON（两个 D 组 op 的出参形状，亦是 A1 dump 的写入形状）。
+    static func strategyDraftJSON(_ d: StrategyCondDraft) throws -> [String: Any] {
+        var o: [String: Any] = [
+            "accountID": d.accountID.uuidString,
+            "metaID": d.metaID,
+            "code": d.code,
+            "name": d.name,
+            "kind": d.kind.rawValue,
+            "params": try encodeJSON(d.params),
+            "directive": ["direction": d.directive.direction.rawValue,
+                          "priceType": d.directive.priceType.rawValue,
+                          "offsetTicks": d.directive.offsetTicks,
+                          "qty": d.directive.qty],
+            "validity": d.validity.rawValue,
+        ]
+        if d.validity == .untilDate, let e = d.expiresAt { o["expiresAt"] = isoString(e) }
+        return o
+    }
+
+    /// 引擎 JSON → 策略草稿。缺键 / 枚举非法即抛（形状非法不静默兜底）。
+    static func strategyDraftFromJSON(_ any: Any?) throws -> StrategyCondDraft {
+        guard let d = any as? [String: Any],
+              let accountID = uuid(d["accountID"]),
+              let kind = str(d["kind"]).flatMap(SimCondKind.init(rawValue:)),
+              let validity = str(d["validity"]).flatMap(SimCondValidity.init(rawValue:)),
+              let dir = d["directive"] as? [String: Any],
+              let direction = str(dir["direction"]).flatMap(SimOrderDirection.init(rawValue:)),
+              let priceType = str(dir["priceType"]).flatMap(SimPriceType.init(rawValue:)),
+              let paramsJSON = d["params"] as? [String: Any] else {
+            throw CodecError.badShape("strategyDraft")
+        }
+        return StrategyCondDraft(accountID: accountID,
+                                 metaID: int(d["metaID"]) ?? 0,
+                                 code: str(d["code"]) ?? "",
+                                 name: str(d["name"]) ?? "",
+                                 kind: kind,
+                                 params: try decodeJSON(SimCondParams.self, from: paramsJSON),
+                                 directive: SimCondDirective(direction: direction,
+                                                             priceType: priceType,
+                                                             offsetTicks: int(dir["offsetTicks"]) ?? 0,
+                                                             qty: int(dir["qty"]) ?? 0),
+                                 validity: validity,
+                                 expiresAt: isoDate(d["expiresAt"]))
+    }
+
     // MARK: - 公式文档（双向）
 
     static func formulaDocFromJSON(_ any: Any?) -> FormulaDoc {

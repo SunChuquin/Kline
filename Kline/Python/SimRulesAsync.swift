@@ -212,4 +212,43 @@ extension SimRulesBridge {
         guard let r = out["range"] as? [String: Any] else { return nil }
         return (lower: SimRulesCodec.num(r["lower"]) ?? 0, upper: SimRulesCodec.num(r["upper"]) ?? 0)
     }
+
+    // MARK: - D 组：策略 → 条件单草稿（纯映射）
+
+    /// 规则 → 草稿（`strategy_drafts`）：账户 × 标的 × 规则 的**纯映射**部分。
+    /// ⚠️ 时间相关规则（`TIME`）由引擎按 `tzOffsetSeconds` 判日期，故显式注入本机偏移。
+    @MainActor
+    static func strategyDrafts(doc: FormulaDoc, meta: MetaItem, accountID: UUID,
+                               lastPrice: Double, costPrice: Double?) async throws
+        -> (drafts: [StrategyCondDraft], skips: [StrategyGenSkip]) {
+        var input: [String: Any] = ["rules": doc.rules,
+                                    "trade": SimRulesCodec.tradeSpecJSON(doc.trade),
+                                    "meta": SimRulesCodec.metaItemJSON(meta),
+                                    "accountID": accountID.uuidString,
+                                    "lastPrice": lastPrice,
+                                    "tzOffsetSeconds": TimeZone.current.secondsFromGMT()]
+        if let v = costPrice { input["costPrice"] = v }
+        let out = try await payloadAsync(op: "strategy_drafts", input: input)
+        let drafts = try ((out["drafts"] as? [Any]) ?? []).map {
+            try SimRulesCodec.strategyDraftFromJSON($0)
+        }
+        let skips = ((out["skips"] as? [[String: Any]]) ?? []).map {
+            StrategyGenSkip(title: SimRulesCodec.str($0["title"]) ?? "",
+                            reason: SimRulesCodec.str($0["reason"]) ?? "")
+        }
+        return (drafts, skips)
+    }
+
+    /// 可选入场单（`strategy_entry_draft`）→ nil 表示不生成（无方向 / 无有效最新价）。
+    @MainActor
+    static func strategyEntryDraft(doc: FormulaDoc, meta: MetaItem, accountID: UUID,
+                                   lastPrice: Double) async throws -> StrategyCondDraft? {
+        let out = try await payloadAsync(op: "strategy_entry_draft",
+                                         input: ["trade": SimRulesCodec.tradeSpecJSON(doc.trade),
+                                                 "meta": SimRulesCodec.metaItemJSON(meta),
+                                                 "accountID": accountID.uuidString,
+                                                 "lastPrice": lastPrice])
+        guard let d = out["draft"], !(d is NSNull) else { return nil }
+        return try SimRulesCodec.strategyDraftFromJSON(d)
+    }
 }

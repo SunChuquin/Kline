@@ -32,6 +32,8 @@ struct StrategyGenConfirmView: View {
     var onDone: (Int) -> Void
 
     @ObservedObject private var store = SimStore.shared
+    /// 条件单文案投影（§11.17）：草稿摘要走引擎口径（`.swift` 模式直通 `SimCondRule`）
+    @ObservedObject private var projection = SimRulesProjection.shared
 
     /// 生成结果（在 onAppear 里算一次，避免 body 重算时反复生成）
     @State private var outcome: StrategyGenOutcome? = nil
@@ -211,7 +213,7 @@ struct StrategyGenConfirmView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.primary)
                 .lineLimit(1)
-            Text("\(draft.kind.title) · \(draft.summary)")
+            Text("\(draft.kind.title) · \(projection.previewSentence(draft.order()))")
                 .font(.system(size: 12))
                 .foregroundColor(Color(.secondaryLabel))
                 .fixedSize(horizontal: false, vertical: true)
@@ -345,13 +347,20 @@ struct StrategyGenConfirmView: View {
 
     // MARK: - 行为
 
-    /// 重算草稿（进入页面 / 切换入场单开关时），纯计算不写盘
+    /// 重算草稿（进入页面 / 切换入场单开关时），纯计算不写盘。
+    /// 映射与建单校验均走引擎（D 组 / A 组 op，见 §11.24）——故异步。
     private func recompute() {
-        outcome = StrategyCondGenerator.generate(doc: doc,
-                                                 metas: metas,
-                                                 includeEntry: includeEntry,
-                                                 accountIDs: doc.trade.accountIDs)
-        errorText = nil
+        let doc = doc, metas = metas, includeEntry = includeEntry
+        let accountIDs = doc.trade.accountIDs
+        Task {
+            let result = await StrategyCondGenerator.generate(doc: doc, metas: metas,
+                                                              includeEntry: includeEntry,
+                                                              accountIDs: accountIDs)
+            outcome = result
+            errorText = nil
+            // 草稿摘要走投影（条件单文案族）
+            projection.request(result.drafts.map { $0.order() })
+        }
     }
 
     /// 确认生成：批量写入（一次落盘），写 0 条视为失败
