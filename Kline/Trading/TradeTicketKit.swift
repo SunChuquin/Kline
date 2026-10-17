@@ -218,7 +218,8 @@ struct TradeQuoteBar: View {
     let limitUpper: Double?
     let limitLower: Double?
     let lastPrice: Double?
-    let availQty: Int
+    /// 可买 / 可卖股数；nil = 引擎计算中（显式占位，§9.10）
+    let availQty: Int?
     let isBuy: Bool
     let holdQty: Int
     let onPickPrice: (Double) -> Void
@@ -245,7 +246,7 @@ struct TradeQuoteBar: View {
             }
             divider
             cell(title: isBuy ? "可买" : "可卖",
-                 value: "\(SimFormat.shares(availQty)) 股",
+                 value: availQty.map { "\(SimFormat.shares($0)) 股" } ?? "—",
                  color: Color.primary,
                  enabled: false, action: {})
             divider
@@ -295,18 +296,25 @@ struct TradeFeeBlock: View {
     let stampTax: Double
     let isBuy: Bool
     let cashAfter: Double
+    /// `false` = 引擎尚未算出费用（`.engine` 模式未就绪）→ 显式占位，不显示 0 元假装已算好（§9.10）
+    var ready: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            (Text("预计成交额 ")
-                + Text(SimFormat.amount(amount)).fontWeight(.semibold).foregroundColor(Color.primary)
-                + Text(" 元 ｜ 佣金（万2.5，最低5元）")
-                + Text(SimFormat.amount(commission)).fontWeight(.semibold).foregroundColor(Color.primary)
-                + Text(" ｜ 印花税（\(isBuy ? "买入免" : "千一")）")
-                + Text(SimFormat.amount(stampTax)).fontWeight(.semibold).foregroundColor(Color.primary))
-            (Text("委托后可用资金预计 ")
-                + Text(SimFormat.amount(cashAfter)).fontWeight(.semibold).foregroundColor(Color.primary)
-                + Text(" 元 · 委托冻结，成交后多退少补"))
+            if !ready {
+                Text("费用明细 · 引擎计算中…")
+                    .foregroundColor(Color(.secondaryLabel))
+            } else {
+                (Text("预计成交额 ")
+                    + Text(SimFormat.amount(amount)).fontWeight(.semibold).foregroundColor(Color.primary)
+                    + Text(" 元 ｜ 佣金（万2.5，最低5元）")
+                    + Text(SimFormat.amount(commission)).fontWeight(.semibold).foregroundColor(Color.primary)
+                    + Text(" ｜ 印花税（\(isBuy ? "买入免" : "千一")）")
+                    + Text(SimFormat.amount(stampTax)).fontWeight(.semibold).foregroundColor(Color.primary))
+                (Text("委托后可用资金预计 ")
+                    + Text(SimFormat.amount(cashAfter)).fontWeight(.semibold).foregroundColor(Color.primary)
+                    + Text(" 元 · 委托冻结，成交后多退少补"))
+            }
         }
         .font(.system(size: 11.5))
         .foregroundColor(Color(.secondaryLabel))

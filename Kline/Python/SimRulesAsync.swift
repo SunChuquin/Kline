@@ -155,6 +155,23 @@ extension SimRulesBridge {
         return SimRulesCodec.num(out["value"]) ?? 0
     }
 
+    /// 佣金（`trade_calc.commission`）。
+    @MainActor
+    static func tradeCommission(amount: Double) async throws -> Double {
+        let out = try await payloadAsync(op: "trade_calc",
+                                         input: ["calc": "commission", "amount": amount])
+        return SimRulesCodec.num(out["value"]) ?? 0
+    }
+
+    /// 印花税（`trade_calc.stampTax`）。
+    @MainActor
+    static func tradeStampTax(amount: Double, direction: SimOrderDirection) async throws -> Double {
+        let out = try await payloadAsync(op: "trade_calc",
+                                         input: ["calc": "stampTax", "amount": amount,
+                                                 "direction": direction.rawValue])
+        return SimRulesCodec.num(out["value"]) ?? 0
+    }
+
     /// 可买整手数量（`trade_calc.affordableQty`）。
     @MainActor
     static func tradeAffordableQty(cash: Double, price: Double) async throws -> Int {

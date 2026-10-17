@@ -457,17 +457,20 @@ struct SimulationLayoutCView: View {
 
     /// 持仓行「条件单」入口：默认止盈止损 / 卖出，数量取可卖整手，基准价预填成本价
     private func openCondEditor(for position: SimPosition) {
-        let rules = SimTradingRules.default
-        let qty = rules.sellableQty(position: position)
-        condPresentation = .editor(SimCondEditorRequest(accountID: position.accountID,
-                                                        metaID: position.metaID,
-                                                        code: position.code,
-                                                        name: position.name,
-                                                        initialKind: .stopLoss,
-                                                        initialDirection: .sell,
-                                                        initialQty: qty > 0 ? qty : rules.lotSize,
-                                                        initialPrice: position.costPrice,
-                                                        editing: nil))
+        let projection = SimTradeRulesProjection.shared
+        Task {
+            // 可卖数量走引擎（动作路径直接 await，避免 `nil` 预填成 1 手）
+            let qty = await projection.sellableQtyAsync(position: position) ?? 0
+            condPresentation = .editor(SimCondEditorRequest(accountID: position.accountID,
+                                                            metaID: position.metaID,
+                                                            code: position.code,
+                                                            name: position.name,
+                                                            initialKind: .stopLoss,
+                                                            initialDirection: .sell,
+                                                            initialQty: qty > 0 ? qty : projection.lotSize,
+                                                            initialPrice: position.costPrice,
+                                                            editing: nil))
+        }
     }
 
     private func openBottomTicket(_ direction: SimOrderDirection) {

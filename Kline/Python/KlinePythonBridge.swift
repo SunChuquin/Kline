@@ -127,6 +127,7 @@ final class KlinePythonBridge {
                 DispatchQueue.main.async {
                     SimRulesTrust.shared.refresh()
                     SimRulesProjection.shared.requestAll()
+                    SimTradeRulesProjection.shared.reset()
                     completion(.success(()))
                 }
                 return
@@ -142,6 +143,7 @@ final class KlinePythonBridge {
                         DispatchQueue.main.async {
                             SimRulesTrust.shared.refresh()
                             SimRulesProjection.shared.requestAll()
+                            SimTradeRulesProjection.shared.reset()
                             completion(.success(()))
                         }
                     case .failure(let e):

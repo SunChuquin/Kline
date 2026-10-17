@@ -2,5 +2,13 @@
   "script": "sim_rules",
   "sha256": "3c814be9a0277849dfc1279a9f94b98d7690e85b85e190780698e65089e916f6",
   "scriptVersion": 1,
-  "requiredApiVersion": 1
+  "requiredApiVersion": 1,
+  "ruleConstants": {
+    "lotSize": 100,
+    "priceTick": 0.01,
+    "commissionRate": 0.00025,
+    "commissionMin": 5.0,
+    "stampTaxRate": 0.001,
+    "limitPct": 0.1
+  }
 }

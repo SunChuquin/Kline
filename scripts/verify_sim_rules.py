@@ -1631,7 +1631,7 @@ def _flatten_fixture(fixture):
 
 
 def _verify_trust():
-    """套件 8 信任链（PC 侧）：脚本 sha256 / 版本声明 与 fixture + Swift 常量三方一致。"""
+    """套件 8 信任链（PC 侧）：脚本 sha256 / 版本声明 / 规则常量 与 fixture + Swift 三方一致。"""
     import hashlib
     import re as _re
     raw = open(SCRIPT, "rb").read()
@@ -1642,8 +1642,28 @@ def _verify_trust():
     if not sv or not av:
         print("FAIL sim_rules.py 缺版本声明")
         return 1
+
+    def lit(name, cast):
+        m = _re.search(r"^%s\s*=\s*([0-9]+(?:\.[0-9]+)?)" % _re.escape(name), text, _re.M)
+        if not m:
+            print("FAIL sim_rules.py 缺交易规则常量 %s" % name)
+            return None
+        return cast(m.group(1))
+    rule_consts = {}
+    for key, name, cast in (("lotSize", "_LOT_SIZE", int),
+                            ("priceTick", "_PRICE_TICK", float),
+                            ("commissionRate", "_COMMISSION_RATE", float),
+                            ("commissionMin", "_COMMISSION_MIN", float),
+                            ("stampTaxRate", "_STAMP_TAX_RATE", float),
+                            ("limitPct", "_LIMIT_PCT", float)):
+        v = lit(name, cast)
+        if v is None:
+            return 1
+        rule_consts[key] = v
+
     want = {"script": "sim_rules", "sha256": sha,
-            "scriptVersion": int(sv.group(1)), "requiredApiVersion": int(av.group(1))}
+            "scriptVersion": int(sv.group(1)), "requiredApiVersion": int(av.group(1)),
+            "ruleConstants": rule_consts}
 
     fix_path = os.path.join(REPO, "KlineTests", "Fixtures", "sim_rules_trust.json")
     if not os.path.exists(fix_path):
@@ -1665,8 +1685,21 @@ def _verify_trust():
             print("FAIL Swift 常量 %s：磁盘=%r 期望=%r" % (name, m.group(1) if m else None, val))
             return 1
 
-    print("OK 信任链三方一致：sha256=%s scriptVersion=%d requiredApiVersion=%d"
-          % (sha, want["scriptVersion"], want["requiredApiVersion"]))
+    # 规则常量镜像（自动生成）：逐行核对数值（防「改了脚本忘了重跑生成器」）
+    rules_path = os.path.join(REPO, "Kline", "Python", "SimTradeRuleConstants.swift")
+    if not os.path.exists(rules_path):
+        print("FAIL 规则常量镜像缺失：%s（请重跑 gen_sim_rules_trust.py）" % rules_path)
+        return 1
+    rules = open(rules_path, encoding="utf-8").read()
+    for key, val in rule_consts.items():
+        m = _re.search(r"static let %s = ([0-9.]+)" % _re.escape(key), rules)
+        if not m or float(m.group(1)) != float(val):
+            print("FAIL 规则常量镜像 %s：磁盘=%r 期望=%r" % (key, m.group(1) if m else None, val))
+            return 1
+
+    print("OK 信任链三方一致：sha256=%s scriptVersion=%d requiredApiVersion=%d ruleConstants=%s"
+          % (sha, want["scriptVersion"], want["requiredApiVersion"],
+             json.dumps(rule_consts, ensure_ascii=False, sort_keys=True)))
     return 0
 
 

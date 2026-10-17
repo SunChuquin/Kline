@@ -70,21 +70,27 @@ private struct QuickAccountChip: View {
 
 /// 交易时段指示：盘中红点 + 每秒刷新的连续竞价时钟；非盘中灰点 + 待报提示
 private struct QuickSessionIndicator: View {
-    private let rules = SimTradingRules.default
+    @ObservedObject private var rules = SimTradeRulesProjection.shared
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
             let open = rules.isTradingSession(at: context.date)
             HStack(spacing: 4) {
                 Circle()
-                    .fill(open ? Color(.systemRed) : Color(.secondaryLabel))
+                    .fill(open == true ? Color(.systemRed) : Color(.secondaryLabel))
                     .frame(width: 6, height: 6)
-                Text(open ? "连续竞价 · \(SimFormat.time(context.date))" : "非交易时段 · 委托将待报")
+                Text(sessionText(open: open, at: context.date))
                     .font(.system(size: 10.5))
-                    .foregroundColor(open ? Color(.systemRed) : Color(.secondaryLabel))
+                    .foregroundColor(open == true ? Color(.systemRed) : Color(.secondaryLabel))
                     .lineLimit(1)
             }
         }
+    }
+
+    /// 未就绪（`.engine` 模式引擎尚未算出）→ 显式占位，不臆断开市 / 休市
+    private func sessionText(open: Bool?, at date: Date) -> String {
+        guard let open = open else { return "交易时段校验中…" }
+        return open ? "连续竞价 · \(SimFormat.time(date))" : "非交易时段 · 委托将待报"
     }
 }
 
@@ -228,8 +234,6 @@ struct QuickPanelBView: View {
     /// 带入下单卡的初始方向与数量（TradeTicketView 内部是 @State，靠 .id 强制重建才能生效）
     @State private var pendingDirection: SimOrderDirection = .buy
     @State private var pendingQty: Int = 100
-
-    private var rules: SimTradingRules { SimTradingRules.default }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -484,11 +488,16 @@ struct QuickPanelBView: View {
 
     /// 持仓页「卖」：带入该持仓标的与可卖数量（至少 1 手且为 1 手整数倍），切到交易页
     private func sellFromPosition(_ position: SimPosition) {
-        let lot = max(rules.lotSize, 1)
+        let projection = SimTradeRulesProjection.shared
+        let lot = max(projection.lotSize, 1)
         pickedMeta = qpMetaItem(metaID: position.metaID, code: position.code, name: position.name)
         pendingDirection = .sell
-        pendingQty = max(lot, rules.sellableQty(position: position) / lot * lot)
         segment = .trade
+        Task {
+            // 可卖数量走引擎（动作路径直接 await，避免 `nil` 退化成 1 手）
+            let sellable = await projection.sellableQtyAsync(position: position) ?? 0
+            pendingQty = max(lot, sellable / lot * lot)
+        }
     }
 
     // MARK: - 分段：委托

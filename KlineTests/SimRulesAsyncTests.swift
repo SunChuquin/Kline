@@ -206,6 +206,18 @@ final class SimRulesAsyncTests: XCTestCase {
             let calc = SimRulesCodec.str(i["calc"]) ?? ""
             let rules = SimTradingRules.default
             switch calc {
+            case "commission":
+                let amount = SimRulesCodec.num(i["amount"]) ?? 0
+                let got = try await SimRulesBridge.tradeCommission(amount: amount)
+                XCTAssertEqual(got, rules.commission(amount: amount), accuracy: 1e-9,
+                               "\(mode) trade_calc.commission \(name(c))")
+            case "stampTax":
+                let dir = SimRulesCodec.str(i["direction"])
+                    .flatMap(SimOrderDirection.init(rawValue:)) ?? .buy
+                let amount = SimRulesCodec.num(i["amount"]) ?? 0
+                let got = try await SimRulesBridge.tradeStampTax(amount: amount, direction: dir)
+                XCTAssertEqual(got, rules.stampTax(amount: amount, direction: dir), accuracy: 1e-9,
+                               "\(mode) trade_calc.stampTax \(name(c))")
             case "fee":
                 let dir = SimRulesCodec.str(i["direction"])
                     .flatMap(SimOrderDirection.init(rawValue:)) ?? .buy
@@ -238,8 +250,7 @@ final class SimRulesAsyncTests: XCTestCase {
                 XCTAssertEqual(got?.upper ?? -1, want?.upperBound ?? -1, accuracy: 1e-9,
                                "\(mode) trade_calc.limitRange.upper \(name(c))")
             default:
-                // commission / stampTax 本套件未包装（暂无生产调用方）
-                continue
+                XCTFail("trade_calc 出现未覆盖的 calc：\(calc)（\(name(c))）")
             }
         }
     }

@@ -47,6 +47,8 @@ struct TradeTicketView: View {
     @ObservedObject private var rowCache = MarketRowCache.shared
     /// 训练态：价格 / 可卖上限 / 提交全部走训练控制器，不触碰模拟账户
     @ObservedObject private var training = TrainingSessionController.shared
+    /// 交易规则派生值投影（§11.23）：`.swift` 模式直通 `SimTradingRules`，`.engine` 模式读引擎缓存
+    @ObservedObject private var rules = SimTradeRulesProjection.shared
 
     // MARK: 交互状态
 
@@ -168,7 +170,7 @@ struct TradeTicketView: View {
             metaRow(padding: 16)
 
             // 提交按钮上方一行小字：合计费用
-            Text("预计费用合计 \(SimFormat.amount(totalFee))")
+            Text("预计费用合计 \(SimTradeRulesProjection.moneyText(totalFee))")
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -310,10 +312,11 @@ struct TradeTicketView: View {
             .padding(.horizontal, 18)
 
             TradeFeeBlock(amount: amount,
-                          commission: commission,
-                          stampTax: stampTax,
+                          commission: commission ?? 0,
+                          stampTax: stampTax ?? 0,
                           isBuy: direction.isBuy,
-                          cashAfter: cashAfterTrade)
+                          cashAfter: cashAfterTrade ?? 0,
+                          ready: totalFee != nil)
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
 
@@ -488,22 +491,24 @@ struct TradeTicketView: View {
     /// 元信息文案：训练态额外标注本标的交收规则 + 训练账户类型（T+1 且当日有买入时提示锁定数量）
     private var metaText: String {
         let lotText = "\(rules.lotSize) 股整数倍"
+        let buyText = SimTradeRulesProjection.sharesText(buyAvail)
+        let sellText = SimTradeRulesProjection.sharesText(sellAvail)
         guard training.isActive else {
             return direction.isBuy
-                ? "\(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
-                : "可卖 \(SimFormat.shares(sellAvail)) 股"
+                ? "\(lotText) · 可买 \(buyText) 股"
+                : "可卖 \(sellText) 股"
         }
         let prefix = "\(training.settlementRule.title) · \(training.accountType.title) · \(training.tradeMode.shortTitle)"
         if direction.isBuy {
             // 百分比账户不校验资金，无可买上限
             return training.accountType == .percent
                 ? "\(prefix) · \(lotText)"
-                : "\(prefix) · \(lotText) · 可买 \(SimFormat.shares(buyAvail)) 股"
+                : "\(prefix) · \(lotText) · 可买 \(buyText) 股"
         }
         let locked = training.lockedQty
         return locked > 0
-            ? "\(prefix) · 可卖 \(SimFormat.shares(sellAvail)) 股（今日买入锁定 \(SimFormat.shares(locked)) 股）"
-            : "\(prefix) · 可卖 \(SimFormat.shares(sellAvail)) 股"
+            ? "\(prefix) · 可卖 \(sellText) 股（今日买入锁定 \(SimFormat.shares(locked)) 股）"
+            : "\(prefix) · 可卖 \(sellText) 股"
     }
 
     /// 拒绝原因（红色小字，展示在提交按钮下方；不用 alert，避免与面板遮罩冲突）
@@ -566,7 +571,6 @@ struct TradeTicketView: View {
 
     // MARK: - 派生数据
 
-    private var rules: SimTradingRules { SimTradingRules.default }
     /// 最新价：训练态取当前训练日收盘价，否则取行情缓存
     private var lastPrice: Double? {
         training.isActive ? training.currentClose : rowCache.numberFor(metaID, .latestPrice)
@@ -588,22 +592,23 @@ struct TradeTicketView: View {
     private var availableCash: Double {
         training.isActive ? training.buyingPower : (account?.cash ?? 0)
     }
-    private var buyAvail: Int { rules.affordableQty(cash: availableCash, price: effectivePrice) }
+    private var buyAvail: Int? { rules.affordableQty(cash: availableCash, price: effectivePrice) }
     /// 可卖上限：训练态用训练持仓（并按标的交收规则扣减当日买入锁定），不用模拟账户持仓
-    private var sellAvail: Int {
+    private var sellAvail: Int? {
         training.isActive ? training.sellableQty : rules.sellableQty(position: position)
     }
-    private var availQty: Int { direction.isBuy ? buyAvail : sellAvail }
+    private var availQty: Int? { direction.isBuy ? buyAvail : sellAvail }
     private var amount: Double { effectivePrice * Double(qty) }
-    private var commission: Double { rules.commission(amount: amount) }
-    private var stampTax: Double { rules.stampTax(amount: amount, direction: direction) }
-    private var totalFee: Double { rules.fee(amount: amount, direction: direction) }
+    private var commission: Double? { rules.commission(amount: amount) }
+    private var stampTax: Double? { rules.stampTax(amount: amount, direction: direction) }
+    private var totalFee: Double? { rules.fee(amount: amount, direction: direction) }
     private var dirColor: Color { direction.isBuy ? Color(.systemRed) : Color(.systemGreen) }
 
-    /// 委托后可用资金预计
-    private var cashAfterTrade: Double {
+    /// 委托后可用资金预计（金额是 GUI 层算术：由 cash / amount / fee 三个来源值合成）
+    private var cashAfterTrade: Double? {
+        guard let fee = totalFee else { return nil }
         let cash = availableCash
-        return direction.isBuy ? cash - amount - totalFee : cash + amount - totalFee
+        return direction.isBuy ? cash - amount - fee : cash + amount - fee
     }
 
     // MARK: - 行为
@@ -685,7 +690,7 @@ struct TradeTicketView: View {
     /// 仓位快捷：按当前方向的可买 / 可卖数量换算成整手
     private func applyPosition(_ ratio: Double) {
         let lot = max(rules.lotSize, 1)
-        qty = max(0, Int(Double(availQty) * ratio) / lot * lot)
+        qty = max(0, Int(Double(availQty ?? 0) * ratio) / lot * lot)
         writeQtyText("\(qty)")
     }
 

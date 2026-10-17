@@ -1011,8 +1011,9 @@ golden: `strategy_dsl.json`（**手写规格**）。
 | 版本锁定 | `apiVersion` 与脚本版本配对；不匹配 → 交易禁用 |
 | 降级矩阵 | 引擎缺失/不可用 → 按 §9.10：交易 / 回测 / 条件单 / 预警**整体不可用**，引导与设置可用 |
 | 输入只读 | 引擎只接受 `sim.json` + 快照入参，**不接受任何「直接下委托」指令**（下委托仍须走完整校验链） |
+| 配置常量镜像 | `sim_rules.py` 的**交易规则常量**（整手 / 最小报价档位 / 费率 / 涨跌停幅）镜像到自动生成的 `Kline/Python/SimTradeRuleConstants.swift`；脚本 ↔ fixture ↔ 两个 Swift 文件**逐值**核对（§11.22） |
 
-> **落地进度**：本套件已实现，见 §11.15（2026-10-17）。三处真源一致性（脚本 sha256 / 版本声明）由 `scripts/gen_sim_rules_trust.py` 维护，`KlineTests/SimRulesTrustTests` + `verify_sim_rules.py --trust` 把关。
+> **落地进度**：本套件已实现，见 §11.15（2026-10-17）。三处真源一致性（脚本 sha256 / 版本声明 / 规则常量）由 `scripts/gen_sim_rules_trust.py` 维护，`KlineTests/SimRulesTrustTests` + `verify_sim_rules.py --trust` 把关。规则常量镜像的由来见 §11.22（2026-10-17）。
 
 ### 10.10 通过判据（删 Swift 的闸门）
 
@@ -1543,7 +1544,7 @@ done
 
 #### 11.18.3 剩余调用点清单（生产，排除 `Python/SimRules*`、`StrategyBacktestEngine`（待删）、注释）
 
-**C 组 · 交易规则（`SimTradingRules`，23 处）**
+**C 组 · 交易规则（`SimTradingRules`，23 处）** — ✅ **展示面已下沉（§11.22 配置常量镜像 + §11.23 投影层，2026-10-17）**；下表「处数」为**下沉前**盘点，剩余为 Training 路径（见 §11.23 取舍 4）与 A6 待删的 Swift 参考实现
 
 | 文件 | 处数 | 备注 |
 | --- | --- | --- |
@@ -1604,6 +1605,8 @@ done
 > **未拍板前不应动 `SimFormat`**；本项不影响 A5-4 其余子系统（sweep / C 组 / D 组 / E 组）的推进。
 
 #### 11.18.5 建议的下一步顺序（下一会话）
+
+> ✅ 1 / 4 / 5 已分别由 §11.20–§11.23 推进（C 组展示面 + 交易规则 + 判定结算已完成）；下表保留原顺序，剩下 D 组 / E 组 / Training / A5-5。
 
 1. **合并子步：条件单判定·结算 + 交易规则**（§11.18.2 的耦合）——`sweepConditions` async 化（含重入守卫）+ `submit` async 化 + 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入（编辑器走防抖投影）；
 2. **D 组 · 策略映射**（`StrategyCondGenerator`，6 处，含 `.summary` 文案 → 投影）；
@@ -1716,6 +1719,81 @@ done
 | E 组 · 策略 DSL | `Formula/` 族（约 30 处，含 `.tdx` 文件读写） | |
 
 > 至此 **§11.18.2 的「合并子步」在主线生产路径上完成**（下单授权 + 条件单判定·结算）；剩余为 C 组展示面 / Training 路径 / D / E 组 + A5-5（默认 `mode` 翻 `.engine`）。
+
+---
+
+### 11.22 C 组前置：交易规则**配置常量**的信任链镜像（2026-10-17）
+
+**问题**：C 组里 `SimTradingRules` 的**配置常量**（`lotSize` / `priceTick` / `commissionRate` / `commissionMin` / `stampTaxRate` / `limitPct`）与算法不同——它们是**呈现层每帧都要读**的值（步进档位、`「100 股整数倍」` 文案、仓位比例换算）。三条出路：
+
+| 出路 | 代价 |
+| --- | --- |
+| ① 每帧走一次引擎请求 | 等于把闸门 6（防抖 + 投影）用在**常量**上；且引入「未就绪窗口」——`lotSize` 参与预填数量，`nil` 会退化成 1 手 |
+| ② Swift 各留一份副本 | 与引擎漂移（引擎改 `_LOT_SIZE` 后 Swift 静默不一致，且**无任何测试能拦下**） |
+| **③ ✅ 信任链镜像** | 真源仍是 `sim_rules.py`，Swift 只保存**自动生成**的镜像；零运行期成本；漂移由套件 8 拦下 |
+
+**决策 = ③**（与 §10.9 套件 8「签名 + 版本锁 + 脚本哈希」同机制，只是把「脚本哈希」扩展为「脚本哈希 + 常量镜像」）。**不新增 op、不改 `trade_calc` 契约**：`lotSize` / `priceTick` 在引擎里本来就不是 op（是 `sim_rules.py` 的内部常量，仅被 `_affordable_qty` / `_limit_range` / `cond_execution_price` 使用）。
+
+**机制**
+
+| 环节 | 落点 |
+| --- | --- |
+| 真源 | `Kline/PyScripts/sim_rules.py` 顶部 `_LOT_SIZE` / `_PRICE_TICK` / `_COMMISSION_RATE` / `_COMMISSION_MIN` / `_STAMP_TAX_RATE` / `_LIMIT_PCT` |
+| 生成器（唯一写盘者） | `scripts/gen_sim_rules_trust.py` → 写 ① `Kline/Python/SimTradeRuleConstants.swift`（**自动生成，勿手改**）② `KlineTests/Fixtures/sim_rules_trust.json` 的 `ruleConstants` 段 |
+| Swift 消费点 | `SimTradingRules` 的**默认值全部改为引用** `SimTradeRuleConstants.*`（Swift 侧不再自持副本） |
+| 漂移拦截（三方） | ① `gen_sim_rules_trust.py --check`（逐字节比生成文本）② `python3 scripts/verify_sim_rules.py --trust`（脚本 ↔ fixture ↔ 两个 Swift 文件逐值核对）③ `KlineTests/SimRulesTrustTests.testRuleConstantsMirrorMatchesFixture`（fixture ↔ Swift 常量 ↔ `SimTradingRules.default`） |
+
+**同时扩展 `--trust` 的核对范围**：原来只核 `sha256` / `scriptVersion` / `requiredAPIVersion`，现加 `ruleConstants` 六值（脚本、fixture、`SimRulesTrust.swift`、`SimTradeRuleConstants.swift` 四方）。这与既有纪律一致——**改了 `sim_rules.py`（含仅注释）就必须重跑生成器**。
+
+**实测**：`gen_sim_rules_trust.py --check` 一致；`verify_sim_rules.py --trust` OK（`ruleConstants={"commissionMin":5.0,"commissionRate":0.00025,"limitPct":0.1,"lotSize":100,"priceTick":0.01,"stampTaxRate":0.001}`）；A0 内置 **255/255**、三份 fixture **191 / 54 / 7** 全过。⚠️ 本步**未改 `sim_rules.py`**，故脚本哈希仍为 `3c814be9…16f6`。
+
+---
+
+### 11.23 C 组展示面：`SimTradeRulesProjection` 引擎投影层（2026-10-17）
+
+**目标**：把 C 组的**展示路径**从 `SimTradingRules` 换成引擎取值（**裁决路径** `submit` / `sweepConditions` 已在 §11.20 / §11.21 切完）。A5-4 之后 `.engine` 模式下「裁决用引擎、界面用 Swift」→ 会出现**界面口径 ≠ 引擎口径**。
+
+**形态 = 运行时投影缓存**（与 §11.17 的 `SimRulesProjection` 同构，取「同名同义 API + 键化缓存」以求最小改动面）
+
+| 面 | 设计 |
+| --- | --- |
+| 同步取值（视图 `body` 路径） | 命中缓存 → **同步**返回；未命中 → 只入队（`pending` / `scheduled` **刻意不是 `@Published`**，故在 `body` 里改不触发「Publishing changes from within view updates」）→ 防抖 50ms → 批量打引擎 → 结果按「函数 + 参数」为键写进 `@Published`，视图自然重绘 |
+| 异步取值（动作路径） | `sellableQtyAsync` / `affordableQtyAsync` 直接 `await` 引擎（并写缓存）——用于需要**确定值**的场合（开条件单默认数量、持仓页「卖」带量、仓位比例按钮），避免「未命中 nil → 预填成 1 手」 |
+| `.swift` 模式（A5-5 前唯一生产形态） | **完全直通** `SimTradingRules.default`：零行为变化、**零引擎请求、零缓存写入**（有测试锁死） |
+| 降级（§9.10） | 未就绪 / 失败 → 返回 `nil` → 视图呈现**显式占位**（`placeholderText = "—"`），**不静默用 Swift 兜底**；`.failed` 键**不自动重试**（否则未就绪期每帧刷一轮请求），由 `reset()` 复位——接线点与 `SimRulesProjection.requestAll()` 同处（`KlinePythonBridge.ensureReady` 的两条成功路径） |
+| 配置常量 | 不走本层（见 §11.22），`lotSize` / `priceTick` 从 `SimTradeRuleConstants` 同步读 |
+
+**缓存键设计（决定命中率）**
+
+| 取值 | 键 | 归并理由 |
+| --- | --- | --- |
+| `affordableQty` | `affordableQty\|cash\|price` | 资金稳定、价格随输入变 → 同一输入不重复请求 |
+| `sellableQty` | `sellableQty\|qty\|availableQty` | 只在持仓变化时变（命中率高） |
+| `commission` / `stampTax` / `fee` | `函数\|amount[\|direction]` | 逐字符改价 → 防抖合并 |
+| `limitRange` | `limitRange\|prevClose` | 每标的稳定；`nil` 昨收也缓存（与「未就绪」区分：`Value.none`） |
+| `isTradingSession` | `isTradingSession\|分钟桶\|tzOffset` | 调用点是**每秒**刷新的时钟（`TimelineView(.periodic(by:1))`）；时段以分钟为粒度判定 → 一分钟内复用同一结果。`tzOffsetSeconds` 进键（DST 会改本机偏移） |
+
+**接入清单（本步改动）**
+
+| 文件 | 改动 |
+| --- | --- |
+| `Trading/TradeTicketView.swift` | `rules` 属性由 `SimTradingRules` 换为投影；`buyAvail` / `sellAvail` / `availQty` / `commission` / `stampTax` / `totalFee` / `cashAfterTrade` 变 `Optional`；`amount` / `cashAfter` 是 GUI 层算术（由来源值合成）；委派 `TradeFeeBlock(ready:)` |
+| `Trading/TradeTicketKit.swift` | `TradeQuoteBar.availQty: Int?`（nil → 显示 `—`）；`TradeFeeBlock` 加 `ready`（false → 「费用明细 · 引擎计算中…」，**不显示 0 元假装已算好**） |
+| `Simulation/SimulationLayoutA/B/CView.swift` | 持仓行「条件单」入口改 `Task { await sellableQtyAsync(...) }`（动作路径） |
+| `Simulation/SimCondEditorView.swift` | `rules` 换投影；`availQty` → `applyPosition` 内 `await`（买走 `affordableQtyAsync`，卖走 `sellableQtyAsync`） |
+| `App/QuickPanelLayouts.swift` / `QuickPanelLayoutsBC.swift` | 时段指示改投影（未就绪 → 「交易时段校验中…」，不臆断开市 / 休市）；持仓页「卖」带量改 `await sellableQtyAsync` |
+| `Python/SimRulesAsync.swift` | 补两个 C 组包装 `tradeCommission` / `tradeStampTax`（原来只包了 `fee`） |
+| `Python/KlinePythonBridge.swift` | `ensureReady` 成功路径接 `SimTradeRulesProjection.shared.reset()` |
+
+**已知取舍（诚实登记）**
+
+1. **「逻辑兜底值」清单**：取值点里凡参与**运算**（预填数量、仓位比例换算、步进）处未就绪时用 `?? 0`——这是「中性值」而非「Swift 兜底」（真正的裁决仍由引擎终审：`submit` 会 `trade_validate` 并 fail-closed，见 §11.20）。凡**纯展示**处则用 `—` 占位。
+2. **`limitRange` 的 nil 双义**：`nil` 既表示「无昨收 → 不设限」（合法），也表示「未就绪」；两者在视图上的表现一致（不显示涨跌停条）。`Value.none` 在缓存里把两者区分开，但视图层不区分——记入 A5-5 待办（是否需要区分「无涨跌停」与「校验中」）。
+3. **`SimCondEngine.executionPrice` 的同步 helper**：仍读 `SimTradingRules.default.priceTick`（训练态复用同一 helper）。它现在是**生成常量的镜像**（§11.22），与引擎口径一致；该 helper 本身归 A6 删除。
+4. **Training 路径**（`TrainingSessionController` / `TrainingModels` / `TrainingSetupSheet`）**未接入**：训练态是另一套结算（`sweepConditions(reason:)`）与账户模型，须单独排（仍列 §11.18.3）。
+5. **`.engine` 模式下仍未补全的空态**：费用块 / 可买可卖已给占位，但条件单页「引擎不可用时静默不结算」仍在（A5-5）。
+
+**测试**：新增 `KlineTests/SimTradeRulesProjectionTests.swift`（6 用例）：① `.swift` 直通且**不写缓存**；② `.engine` 冷缓存先 `nil` 再得引擎值；③ 两种 mode 下 `trade_calc` 全量入参与 `SimTradingRules.default` 逐条相等（含动作路径 `sellableQtyAsync`）；④ 时段按分钟归并；⑤ 配置常量与占位文案。另补 `SimRulesAsyncTests` 的 `commission` / `stampTax`（此前该套件未包装）。**实测 `KlineTests` 全量 82/82 全绿 0 skip**。
 
 ---
 

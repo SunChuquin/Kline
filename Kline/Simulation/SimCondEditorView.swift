@@ -832,7 +832,8 @@ struct SimCondEditorView: View {
 
     // MARK: - 派生数据
 
-    private var rules: SimTradingRules { SimTradingRules.default }
+    /// 交易规则派生值投影（§11.23）：`.swift` 模式直通 `SimTradingRules`，`.engine` 模式读引擎缓存
+    @ObservedObject private var rules = SimTradeRulesProjection.shared
     private var isTraining: Bool { trainingBackend != nil }
     private var account: SimAccount? {
         if let backend = trainingBackend { return backend.account }
@@ -874,13 +875,6 @@ struct SimCondEditorView: View {
     /// 委托指令参考价（可买数量换算用）
     private var referencePrice: Double {
         lastPrice ?? params.triggerPrice ?? params.breakoutPrice ?? 0
-    }
-
-    private var availQty: Int {
-        if direction.isBuy {
-            return rules.affordableQty(cash: account?.cash ?? 0, price: referencePrice)
-        }
-        return rules.sellableQty(position: position)
     }
 
     private var baseModeOptions: [TradeSegOption] {
@@ -1101,9 +1095,23 @@ struct SimCondEditorView: View {
     }
 
     private func applyPosition(_ ratio: Double) {
-        let lot = max(rules.lotSize, 1)
-        qty = max(0, Int(Double(availQty) * ratio) / lot * lot)
-        setNum(.qty, Double(qty))
+        let projection = rules
+        let lot = max(projection.lotSize, 1)
+        Task {
+            // 可买 / 可卖上限走引擎（动作路径直接 await，避免 `nil` 退化成 0 手）
+            let cash = account?.cash ?? 0
+            let price = referencePrice
+            let avail: Int
+            if direction.isBuy {
+                avail = await projection.affordableQtyAsync(cash: cash, price: price) ?? 0
+            } else if let position = position {
+                avail = await projection.sellableQtyAsync(position: position) ?? 0
+            } else {
+                avail = 0
+            }
+            qty = max(0, Int(Double(avail) * ratio) / lot * lot)
+            setNum(.qty, Double(qty))
+        }
     }
 
     private func handleSave() {

@@ -46,7 +46,7 @@ struct QuickPanelAView: View {
     /// 一键清仓二次确认
     @State private var showCloseAllConfirm = false
 
-    private var rules: SimTradingRules { SimTradingRules.default }
+    @ObservedObject private var rules = SimTradeRulesProjection.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -171,14 +171,20 @@ struct QuickPanelAView: View {
             let open = rules.isTradingSession(at: context.date)
             HStack(spacing: 4) {
                 Circle()
-                    .fill(open ? Color(.systemRed) : Color(.secondaryLabel))
+                    .fill(open == true ? Color(.systemRed) : Color(.secondaryLabel))
                     .frame(width: 6, height: 6)
-                Text(open ? "连续竞价 · \(SimFormat.time(context.date))" : "非交易时段 · 委托将待报")
+                Text(sessionText(open: open, at: context.date))
                     .font(.system(size: 10.5))
-                    .foregroundColor(open ? Color(.systemRed) : Color(.secondaryLabel))
+                    .foregroundColor(open == true ? Color(.systemRed) : Color(.secondaryLabel))
                     .lineLimit(1)
             }
         }
+    }
+
+    /// 未就绪（`.engine` 模式引擎尚未算出）→ 显式占位，不臆断开市 / 休市
+    private func sessionText(open: Bool?, at date: Date) -> String {
+        guard let open = open else { return "交易时段校验中…" }
+        return open ? "连续竞价 · \(SimFormat.time(date))" : "非交易时段 · 委托将待报"
     }
 
     /// 行情头：名称 + 代码 + 最新价 + 涨跌幅（按涨跌色）

@@ -63,14 +63,17 @@ enum SimOrderRejection: Error, Equatable {
 
 /// 交易规则（集中管理，多账户可各自挂一份）
 /// nonisolated：纯计算值类型，需在后台线程（如历史回测引擎）调用，不参与 UI 隔离
+///
+/// ⚠️ 默认值全部取自 `SimTradeRuleConstants`（自动生成，真源 = `sim_rules.py`）——
+/// Swift 侧不再自持一份交易规则常量，杜绝与引擎漂移（见 §11.22 / §10.9 套件 8）。
 nonisolated struct SimTradingRules {
     var tPlus1Enabled: Bool = true
-    var lotSize: Int = 100
-    var commissionRate: Double = 0.00025      // 佣金万 2.5
-    var commissionMin: Double = 5.0           // 最低 5 元
-    var stampTaxRate: Double = 0.001          // 卖出印花税千一
-    var limitPct: Double = 0.10               // 涨跌停 ±10%
-    var priceTick: Double = 0.01              // 最小报价档位
+    var lotSize: Int = SimTradeRuleConstants.lotSize
+    var commissionRate: Double = SimTradeRuleConstants.commissionRate
+    var commissionMin: Double = SimTradeRuleConstants.commissionMin
+    var stampTaxRate: Double = SimTradeRuleConstants.stampTaxRate
+    var limitPct: Double = SimTradeRuleConstants.limitPct
+    var priceTick: Double = SimTradeRuleConstants.priceTick
 
     static let `default` = SimTradingRules()
 

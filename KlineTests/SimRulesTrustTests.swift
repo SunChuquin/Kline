@@ -62,6 +62,21 @@ final class SimRulesTrustTests: XCTestCase {
         XCTAssertEqual(declared.requiredAPIVersion, SimRulesTrust.requiredAPIVersion)
     }
 
+    /// 交易规则配置常量：自动生成的 Swift 镜像 ↔ fixture（真源 = sim_rules.py，见 §11.22）。
+    /// 呈现层同步读 `SimTradeRuleConstants`，故这里必须逐值锁死——漂移即等于「界面口径 ≠ 引擎口径」。
+    func testRuleConstantsMirrorMatchesFixture() throws {
+        let fix = try XCTUnwrap(try loadFixture()["ruleConstants"] as? [String: Any],
+                                "fixture 缺 ruleConstants（请重跑 gen_sim_rules_trust.py）")
+        XCTAssertEqual(fix["lotSize"] as? Int, SimTradeRuleConstants.lotSize)
+        XCTAssertEqual(fix["lotSize"] as? Int, SimTradingRules.default.lotSize)
+        XCTAssertEqual(fix["priceTick"] as? Double, SimTradeRuleConstants.priceTick)
+        XCTAssertEqual(fix["priceTick"] as? Double, SimTradingRules.default.priceTick)
+        XCTAssertEqual(fix["commissionRate"] as? Double, SimTradeRuleConstants.commissionRate)
+        XCTAssertEqual(fix["commissionMin"] as? Double, SimTradeRuleConstants.commissionMin)
+        XCTAssertEqual(fix["stampTaxRate"] as? Double, SimTradeRuleConstants.stampTaxRate)
+        XCTAssertEqual(fix["limitPct"] as? Double, SimTradeRuleConstants.limitPct)
+    }
+
     // MARK: - ② 真源判定
 
     /// 真实 Bundle 脚本 + 真实内嵌引擎 manifest.apiVersion → trusted。
