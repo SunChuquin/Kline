@@ -1496,6 +1496,115 @@ done
 
 **下一步**：A5-3 剩余文案调用点（编辑器草稿预览 + Training 两处）→ A5-4 其余子系统（DSL/策略映射 → 交易规则 → 条件单判定·结算）。
 
+> **A5-3 已收口（2026-10-17 同日）**：上句所列「剩余文案调用点」已全部接入投影（`939704f`，见 §11.18 交付表）。`SimCondRule` 六个文案方法的生产调用点只剩：① `SimRulesProjection` 的 `.swift` 直通；② `SimRulesBridge` 的 `.swift` 后端；③ A5-4 待处理的**逻辑**调用。故 §11.18 的清单只列**逻辑/校验**类剩余量。
+
+---
+
+### 11.18 A5-4 剩余工作清单与关键耦合（2026-10-17 盘点）
+
+#### 11.18.1 本会话已交付（A5-③「一次性全切 + 信任链」）
+
+| 子步 | 内容 | commit | 实测 |
+| --- | --- | --- | --- |
+| A5-1 | 信任链（套件 8）：真源声明 + `SimRulesTrust` + `gen_sim_rules_trust.py` + `--trust` | `88763e5` | 10/10（当时） |
+| A5-2 | 生产编解码层 `SimRulesCodec`（领域模型 ↔ op JSON 双向单一来源；`SimRulesBridge` 全部委派） | `b3cd1ed` | 4/4 |
+| A5-4（回测） | `SimRulesBridge.backtestRun` 分派；`StrategyBacktestRunner` 走该入口 | `b3cd1ed` | 同批 23/23 |
+| A5-3 | 投影层 `SimRulesProjection` + 批量 op `cond_texts` | `d690465` | 3/3 + diff 一致性 |
+| A5-3（收口） | 全部文案调用点接入（Training 两处 + 编辑器草稿 + sweep 触发日志） | `939704f` | **`KlineTests` 全量 73/73 全绿 0 skip** |
+
+#### 11.18.2 ⚠️ 关键耦合：交易规则（C 组）**不能**单独切
+
+`SimStore.submit(_:)` 共 **4** 个调用点：
+
+| 调用点 | 性质 |
+| --- | --- |
+| `TradeTicketView.swift:724` | 用户点击（可在 `Task` 里 `await`） |
+| `App/QuickPanelLayouts.swift:665` | 用户点击（同上） |
+| `SimStore.closeAll(accountID:metaID:)`（`SimStore.swift:909`） | 一键平仓（UI 触发，可 `await`） |
+| **`SimCondEngine.fireCondOrder(...)`（`SimCondEngine.swift:163`）** | **`sweepConditions` 主线程同步循环内的逐单下单** |
+
+→ 一旦 `submit` 变成 `async`（`.engine` 模式必须如此：`blockingCall` 禁主线程、`call` 回主线程，无法同步取结果），`sweepConditions` 的**同步循环**必须同步改造为 **async 流水线**。故：
+
+> **交易规则（`trade_validate`）与条件单判定·结算（`cond_evaluate` / B 组）必须合并为同一子步切换**，且 `sweepConditions` 改造须加**重入守卫**（上一轮 `await` 未回时不得再扫，否则条件单可能被重复触发）。
+
+`sweepConditions` 的 async 化的约束（改造时逐条守住）：
+
+1. **状态写入仍全在主线程**（`SimStore` 是 `@MainActor`）——`await` 只用于「取值/判定」，写回（`assignConditionalOrders` / `saveToDisk`）仍同步主线程；
+2. 逐单顺序处理（引擎逐单 `cond_evaluate`），不并发，避免同一订单的重叠判定；
+3. 现有「整轮只写盘一次（`dirty` 标志）」语义保留；
+4. `fireCondOrder` 里 `submit` 的失败分支（`.failure` → 置 `rejected` / 继续监控）语义逐字保留；
+5. `TrainingSessionController.swift:534` 的 `SimCondRule.evaluate`（训练态评估）是**另一条**同步路径，与 sweep 同批处理。
+
+#### 11.18.3 剩余调用点清单（生产，排除 `Python/SimRules*`、`StrategyBacktestEngine`（待删）、注释）
+
+**C 组 · 交易规则（`SimTradingRules`，23 处）**
+
+| 文件 | 处数 | 备注 |
+| --- | --- | --- |
+| `Training/TrainingSessionController.swift` | 5 | 训练态下单（`lotSize`/`fee`/`affordableQty`，同步逻辑） |
+| `Training/TrainingModels.swift` · `Training/TrainingSetupSheet.swift` | 1 · 2 | `fee` / `lotSize`（建仓规则） |
+| `Trading/SimStore.swift` | 3 | `submit` 内 `validate` + `closeAll` 的 `sellableQty` |
+| `Trading/TradeTicketView.swift` · `Trading/SimCondEngine.swift` | 1 · 1 | `rules` 取用 / `priceTick`（判定链路） |
+| `Simulation/SimulationLayoutA/B/CView.swift` | 1 · 1 · 1 | 展示（`lotSize`/`affordableQty`） |
+| `Simulation/SimCondEditorView.swift` | 1 | 建单校验（`:999` `validateCreate` 内） |
+| `App/QuickPanelLayouts.swift` · `App/QuickPanelLayoutsBC.swift` | 1 · 2 | 展示（`lotSize`/`affordableQty`） |
+
+> 其中 `lotSize` 是**常量**（`100`），非算法；`fee`/`commission`/`stampTax`/`limitRange`/`affordableQty`/`sellableQty`/`isTradingSession` 是算法（对应 `trade_calc` 的 7 个 `calc`）。
+
+**A/B 组 · 条件单判定与结算（`SimCondEngine` 全域，5 处 + 整文件）**
+
+| 位置 | 内容 |
+| --- | --- |
+| `SimCondEngine.swift:89` | `SimCondRule.evaluate`（判定主循环） |
+| `SimCondEngine.swift:346` | `repeatableFinished` 的 `gridLevelCount`（**逻辑**） |
+| `SimCondEngine.swift`（整文件） | `fireDirection` / `executionPrice` / `advanceRepeatable` / `expiredReason` / `alertMessage` / `sweepConditions` |
+| `Training/TrainingSessionController.swift:534` | 训练态 `evaluate` |
+| `SimStore.swift:1127` | 仅提醒建单 `SimCondRule.validateCreate` |
+| `Simulation/SimCondEditorView.swift:999` | 编辑器 `validateDraft`（**每帧同步校验** → 闸门 6「防抖 + 投影」） |
+
+**D 组 · 策略 → 条件单草稿（`StrategyCondGenerator`，6 处）**
+
+| 位置 | 内容 |
+| --- | --- |
+| `StrategyCondGenerator.swift:53` | `.summary`（`previewSentence` 口径，展示文案） |
+| `StrategyCondGenerator.swift:147` | `validateCreate` 逐条校验 |
+| `StrategyCondGenerator.swift`（其余） | `rule parse` / `trade override` |
+| `Simulation/StrategyGenConfirmView.swift` | 2（调用 `drafts`/`entryDraft`） |
+
+**E 组 · 策略 DSL 纯解析/校验/预览（`Formula/` 族，约 30 处）**
+
+| 文件 | 处数 | 符号 |
+| --- | --- | --- |
+| `Formula/StrategyFormula.swift` | 5 · 3 · 2 · 1 · 1 · 5 | `StrategyRuleCatalog` / `StrategyRuleParser` / `StrategyTradeParser` / `StrategyValidator` / `StrategyPreview` / `FormulaKind.parse·serialize` |
+| `Formula/StrategyFormulaEditorView.swift` | 1 · 2 · 1 · 3 · 1 · 1 | `Catalog` / `Parser` / `Validator` / `Preview` / `TradeParser` / `parse`（**大量在输入实时路径** → 防抖 + 投影） |
+| `Formula/StrategyDetailView.swift` | 1 · 3 | `StrategyRuleParser` / `StrategyPreview`（展示） |
+| `Formula/StrategyTrade.swift` | 1 · 1 | `StrategyRuleCatalog` / `StrategyTradeParser` |
+| `Formula/FormulaKind.swift` | 2 | `StrategyTradeParser`（**`.tdx` 文件加载/保存**，模型级路径） |
+| `Formula/FormulaCenterView.swift` | 1 | `parse`（文件读取） |
+| `Trading/StrategyCondGenerator.swift` | 1 · 1 | `StrategyRuleParser` / `StrategyTradeParser` |
+
+#### 11.18.4 🔴 拍板点：`SimFormat` 有 **219** 处生产调用点
+
+`SimFormat.`（数值 + 日期文案）在生产 Swift **219 处**，分布在 ~30 个文件（最多的 `Simulation/SimSharedViews.swift` 26、`SimulationLayoutBView.swift` 20、`Trading/TradeTicketView.swift` 16、`SimulationLayoutCView.swift` 16…），**全部在 SwiftUI 渲染路径**（每帧求值）。
+
+这与 §11.3 把 `sim_format` 列为契约 op 的现状冲突：**每帧文案无法逐个走异步投影**（缓存命中率≈0，且要改 219 处调用签名）。
+
+| 出路 | 内容 | 代价 |
+| --- | --- | --- |
+| **① 格式化归 GUI（待拍板，推荐）** | 修订 §11.3：`sim_format` op **保留**（`_sim_format` 回归网 / 引擎内部 / fixture 用），但**生产不调用**；`SimFormat.swift` 明确归入「GUI 层」（GUI 文档的展示规则）。 | `SimFormat` 舍入口径的「单一来源」不再是引擎 → 靠 §11.9 探针 + `simFormat` fixture（23 条）保证两边同步 |
+| ② 引擎出规则、Swift 执行 | 引擎返回 `{fn → 小数位/舍入模式/日期格式}`，`SimFormat` 按规则本地格式化 | 需重写 `SimFormat` 并证明等价（`NumberFormatter` 的 shortest-roundtrip 行为不易规则化） |
+| ③ 同步跨语言调用 | 219 处直接同步调引擎 | 需放开 `blockingCall` 的主线程禁令（与设计冲突）+ 每帧跨语言调用，**不推荐** |
+
+> **未拍板前不应动 `SimFormat`**；本项不影响 A5-4 其余子系统（sweep / C 组 / D 组 / E 组）的推进。
+
+#### 11.18.5 建议的下一步顺序（下一会话）
+
+1. **合并子步：条件单判定·结算 + 交易规则**（§11.18.2 的耦合）——`sweepConditions` async 化（含重入守卫）+ `submit` async 化 + 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入（编辑器走防抖投影）；
+2. **D 组 · 策略映射**（`StrategyCondGenerator`，6 处，含 `.summary` 文案 → 投影）；
+3. **E 组 · 策略 DSL**（`Formula/` 族 §11.18.3；编辑器实时路径 → 防抖 + 投影；`FormulaKind.parse/serialize` 文件读写 → 单次 `await`）；
+4. `SimFormat` **按拍板结果**处理（§11.18.4）；
+5. A5-5：把 `SimRulesBridge.mode` 默认翻 `.engine`；A6：删 Swift 实现 + fixture 冻结（§10.10 六闸门）。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
