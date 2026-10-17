@@ -1606,12 +1606,12 @@ done
 
 #### 11.18.5 建议的下一步顺序（下一会话）
 
-> ✅ 1 / 4 / 5 已分别由 §11.20–§11.23 推进（C 组展示面 + 交易规则 + 判定结算已完成）；下表保留原顺序，剩下 D 组 / E 组 / Training / A5-5。
+> ✅ 1 已由 §11.20–§11.23 推进（交易规则 + 判定结算 + C 组展示面）；✅ 2（D 组 · 策略映射）已由 §11.24 推进；下表保留原顺序，剩下 E 组 / Training / A5-5。
 
-1. **合并子步：条件单判定·结算 + 交易规则**（§11.18.2 的耦合）——`sweepConditions` async 化（含重入守卫）+ `submit` async 化 + 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入（编辑器走防抖投影）；
-2. **D 组 · 策略映射**（`StrategyCondGenerator`，6 处，含 `.summary` 文案 → 投影）；
+1. **合并子步：条件单判定·结算 + 交易规则**（§11.18.2 的耦合）——`sweepConditions` async 化（含重入守卫）+ `submit` async 化 + 4 个调用点适配 + `SimStore.swift:1127` / `SimCondEditorView:999` 校验接入（编辑器走防抖投影）；**[✅ §11.20 / §11.21 / §11.22 / §11.23]**
+2. **D 组 · 策略映射**（`StrategyCondGenerator`，6 处，含 `.summary` 文案 → 投影）；**[✅ §11.24]**
 3. **E 组 · 策略 DSL**（`Formula/` 族 §11.18.3；编辑器实时路径 → 防抖 + 投影；`FormulaKind.parse/serialize` 文件读写 → 单次 `await`）；
-4. `SimFormat` **按拍板结果**处理（§11.18.4）；
+4. `SimFormat` **按拍板结果**处理（§11.18.4）；**[✅ D5 = 归 GUI，219 处不下沉]**
 5. A5-5：把 `SimRulesBridge.mode` 默认翻 `.engine`；A6：删 Swift 实现 + fixture 冻结（§10.10 六闸门）。
 
 ---
