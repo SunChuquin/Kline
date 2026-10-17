@@ -1,0 +1,2666 @@
+{
+  "_header": {
+    "schema": 1,
+    "generatedBy": "SimRulesContractTests dump (Swift 现状)",
+    "generatedAt": "2026-10-17",
+    "tzOffsetSeconds": 28800
+  },
+  "cases": [
+    {
+      "caseName": "bt.entry_then_stop_loss",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "STOP_LOSS(PROFIT=10, LOSS=5)",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": true,
+          "includeEntry": true
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 9.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260115,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260116,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260117,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260118,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260119,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260120,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260121,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260122,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260123,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260124,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260125,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260126,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260127,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260128,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260129,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260130,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260131,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260201,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260202,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260203,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ]
+        },
+        "pickHits": {
+          "7": [
+            20260105
+          ]
+        },
+        "metas": {
+          "7": {
+            "id": 7,
+            "code": "600519.SH",
+            "name": "贵州茅台"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [
+          {
+            "date": 20260105,
+            "equity": 100000
+          },
+          {
+            "date": 20260106,
+            "equity": 99995
+          },
+          {
+            "date": 20260107,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260108,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260109,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260110,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260111,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260112,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260113,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260114,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260115,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260116,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260117,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260118,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260119,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260120,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260121,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260122,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260123,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260124,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260125,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260126,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260127,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260128,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260129,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260130,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260131,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260201,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260202,
+            "equity": 98975.74524999999
+          },
+          {
+            "date": 20260203,
+            "equity": 98975.74524999999
+          }
+        ],
+        "hitCount": 1,
+        "maxDrawdownRange": [
+          0,
+          2
+        ],
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": true,
+          "includeEntry": true,
+          "initialCapital": 100000
+        },
+        "scannedCount": 1,
+        "skipped": [],
+        "stats": {
+          "annualized": -0.08284707325641294,
+          "avgHoldDays": 1,
+          "finalEquity": 98975.74524999999,
+          "initialCapital": 100000,
+          "maxDrawdown": 0.010242547500000088,
+          "profitFactor": 0,
+          "roundTrips": 1,
+          "totalReturn": -0.010242547500000088,
+          "tradeCount": 2,
+          "winRate": 0
+        },
+        "trades": [
+          {
+            "amount": 20000,
+            "code": "600519.SH",
+            "date": 20260106,
+            "direction": "buy",
+            "fee": 5,
+            "holdDays": null,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 10,
+            "qty": 2000,
+            "realizedPnL": null,
+            "ruleKind": null,
+            "signalDate": 20260105
+          },
+          {
+            "amount": 19004.749999999996,
+            "code": "600519.SH",
+            "date": 20260107,
+            "direction": "sell",
+            "fee": 24.004749999999998,
+            "holdDays": 1,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 9.502374999999999,
+            "qty": 2000,
+            "realizedPnL": -1024.2547500000012,
+            "ruleKind": "STOP_LOSS",
+            "signalDate": 20260107
+          }
+        ],
+        "warnings": [
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    },
+    {
+      "caseName": "bt.empty_result",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": true,
+          "includeEntry": true
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ],
+          "8": []
+        },
+        "pickHits": {},
+        "metas": {},
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [],
+        "hitCount": 0,
+        "maxDrawdownRange": null,
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": true,
+          "includeEntry": true,
+          "initialCapital": 100000
+        },
+        "scannedCount": 2,
+        "skipped": [
+          "标 #7：行情不足 30 根（10），已跳过",
+          "标 #8：无历史行情数据，已跳过"
+        ],
+        "stats": {
+          "annualized": 0,
+          "avgHoldDays": 0,
+          "finalEquity": 100000,
+          "initialCapital": 100000,
+          "maxDrawdown": 0,
+          "profitFactor": 0,
+          "roundTrips": 0,
+          "totalReturn": 0,
+          "tradeCount": 0,
+          "winRate": 0
+        },
+        "trades": [],
+        "warnings": [
+          "没有可参与回测的标的（行情缺失或不足 30 根），未产生净值曲线",
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    },
+    {
+      "caseName": "bt.warnings_future_and_gap",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "BACKSET(C,1) > 0 AND REF(C,-1) > 0 AND ZIG(3,5)",
+          "pickRef": null,
+          "rules": "",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": true,
+          "includeEntry": true
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260115,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260116,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260117,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260118,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260119,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260120,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260121,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260122,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260123,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260124,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260125,
+              "open": 12.0,
+              "high": 12.0,
+              "low": 12.0,
+              "close": 12.0
+            },
+            {
+              "date": 20260126,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260127,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260128,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260129,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260130,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260131,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260201,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260202,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260203,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ]
+        },
+        "pickHits": {},
+        "metas": {
+          "7": {
+            "id": 7,
+            "code": "600519.SH",
+            "name": "贵州茅台"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [
+          {
+            "date": 20260105,
+            "equity": 100000
+          },
+          {
+            "date": 20260106,
+            "equity": 100000
+          },
+          {
+            "date": 20260107,
+            "equity": 100000
+          },
+          {
+            "date": 20260108,
+            "equity": 100000
+          },
+          {
+            "date": 20260109,
+            "equity": 100000
+          },
+          {
+            "date": 20260110,
+            "equity": 100000
+          },
+          {
+            "date": 20260111,
+            "equity": 100000
+          },
+          {
+            "date": 20260112,
+            "equity": 100000
+          },
+          {
+            "date": 20260113,
+            "equity": 100000
+          },
+          {
+            "date": 20260114,
+            "equity": 100000
+          },
+          {
+            "date": 20260115,
+            "equity": 100000
+          },
+          {
+            "date": 20260116,
+            "equity": 100000
+          },
+          {
+            "date": 20260117,
+            "equity": 100000
+          },
+          {
+            "date": 20260118,
+            "equity": 100000
+          },
+          {
+            "date": 20260119,
+            "equity": 100000
+          },
+          {
+            "date": 20260120,
+            "equity": 100000
+          },
+          {
+            "date": 20260121,
+            "equity": 100000
+          },
+          {
+            "date": 20260122,
+            "equity": 100000
+          },
+          {
+            "date": 20260123,
+            "equity": 100000
+          },
+          {
+            "date": 20260124,
+            "equity": 100000
+          },
+          {
+            "date": 20260125,
+            "equity": 100000
+          },
+          {
+            "date": 20260126,
+            "equity": 100000
+          },
+          {
+            "date": 20260127,
+            "equity": 100000
+          },
+          {
+            "date": 20260128,
+            "equity": 100000
+          },
+          {
+            "date": 20260129,
+            "equity": 100000
+          },
+          {
+            "date": 20260130,
+            "equity": 100000
+          },
+          {
+            "date": 20260131,
+            "equity": 100000
+          },
+          {
+            "date": 20260201,
+            "equity": 100000
+          },
+          {
+            "date": 20260202,
+            "equity": 100000
+          },
+          {
+            "date": 20260203,
+            "equity": 100000
+          }
+        ],
+        "hitCount": 0,
+        "maxDrawdownRange": null,
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": true,
+          "includeEntry": true,
+          "initialCapital": 100000
+        },
+        "scannedCount": 1,
+        "skipped": [],
+        "stats": {
+          "annualized": 0,
+          "avgHoldDays": 0,
+          "finalEquity": 100000,
+          "initialCapital": 100000,
+          "maxDrawdown": 0,
+          "profitFactor": 0,
+          "roundTrips": 0,
+          "totalReturn": 0,
+          "tradeCount": 0,
+          "winRate": 0
+        },
+        "trades": [],
+        "warnings": [
+          "选股公式包含未来函数（BACKSET），回测结果偏乐观",
+          "选股公式包含未来函数（ZIG），回测结果偏乐观",
+          "选股公式包含未来函数（REF 负偏移），回测结果偏乐观",
+          "1 只标的出现单日跳空 > 11%，疑似除权，结果可能失真",
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    },
+    {
+      "caseName": "bt.grid_round_trip",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "GRID(BASE=10, LOW=5, HIGH=20, STEP=10, QTY=100, MULT=1)",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": true,
+          "includeEntry": true
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 8.5,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260115,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260116,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260117,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260118,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260119,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260120,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260121,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260122,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260123,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260124,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260125,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260126,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260127,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260128,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260129,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260130,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260131,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260201,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260202,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260203,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ]
+        },
+        "pickHits": {
+          "7": [
+            20260105
+          ]
+        },
+        "metas": {
+          "7": {
+            "id": 7,
+            "code": "600519.SH",
+            "name": "贵州茅台"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [
+          {
+            "date": 20260105,
+            "equity": 100000
+          },
+          {
+            "date": 20260106,
+            "equity": 99995
+          },
+          {
+            "date": 20260107,
+            "equity": 100084
+          },
+          {
+            "date": 20260108,
+            "equity": 100084
+          },
+          {
+            "date": 20260109,
+            "equity": 100084
+          },
+          {
+            "date": 20260110,
+            "equity": 100084
+          },
+          {
+            "date": 20260111,
+            "equity": 100084
+          },
+          {
+            "date": 20260112,
+            "equity": 100084
+          },
+          {
+            "date": 20260113,
+            "equity": 100084
+          },
+          {
+            "date": 20260114,
+            "equity": 100084
+          },
+          {
+            "date": 20260115,
+            "equity": 100084
+          },
+          {
+            "date": 20260116,
+            "equity": 100084
+          },
+          {
+            "date": 20260117,
+            "equity": 100084
+          },
+          {
+            "date": 20260118,
+            "equity": 100084
+          },
+          {
+            "date": 20260119,
+            "equity": 100084
+          },
+          {
+            "date": 20260120,
+            "equity": 100084
+          },
+          {
+            "date": 20260121,
+            "equity": 100084
+          },
+          {
+            "date": 20260122,
+            "equity": 100084
+          },
+          {
+            "date": 20260123,
+            "equity": 100084
+          },
+          {
+            "date": 20260124,
+            "equity": 100084
+          },
+          {
+            "date": 20260125,
+            "equity": 100084
+          },
+          {
+            "date": 20260126,
+            "equity": 100084
+          },
+          {
+            "date": 20260127,
+            "equity": 100084
+          },
+          {
+            "date": 20260128,
+            "equity": 100084
+          },
+          {
+            "date": 20260129,
+            "equity": 100084
+          },
+          {
+            "date": 20260130,
+            "equity": 100084
+          },
+          {
+            "date": 20260131,
+            "equity": 100084
+          },
+          {
+            "date": 20260201,
+            "equity": 100084
+          },
+          {
+            "date": 20260202,
+            "equity": 100084
+          },
+          {
+            "date": 20260203,
+            "equity": 100084
+          }
+        ],
+        "hitCount": 1,
+        "maxDrawdownRange": [
+          0,
+          1
+        ],
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": true,
+          "includeEntry": true,
+          "initialCapital": 100000
+        },
+        "scannedCount": 1,
+        "skipped": [],
+        "stats": {
+          "annualized": 0.007077969391243277,
+          "avgHoldDays": 1,
+          "finalEquity": 100084,
+          "initialCapital": 100000,
+          "maxDrawdown": 4.999999999999449e-05,
+          "profitFactor": 0,
+          "roundTrips": 1,
+          "totalReturn": 0.0008399999999999519,
+          "tradeCount": 3,
+          "winRate": 0
+        },
+        "trades": [
+          {
+            "amount": 20000,
+            "code": "600519.SH",
+            "date": 20260106,
+            "direction": "buy",
+            "fee": 5,
+            "holdDays": null,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 10,
+            "qty": 2000,
+            "realizedPnL": null,
+            "ruleKind": null,
+            "signalDate": 20260105
+          },
+          {
+            "amount": 900,
+            "code": "600519.SH",
+            "date": 20260107,
+            "direction": "buy",
+            "fee": 5,
+            "holdDays": null,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 9,
+            "qty": 100,
+            "realizedPnL": null,
+            "ruleKind": "GRID",
+            "signalDate": 20260107
+          },
+          {
+            "amount": 1000,
+            "code": "600519.SH",
+            "date": 20260107,
+            "direction": "sell",
+            "fee": 6,
+            "holdDays": 1,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 10,
+            "qty": 100,
+            "realizedPnL": -1.7142857142857295,
+            "ruleKind": "GRID",
+            "signalDate": 20260107
+          }
+        ],
+        "warnings": [
+          "期末仍有 1 只标的未平仓，已按最后一个交易日收盘价计入净值",
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    },
+    {
+      "caseName": "bt.batch_first_tranche",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "BATCH(TOTAL=1000, COUNT=2, FIRST=9, GAP=0.5)",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": true,
+          "includeEntry": true
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 8.5,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260115,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260116,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260117,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260118,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260119,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260120,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260121,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260122,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260123,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260124,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260125,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260126,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260127,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260128,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260129,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260130,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260131,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260201,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260202,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260203,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ]
+        },
+        "pickHits": {
+          "7": [
+            20260105
+          ]
+        },
+        "metas": {
+          "7": {
+            "id": 7,
+            "code": "600519.SH",
+            "name": "贵州茅台"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [
+          {
+            "date": 20260105,
+            "equity": 100000
+          },
+          {
+            "date": 20260106,
+            "equity": 99995
+          },
+          {
+            "date": 20260107,
+            "equity": 100490
+          },
+          {
+            "date": 20260108,
+            "equity": 100490
+          },
+          {
+            "date": 20260109,
+            "equity": 100490
+          },
+          {
+            "date": 20260110,
+            "equity": 100490
+          },
+          {
+            "date": 20260111,
+            "equity": 100490
+          },
+          {
+            "date": 20260112,
+            "equity": 100490
+          },
+          {
+            "date": 20260113,
+            "equity": 100490
+          },
+          {
+            "date": 20260114,
+            "equity": 100490
+          },
+          {
+            "date": 20260115,
+            "equity": 100490
+          },
+          {
+            "date": 20260116,
+            "equity": 100490
+          },
+          {
+            "date": 20260117,
+            "equity": 100490
+          },
+          {
+            "date": 20260118,
+            "equity": 100490
+          },
+          {
+            "date": 20260119,
+            "equity": 100490
+          },
+          {
+            "date": 20260120,
+            "equity": 100490
+          },
+          {
+            "date": 20260121,
+            "equity": 100490
+          },
+          {
+            "date": 20260122,
+            "equity": 100490
+          },
+          {
+            "date": 20260123,
+            "equity": 100490
+          },
+          {
+            "date": 20260124,
+            "equity": 100490
+          },
+          {
+            "date": 20260125,
+            "equity": 100490
+          },
+          {
+            "date": 20260126,
+            "equity": 100490
+          },
+          {
+            "date": 20260127,
+            "equity": 100490
+          },
+          {
+            "date": 20260128,
+            "equity": 100490
+          },
+          {
+            "date": 20260129,
+            "equity": 100490
+          },
+          {
+            "date": 20260130,
+            "equity": 100490
+          },
+          {
+            "date": 20260131,
+            "equity": 100490
+          },
+          {
+            "date": 20260201,
+            "equity": 100490
+          },
+          {
+            "date": 20260202,
+            "equity": 100490
+          },
+          {
+            "date": 20260203,
+            "equity": 100490
+          }
+        ],
+        "hitCount": 1,
+        "maxDrawdownRange": [
+          0,
+          1
+        ],
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": true,
+          "includeEntry": true,
+          "initialCapital": 100000
+        },
+        "scannedCount": 1,
+        "skipped": [],
+        "stats": {
+          "annualized": 0.04191408322338175,
+          "avgHoldDays": 0,
+          "finalEquity": 100490,
+          "initialCapital": 100000,
+          "maxDrawdown": 4.999999999999449e-05,
+          "profitFactor": 0,
+          "roundTrips": 0,
+          "totalReturn": 0.004899999999999904,
+          "tradeCount": 2,
+          "winRate": 0
+        },
+        "trades": [
+          {
+            "amount": 20000,
+            "code": "600519.SH",
+            "date": 20260106,
+            "direction": "buy",
+            "fee": 5,
+            "holdDays": null,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 10,
+            "qty": 2000,
+            "realizedPnL": null,
+            "ruleKind": null,
+            "signalDate": 20260105
+          },
+          {
+            "amount": 4500,
+            "code": "600519.SH",
+            "date": 20260107,
+            "direction": "buy",
+            "fee": 5,
+            "holdDays": null,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 9,
+            "qty": 500,
+            "realizedPnL": null,
+            "ruleKind": "BATCH",
+            "signalDate": 20260107
+          }
+        ],
+        "warnings": [
+          "期末仍有 1 只标的未平仓，已按最后一个交易日收盘价计入净值",
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    },
+    {
+      "caseName": "bt.no_entry",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=5)",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": true,
+          "includeEntry": false
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260115,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260116,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260117,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260118,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260119,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260120,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260121,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260122,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260123,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260124,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260125,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260126,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260127,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260128,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260129,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260130,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260131,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260201,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260202,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260203,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ]
+        },
+        "pickHits": {
+          "7": [
+            20260105
+          ]
+        },
+        "metas": {
+          "7": {
+            "id": 7,
+            "code": "600519.SH",
+            "name": "贵州茅台"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [
+          {
+            "date": 20260105,
+            "equity": 100000
+          },
+          {
+            "date": 20260106,
+            "equity": 100000
+          },
+          {
+            "date": 20260107,
+            "equity": 100000
+          },
+          {
+            "date": 20260108,
+            "equity": 100000
+          },
+          {
+            "date": 20260109,
+            "equity": 100000
+          },
+          {
+            "date": 20260110,
+            "equity": 100000
+          },
+          {
+            "date": 20260111,
+            "equity": 100000
+          },
+          {
+            "date": 20260112,
+            "equity": 100000
+          },
+          {
+            "date": 20260113,
+            "equity": 100000
+          },
+          {
+            "date": 20260114,
+            "equity": 100000
+          },
+          {
+            "date": 20260115,
+            "equity": 100000
+          },
+          {
+            "date": 20260116,
+            "equity": 100000
+          },
+          {
+            "date": 20260117,
+            "equity": 100000
+          },
+          {
+            "date": 20260118,
+            "equity": 100000
+          },
+          {
+            "date": 20260119,
+            "equity": 100000
+          },
+          {
+            "date": 20260120,
+            "equity": 100000
+          },
+          {
+            "date": 20260121,
+            "equity": 100000
+          },
+          {
+            "date": 20260122,
+            "equity": 100000
+          },
+          {
+            "date": 20260123,
+            "equity": 100000
+          },
+          {
+            "date": 20260124,
+            "equity": 100000
+          },
+          {
+            "date": 20260125,
+            "equity": 100000
+          },
+          {
+            "date": 20260126,
+            "equity": 100000
+          },
+          {
+            "date": 20260127,
+            "equity": 100000
+          },
+          {
+            "date": 20260128,
+            "equity": 100000
+          },
+          {
+            "date": 20260129,
+            "equity": 100000
+          },
+          {
+            "date": 20260130,
+            "equity": 100000
+          },
+          {
+            "date": 20260131,
+            "equity": 100000
+          },
+          {
+            "date": 20260201,
+            "equity": 100000
+          },
+          {
+            "date": 20260202,
+            "equity": 100000
+          },
+          {
+            "date": 20260203,
+            "equity": 100000
+          }
+        ],
+        "hitCount": 1,
+        "maxDrawdownRange": null,
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": true,
+          "includeEntry": false,
+          "initialCapital": 100000
+        },
+        "scannedCount": 1,
+        "skipped": [],
+        "stats": {
+          "annualized": 0,
+          "avgHoldDays": 0,
+          "finalEquity": 100000,
+          "initialCapital": 100000,
+          "maxDrawdown": 0,
+          "profitFactor": 0,
+          "roundTrips": 0,
+          "totalReturn": 0,
+          "tradeCount": 0,
+          "winRate": 0
+        },
+        "trades": [],
+        "warnings": [
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    },
+    {
+      "caseName": "bt.same_bar_entry_no_drawdown",
+      "op": "backtest_run",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "",
+          "trade": {}
+        },
+        "params": {
+          "days": 250,
+          "initialCapital": 100000.0,
+          "executeNextOpen": false,
+          "includeEntry": true
+        },
+        "bars": {
+          "7": [
+            {
+              "date": 20260105,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260106,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260107,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260108,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260109,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260110,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260111,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260112,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260113,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260114,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260115,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260116,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260117,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260118,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260119,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260120,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260121,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260122,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260123,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260124,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260125,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260126,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260127,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260128,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260129,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260130,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260131,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260201,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260202,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            },
+            {
+              "date": 20260203,
+              "open": 10.0,
+              "high": 10.0,
+              "low": 10.0,
+              "close": 10.0
+            }
+          ]
+        },
+        "pickHits": {
+          "7": [
+            20260105
+          ]
+        },
+        "metas": {
+          "7": {
+            "id": 7,
+            "code": "600519.SH",
+            "name": "贵州茅台"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "equity": [
+          {
+            "date": 20260105,
+            "equity": 99995
+          },
+          {
+            "date": 20260106,
+            "equity": 99995
+          },
+          {
+            "date": 20260107,
+            "equity": 99995
+          },
+          {
+            "date": 20260108,
+            "equity": 99995
+          },
+          {
+            "date": 20260109,
+            "equity": 99995
+          },
+          {
+            "date": 20260110,
+            "equity": 99995
+          },
+          {
+            "date": 20260111,
+            "equity": 99995
+          },
+          {
+            "date": 20260112,
+            "equity": 99995
+          },
+          {
+            "date": 20260113,
+            "equity": 99995
+          },
+          {
+            "date": 20260114,
+            "equity": 99995
+          },
+          {
+            "date": 20260115,
+            "equity": 99995
+          },
+          {
+            "date": 20260116,
+            "equity": 99995
+          },
+          {
+            "date": 20260117,
+            "equity": 99995
+          },
+          {
+            "date": 20260118,
+            "equity": 99995
+          },
+          {
+            "date": 20260119,
+            "equity": 99995
+          },
+          {
+            "date": 20260120,
+            "equity": 99995
+          },
+          {
+            "date": 20260121,
+            "equity": 99995
+          },
+          {
+            "date": 20260122,
+            "equity": 99995
+          },
+          {
+            "date": 20260123,
+            "equity": 99995
+          },
+          {
+            "date": 20260124,
+            "equity": 99995
+          },
+          {
+            "date": 20260125,
+            "equity": 99995
+          },
+          {
+            "date": 20260126,
+            "equity": 99995
+          },
+          {
+            "date": 20260127,
+            "equity": 99995
+          },
+          {
+            "date": 20260128,
+            "equity": 99995
+          },
+          {
+            "date": 20260129,
+            "equity": 99995
+          },
+          {
+            "date": 20260130,
+            "equity": 99995
+          },
+          {
+            "date": 20260131,
+            "equity": 99995
+          },
+          {
+            "date": 20260201,
+            "equity": 99995
+          },
+          {
+            "date": 20260202,
+            "equity": 99995
+          },
+          {
+            "date": 20260203,
+            "equity": 99995
+          }
+        ],
+        "hitCount": 1,
+        "maxDrawdownRange": null,
+        "ok": true,
+        "params": {
+          "days": 250,
+          "executeNextOpen": false,
+          "includeEntry": true,
+          "initialCapital": 100000
+        },
+        "scannedCount": 1,
+        "skipped": [],
+        "stats": {
+          "annualized": -0.0004199223082873571,
+          "avgHoldDays": 0,
+          "finalEquity": 99995,
+          "initialCapital": 100000,
+          "maxDrawdown": 0,
+          "profitFactor": 0,
+          "roundTrips": 0,
+          "totalReturn": -4.999999999999449e-05,
+          "tradeCount": 1,
+          "winRate": 0
+        },
+        "trades": [
+          {
+            "amount": 20000,
+            "code": "600519.SH",
+            "date": 20260105,
+            "direction": "buy",
+            "fee": 5,
+            "holdDays": null,
+            "metaID": 7,
+            "name": "贵州茅台",
+            "price": 10,
+            "qty": 2000,
+            "realizedPnL": null,
+            "ruleKind": null,
+            "signalDate": 20260105
+          }
+        ],
+        "warnings": [
+          "期末仍有 1 只标的未平仓，已按最后一个交易日收盘价计入净值",
+          "TRAILING 与 bar 内「先 high 后 low」判定属乐观假设，实际触发价可能更差",
+          "实盘条件单只吃行情快照，触发必然晚于回测的逐 bar 判定"
+        ]
+      }
+    }
+  ]
+}

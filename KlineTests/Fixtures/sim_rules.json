@@ -1,0 +1,5556 @@
+{
+  "_header": {
+    "schema": 1,
+    "generatedBy": "SimRulesContractTests dump (Swift 现状)",
+    "generatedAt": "2026-10-17",
+    "tzOffsetSeconds": 28800,
+    "now": "2026-10-17T02:30:00Z"
+  },
+  "simFormat": [
+    {
+      "caseName": "format.price",
+      "op": "sim_format",
+      "input": {
+        "fn": "price",
+        "value": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,500.00"
+      }
+    },
+    {
+      "caseName": "format.price_frac",
+      "op": "sim_format",
+      "input": {
+        "fn": "price",
+        "value": 1466.1712
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,466.17"
+      }
+    },
+    {
+      "caseName": "format.amount",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": 1028446.5
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,028,446.50"
+      }
+    },
+    {
+      "caseName": "format.amount0_half_even_down",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount0",
+        "value": 1028446.5
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,028,446"
+      }
+    },
+    {
+      "caseName": "format.amount0_half_even_up",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount0",
+        "value": 1028447.5
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,028,448"
+      }
+    },
+    {
+      "caseName": "format.amount_half_boundary",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": 0.125
+      },
+      "expected": {
+        "ok": true,
+        "value": "0.12"
+      }
+    },
+    {
+      "caseName": "format.amount_shortest_roundtrip_up",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": 2.675
+      },
+      "expected": {
+        "ok": true,
+        "value": "2.68"
+      }
+    },
+    {
+      "caseName": "format.amount_shortest_roundtrip_down",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": 0.005
+      },
+      "expected": {
+        "ok": true,
+        "value": "0.00"
+      }
+    },
+    {
+      "caseName": "format.amount_shortest_roundtrip_up2",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": 0.015
+      },
+      "expected": {
+        "ok": true,
+        "value": "0.02"
+      }
+    },
+    {
+      "caseName": "format.amount_shortest_roundtrip_even",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": 0.025
+      },
+      "expected": {
+        "ok": true,
+        "value": "0.02"
+      }
+    },
+    {
+      "caseName": "format.amount_neg_zero",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": -0.0
+      },
+      "expected": {
+        "ok": true,
+        "value": "-0.00"
+      }
+    },
+    {
+      "caseName": "format.amount_neg_rounds_to_zero",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount",
+        "value": -0.004
+      },
+      "expected": {
+        "ok": true,
+        "value": "-0.00"
+      }
+    },
+    {
+      "caseName": "format.amount0_neg_zero",
+      "op": "sim_format",
+      "input": {
+        "fn": "amount0",
+        "value": -0.0
+      },
+      "expected": {
+        "ok": true,
+        "value": "-0"
+      }
+    },
+    {
+      "caseName": "format.signed_neg",
+      "op": "sim_format",
+      "input": {
+        "fn": "signed",
+        "value": -420.0
+      },
+      "expected": {
+        "ok": true,
+        "value": "-420.00"
+      }
+    },
+    {
+      "caseName": "format.signed_pos",
+      "op": "sim_format",
+      "input": {
+        "fn": "signed",
+        "value": 2841.0
+      },
+      "expected": {
+        "ok": true,
+        "value": "+2,841.00"
+      }
+    },
+    {
+      "caseName": "format.signed_neg_zero",
+      "op": "sim_format",
+      "input": {
+        "fn": "signed",
+        "value": -0.0
+      },
+      "expected": {
+        "ok": true,
+        "value": "+0.00"
+      }
+    },
+    {
+      "caseName": "format.pct_pos",
+      "op": "sim_format",
+      "input": {
+        "fn": "pct",
+        "value": 0.31
+      },
+      "expected": {
+        "ok": true,
+        "value": "+0.31%"
+      }
+    },
+    {
+      "caseName": "format.pct_neg",
+      "op": "sim_format",
+      "input": {
+        "fn": "pct",
+        "value": -1.18
+      },
+      "expected": {
+        "ok": true,
+        "value": "-1.18%"
+      }
+    },
+    {
+      "caseName": "format.shares",
+      "op": "sim_format",
+      "input": {
+        "fn": "shares",
+        "value": 1000
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,000"
+      }
+    },
+    {
+      "caseName": "format.shares_big",
+      "op": "sim_format",
+      "input": {
+        "fn": "shares",
+        "value": 1234567
+      },
+      "expected": {
+        "ok": true,
+        "value": "1,234,567"
+      }
+    },
+    {
+      "caseName": "format.time_tz8",
+      "op": "sim_format",
+      "input": {
+        "fn": "time",
+        "date": "2026-10-16T02:30:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": "10:30:00"
+      }
+    },
+    {
+      "caseName": "format.dateTime_tz8",
+      "op": "sim_format",
+      "input": {
+        "fn": "dateTime",
+        "date": "2026-09-19T06:52:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": "09-19 14:52"
+      }
+    },
+    {
+      "caseName": "format.shortDate_tz8",
+      "op": "sim_format",
+      "input": {
+        "fn": "shortDate",
+        "date": "2026-09-19T06:52:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": "09-19"
+      }
+    }
+  ],
+  "evaluate": [
+    {
+      "caseName": "eval.price_up_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1501.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1500,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.price_down_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1400.0,
+            "compareUp": false
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 200,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1399.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1400,
+          "decision": "fire",
+          "qty": 200
+        }
+      }
+    },
+    {
+      "caseName": "eval.price_hold",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1499.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.price_abort",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "触发价缺失"
+        }
+      }
+    },
+    {
+      "caseName": "eval.no_quote_hold",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": null
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.stoploss_oco_prefers_stop",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "stopLossPrice": 1450.0,
+            "takeProfitPrice": 1430.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1440.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1450,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.stoploss_take_only",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "takeProfitPrice": 1500.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1501.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1500,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.stoploss_abort",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "止盈止损参数缺失"
+        }
+      }
+    },
+    {
+      "caseName": "eval.trailing_no_breakout_hold",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1490.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.trailing_track_extreme",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1520.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0,
+            "extreme": 1520
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.trailing_drawdown_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "extreme": 1600.0
+          }
+        },
+        "snapshot": {
+          "last": 1540.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1540,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.trailing_floor_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0,
+            "floorEnabled": true,
+            "floorPrice": 1400.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1395.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1395,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.time_hold_future",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {
+            "fireDate": "2099-01-01T00:00:00Z"
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:30:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.time_no_quote_holds",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {
+            "fireDate": "2000-01-01T00:00:00Z"
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": null,
+          "prevClose": 1480.0
+        },
+        "now": "2026-10-17T01:30:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.time_fire_with_last",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {
+            "fireDate": "2000-01-01T00:00:00Z"
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0,
+          "prevClose": 1480.0
+        },
+        "now": "2026-10-17T01:30:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1500,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.time_abort",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "触发时间缺失"
+        }
+      }
+    },
+    {
+      "caseName": "eval.changepct_up_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0,
+          "changePct": 5.5
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1500,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.changepct_down_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": -5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1400.0,
+          "changePct": -5.2
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1400,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.changepct_hold",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0,
+          "changePct": 4.9
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.changepct_abort",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": 0.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1500.0,
+          "changePct": 5.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "涨跌幅阈值缺失"
+        }
+      }
+    },
+    {
+      "caseName": "eval.macross_up_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {
+            "maPeriod": 20,
+            "maAbove": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1505.0,
+          "ma": 1500.0,
+          "prevClose": 1495.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1505,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.macross_down_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {
+            "maPeriod": 20,
+            "maAbove": false
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1495.0,
+          "ma": 1500.0,
+          "prevClose": 1505.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 1495,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.macross_hold",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {
+            "maPeriod": 20,
+            "maAbove": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1510.0,
+          "ma": 1500.0,
+          "prevClose": 1505.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.macross_abort",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1505.0,
+          "ma": 1500.0,
+          "prevClose": 1495.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "均线参数缺失"
+        }
+      }
+    },
+    {
+      "caseName": "eval.grid_first_level_fire",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0,
+            "gridQtyPerLevel": 100,
+            "gridMultiplier": 1.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 940.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 940,
+          "decision": "fire",
+          "qty": 100
+        }
+      }
+    },
+    {
+      "caseName": "eval.grid_hold_in_step",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0,
+            "gridQtyPerLevel": 100,
+            "gridMultiplier": 1.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 980.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "hold",
+          "runtime": {
+            "batchDone": 0,
+            "gridLastPrice": 1000,
+            "gridLevel": 0
+          }
+        }
+      }
+    },
+    {
+      "caseName": "eval.grid_out_of_range_complete",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0,
+            "gridQtyPerLevel": 100,
+            "gridMultiplier": 1.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 1300.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "complete",
+          "reason": "价格已越出网格区间"
+        }
+      }
+    },
+    {
+      "caseName": "eval.grid_level4_multiplier",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0,
+            "gridQtyPerLevel": 100,
+            "gridMultiplier": 3.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "gridLevel": 4,
+            "gridLastPrice": 1000.0
+          }
+        },
+        "snapshot": {
+          "last": 940.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 940,
+          "decision": "fire",
+          "qty": 8100
+        }
+      }
+    },
+    {
+      "caseName": "eval.grid_alertonly_zero_qty",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": true
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 940.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 940,
+          "decision": "fire",
+          "qty": 0
+        }
+      }
+    },
+    {
+      "caseName": "eval.grid_abort_missing_step",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridQtyPerLevel": 100
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 940.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "网格参数不完整"
+        }
+      }
+    },
+    {
+      "caseName": "eval.batch_buy_first",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0,
+            "batchTotalQty": 900
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 95.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 95,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.batch_sell_second",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0,
+            "batchTotalQty": 900
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 1
+          }
+        },
+        "snapshot": {
+          "last": 106.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 106,
+          "decision": "fire",
+          "qty": 300
+        }
+      }
+    },
+    {
+      "caseName": "eval.batch_last_remainder",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0,
+            "batchTotalQty": 1000
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 2
+          }
+        },
+        "snapshot": {
+          "last": 85.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 85,
+          "decision": "fire",
+          "qty": 400
+        }
+      }
+    },
+    {
+      "caseName": "eval.batch_complete",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0,
+            "batchTotalQty": 900
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 3
+          }
+        },
+        "snapshot": {
+          "last": 85.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "complete",
+          "reason": "分批已全部完成"
+        }
+      }
+    },
+    {
+      "caseName": "eval.batch_alertonly_no_total",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": true
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 95.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "at": 95,
+          "decision": "fire",
+          "qty": 0
+        }
+      }
+    },
+    {
+      "caseName": "eval.batch_abort_count",
+      "op": "cond_evaluate",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 1,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0,
+            "batchTotalQty": 900
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "snapshot": {
+          "last": 95.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "decision": "abort",
+          "reason": "分批参数不完整"
+        }
+      }
+    }
+  ],
+  "validateCreate": [
+    {
+      "caseName": "vc.ok_price_buy",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": null
+      }
+    },
+    {
+      "caseName": "vc.archived_account",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": true,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "accountUnavailable",
+          "message": "请先选择有效的模拟账户"
+        }
+      }
+    },
+    {
+      "caseName": "vc.account_mismatch",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "22222222-2222-2222-2222-222222222222",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "accountUnavailable",
+          "message": "请先选择有效的模拟账户"
+        }
+      }
+    },
+    {
+      "caseName": "vc.qty_not_lot",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 150,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidQty",
+          "lot": 100,
+          "message": "委托数量需为 100 股的整数倍且大于 0"
+        }
+      }
+    },
+    {
+      "caseName": "vc.no_quote",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": null
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "noQuote",
+          "message": "暂无该标的行情，无法创建条件单"
+        }
+      }
+    },
+    {
+      "caseName": "vc.sell_no_position",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "noPosition",
+          "message": "当前账户无可卖持仓，无法创建卖出条件单"
+        }
+      }
+    },
+    {
+      "caseName": "vc.price_missing_trigger",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "触发价不能为空",
+          "name": "触发价"
+        }
+      }
+    },
+    {
+      "caseName": "vc.stoploss_missing_both",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "baseMode": "price"
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "止盈价或止损价不能为空",
+          "name": "止盈价或止损价"
+        }
+      }
+    },
+    {
+      "caseName": "vc.stoploss_oco_invalid",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "baseMode": "price",
+            "basePrice": 1500.0,
+            "takeProfitPrice": 1490.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidOCORange",
+          "message": "止盈价应高于基准价，止损价应低于基准价"
+        }
+      }
+    },
+    {
+      "caseName": "vc.trailing_missing_breakout",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {},
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "突破价不能为空",
+          "name": "突破价"
+        }
+      }
+    },
+    {
+      "caseName": "vc.trailing_floor_missing",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0,
+            "floorEnabled": true
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "保底价不能为空",
+          "name": "保底价"
+        }
+      }
+    },
+    {
+      "caseName": "vc.time_past_invalid",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {
+            "fireDate": "2026-10-16T01:00:00Z"
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidFireDate",
+          "message": "时间条件需选择未来的触发时间"
+        }
+      }
+    },
+    {
+      "caseName": "vc.time_future_ok",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {
+            "fireDate": "2026-10-20T01:00:00Z"
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": null
+      }
+    },
+    {
+      "caseName": "vc.changepct_missing",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {},
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "涨跌幅阈值不能为空",
+          "name": "涨跌幅阈值"
+        }
+      }
+    },
+    {
+      "caseName": "vc.macross_bad_period",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {
+            "maPeriod": 7,
+            "maAbove": true
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "均线周期不能为空",
+          "name": "均线周期"
+        }
+      }
+    },
+    {
+      "caseName": "vc.macross_missing_above",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {
+            "maPeriod": 20
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "穿越方向不能为空",
+          "name": "穿越方向"
+        }
+      }
+    },
+    {
+      "caseName": "vc.grid_inverted",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 1200.0,
+            "gridUpper": 800.0,
+            "gridStepPct": 5.0,
+            "gridQtyPerLevel": 100
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1000.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidGridRange",
+          "message": "网格价格区间下界需低于上界"
+        }
+      }
+    },
+    {
+      "caseName": "vc.grid_bad_step",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 0.0,
+            "gridQtyPerLevel": 100
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1000.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidGridStep",
+          "message": "网格间距需大于 0"
+        }
+      }
+    },
+    {
+      "caseName": "vc.grid_qty_not_lot",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0,
+            "gridQtyPerLevel": 150
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1000.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidQty",
+          "lot": 100,
+          "message": "委托数量需为 100 股的整数倍且大于 0"
+        }
+      }
+    },
+    {
+      "caseName": "vc.batch_bad_count",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 1,
+            "batchTotalQty": 900,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 100.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "invalidBatchCount",
+          "message": "分批笔数需为 2 ~ 5 笔"
+        }
+      }
+    },
+    {
+      "caseName": "vc.batch_too_small",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchTotalQty": 200,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 100.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "batchTooSmall",
+          "lot": 100,
+          "message": "分批总数量不足：每批至少 1 手（100 股）"
+        }
+      }
+    },
+    {
+      "caseName": "vc.untildate_missing_expires",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "untilDate",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 500,
+          "qty": 500
+        },
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "missingParam",
+          "message": "有效期到期日不能为空",
+          "name": "有效期到期日"
+        }
+      }
+    },
+    {
+      "caseName": "vc.alertonly_sell_no_position_ok",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": true
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "snapshot": {
+          "last": 1500.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": null
+      }
+    },
+    {
+      "caseName": "vc.alertonly_grid_no_qty_ok",
+      "op": "cond_validate_create",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": true
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "snapshot": {
+          "last": 1000.0
+        },
+        "now": "2026-10-17T01:00:00Z"
+      },
+      "expected": {
+        "ok": true,
+        "result": null
+      }
+    }
+  ],
+  "gridLevelCount": [
+    {
+      "caseName": "glc.basic",
+      "op": "cond_grid_level_count",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridUpper": 1200.0,
+            "gridLower": 800.0,
+            "gridStepPct": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        }
+      },
+      "expected": {
+        "count": 7,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "glc.missing",
+      "op": "cond_grid_level_count",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        }
+      },
+      "expected": {
+        "count": 1,
+        "ok": true
+      }
+    }
+  ],
+  "text": [
+    {
+      "caseName": "text.cond_price_up",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "现价 ≥ 1,500.00"
+      }
+    },
+    {
+      "caseName": "text.cond_price_down",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": false
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "现价 ≤ 1,500.00"
+      }
+    },
+    {
+      "caseName": "text.cond_stoploss",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "takeProfitPrice": 1600.0,
+            "stopLossPrice": 1450.0,
+            "basePrice": 1500.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "止盈 1,600.00（+6.67%）或 止损 1,450.00（-3.33%）"
+      }
+    },
+    {
+      "caseName": "text.cond_trailing_sell",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1450.0,
+            "trailPct": 3.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "回落卖出 · 突破 1,450.00 后回落 3.0%"
+      }
+    },
+    {
+      "caseName": "text.cond_trailing_buy_floor",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1550.0,
+            "trailPct": 2.5,
+            "floorEnabled": true,
+            "floorPrice": 1500.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "反弹买入 · 突破 1,550.00 后反弹 2.5% · 保底 1,500.00"
+      }
+    },
+    {
+      "caseName": "text.cond_time_tz8",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {
+            "fireDate": "2026-09-19T06:52:00Z"
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "text": "09-19 14:52 触发"
+      }
+    },
+    {
+      "caseName": "text.cond_changepct_up",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "日涨幅 ≥ 5.0%"
+      }
+    },
+    {
+      "caseName": "text.cond_changepct_down",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": -5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "日跌幅 ≥ 5.0%"
+      }
+    },
+    {
+      "caseName": "text.cond_macross_default",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "上穿 MA20"
+      }
+    },
+    {
+      "caseName": "text.cond_grid",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridLower": 800.0,
+            "gridUpper": 1200.0,
+            "gridStepPct": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "网格交易 · 区间 800.00 ~ 1,200.00 · 间距 5.0%"
+      }
+    },
+    {
+      "caseName": "text.cond_batch",
+      "op": "cond_text",
+      "input": {
+        "field": "condition",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3,
+            "batchFirstPrice": 100.0,
+            "batchStepPct": 5.0
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "分批买入 3 批 · 首批 100.00 · 每批 5.0%"
+      }
+    },
+    {
+      "caseName": "text.core_limit_offset",
+      "op": "cond_text",
+      "input": {
+        "field": "directiveCore",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "buy",
+            "priceType": "limit",
+            "offsetTicks": 2,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "限价买入（触发价 +2 档） 300 股"
+      }
+    },
+    {
+      "caseName": "text.core_market",
+      "op": "cond_text",
+      "input": {
+        "field": "directiveCore",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "市价卖出 300 股"
+      }
+    },
+    {
+      "caseName": "text.core_grid",
+      "op": "cond_text",
+      "input": {
+        "field": "directiveCore",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridQtyPerLevel": 100,
+            "gridMultiplier": 1.5
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "市价 · 每格 100 股 · 倍数 1.5"
+      }
+    },
+    {
+      "caseName": "text.directive_prefix",
+      "op": "cond_text",
+      "input": {
+        "field": "directive",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "触发后 市价买入 300 股"
+      }
+    },
+    {
+      "caseName": "text.validity_day",
+      "op": "cond_text",
+      "input": {
+        "field": "validity",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "day",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "当日有效"
+      }
+    },
+    {
+      "caseName": "text.validity_longterm",
+      "op": "cond_text",
+      "input": {
+        "field": "validity",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "长期有效"
+      }
+    },
+    {
+      "caseName": "text.validity_untildate_tz8",
+      "op": "cond_text",
+      "input": {
+        "field": "validity",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "untilDate",
+          "runtime": {},
+          "expiresAt": "2026-09-19T06:52:00Z"
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "text": "09-19 前有效"
+      }
+    },
+    {
+      "caseName": "text.preview",
+      "op": "cond_text",
+      "input": {
+        "field": "preview",
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "策略A",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": true
+          },
+          "directive": {
+            "direction": "buy",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 300,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "text": "当 策略A 现价 ≥ 1,500.00 时，以 市价买入 300 股，长期有效"
+      }
+    }
+  ],
+  "sweep": [
+    {
+      "caseName": "exp.longterm",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "longTerm",
+          "createdAt": "2026-01-01T00:00:00Z"
+        },
+        "now": "2026-10-17T01:00:00Z",
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "reason": null
+      }
+    },
+    {
+      "caseName": "exp.day_crossed",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "day",
+          "createdAt": "2026-10-16T01:00:00Z"
+        },
+        "now": "2026-10-17T01:00:00Z",
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "reason": "当日有效条件单已跨日失效"
+      }
+    },
+    {
+      "caseName": "exp.day_same",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "day",
+          "createdAt": "2026-10-17T01:00:00Z"
+        },
+        "now": "2026-10-17T23:00:00Z",
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "reason": null
+      }
+    },
+    {
+      "caseName": "exp.untildate_expired",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "untilDate",
+          "createdAt": "2026-10-01T00:00:00Z",
+          "expiresAt": "2026-10-16T01:00:00Z"
+        },
+        "now": "2026-10-17T01:00:00Z",
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "reason": "已超过指定有效期"
+      }
+    },
+    {
+      "caseName": "exp.untildate_same",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "untilDate",
+          "createdAt": "2026-10-01T00:00:00Z",
+          "expiresAt": "2026-10-17T01:00:00Z"
+        },
+        "now": "2026-10-17T23:00:00Z",
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "reason": null
+      }
+    },
+    {
+      "caseName": "exp.untildate_null",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "untilDate",
+          "createdAt": "2026-10-01T00:00:00Z"
+        },
+        "now": "2026-10-17T01:00:00Z",
+        "tzOffsetSeconds": 0
+      },
+      "expected": {
+        "ok": true,
+        "reason": null
+      }
+    },
+    {
+      "caseName": "exp.day_tz8_not_crossed",
+      "op": "cond_expired_reason",
+      "input": {
+        "order": {
+          "validity": "day",
+          "createdAt": "2026-10-16T20:00:00Z"
+        },
+        "now": "2026-10-17T02:00:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "reason": null
+      }
+    },
+    {
+      "caseName": "fire_dir.nongrid",
+      "op": "cond_fire_direction",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 940.0
+      },
+      "expected": {
+        "direction": "sell",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "fire_dir.grid_down_buy",
+      "op": "cond_fire_direction",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "gridLastPrice": 1000.0
+          }
+        },
+        "triggerPrice": 940.0
+      },
+      "expected": {
+        "direction": "buy",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "fire_dir.grid_up_sell",
+      "op": "cond_fire_direction",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "gridLastPrice": 1000.0
+          }
+        },
+        "triggerPrice": 1060.0
+      },
+      "expected": {
+        "direction": "sell",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "fire_dir.grid_base_fallback",
+      "op": "cond_fire_direction",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 940.0
+      },
+      "expected": {
+        "direction": "buy",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "fire_dir.grid_trigger_fallback",
+      "op": "cond_fire_direction",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 940.0
+      },
+      "expected": {
+        "direction": "sell",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "exec.market_nil",
+      "op": "cond_execution_price",
+      "input": {
+        "directive": {
+          "priceType": "market",
+          "offsetTicks": 0
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "price": null
+      }
+    },
+    {
+      "caseName": "exec.limit_zero_tick",
+      "op": "cond_execution_price",
+      "input": {
+        "directive": {
+          "priceType": "limit",
+          "offsetTicks": 0
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "price": 1500
+      }
+    },
+    {
+      "caseName": "exec.limit_up_2",
+      "op": "cond_execution_price",
+      "input": {
+        "directive": {
+          "priceType": "limit",
+          "offsetTicks": 2
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "price": 1500.02
+      }
+    },
+    {
+      "caseName": "exec.limit_down_1",
+      "op": "cond_execution_price",
+      "input": {
+        "directive": {
+          "priceType": "limit",
+          "offsetTicks": -1
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "price": 1499.99
+      }
+    },
+    {
+      "caseName": "exec.limit_floor_001",
+      "op": "cond_execution_price",
+      "input": {
+        "directive": {
+          "priceType": "limit",
+          "offsetTicks": -100
+        },
+        "triggerPrice": 1.0
+      },
+      "expected": {
+        "ok": true,
+        "price": 0.01
+      }
+    },
+    {
+      "caseName": "adv.grid",
+      "op": "cond_advance",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "gridLevel": 2,
+            "gridLastPrice": 1000.0
+          }
+        },
+        "triggerPrice": 940.0
+      },
+      "expected": {
+        "ok": true,
+        "runtime": {
+          "batchDone": 0,
+          "gridLastPrice": 940,
+          "gridLevel": 3
+        }
+      }
+    },
+    {
+      "caseName": "adv.batch",
+      "op": "cond_advance",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 1
+          }
+        },
+        "triggerPrice": 100.0
+      },
+      "expected": {
+        "ok": true,
+        "runtime": {
+          "batchDone": 2
+        }
+      }
+    },
+    {
+      "caseName": "adv.nongrid_unchanged",
+      "op": "cond_advance",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 0
+          }
+        },
+        "triggerPrice": 100.0
+      },
+      "expected": {
+        "ok": true,
+        "runtime": {
+          "batchDone": 0
+        }
+      }
+    },
+    {
+      "caseName": "rep.grid_not_finished",
+      "op": "cond_repeatable_finished",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridUpper": 1200.0,
+            "gridLower": 800.0,
+            "gridStepPct": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "gridLevel": 6
+          }
+        }
+      },
+      "expected": {
+        "finished": false,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "rep.grid_finished",
+      "op": "cond_repeatable_finished",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {
+            "gridBase": 1000.0,
+            "gridUpper": 1200.0,
+            "gridLower": 800.0,
+            "gridStepPct": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "gridLevel": 7
+          }
+        }
+      },
+      "expected": {
+        "finished": true,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "rep.batch_finished",
+      "op": "cond_repeatable_finished",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 3
+          }
+        }
+      },
+      "expected": {
+        "finished": true,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "rep.batch_not_finished",
+      "op": "cond_repeatable_finished",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 2
+          }
+        }
+      },
+      "expected": {
+        "finished": false,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "rep.nongrid_false",
+      "op": "cond_repeatable_finished",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        }
+      },
+      "expected": {
+        "finished": false,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.price_up",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1512.3
+      },
+      "expected": {
+        "message": "预警：现价 1,512.30 上穿 1,500.00",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.price_down",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {
+            "triggerPrice": 1500.0,
+            "compareUp": false
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1488.0
+      },
+      "expected": {
+        "message": "预警：现价 1,488.00 下破 1,500.00",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.price_no_target",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "price",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1512.3
+      },
+      "expected": {
+        "message": "预警：现价 1,512.30 触发价格条件",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.stoploss_stop",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "stopLossPrice": 1450.0,
+            "takeProfitPrice": 1500.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1440.0
+      },
+      "expected": {
+        "message": "预警：现价 1,440.00 下破止损价 1,450.00",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.stoploss_take",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "stopLoss",
+          "params": {
+            "stopLossPrice": 1450.0,
+            "takeProfitPrice": 1500.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1455.0
+      },
+      "expected": {
+        "message": "预警：现价 1,455.00 上穿止盈价 1,500.00",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.trailing_floor",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0,
+            "floorEnabled": true,
+            "floorPrice": 1400.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1395.0
+      },
+      "expected": {
+        "message": "预警：现价 1,395.00 跌破保底价 1,400.00",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.trailing_sell",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "trailing",
+          "params": {
+            "breakoutPrice": 1500.0,
+            "trailPct": 3.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 回落达到 3.0%",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.time",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "time",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 到达触发时间",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.changepct_up",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": 5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 日涨幅达到 5.0%",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.changepct_down",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "changePct",
+          "params": {
+            "changeThreshold": -5.0
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 日跌幅达到 5.0%",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.macross",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "maCross",
+          "params": {
+            "maPeriod": 20,
+            "maAbove": true
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 上穿 MA20",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.grid",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "grid",
+          "params": {},
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {}
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 触发网格档位",
+        "ok": true
+      }
+    },
+    {
+      "caseName": "alert.batch",
+      "op": "cond_alert_message",
+      "input": {
+        "order": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "name": "条件单",
+          "kind": "batch",
+          "params": {
+            "batchCount": 3
+          },
+          "directive": {
+            "direction": "sell",
+            "priceType": "market",
+            "offsetTicks": 0,
+            "qty": 0,
+            "alertOnly": false
+          },
+          "validity": "longTerm",
+          "runtime": {
+            "batchDone": 1
+          }
+        },
+        "triggerPrice": 1500.0
+      },
+      "expected": {
+        "message": "预警：现价 1,500.00 触发分批第 2 批",
+        "ok": true
+      }
+    }
+  ],
+  "tradingRules": [
+    {
+      "caseName": "calc.commission_rate",
+      "op": "trade_calc",
+      "input": {
+        "calc": "commission",
+        "amount": 100000.0
+      },
+      "expected": {
+        "ok": true,
+        "value": 25
+      }
+    },
+    {
+      "caseName": "calc.commission_min",
+      "op": "trade_calc",
+      "input": {
+        "calc": "commission",
+        "amount": 1000.0
+      },
+      "expected": {
+        "ok": true,
+        "value": 5
+      }
+    },
+    {
+      "caseName": "calc.stamp_sell",
+      "op": "trade_calc",
+      "input": {
+        "calc": "stampTax",
+        "amount": 100000.0,
+        "direction": "sell"
+      },
+      "expected": {
+        "ok": true,
+        "value": 100
+      }
+    },
+    {
+      "caseName": "calc.stamp_buy",
+      "op": "trade_calc",
+      "input": {
+        "calc": "stampTax",
+        "amount": 100000.0,
+        "direction": "buy"
+      },
+      "expected": {
+        "ok": true,
+        "value": 0
+      }
+    },
+    {
+      "caseName": "calc.fee_buy",
+      "op": "trade_calc",
+      "input": {
+        "calc": "fee",
+        "amount": 100000.0,
+        "direction": "buy"
+      },
+      "expected": {
+        "ok": true,
+        "value": 25
+      }
+    },
+    {
+      "caseName": "calc.fee_sell",
+      "op": "trade_calc",
+      "input": {
+        "calc": "fee",
+        "amount": 100000.0,
+        "direction": "sell"
+      },
+      "expected": {
+        "ok": true,
+        "value": 125
+      }
+    },
+    {
+      "caseName": "calc.limit_range",
+      "op": "trade_calc",
+      "input": {
+        "calc": "limitRange",
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "range": {
+          "lower": 1350,
+          "upper": 1650.0000000000002
+        }
+      }
+    },
+    {
+      "caseName": "calc.limit_range_nil",
+      "op": "trade_calc",
+      "input": {
+        "calc": "limitRange",
+        "prevClose": null
+      },
+      "expected": {
+        "ok": true,
+        "range": null
+      }
+    },
+    {
+      "caseName": "calc.limit_range_zero",
+      "op": "trade_calc",
+      "input": {
+        "calc": "limitRange",
+        "prevClose": 0.0
+      },
+      "expected": {
+        "ok": true,
+        "range": null
+      }
+    },
+    {
+      "caseName": "calc.affordable_basic",
+      "op": "trade_calc",
+      "input": {
+        "calc": "affordableQty",
+        "cash": 100000.0,
+        "price": 100.0
+      },
+      "expected": {
+        "ok": true,
+        "value": 900
+      }
+    },
+    {
+      "caseName": "calc.affordable_below_lot",
+      "op": "trade_calc",
+      "input": {
+        "calc": "affordableQty",
+        "cash": 400.0,
+        "price": 100.0
+      },
+      "expected": {
+        "ok": true,
+        "value": 0
+      }
+    },
+    {
+      "caseName": "calc.affordable_zero_cash",
+      "op": "trade_calc",
+      "input": {
+        "calc": "affordableQty",
+        "cash": 0.0,
+        "price": 100.0
+      },
+      "expected": {
+        "ok": true,
+        "value": 0
+      }
+    },
+    {
+      "caseName": "calc.sellable_t1",
+      "op": "trade_calc",
+      "input": {
+        "calc": "sellableQty",
+        "position": {
+          "availableQty": 250,
+          "qty": 300
+        },
+        "tPlus1Enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": 200
+      }
+    },
+    {
+      "caseName": "calc.sellable_no_t1",
+      "op": "trade_calc",
+      "input": {
+        "calc": "sellableQty",
+        "position": {
+          "availableQty": 250,
+          "qty": 300
+        },
+        "tPlus1Enabled": false
+      },
+      "expected": {
+        "ok": true,
+        "value": 300
+      }
+    },
+    {
+      "caseName": "calc.sellable_nil",
+      "op": "trade_calc",
+      "input": {
+        "calc": "sellableQty",
+        "position": null
+      },
+      "expected": {
+        "ok": true,
+        "value": 0
+      }
+    },
+    {
+      "caseName": "calc.session_morning",
+      "op": "trade_calc",
+      "input": {
+        "calc": "isTradingSession",
+        "at": "2026-10-16T02:00:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": true
+      }
+    },
+    {
+      "caseName": "calc.session_noon_break",
+      "op": "trade_calc",
+      "input": {
+        "calc": "isTradingSession",
+        "at": "2026-10-16T04:00:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": false
+      }
+    },
+    {
+      "caseName": "calc.session_weekend",
+      "op": "trade_calc",
+      "input": {
+        "calc": "isTradingSession",
+        "at": "2026-10-17T02:00:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": false
+      }
+    },
+    {
+      "caseName": "calc.session_open_boundary",
+      "op": "trade_calc",
+      "input": {
+        "calc": "isTradingSession",
+        "at": "2026-10-16T01:30:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": true
+      }
+    },
+    {
+      "caseName": "calc.session_close_boundary",
+      "op": "trade_calc",
+      "input": {
+        "calc": "isTradingSession",
+        "at": "2026-10-16T03:30:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": true
+      }
+    },
+    {
+      "caseName": "calc.session_after",
+      "op": "trade_calc",
+      "input": {
+        "calc": "isTradingSession",
+        "at": "2026-10-16T03:31:00Z",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "value": false
+      }
+    },
+    {
+      "caseName": "tv.ok_market_buy",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "market",
+          "qty": 100
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": null
+      }
+    },
+    {
+      "caseName": "tv.not_lot",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "market",
+          "qty": 150
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "notLotMultiple",
+          "lot": 100,
+          "message": "委托数量需为 100 股的整数倍"
+        }
+      }
+    },
+    {
+      "caseName": "tv.no_quote_market",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "market",
+          "qty": 100
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": null,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "noQuote",
+          "message": "暂无该标的行情，无法下单"
+        }
+      }
+    },
+    {
+      "caseName": "tv.no_quote_limit",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "limit",
+          "qty": 100
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "noQuote",
+          "message": "暂无该标的行情，无法下单"
+        }
+      }
+    },
+    {
+      "caseName": "tv.out_of_limit",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "limit",
+          "qty": 100,
+          "price": 1700.0
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "priceOutOfLimit",
+          "lower": 1350,
+          "message": "委托价超出涨跌停区间 1,350.00 ~ 1,650.00",
+          "upper": 1650.0000000000002
+        }
+      }
+    },
+    {
+      "caseName": "tv.limit_in_range",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "limit",
+          "qty": 100,
+          "price": 1600.0
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": null
+      }
+    },
+    {
+      "caseName": "tv.insufficient_cash",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "buy",
+          "priceType": "market",
+          "qty": 100
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 10000.0
+        },
+        "position": null,
+        "lastPrice": 100.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "affordableQty": 0,
+          "available": 10000,
+          "code": "insufficientCash",
+          "message": "可用资金不足，可买 0 股（可用 10,000.00）"
+        }
+      }
+    },
+    {
+      "caseName": "tv.insufficient_shares",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "direction": "sell",
+          "priceType": "market",
+          "qty": 300
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": {
+          "availableQty": 200,
+          "qty": 200
+        },
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "available": 200,
+          "code": "insufficientShares",
+          "message": "可卖数量不足（T+1：当日买入不可卖）"
+        }
+      }
+    },
+    {
+      "caseName": "tv.empty_account",
+      "op": "trade_validate",
+      "input": {
+        "draft": {
+          "accountID": "22222222-2222-2222-2222-222222222222",
+          "direction": "buy",
+          "priceType": "market",
+          "qty": 100
+        },
+        "account": {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "isArchived": false,
+          "cash": 1000000.0
+        },
+        "position": null,
+        "lastPrice": 1500.0,
+        "prevClose": 1500.0
+      },
+      "expected": {
+        "ok": true,
+        "result": {
+          "code": "emptyAccount",
+          "message": "请先选择有效的模拟账户"
+        }
+      }
+    }
+  ],
+  "mapping": [
+    {
+      "caseName": "sd.price_defaults",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "PRICE(OP=>=, VALUE=1480)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "price",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "compareUp": true,
+              "floorEnabled": false,
+              "triggerPrice": 1480
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.price_compare_down",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "PRICE(OP=<=, VALUE=1480)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "price",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "compareUp": false,
+              "floorEnabled": false,
+              "triggerPrice": 1480
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.stoploss_percent_from_cost",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "STOP_LOSS(PROFIT=10, LOSS=5)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "stopLoss",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "percent",
+              "basePrice": 1450,
+              "floorEnabled": false,
+              "stopLossPrice": 1377.5,
+              "takeProfitPrice": 1595.0000000000002
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.stoploss_price_mode_last",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "STOP_LOSS(BASE=LAST, MODE=PRICE, PROFIT=1600, LOSS=1400)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "stopLoss",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "basePrice": 1500,
+              "floorEnabled": false,
+              "stopLossPrice": 1400,
+              "takeProfitPrice": 1600
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.stoploss_no_cost",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "STOP_LOSS(PROFIT=10)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": null,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "stopLoss",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "percent",
+              "floorEnabled": false
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.trailing_with_floor",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "TRAILING(PCT=3, FLOOR=1400)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "trailing",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "breakoutPrice": 1500,
+              "floorEnabled": true,
+              "floorPrice": 1400,
+              "trailPct": 3
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.time_default_at",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "TIME(DATE=2026-10-20)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "time",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "fireDate": "2026-10-20T01:30:00Z",
+              "floorEnabled": false
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.time_normalizes_overflow",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "TIME(DATE=2026-02-30, AT=09:30)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "time",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "fireDate": "2026-03-02T01:30:00Z",
+              "floorEnabled": false
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.grid",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "GRID(BASE=1000, LOW=800, HIGH=1200, STEP=5, QTY=300, MULT=2)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 300
+            },
+            "kind": "grid",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "floorEnabled": false,
+              "gridBase": 1000,
+              "gridLower": 800,
+              "gridMultiplier": 2,
+              "gridQtyPerLevel": 300,
+              "gridStepPct": 5,
+              "gridUpper": 1200
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.batch_gap_conversion",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "BATCH(TOTAL=3000, COUNT=3, FIRST=15, GAP=0.30)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "buy",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 3000
+            },
+            "kind": "batch",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "batchCount": 3,
+              "batchFirstPrice": 15,
+              "batchStepPct": 2,
+              "batchTotalQty": 3000,
+              "floorEnabled": false
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.macross_and_changepct",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "MA_CROSS(PERIOD=20, DIR=UP)\nCHANGE_PCT(PCT=5, OP=<=)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "maCross",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "floorEnabled": false,
+              "maAbove": true,
+              "maPeriod": 20
+            },
+            "validity": "longTerm"
+          },
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "changePct",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "changeThreshold": -5,
+              "floorEnabled": false
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.override_beats_trade",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "PRICE(VALUE=1480, ORDDIR=BUY, ORDQTY=500, ORDPT=LIMIT, ORDOFF=2)",
+        "trade": {
+          "direction": "sell",
+          "qty": 300,
+          "priceType": "market",
+          "validity": "day"
+        },
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "buy",
+              "offsetTicks": 2,
+              "priceType": "limit",
+              "qty": 500
+            },
+            "kind": "price",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "compareUp": true,
+              "floorEnabled": false,
+              "triggerPrice": 1480
+            },
+            "validity": "day"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.trade_amount_to_lots",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "PRICE(VALUE=100)",
+        "trade": {
+          "direction": "buy",
+          "amount": 15000.0,
+          "priceType": "limit",
+          "offsetTicks": 1,
+          "validity": "untilDate",
+          "expiresAt": "2026-12-31T00:00:00Z"
+        },
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "buy",
+              "offsetTicks": 1,
+              "priceType": "limit",
+              "qty": 100
+            },
+            "expiresAt": "2026-12-31T00:00:00Z",
+            "kind": "price",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "compareUp": true,
+              "floorEnabled": false,
+              "triggerPrice": 100
+            },
+            "validity": "untilDate"
+          }
+        ],
+        "ok": true,
+        "skips": []
+      }
+    },
+    {
+      "caseName": "sd.skip_and_draft",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "PRICE(VALUE=100)\nGRID(BASE=1)\nTIME(DATE=abc)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [
+          {
+            "accountID": "11111111-1111-1111-1111-111111111111",
+            "code": "600519.SH",
+            "directive": {
+              "direction": "sell",
+              "offsetTicks": 0,
+              "priceType": "market",
+              "qty": 0
+            },
+            "kind": "price",
+            "metaID": 7,
+            "name": "贵州茅台",
+            "params": {
+              "baseMode": "price",
+              "compareUp": true,
+              "floorEnabled": false,
+              "triggerPrice": 100
+            },
+            "validity": "longTerm"
+          }
+        ],
+        "ok": true,
+        "skips": [
+          {
+            "reason": "网格交易参数不完整（BASE / LOW / HIGH / STEP / QTY）",
+            "title": "贵州茅台 600519.SH · 网格交易"
+          },
+          {
+            "reason": "时间条件缺少有效日期（DATE）",
+            "title": "贵州茅台 600519.SH · 时间条件"
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sd.parse_errors_ignored",
+      "op": "strategy_drafts",
+      "input": {
+        "rules": "PRICE2(VALUE=1)\nPRICE(OP=>=)",
+        "trade": {},
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0,
+        "costPrice": 1450.0,
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "drafts": [],
+        "ok": true,
+        "skips": [
+          {
+            "reason": "价格条件缺少有效的触发价（VALUE）",
+            "title": "贵州茅台 600519.SH · 价格条件"
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sed.with_qty",
+      "op": "strategy_entry_draft",
+      "input": {
+        "trade": {
+          "direction": "buy",
+          "qty": 300,
+          "validity": "longTerm"
+        },
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0
+      },
+      "expected": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "code": "600519.SH",
+          "directive": {
+            "direction": "buy",
+            "offsetTicks": 0,
+            "priceType": "market",
+            "qty": 300
+          },
+          "kind": "price",
+          "metaID": 7,
+          "name": "贵州茅台",
+          "params": {
+            "baseMode": "price",
+            "compareUp": true,
+            "floorEnabled": false,
+            "triggerPrice": 1500
+          },
+          "validity": "longTerm"
+        },
+        "ok": true
+      }
+    },
+    {
+      "caseName": "sed.amount_to_lots",
+      "op": "strategy_entry_draft",
+      "input": {
+        "trade": {
+          "direction": "sell",
+          "amount": 150000.0,
+          "priceType": "limit",
+          "offsetTicks": 3,
+          "validity": "untilDate",
+          "expiresAt": "2026-12-31T00:00:00Z"
+        },
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0
+      },
+      "expected": {
+        "draft": {
+          "accountID": "11111111-1111-1111-1111-111111111111",
+          "code": "600519.SH",
+          "directive": {
+            "direction": "sell",
+            "offsetTicks": 3,
+            "priceType": "limit",
+            "qty": 100
+          },
+          "expiresAt": "2026-12-31T00:00:00Z",
+          "kind": "price",
+          "metaID": 7,
+          "name": "贵州茅台",
+          "params": {
+            "baseMode": "price",
+            "compareUp": true,
+            "floorEnabled": false,
+            "triggerPrice": 1500
+          },
+          "validity": "untilDate"
+        },
+        "ok": true
+      }
+    },
+    {
+      "caseName": "sed.no_direction",
+      "op": "strategy_entry_draft",
+      "input": {
+        "trade": {
+          "qty": 300
+        },
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 1500.0
+      },
+      "expected": {
+        "draft": null,
+        "ok": true
+      }
+    },
+    {
+      "caseName": "sed.no_quote",
+      "op": "strategy_entry_draft",
+      "input": {
+        "trade": {
+          "direction": "buy",
+          "qty": 300
+        },
+        "meta": {
+          "id": 7,
+          "code": "600519.SH",
+          "name": "贵州茅台"
+        },
+        "accountID": "11111111-1111-1111-1111-111111111111",
+        "lastPrice": 0.0
+      },
+      "expected": {
+        "draft": null,
+        "ok": true
+      }
+    }
+  ]
+}

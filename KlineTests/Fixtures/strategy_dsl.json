@@ -1,0 +1,1263 @@
+{
+  "_header": {
+    "schema": 1,
+    "generatedBy": "手写规格（A0 手推期望值，非 dump）",
+    "generatedAt": "2026-10-17",
+    "tzOffsetSeconds": 28800
+  },
+  "strategyParse": [
+    {
+      "caseName": "sp.basic_two_lines",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(OP=>=, VALUE=1480)\n{注释行}\n\nSTOP_LOSS(MODE=PCT, PROFIT=10, LOSS=5)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "OP": ">=",
+              "VALUE": "1480"
+            },
+            "raw": "PRICE(OP=>=, VALUE=1480)",
+            "line": 1
+          },
+          {
+            "kind": "STOP_LOSS",
+            "params": {
+              "MODE": "PCT",
+              "PROFIT": "10",
+              "LOSS": "5"
+            },
+            "raw": "STOP_LOSS(MODE=PCT, PROFIT=10, LOSS=5)",
+            "line": 4
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.fullwidth",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE（OP＝>=, VALUE＝1480）"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "OP": ">=",
+              "VALUE": "1480"
+            },
+            "raw": "PRICE（OP＝>=, VALUE＝1480）",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.lowercase_and_spaces",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "price(op=>=, value=1 480)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "OP": ">=",
+              "VALUE": "1480"
+            },
+            "raw": "price(op=>=, value=1 480)",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.reserved_keys",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(OP=>=, VALUE=1, ORDQTY=300, ORDOFF=2)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "OP": ">=",
+              "VALUE": "1",
+              "ORDQTY": "300",
+              "ORDOFF": "2"
+            },
+            "raw": "PRICE(OP=>=, VALUE=1, ORDQTY=300, ORDOFF=2)",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.empty_inner",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE()"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {},
+            "raw": "PRICE()",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.trailing_comma",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(VALUE=1,)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "VALUE": "1"
+            },
+            "raw": "PRICE(VALUE=1,)",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.unknown_keyword",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE2(VALUE=1)"
+      },
+      "expected": {
+        "ok": true,
+        "rules": [],
+        "errors": [
+          "第 1 行：未知规则 PRICE2"
+        ]
+      }
+    },
+    {
+      "caseName": "sp.no_paren",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE VALUE=1"
+      },
+      "expected": {
+        "ok": true,
+        "rules": [],
+        "errors": [
+          "第 1 行：规则格式应为 KEYWORD(KEY=VAL, ...)"
+        ]
+      }
+    },
+    {
+      "caseName": "sp.unclosed",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(VALUE=1"
+      },
+      "expected": {
+        "ok": true,
+        "rules": [],
+        "errors": [
+          "第 1 行：括号不闭合"
+        ]
+      }
+    },
+    {
+      "caseName": "sp.bad_param",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(OP)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [
+          "第 1 行：参数格式应为 KEY=VAL（OP）"
+        ],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {},
+            "raw": "PRICE(OP)",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.unknown_param",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(OP=>=, XXX=1)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [
+          "第 1 行：价格条件 未识别参数 XXX"
+        ],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "OP": ">="
+            },
+            "raw": "PRICE(OP=>=, XXX=1)",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.multi_errors_one_line",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(OP, XXX=1)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [
+          "第 1 行：参数格式应为 KEY=VAL（OP）",
+          "第 1 行：价格条件 未识别参数 XXX"
+        ],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {},
+            "raw": "PRICE(OP, XXX=1)",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseName": "sp.crlf_lines",
+      "op": "strategy_parse",
+      "input": {
+        "lines": "PRICE(VALUE=1)\r\nTIME(DATE=2026-10-20)"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "rules": [
+          {
+            "kind": "PRICE",
+            "params": {
+              "VALUE": "1"
+            },
+            "raw": "PRICE(VALUE=1)",
+            "line": 1
+          },
+          {
+            "kind": "TIME",
+            "params": {
+              "DATE": "2026-10-20"
+            },
+            "raw": "TIME(DATE=2026-10-20)",
+            "line": 3
+          }
+        ]
+      }
+    }
+  ],
+  "strategyRuleLine": [
+    {
+      "caseName": "srl.spec_order",
+      "op": "strategy_rule_line",
+      "input": {
+        "call": {
+          "kind": "STOP_LOSS",
+          "params": {
+            "LOSS": "5",
+            "PROFIT": "10",
+            "MODE": "PCT",
+            "BASE": "COST"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "line": "STOP_LOSS(BASE=COST, MODE=PCT, PROFIT=10, LOSS=5)"
+      }
+    },
+    {
+      "caseName": "srl.reserved_last",
+      "op": "strategy_rule_line",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {
+            "VALUE": "1480",
+            "OP": ">=",
+            "ORDOFF": "2",
+            "ORDQTY": "300"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "line": "PRICE(OP=>=, VALUE=1480, ORDQTY=300, ORDOFF=2)"
+      }
+    },
+    {
+      "caseName": "srl.empty",
+      "op": "strategy_rule_line",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {}
+        }
+      },
+      "expected": {
+        "ok": true,
+        "line": "PRICE()"
+      }
+    }
+  ],
+  "strategyCatalog": [
+    {
+      "caseName": "scat.price",
+      "op": "strategy_catalog",
+      "input": {
+        "kind": "PRICE"
+      },
+      "expected": {
+        "ok": true,
+        "catalog": {
+          "PRICE": {
+            "title": "价格条件",
+            "conditionOrderTitle": "价格条件",
+            "simCondKind": "price",
+            "specs": [
+              {
+                "key": "OP",
+                "title": "比较方向",
+                "type": "option",
+                "isOptional": false,
+                "placeholder": ">=",
+                "options": [
+                  ">=",
+                  "<="
+                ],
+                "unit": ""
+              },
+              {
+                "key": "VALUE",
+                "title": "触发价",
+                "type": "number",
+                "isOptional": false,
+                "placeholder": "1480.00",
+                "options": [],
+                "unit": "元"
+              }
+            ],
+            "knownKeys": [
+              "OP",
+              "VALUE"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "caseName": "scat.macross",
+      "op": "strategy_catalog",
+      "input": {
+        "kind": "MA_CROSS"
+      },
+      "expected": {
+        "ok": true,
+        "catalog": {
+          "MA_CROSS": {
+            "title": "均线条件",
+            "conditionOrderTitle": "均线条件",
+            "simCondKind": "maCross",
+            "specs": [
+              {
+                "key": "PERIOD",
+                "title": "周期",
+                "type": "option",
+                "isOptional": false,
+                "placeholder": "20",
+                "options": [
+                  "5",
+                  "10",
+                  "20",
+                  "60"
+                ],
+                "unit": "日"
+              },
+              {
+                "key": "DIR",
+                "title": "方向",
+                "type": "option",
+                "isOptional": false,
+                "placeholder": "UP",
+                "options": [
+                  "UP",
+                  "DOWN"
+                ],
+                "unit": ""
+              }
+            ],
+            "knownKeys": [
+              "DIR",
+              "PERIOD"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "strategyValidate": [
+    {
+      "caseName": "sval.missing_pick",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "策略需要选股条件：请填写内嵌选股公式，或引用一个选股公式"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.ok_minimal",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": []
+      }
+    },
+    {
+      "caseName": "sval.both_body_and_ref",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": "abc",
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "PICKREF 与内嵌选股条件只能二选一，请保留其一",
+          "引用的选股公式已不存在，请重新选择或改用内嵌选股条件"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.ref_exists",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "",
+          "pickRef": "abc",
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {}
+        },
+        "pickerExists": true
+      },
+      "expected": {
+        "ok": true,
+        "issues": []
+      }
+    },
+    {
+      "caseName": "sval.pick_syntax_error",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {}
+        },
+        "pickerExists": false,
+        "pickSyntaxError": "缺少右括号"
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "内嵌选股公式语法错误：缺少右括号"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.empty_rules",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "策略至少需要一条交易规则"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.missing_required_param",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "第 1 行：价格条件 缺少参数 VALUE"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.number_not_numeric",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=abc)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "触发价 需要填数字"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.macross_bad_period",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "MA_CROSS(PERIOD=7, DIR=UP)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "均线周期只支持 5 / 10 / 20 / 60"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.grid_inverted",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "GRID(BASE=1000, LOW=1200, HIGH=800, STEP=5, QTY=300)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "网格价格区间下界不得高于上界"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.grid_and_batch",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "GRID(BASE=1000, LOW=800, HIGH=1200, STEP=5, QTY=300)\nBATCH(TOTAL=900, COUNT=3, FIRST=10, GAP=0.1)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "网格交易与分批建仓不宜同一策略并存，请保留其一"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.duplicate_rule",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)\nPRICE(OP=>=, VALUE=2)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "第 2 行：价格条件 规则重复声明，请保留其一"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.parse_error_passthrough",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE2(VALUE=1)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "第 1 行：未知规则 PRICE2"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.override_qty_not_lot",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1, ORDQTY=150)",
+          "trade": {}
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "第 1 行：委托数量需为 100 股的整数倍"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.trade_missing_direction",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {
+            "qty": 300
+          }
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "请选择交易方向"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.trade_qty_and_amount",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {
+            "direction": "buy",
+            "qty": 300,
+            "amount": 15000.0
+          }
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "交易指令的数量与金额只能二选一"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.trade_qty_not_lot",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {
+            "direction": "buy",
+            "qty": 150
+          }
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "交易指令数量需为 100 股的整数倍"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.trade_limit_no_offset",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {
+            "direction": "buy",
+            "qty": 300,
+            "priceType": "limit"
+          }
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "限价委托需设置偏移档次（OFFSETTICKS）"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.trade_untildate_no_expires",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {
+            "direction": "buy",
+            "qty": 300,
+            "validity": "untilDate"
+          }
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": [
+          "指定日期有效期需设置到期日（EXPIRES）"
+        ]
+      }
+    },
+    {
+      "caseName": "sval.tech_skips_trade",
+      "op": "strategy_validate",
+      "input": {
+        "doc": {
+          "kind": "TECH",
+          "pickBody": "C>1",
+          "pickRef": null,
+          "rules": "PRICE(OP=>=, VALUE=1)",
+          "trade": {
+            "qty": 150
+          }
+        },
+        "pickerExists": false
+      },
+      "expected": {
+        "ok": true,
+        "issues": []
+      }
+    }
+  ],
+  "strategyPreview": [
+    {
+      "caseName": "spv.full",
+      "op": "strategy_preview",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "C>1 AND C>REF(C,1)",
+          "rules": "PRICE(OP=>=, VALUE=1480)\nSTOP_LOSS(MODE=PCT, PROFIT=10, LOSS=5)",
+          "trade": {
+            "direction": "buy",
+            "qty": 300,
+            "priceType": "limit",
+            "offsetTicks": 2,
+            "validity": "day"
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "summary": "对命中【内嵌选股条件：C>1 AND C>REF(C,1)】的标的：① 现价 ≥ 1480.00 时触发；② 止盈 +10% 或 止损 −5%（先到者为准）。",
+        "pick": "内嵌选股条件：C>1 AND C>REF(C,1)",
+        "trade": "买入 300 股 · 限价委托（触发价 +2 档） · 当日有效",
+        "executionNotice": "触发后的下单指令（方向 / 数量 / 报价方式）本阶段未定义，留待接入执行阶段",
+        "triggers": [
+          "现价 ≥ 1480.00 时触发",
+          "止盈 +10% 或 止损 −5%（先到者为准）"
+        ]
+      }
+    },
+    {
+      "caseName": "spv.no_rules_with_ref",
+      "op": "strategy_preview",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickRef": "sel1",
+          "pickBody": "",
+          "rules": "",
+          "trade": {}
+        },
+        "pickerName": "强势股",
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "summary": "对命中【引用选股公式：强势股】的标的：暂无交易规则。",
+        "pick": "引用选股公式：强势股",
+        "trade": "未配置交易指令",
+        "executionNotice": "触发后的下单指令（方向 / 数量 / 报价方式）本阶段未定义，留待接入执行阶段",
+        "triggers": []
+      }
+    },
+    {
+      "caseName": "spv.deleted_picker_and_truncate",
+      "op": "strategy_preview",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickRef": "gone",
+          "pickBody": "",
+          "rules": "",
+          "trade": {
+            "amount": 15000.5
+          }
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "summary": "对命中【引用选股公式：已删除的公式】的标的：暂无交易规则。",
+        "pick": "引用选股公式：已删除的公式",
+        "trade": "15000.5 元（按最新价折算）",
+        "executionNotice": "触发后的下单指令（方向 / 数量 / 报价方式）本阶段未定义，留待接入执行阶段",
+        "triggers": []
+      }
+    },
+    {
+      "caseName": "spv.body_truncated_and_trigger_fallback",
+      "op": "strategy_preview",
+      "input": {
+        "doc": {
+          "kind": "STRATEGY",
+          "pickBody": "A>1 AND B>2 AND C>3 AND D>4 AND E>5",
+          "rules": "PRICE(OP=>=, VALUE=abc)\nTIME(DATE=2026-10-20, AT=09:30)\nCHANGE_PCT(PCT=5, OP=<=)\nMA_CROSS(PERIOD=20, DIR=DOWN)\nGRID(BASE=1000, LOW=800, HIGH=1200, STEP=5, QTY=300, MULT=2)\nBATCH(TOTAL=900, COUNT=3, FIRST=10.5, GAP=0.3)",
+          "trade": {}
+        },
+        "tzOffsetSeconds": 28800
+      },
+      "expected": {
+        "ok": true,
+        "summary": "对命中【内嵌选股条件：A>1 AND B>2 AND C>3 AND …】的标的：① 现价 ≥ abc 时触发；② 2026-10-20 09:30 触发；③ 当日涨跌幅 ≤ 5% 触发；④ 下破 MA20 触发；⑤ 网格区间 800.00 ~ 1200.00，每 5% 一档，每档 300 股，倍数 2；⑥ 分 3 批建仓：首批 10.50，每批价差 0.30。",
+        "pick": "内嵌选股条件：A>1 AND B>2 AND C>3 AND …",
+        "trade": "未配置交易指令",
+        "executionNotice": "触发后的下单指令（方向 / 数量 / 报价方式）本阶段未定义，留待接入执行阶段",
+        "triggers": [
+          "现价 ≥ abc 时触发",
+          "2026-10-20 09:30 触发",
+          "当日涨跌幅 ≤ 5% 触发",
+          "下破 MA20 触发",
+          "网格区间 800.00 ~ 1200.00，每 5% 一档，每档 300 股，倍数 2",
+          "分 3 批建仓：首批 10.50，每批价差 0.30"
+        ]
+      }
+    }
+  ],
+  "tradeParse": [
+    {
+      "caseName": "tp.all_keys",
+      "op": "trade_parse",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "lines": [
+          "DIRECTION=BUY",
+          "QTY=300",
+          "AMOUNT=15000.5",
+          "PRICETYPE=LIMIT",
+          "OFFSETTICKS=2",
+          "VALIDITY=DATE",
+          "EXPIRES=2026-12-31",
+          "ACCOUNTS=E621E1F8-C36C-495A-8F1F-1D9A3B5F3E0D"
+        ]
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "spec": {
+          "direction": "buy",
+          "qty": 300,
+          "amount": 15000.5,
+          "priceType": "limit",
+          "offsetTicks": 2,
+          "validity": "untilDate",
+          "expiresAt": "2026-12-30T16:00:00Z",
+          "accountIDs": [
+            "E621E1F8-C36C-495A-8F1F-1D9A3B5F3E0D"
+          ]
+        }
+      }
+    },
+    {
+      "caseName": "tp.errors_and_unknown_key",
+      "op": "trade_parse",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "lines": [
+          "FOO=1",
+          "QTY=abc",
+          "DIRECTION=X",
+          "PRICETYPE=Y",
+          "VALIDITY=Z",
+          "EXPIRES=abc",
+          "ACCOUNTS=bad",
+          "NOKEY"
+        ]
+      },
+      "expected": {
+        "ok": true,
+        "errors": [
+          "TRADE 段未识别键 FOO",
+          "QTY 需要填整数",
+          "DIRECTION 只能是 BUY 或 SELL",
+          "PRICETYPE 只能是 MARKET 或 LIMIT",
+          "VALIDITY 只能是 DAY / LONG / DATE",
+          "EXPIRES 日期格式应为 YYYY-MM-DD",
+          "ACCOUNTS 含非法账户 id：bad",
+          "TRADE 段格式应为 KEY=VALUE（NOKEY）"
+        ],
+        "spec": {
+          "direction": null,
+          "qty": null,
+          "amount": null,
+          "priceType": null,
+          "offsetTicks": null,
+          "validity": null,
+          "expiresAt": null,
+          "accountIDs": []
+        }
+      }
+    },
+    {
+      "caseName": "tp.fullwidth_and_case",
+      "op": "trade_parse",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "lines": [
+          "DIRECTION＝buy",
+          "QTY=3 00",
+          "VALIDITY=longterm",
+          "ACCOUNTS=e621e1f8-c36c-495a-8f1f-1d9a3b5f3e0d"
+        ]
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "spec": {
+          "direction": "buy",
+          "qty": 300,
+          "amount": null,
+          "priceType": null,
+          "offsetTicks": null,
+          "validity": "longTerm",
+          "expiresAt": null,
+          "accountIDs": [
+            "E621E1F8-C36C-495A-8F1F-1D9A3B5F3E0D"
+          ]
+        }
+      }
+    },
+    {
+      "caseName": "tp.single_string",
+      "op": "trade_parse",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "lines": "DIRECTION=SELL\nVALIDITY=LONG"
+      },
+      "expected": {
+        "ok": true,
+        "errors": [],
+        "spec": {
+          "direction": "sell",
+          "qty": null,
+          "amount": null,
+          "priceType": null,
+          "offsetTicks": null,
+          "validity": "longTerm",
+          "expiresAt": null,
+          "accountIDs": []
+        }
+      }
+    }
+  ],
+  "tradeSerialize": [
+    {
+      "caseName": "ts.roundtrip",
+      "op": "trade_serialize",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "spec": {
+          "direction": "sell",
+          "qty": 300,
+          "amount": 15000.5,
+          "priceType": "limit",
+          "offsetTicks": -1,
+          "validity": "untilDate",
+          "expiresAt": "2026-12-30T16:00:00Z",
+          "accountIDs": [
+            "E621E1F8-C36C-495A-8F1F-1D9A3B5F3E0D"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "text": "DIRECTION=SELL\nQTY=300\nAMOUNT=15000.5\nPRICETYPE=LIMIT\nOFFSETTICKS=-1\nVALIDITY=DATE\nEXPIRES=2026-12-31\nACCOUNTS=E621E1F8-C36C-495A-8F1F-1D9A3B5F3E0D"
+      }
+    },
+    {
+      "caseName": "ts.integral_amount",
+      "op": "trade_serialize",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "spec": {
+          "direction": "buy",
+          "amount": 15000.0
+        }
+      },
+      "expected": {
+        "ok": true,
+        "text": "DIRECTION=BUY\nAMOUNT=15000"
+      }
+    },
+    {
+      "caseName": "ts.empty",
+      "op": "trade_serialize",
+      "input": {
+        "tzOffsetSeconds": 28800,
+        "spec": {}
+      },
+      "expected": {
+        "ok": true,
+        "text": ""
+      }
+    }
+  ],
+  "tradeOverride": [
+    {
+      "caseName": "to.full",
+      "op": "trade_override",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {
+            "ORDDIR": "sell",
+            "ORDQTY": "300",
+            "ORDPT": "limit",
+            "ORDOFF": "2"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "isEmpty": false,
+        "summary": "卖出 300 股 限价 +2 档",
+        "override": {
+          "dir": "sell",
+          "qty": 300,
+          "amount": null,
+          "priceType": "limit",
+          "offsetTicks": 2
+        }
+      }
+    },
+    {
+      "caseName": "to.empty",
+      "op": "trade_override",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {}
+        }
+      },
+      "expected": {
+        "ok": true,
+        "isEmpty": true,
+        "summary": null,
+        "override": {
+          "dir": null,
+          "qty": null,
+          "amount": null,
+          "priceType": null,
+          "offsetTicks": null
+        }
+      }
+    },
+    {
+      "caseName": "to.offset_only_negative",
+      "op": "trade_override",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {
+            "ORDOFF": "-1"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "isEmpty": false,
+        "summary": "-1 档",
+        "override": {
+          "dir": null,
+          "qty": null,
+          "amount": null,
+          "priceType": null,
+          "offsetTicks": -1
+        }
+      }
+    },
+    {
+      "caseName": "to.amount_only",
+      "op": "trade_override",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {
+            "ORDAMT": "15000.5"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "isEmpty": false,
+        "summary": "15000.5 元",
+        "override": {
+          "dir": null,
+          "qty": null,
+          "amount": 15000.5,
+          "priceType": null,
+          "offsetTicks": null
+        }
+      }
+    },
+    {
+      "caseName": "to.bad_values_are_none",
+      "op": "trade_override",
+      "input": {
+        "call": {
+          "kind": "PRICE",
+          "params": {
+            "ORDDIR": "X",
+            "ORDQTY": "abc",
+            "ORDPT": "Y"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "isEmpty": true,
+        "summary": null,
+        "override": {
+          "dir": null,
+          "qty": null,
+          "amount": null,
+          "priceType": null,
+          "offsetTicks": null
+        }
+      }
+    }
+  ]
+}

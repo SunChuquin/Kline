@@ -1223,7 +1223,7 @@ python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json
 **契约发现 1（锁现状，不得顺手修正）**：`SimCondRule.evaluate` 开头 `guard let price = snapshot.last, price > 0 else { return .hold(order.runtime) }` 先于 `switch`。因此 `case .time` 里 `snapshot.last ?? snapshot.prevClose` 的**「无最新价退化用昨收」分支实际不可达**（能让它走到 `at` 的前提是 `last > 0`，此时 `??` 必然取 `last`）。
 → 契约测试按「`last` 缺失 → `hold`」**锁死现状**，用例 `eval.time_no_quote_holds` 已标注原因。这是「契约锁现状」原则的实例：**旧的意图分支已死，但改动它会改变外部可观察行为，故冻结在 A 阶段不动**。
 
-**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **转入 A1**（Swift dump 导出 golden，§12），跑通 §10 八套件与 6 条「允许删 Swift」闸门。
+**下一步（A 阶段余量）**：F 组 `backtest_run` 已落地（见 §11.11）→ **A1 已落地**（Swift dump 导出三份 golden，见 §11.12 与 §12）；后续转入 A2 双跑（`SimRulesBridge.mode`）。
 
 ### 11.10 D/E 组落地进度与实测发现（2026-10-17）
 
@@ -1282,6 +1282,29 @@ python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json
 
 **F 组的测试口径**：A0 期为**手工推导**（入场 + 止盈止损成交明细 / 网格上下各一档 / 分批首批 / 空结果 / 不接入场 / 同 bar 成交 / 非法入参 9 条），其中公式型指标（`annualized` / `maxDrawdown`）在测试内**按源码写明的公式独立表达**而不是抄回输出。⚠️ **F 组的最终权威仍是 A1 的 Swift dump**（§12 的 `backtest_golden.json`）：回测是最容易「看着数值像对的就放过」的一环，净值曲线必须逐点对拍。
 
+### 11.12 A1 落地进度与实测发现（Swift dump，2026-10-17）
+
+**已完成**：A1 首次动 Swift —— 新增 `KlineTests/SimRulesContractTests.swift`（`@MainActor` dump/断言两用）、`scripts/gen_sim_rules_inputs.py`（输入骨架生成/保 golden）、`scripts/extract_sim_rules_golden.py`（stdout 哨兵抓 golden）；并给 `SimCondEngine.expiredReason` / `executionPrice` 去掉 `private`（**仅可见性、零行为变更**，沿用同文件 `alertMessage` 等「训练态复用：放宽为 internal」的既有注释体例）。
+
+**产出三份 golden，Swift↔Python 全部零差异**：
+
+| fixture | 段 | 用例数 | 差异 |
+| --- | --- | --- | --- |
+| `sim_rules.json` | `simFormat` / `evaluate` / `validateCreate` / `gridLevelCount` / `text` / `sweep` / `tradingRules` / `mapping`（**八段**，比 §12.1 初拟六段多出 `gridLevelCount` / `text`） | 191 | **0** |
+| `strategy_dsl.json` | `strategyParse` / `strategyRuleLine` / `strategyCatalog` / `strategyValidate` / `strategyPreview` / `tradeParse` / `tradeSerialize` / `tradeOverride` | 54 | **0**（手写规格，2 处修正见下） |
+| `backtest_golden.json` | `cases`（回测） | 7 | **0**（1 处口径修正见下） |
+
+> 注：A0 内置 255 条中，形状非法的守卫用例（`srl.bad_kind` / `bt.bad_bars` / `bt.bad_bar_key`，期望 `ok:false`）Swift 侧**无法构造**，不进 fixture，仍留 A0 内置用例守。
+
+**A1 抓到的两处真实差异（都证明「期望值不能手推」）**：
+
+1. **CRLF 行号**：Swift `StrategyRuleParser.parse` 用 `lines.components(separatedBy: .newlines)`，把 `\r` 与 `\n` 当**两个**分隔符（`"a\r\nb"` → `["a","","b"]`，第二行行号是 3）；A0 手推按「CRLF 一个换行」写成 2。**修 Python**：`_NEWLINE_RE` 由 `\r\n|\r|\n|…` 改为字符类 `[\r\n\v\f\x85\u2028\u2029]`（逐字符切分，且不含 `str.splitlines()` 多出的 `\x1c-\x1e`），`verify_sim_rules.py` 的 `sp.crlf_lines` 期望同步改 3。
+2. **回测成交 `ruleKind` 大小写**：Swift `BacktestTrade.ruleKind` 是 `StrategyRuleKind?`，编码为其 `rawValue`（`"STOP_LOSS"`/`"GRID"`/`"BATCH"`）；A0 手推误用 camelCase（`"stopLoss"`…）。**修 Python**：`_bt_trade` 输出经 `_KIND_RAW`（`SimCondKind.rawValue → StrategyRuleKind.rawValue`）反转，A0 的 F 组期望同步改大写。
+
+**环境依赖（诚实登记）**：`KlineTests` 目标**不支持 macOS**（只有 iOS，`xcodebuild -showdestinations` 实测），故 §12.3 的「macOS 首选」作废，只能走 iOS 模拟器 + stdout 哨兵。且 `SimFormat` 日期文案 / `isTradingSession` / 策略 `fireDate` 都走**本机时区**，fixture 按 **+08:00** 生成，`SimRulesContractTests.testEnvironmentTimeZoneIsPlus8` 会显式校验（非 +8 直接失败并给出提示）。
+
+**踩坑**：`[String: String]` 字面量里混 `NSNull()` 会编译期类型推断失败（回测/覆盖的 `null` 字段必须先声明 `[String: Any]`）；`xcodebuild test` 跑完偶发「收集诊断超时 600s」但 `TEST SUCCEEDED`（dump 的那次），后续以 stdout 为准。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
@@ -1290,80 +1313,64 @@ python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json
 
 | 文件 | 内容 | golden 来源 |
 | --- | --- | --- |
-| `KlineTests/Fixtures/sim_rules.json` | `evaluate` / `validateCreate` / `tradingRules` / `sweep` / `mapping` / `simFormat` 六段 | **Swift 现状 dump 生成**（A1），A6 后冻结 |
-| `KlineTests/Fixtures/strategy_dsl.json` | 解析 / 序列化 / catalog / 校验 / 预览 | **手写为规格**（文本口径稳定） |
-| `KlineTests/Fixtures/backtest_golden.json` | 净值曲线 + 明细 + 警告 | **Swift 现状 dump 生成** |
+| `KlineTests/Fixtures/sim_rules.json` | `simFormat` / `evaluate` / `validateCreate` / `gridLevelCount` / `text` / `sweep` / `tradingRules` / `mapping` **八段** | **Swift 现状 dump 生成**（A1 已落地），A6 后冻结 |
+| `KlineTests/Fixtures/strategy_dsl.json` | `strategyParse` / `strategyRuleLine` / `strategyCatalog` / `strategyValidate` / `strategyPreview` / `tradeParse` / `tradeSerialize` / `tradeOverride` 八段 | **手写为规格**（文本口径稳定，源自 A0 手推期望值） |
+| `KlineTests/Fixtures/backtest_golden.json` | `cases`（净值曲线 + 明细 + 警告 + 指标） | **Swift 现状 dump 生成** |
+
+> 初拟为「六段」；实测把 `grid_level_count` / `cond_text` 独立成段（§10 本就把它们单列套件），共八段。三份合计 **252** 条（A0 的 255 减去 3 条形状非法守卫）。
 
 ### 12.2 用例作者规范（输入手工、输出来自 dump）
 
-`sim_rules.json` 顶层：
+**输入侧由 `scripts/gen_sim_rules_inputs.py` 从 A0 用例抽出**（`cases()` 的 `input` 去 `op`、账户 id 归一为固定 UUID、时间类用例把 `fireDate` 推到远过去/远未来保证与真实 `Date()` 无关）。重跑 gen **会保住已 dump 的 `expected`**（按 `caseName` 回填），不会清空 golden。
+
+顶层键取固定段名，另含 `_header`。**每个 case 的形状**：
 
 ```json
 {
-  "schema": 1,
-  "generatedBy": "SimRulesContractTests dump (Swift 现状)",
-  "generatedAt": "2026-10-17",
-  "tzOffsetSeconds": 28800,
-  "now": "2026-10-17T02:30:00Z",
-  "evaluate": [
-    {
-      "caseName": "price_up_hit",
-      "input": {
-        "kind": "price",
-        "params": {"compareUp": true, "triggerPrice": 1500.0},
-        "directive": {"direction": "sell", "priceType": "market", "offsetTicks": 0, "qty": 300},
-        "runtime": {},
-        "snapshot": {"last": 1501.0, "prevClose": 1480.0}
-      },
-      "expected": { "decision": "fire", "qty": 300, "at": 1500.0 }
-    }
-  ],
-  "validateCreate": [ { "caseName": "…", "input": {…}, "expected": null } ],
-  "tradingRules": [ { "caseName": "…", "input": {…}, "expected": {…} } ],
-  "sweep": [ … ],
-  "mapping": [ … ],
-  "simFormat": [ { "caseName": "price_grouping", "input": {"fn":"price","value":1500.0}, "expected": {"text":"1,500.00"} } ]
+  "caseName": "ev.price_up_hit",
+  "op": "cond_evaluate",
+  "input": { "order": {…SimCondOrder JSON…}, "snapshot": {…}, "now": "…" },
+  "expected": { "ok": true, "result": { "decision": "fire", "qty": 300, "at": 1500.0 } }
 }
 ```
 
-规则：
-- **`input` 手写**（评审用例是否覆盖边界）；**`expected` 只能由 dump 写**，禁止手工编辑（避免「按读数反推实现」）；
-- 每段一个 `caseName`，失败信息直接回显它；
-- 时间类用例固定 `tzOffsetSeconds` + 顶层 `now`；
-- `.5` 边界、仅提醒、判序遮蔽、grid 倍数、batch 余数这些**必须单独占一条 case**。
+规则（**与初拟的差异已按实测校正**）：
+- **`input` 手写/评审 → `op` 放 case 级**（不放 input 内）；**`expected` 只能由 dump 写**，禁止手工编辑（避免「按读数反推实现」）；
+- **`expected` = op 的完整输出含 `ok`**（不是剥掉 `ok` 的载荷）：这样 `verify_sim_rules.py --fixture` 直接 `_cmp(expected, run_op(input))`，且 `ok:false` 的错误形状也能表达；
+- `expected` 里的数值都是 Swift 侧编码；`SimCondParams` 走 Swift 合成 `Codable`（可选 nil 省略、`baseMode`/`floorEnabled` 恒在），与 Python `_params_json` 的 `_PARAMS_ORDER`+默认同口径；
+- 时间类用例固定 `tzOffsetSeconds` + `now`；**但 `cond_evaluate` 的 `.time` 分支 Swift 侧取真实 `Date()`（无 now 注入）**，故 `eval.time_*` 的 `fireDate` 用 2000/2099 远日期（`gen` 脚本内 `_TIME_FIX`）；
+- `.5` 边界、仅提醒、判序遮蔽、grid 倍数、batch 余数这些必须单独占一条 case（A0 已覆盖）。
 
 ### 12.3 dump 模式
 
-在 `SimRulesContractTests` 内加一个**环境变量门**：
+**实测环境**：`KlineTests` 目标**不支持 macOS**（`xcodebuild -showdestinations` 只有 iOS），所以 §12.1 初拟的「macOS 首选、直写仓库路径」**作废**——只有 iOS 模拟器一条路，模拟器进程沙盒**写不到仓库路径**，必须走 **stdout 哨兵 + base64** 兜底。
+
+`SimRulesContractTests` 的 dump 触发（`@MainActor final class`）：
 
 ```swift
-// KLINE_DUMP_SIM_RULES=1 时：不 assert，改为把每个 case 的输入跑一遍 Swift 现状，
-// 生成 expected 覆盖写回 fixture；否则走正常断言。
-let dump = ProcessInfo.processInfo.environment["KLINE_DUMP_SIM_RULES"] == "1"
+// 显式 dump：KLINE_DUMP_SIM_RULES=1（经 TEST_RUNNER_ 前缀传进测试进程），
+//   或「首次引导」：fixture 里还有 case 没有 expected（此时不 assert、自动 dump）。
+let dumpMode = ProcessInfo.processInfo.environment["KLINE_DUMP_SIM_RULES"] == "1"
+let shouldEmit = dumpMode || !allCasesHaveExpected
 ```
 
-**生成命令**：
+**生成命令（实测可用）**：
 
 ```bash
-# 首选：macOS 目标（双路径打包已有 macOS 内嵌构建；非沙盒，可直接写仓库路径）
-KLINE_DUMP_SIM_RULES=1 \
-KLINE_DUMP_OUT="$PWD/KlineTests/Fixtures/sim_rules.json" \
-xcodebuild -scheme Kline-macOS test \
-  -only-testing:KlineTests/SimRulesContractTests
+cd 仓库根 && xcodebuild test -scheme Kline -project Kline.xcodeproj \
+  -destination 'platform=iOS Simulator,name=iPhone 11,OS=27.0' \
+  -only-testing:KlineTests/SimRulesContractTests \
+  -derivedDataPath build/DerivedData 2>&1 \
+  | python3 scripts/extract_sim_rules_golden.py
+# 首次（fixture 无 expected）会自动 dump；之后同一命令转为「断言 + 无输出」。
+# 强制重 dump：TEST_RUNNER_KLINE_DUMP_SIM_RULES=1 xcodebuild test …
 ```
 
-**沙盒兜底（只有 iOS 模拟器目标时）**：模拟器进程受沙盒限制，**写不到仓库路径**。此时 dump 改为把结果打到 stdout（哨兵 + base64），由脚本落盘：
-
-```bash
-xcodebuild -scheme Kline test -only-testing:KlineTests/SimRulesContractTests 2>&1 \
-  | python3 scripts/extract_sim_rules_golden.py   # 抓 KLINE_SIM_RULES_GOLDEN_B64:<…> 并写 fixture
-```
-
-（`extract_sim_rules_golden.py` 约 30 行：正则抓哨兵行 → base64 解码 → 写 `KlineTests/Fixtures/sim_rules.json`。）
+`extract_sim_rules_golden.py`：正则抓 `KLINE_SIM_RULES_GOLDEN_B64:<idx>:<chunk>` / `KLINE_BACKTEST_GOLDEN_B64:…`（按 idx 排序拼接）→ base64 解码 → 覆盖 `KlineTests/Fixtures/{sim_rules,backtest_golden}.json`。`SimRulesContractTests` 按 1000 字符分片 `print`，避开日志行长限制。
 
 ### 12.4 差分与评审流程
 
-1. **A1** 跑 dump → `git diff` fixture：**逐条人工评审 `expected` 是否符合语义**（这一步是在「把现状固化成基准」，必须有人看，不能盲信）；
+1. **A1**（已完成）跑 dump → `git diff` fixture：**逐条人工评审 `expected` 是否符合语义**（把现状固化成基准，必须有人看）；同时跑 `python3 scripts/verify_sim_rules.py --fixture KlineTests/Fixtures/sim_rules.json`（Python↔golden 逐位）；
 2. **A2/A3** 跑 `SimRulesContractTests` + `PyBridgeSimRulesTests`：任一差异 → 修 Python（不修 fixture）；
 3. **A4** 差分双跑：`SimRulesBridge.mode` 切 `.swift` 与 `.engine` 各跑一遍全部用例，逐字段比较；
 4. **A6** fixture **冻结**并加文件头注释「此文件为口径基准，改动必须走 PR 评审」。
@@ -1381,7 +1388,7 @@ xcodebuild -scheme Kline test -only-testing:KlineTests/SimRulesContractTests 2>&
 
 ### 12.6 A1 之前的临时基准：A0 内嵌用例（2026-10-17）
 
-A1 的 Swift dump 尚未产出，为避免 A0 期「写完脚本无回归网」，**先由 `scripts/verify_sim_rules.py` 内嵌一份 172 条用例**（期望值**由 Swift 现状逐条手工推得**，非 dump）。
+A1 的 Swift dump 尚未产出时，为避免 A0 期「写完脚本无回归网」，**先由 `scripts/verify_sim_rules.py` 内嵌一份用例**（期望值**由 Swift 现状逐条手工推得**，非 dump）；最终扩到 **255 条**。**A1 落地后这批内嵌用例与 fixture 并存**——内嵌用例继续守 A0 已确认的口径（尤其 half-even / `.5` 边界 / `time` 死分支）与 3 条形状非法守卫；fixture 负责全量逐位对拍。
 
 - **定位**：临时基准，**不能替代** §12.2 的 dump fixture；A1 落地后它与 fixture **并存**——内嵌用例继续守 A0 已确认的口径（尤其 half-even / `.5` 边界 / `time` 死分支），fixture 负责全量逐位对拍。
 - **比较口径差异**：内嵌用例用 `rel_tol=1e-9`（容忍手写浮点字面量 1 ULP，公式级错误仍暴露）；`--fixture` 模式**逐位精确**（契约权威）。

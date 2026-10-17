@@ -1043,6 +1043,8 @@ _SIM_KIND = {
     "PRICE": "price", "STOP_LOSS": "stopLoss", "TRAILING": "trailing", "TIME": "time",
     "CHANGE_PCT": "changePct", "MA_CROSS": "maCross", "GRID": "grid", "BATCH": "batch",
 }
+# 反向：SimCondKind.rawValue → StrategyRuleKind.rawValue（回测成交 ruleKind 用 Swift 枚举 rawValue）
+_KIND_RAW = {v: k for k, v in _SIM_KIND.items()}
 
 
 def _spec(key, title, type_, optional, placeholder, options=(), unit=""):
@@ -1104,8 +1106,9 @@ _RESERVED_KEY_SET = set(_TRADE_RESERVED_KEYS)
 _DIR_TITLE = {"buy": "买入", "sell": "卖出"}
 _PT_TITLE = {"limit": "限价", "market": "市价"}
 
-# Swift 的 .newlines 集合（不含 Python splitlines 额外的 \x1c-\x1e）
-_NEWLINE_RE = re.compile(r'\r\n|\r|\n|\v|\f|\x85|\u2028|\u2029')
+# Swift `lines.components(separatedBy: .newlines)` 的逐字符切分口径：\r\n 视为**两个**分隔符
+# （会切出中间空串、行号 +2）；不用 `str.splitlines()`（它把 \r\n 当一个换行，且多出 \x1c-\x1e）。
+_NEWLINE_RE = re.compile(r'[\r\n\v\f\x85\u2028\u2029]')
 
 _NORMALIZE_RULE = (("（", "("), ("）", ")"), ("，", ","), ("＝", "="), ("－", "-"), ("：", ":"))
 _NORMALIZE_TRADE = (("＝", "="), ("，", ","), ("：", ":"))
@@ -2789,7 +2792,9 @@ def _bt_trade(signal_date, date, meta_id, code, name, rule_kind, direction, qty,
               amount, fee, realized_pnl, hold_days):
     return {"signalDate": signal_date, "date": date, "metaID": meta_id,
             "code": code, "name": name,
-            "ruleKind": rule_kind, "direction": direction, "qty": qty, "price": price,
+            # 成交的 ruleKind 用 StrategyRuleKind.rawValue（Swift BacktestTrade.ruleKind 口径）
+            "ruleKind": _KIND_RAW.get(rule_kind, rule_kind),
+            "direction": direction, "qty": qty, "price": price,
             "amount": amount, "fee": fee, "realizedPnL": realized_pnl, "holdDays": hold_days}
 
 

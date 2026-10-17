@@ -896,11 +896,12 @@ def cases():
           {"ok": True,
            "errors": ["第 1 行：参数格式应为 KEY=VAL（OP）", "第 1 行：价格条件 未识别参数 XXX"],
            "rules": [rule("PRICE", {}, "PRICE(OP, XXX=1)", 1)]}),
-        # CRLF 视为一个换行，行号连续
+        # CRLF：Swift `components(separatedBy: .newlines)` 把 \r 与 \n 视为**两个**分隔符，
+        # 切出一个中间空行 → 第二行规则的行号是 3（A1 dump 实证，非「一个换行」）
         C("sp.crlf_lines", "strategy_parse", sp("PRICE(VALUE=1)\r\nTIME(DATE=2026-10-20)"),
           {"ok": True, "errors": [], "rules": [
               rule("PRICE", {"VALUE": "1"}, "PRICE(VALUE=1)", 1),
-              rule("TIME", {"DATE": "2026-10-20"}, "TIME(DATE=2026-10-20)", 2)]}),
+              rule("TIME", {"DATE": "2026-10-20"}, "TIME(DATE=2026-10-20)", 3)]}),
     ]
 
     # ---- E 组 · strategy_rule_line（StrategyRuleParser.line） ----
@@ -1421,7 +1422,7 @@ def cases():
     A_TRADES = [
         bt_trade(DA[0], DA[1], None, "buy", 2000, 10.0, 20000.0, 5.0, None, None),
         # 触发价 = 成本价 10.0025 × 0.95 = 9.502375；成交额 19004.75；费用 5 + 19.00475
-        bt_trade(DA[2], DA[2], "stopLoss", "sell", 2000, 9.502375, 19004.75, 24.00475,
+        bt_trade(DA[2], DA[2], "STOP_LOSS", "sell", 2000, 9.502375, 19004.75, 24.00475,
                  -1024.25475, 1),
     ]
     cs += [
@@ -1480,9 +1481,9 @@ def cases():
     D_FINAL = 100084.0                      # cash 80084 + 持仓 2000 × 10
     D_TRADES = [
         bt_trade(DD[0], DD[1], None, "buy", 2000, 10.0, 20000.0, 5.0, None, None),
-        bt_trade(DD[2], DD[2], "grid", "buy", 100, 9.0, 900.0, 5.0, None, None),
+        bt_trade(DD[2], DD[2], "GRID", "buy", 100, 9.0, 900.0, 5.0, None, None),
         # 上移卖出同档数量；成本价 = 20910/2100（含网格买入费用）
-        bt_trade(DD[2], DD[2], "grid", "sell", 100, 10.0, 1000.0, 6.0,
+        bt_trade(DD[2], DD[2], "GRID", "sell", 100, 10.0, 1000.0, 6.0,
                  (10.0 - 20910.0 / 2100.0) * 100 - 6.0, 1),
     ]
     cs += [
@@ -1508,7 +1509,7 @@ def cases():
     E_FINAL = 100490.0                      # cash 75490 + 持仓 2500 × 10
     E_TRADES = [
         bt_trade(DE[0], DE[1], None, "buy", 2000, 10.0, 20000.0, 5.0, None, None),
-        bt_trade(DE[2], DE[2], "batch", "buy", 500, 9.0, 4500.0, 5.0, None, None),
+        bt_trade(DE[2], DE[2], "BATCH", "buy", 500, 9.0, 4500.0, 5.0, None, None),
     ]
     cs += [
         C("bt.batch_first_tranche", "backtest_run",
@@ -1613,13 +1614,30 @@ def _report(passed, failures, total):
     return 0 if not failures else 1
 
 
+def _flatten_fixture(fixture):
+    """把分段落 fixture 摊平成用例列表（兼容旧的扁平 {cases:[...]} 格式）。"""
+    cs = []
+    for key, value in fixture.items():
+        if key.startswith("_") or not isinstance(value, list):
+            continue
+        for e in value:
+            if not isinstance(e, dict) or "input" not in e:
+                continue
+            op = e.get("op", (e.get("input") or {}).get("op"))
+            cs.append({"name": e.get("caseName", e.get("name", op)),
+                       "op": op, "input": e["input"], "expected": e.get("expected")})
+    return cs
+
+
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--fixture":
         fixture = json.load(open(sys.argv[2], encoding="utf-8"))
-        cs = []
-        for e in fixture.get("cases", []):
-            cs.append({"name": e.get("name", e.get("op")), "op": e.get("op"),
-                       "input": e["input"], "expected": e["expected"]})
+        cs = _flatten_fixture(fixture)
+        missing = [c["name"] for c in cs if c["expected"] is None]
+        if missing:
+            print("fixture 缺 expected（%d 条，是否忘了 dump？）：%s"
+                  % (len(missing), ", ".join(missing[:5])))
+            return 1
         print("fixture 差分：%s（%d 用例，逐位精确）" % (sys.argv[2], len(cs)))
         passed, failures = _run_cases(cs, FIXTURE_TOL)
         return _report(passed, failures, len(cs))

@@ -291,7 +291,8 @@ extension SimStore {
     // MARK: - 有效期
 
     /// 有效期判定：返回非 nil 即为失效原因（长期有效不因时间失效）
-    private func expiredReason(of order: SimCondOrder, today: Date, calendar: Calendar) -> String? {
+    /// （训练态复用：放宽为 internal，纯计算无副作用）
+    func expiredReason(of order: SimCondOrder, today: Date, calendar: Calendar) -> String? {
         switch order.validity {
         case .longTerm:
             return nil
@@ -314,7 +315,8 @@ extension SimStore {
     }
 
     /// 触发价 → 委托价：市价单不带价；限价单 = 触发价 + N 档（下限 0.01）
-    private func executionPrice(directive: SimCondDirective, triggerPrice: Double) -> Double? {
+    /// （训练态复用：放宽为 internal，纯计算无副作用）
+    func executionPrice(directive: SimCondDirective, triggerPrice: Double) -> Double? {
         guard directive.priceType == .limit else { return nil }
         let tick = SimTradingRules.default.priceTick
         return max(triggerPrice + Double(directive.offsetTicks) * tick, 0.01)
