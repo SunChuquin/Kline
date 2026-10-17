@@ -40,6 +40,8 @@ struct TrainingCondListView: View {
     let onClose: () -> Void
 
     @ObservedObject private var training = TrainingSessionController.shared
+    /// A5-3：条件单文案投影（引擎算好的文案缓存）
+    @ObservedObject private var projection = SimRulesProjection.shared
 
     @State private var segment: Segment = .conditions
     @State private var editorRequest: TrainCondEditorRequest?
@@ -64,6 +66,10 @@ struct TrainingCondListView: View {
         .onAppear {
             training.reloadConditions()
             training.reloadAlerts()
+            SimRulesProjection.shared.request(training.conditions.map { $0.order })
+        }
+        .onChange(of: training.conditions.count) { _ in
+            SimRulesProjection.shared.request(training.conditions.map { $0.order })
         }
         .fullScreenCover(item: $editorRequest) { request in
             SimCondEditorView(accountID: TrainingSessionController.trainingAccountID,
@@ -209,7 +215,7 @@ struct TrainingCondListView: View {
 
             HStack(spacing: 6) {
                 SimCondKindChip(kind: order.kind)
-                Text(SimCondRule.conditionSummary(order))
+                Text(SimRulesProjection.shared.conditionSummary(order))
                     .font(.system(size: 13))
                     .foregroundColor(Color.primary)
                     .lineLimit(2)
@@ -250,11 +256,11 @@ struct TrainingCondListView: View {
     }
 
     private func directiveLine(_ order: SimCondOrder) -> String {
-        let validity = SimCondRule.validitySummary(order)
+        let validity = SimRulesProjection.shared.validitySummary(order)
         if order.directive.isAlertOnly {
             return "触发后只记录预警（不下单） · \(validity)"
         }
-        return "\(SimCondRule.directiveSummary(order)) · \(validity)"
+        return "\(SimRulesProjection.shared.directiveSummary(order)) · \(validity)"
     }
 
     private func progressDone(_ order: SimCondOrder) -> Int {
@@ -262,7 +268,7 @@ struct TrainingCondListView: View {
     }
 
     private func progressTotal(_ order: SimCondOrder) -> Int {
-        order.kind == .grid ? SimCondRule.gridLevelCount(order: order) : (order.params.batchCount ?? 0)
+        order.kind == .grid ? SimRulesProjection.shared.gridLevelCount(order) : (order.params.batchCount ?? 0)
     }
 
     private func inlineButton(_ title: String, tint: Color = .blue,

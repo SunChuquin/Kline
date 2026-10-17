@@ -183,7 +183,7 @@ extension SimStore {
             }
             appendLog(conditionLog(order: target,
                                    content: "条件单触发 \(target.name) · \(target.kind.title)："
-                                       + SimCondRule.directiveCore(target),
+                                       + SimRulesProjection.shared.directiveCore(target),
                                    result: generated.status.title, at: now))
 
         case .failure(let rejection):

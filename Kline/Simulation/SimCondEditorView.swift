@@ -62,6 +62,8 @@ struct SimCondEditorView: View {
 
     @ObservedObject private var store = SimStore.shared
     @ObservedObject private var rowCache = MarketRowCache.shared
+    /// A5-3：条件单文案投影（引擎算好的文案缓存；观察它才能在缓存更新后重绘）
+    @ObservedObject private var projection = SimRulesProjection.shared
 
     // MARK: 草稿状态
 
@@ -82,6 +84,9 @@ struct SimCondEditorView: View {
     @State private var numText: [CondNumKey: String] = [:]
     @State private var errorText: String?
     @State private var didSetup = false
+    /// 新建草稿的稳定 id（A5-3：投影按 id 缓存文案；`draftOrder()` 每次调用必须给同一 id，
+    /// 否则投影永远命中不了。编辑既有单据时仍用 `editing.id`。）
+    @State private var draftIdentity = UUID()
 
     // MARK: - 初始化（显式 init：本视图含 private 存储属性，合成 memberwise init 会是 private）
 
@@ -148,6 +153,25 @@ struct SimCondEditorView: View {
         }
         .background(Color(.systemBackground).ignoresSafeArea())
         .onAppear(perform: handleAppear)
+        .onChange(of: draftSignature) { _ in requestProjection() }
+    }
+
+    /// A5-3：草稿输入指纹（触发投影刷新的**唯一**依据）。
+    /// 不能直接 `onChange(of: draftOrder())`——那里含 `updatedAt = Date()` 与新建时的 `UUID()`，
+    /// 每次求值都不同，会把变更检测变成无限刷新。
+    private var draftSignature: Int {
+        var h = Hasher()
+        h.combine(kind); h.combine(direction); h.combine(priceType); h.combine(offsetTicks)
+        h.combine(qty); h.combine(validity); h.combine(alertOnly)
+        h.combine(params); h.combine(numText)
+        h.combine(expiresAt); h.combine(fireDate)
+        h.combine(takeProfitOn); h.combine(stopLossOn)
+        return h.finalize()
+    }
+
+    /// 把当前草稿投给投影层（投影内置防抖 + 内容去重，故每次输入变化调用都安全）
+    private func requestProjection() {
+        SimRulesProjection.shared.request(draftOrder())
     }
 
     // MARK: 导航栏
@@ -410,7 +434,7 @@ struct SimCondEditorView: View {
         // 倍数只放大下单数量，不影响档位判定 → 仅提醒时置灰
         .disabled(alertOnly)
         .opacity(alertOnly ? 0.4 : 1)
-        hintRow("区间内约 \(SimCondRule.gridLevelCount(order: draftOrder())) 档")
+        hintRow("区间内约 \(SimRulesProjection.shared.gridLevelCount(draftOrder())) 档")
     }
 
     @ViewBuilder
@@ -530,7 +554,7 @@ struct SimCondEditorView: View {
             Text("预览")
                 .font(.system(size: 11))
                 .foregroundColor(Color(.secondaryLabel))
-            Text(alertOnly ? alertPreviewSentence : SimCondRule.previewSentence(draftOrder()))
+            Text(alertOnly ? alertPreviewSentence : SimRulesProjection.shared.previewSentence(draftOrder()))
                 .font(.system(size: 12))
                 .foregroundColor(Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -545,8 +569,8 @@ struct SimCondEditorView: View {
     /// （`SimCondRule.previewSentence` 固定含「以…下单」，本轮不改该文件）
     private var alertPreviewSentence: String {
         let order = draftOrder()
-        return "当 \(order.name) \(SimCondRule.conditionSummary(order)) 时，只记录预警（不下单），"
-            + SimCondRule.validitySummary(order)
+        return "当 \(order.name) \(SimRulesProjection.shared.conditionSummary(order)) 时，只记录预警（不下单），"
+            + SimRulesProjection.shared.validitySummary(order)
     }
 
     // MARK: 提交
@@ -947,7 +971,7 @@ struct SimCondEditorView: View {
                                          qty: directiveQty,
                                          // 仅提醒才写 true；普通单写 nil → 与改造前的 JSON 逐字一致
                                          alertOnly: alertOnly ? true : nil)
-        return SimCondOrder(id: editing?.id ?? UUID(),
+        return SimCondOrder(id: editing?.id ?? draftIdentity,
                             accountID: accountID,
                             metaID: metaID,
                             code: code,

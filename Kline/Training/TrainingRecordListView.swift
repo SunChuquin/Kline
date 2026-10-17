@@ -242,6 +242,8 @@ private struct TrainingTradeDetailView: View {
     @State private var conditions: [TrainCondRecord] = []
     @State private var alerts: [TrainAlertRecord] = []
     @State private var tab: DetailTab = .trades
+    /// A5-3：条件单文案投影
+    @ObservedObject private var projection = SimRulesProjection.shared
 
     private enum DetailTab: String, CaseIterable, Identifiable {
         case trades, conditions, alerts
@@ -281,7 +283,10 @@ private struct TrainingTradeDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground).ignoresSafeArea())
-        .onAppear { loadAll() }
+        .onAppear {
+            loadAll()
+            SimRulesProjection.shared.request(conditions.map { $0.order })
+        }
     }
 
     @ViewBuilder
@@ -501,7 +506,7 @@ private struct TrainingTradeDetailView: View {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 6) {
                             SimCondKindChip(kind: order.kind)
-                            Text(SimCondRule.conditionSummary(order))
+                            Text(SimRulesProjection.shared.conditionSummary(order))
                                 .font(.system(size: 12.5))
                                 .foregroundColor(Color.primary)
                                 .lineLimit(2)
@@ -511,7 +516,7 @@ private struct TrainingTradeDetailView: View {
                             SimCondStatusTag(status: order.status)
                         }
                         Text("创建训练日 \(TrainSessionRecord.dateText(record.createdDate))"
-                             + " · \(SimCondRule.validitySummary(order))")
+                             + " · \(SimRulesProjection.shared.validitySummary(order))")
                             .font(.system(size: 11))
                             .foregroundColor(Color(.secondaryLabel))
                         if !order.runtime.lastMessage.isEmpty {

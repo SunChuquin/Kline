@@ -1468,13 +1468,17 @@ done
 
 **引擎侧新 op `cond_texts`**（`sim_rules.py`）：`{order, tzOffsetSeconds}` → `text{condition,directiveCore,directive,validity,preview,gridLevelCount}`。语义 = 逐字段 `cond_text` + `cond_grid_level_count` 的合并往返；`.swift` 后端（`SimRulesBridge.swiftBody`）同步实现，由 `SimRulesDiffTests.testCondTextsBatchedConsistency` 验证「两侧后端一致 + 批量 == 逐字段」。
 
-**接入点（一处收口 + 两处视图）**：
+**接入点（一处收口 + 五个视图/逻辑点）**：
 
 | 位置 | 改动 |
 | --- | --- |
 | `SimStore.assignConditionalOrders(_:)` | 所有条件单写入都经此口子 → 在此 `SimRulesProjection.shared.request(value)`（**唯一收口**，无需在每个视图挂 `onChange`） |
 | `KlinePythonBridge.ensureReady` 两条成功路径 | `SimRulesProjection.shared.requestAll()` |
 | `SimCondListView` / `SimCondDetailView` | `SimCondRule.*` → `SimRulesProjection.shared.*`（8 处）；两视图加 `@ObservedObject private var projection`（否则缓存更新不触发重绘） |
+| `TrainingCondListView` | 同上（4 处）+ `.onAppear` / `.onChange(of: training.conditions.count)` 投递（训练态条件单不经 `SimStore`） |
+| `TrainingRecordListView`（`TrainingTradeDetailView`） | 同上（2 处）+ `loadAll()` 后投递 |
+| `SimCondEditorView`（实时草稿） | 5 处文案改调投影；新增 `draftSignature`（输入指纹）→ `.onChange` 触发 `requestProjection()`；`draftOrder()` 新建时 id 由 `UUID()` 改为 `@State draftIdentity`（**必须稳定**，否则投影永远命中不了） |
+| `SimCondEngine` 触发日志 | `directiveCore(target)` → 投影（文案；`repeatableFinished` 里的 `gridLevelCount` 属逻辑，留 A5-4） |
 
 **验证**：
 
@@ -1487,7 +1491,7 @@ done
 - `cond_texts` **未进 fixture**（golden 不变）：它由「两侧后端 + 与逐字段 op 一致」的一致性用例覆盖，避免为「纯合并往返」的 op 再走一遍 dump/extract/gen 流程；A6 删 `.swift` 后端时该一致性用例随之删（届时只剩引擎侧，语义已由逐字段 op 锁定）。
 - **`gridLevelCount` 未就绪返回 0**：`.engine` 模式下视图会短暂呈现「约 0 档」。A5-5 翻 `mode` 后需评估改为「就绪前不渲染进度行」以免误导——**记入 A5-5 待办**。
 - **日期相关 kind（`.time`）**不纳入投影逐字比较（Swift `Calendar.current` 含 DST，引擎用固定 `tzOffsetSeconds`，§11.5 已知限制）；由 `cond_texts` 同入参两侧对拍兜住。
-- 尚未接入投影的文案调用点仍直调 `SimCondRule`（A6 删 `SimCondRule` 前必须全部切完）：`SimCondEditorView`（含实时草稿预览，需防抖）、`TrainingCondListView`、`TrainingRecordListView`、`SimCondEditorView` 的 alert 预览等 → 下一步补齐。
+- **文案调用点已全部接入投影**（`SimCondRule` 六个文案方法只剩三类调用点：① `SimRulesProjection` 的 `.swift` 直通分支；② `SimRulesBridge` 的 `.swift` 后端投影；③ 待 A5-4 处理的逻辑调用 —— `SimCondEngine.repeatableFinished` 的 `gridLevelCount`（是**逻辑**不是文案）、`StrategyCondGenerator.summary`（D 组草稿摘要）、已待删的 `StrategyBacktestEngine`）：
 - 每次改 `sim_rules.py` 都会改哈希 → 已按 §11.15 重跑 `gen_sim_rules_trust.py`（新哈希 `3c814be9…16f6`）。
 
 **下一步**：A5-3 剩余文案调用点（编辑器草稿预览 + Training 两处）→ A5-4 其余子系统（DSL/策略映射 → 交易规则 → 条件单判定·结算）。
