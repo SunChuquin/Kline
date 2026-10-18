@@ -397,14 +397,15 @@ extension SimRulesBridge {
             logEntry = Self.logEntryFromJSON(result["logEntry"])
         }
 
-        private static func cashChangeFromJSON(_ any: Any?) -> [String: Any]? {
+        /// 引擎增量字典 → 原生类型（UUID / Date）。整环结算 `cond_sweep` 复用同一批转换。
+        static func cashChangeFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any], let cash = SimRulesCodec.num(d["cash"]) else { return nil }
             var o: [String: Any] = ["cash": cash]
             if let id = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = id }
             return o
         }
 
-        private static func positionChangeFromJSON(_ any: Any?) -> [String: Any]? {
+        static func positionChangeFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any] else { return nil }
             var o: [String: Any] = [:]
             if let v = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = v }
@@ -419,7 +420,7 @@ extension SimRulesBridge {
             return o
         }
 
-        private static func ledgerEntryFromJSON(_ any: Any?) -> [String: Any]? {
+        static func ledgerEntryFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any] else { return nil }
             var o: [String: Any] = [:]
             if let v = SimRulesCodec.uuid(d["id"]) { o["id"] = v }
@@ -432,7 +433,7 @@ extension SimRulesBridge {
             return o
         }
 
-        private static func logEntryFromJSON(_ any: Any?) -> [String: Any]? {
+        static func logEntryFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any] else { return nil }
             var o: [String: Any] = [:]
             if let v = SimRulesCodec.uuid(d["id"]) { o["id"] = v }
@@ -442,6 +443,114 @@ extension SimRulesBridge {
             if let v = SimRulesCodec.str(d["result"]) { o["result"] = v }
             if let v = SimRulesCodec.isoDate(d["occurredAt"]) { o["occurredAt"] = v }
             return o
+        }
+    }
+
+    // MARK: - 条件单整环结算（`cond_sweep`）
+
+    /// 条件单整轮结算（`cond_sweep`）：有效期 → 快照 → 判定 → 下单 / 预警 → 档位推进 · 完成。
+    /// 整环在引擎内一次完成，Swift 仅装配入参 + 应用增量。
+    /// ⚠️ 口径由 `scripts/verify_cond_sweep_parity.py` 的 12 例对拍（整环 op vs 细粒度 op 序列）
+    /// 逐字段锁死——含 hold / fire / expired / abort / 网格 / 分批 / 仅提醒 / 被拒 全分支。
+    @MainActor
+    static func condSweep(orders: [SimCondOrder],
+                          snapshots: [UUID: SimCondSnapshot],
+                          accounts: [SimAccount],
+                          positions: [SimPosition],
+                          lastPrices: [Int: Double],
+                          prevCloses: [Int: Double],
+                          now: Date,
+                          tzOffsetSeconds: Int,
+                          fills: [SimFill],
+                          existingOrders: [SimOrder]) async throws -> CondSweepResult {
+        var snapshotsJSON: [String: Any] = [:]
+        for (id, snap) in snapshots { snapshotsJSON[id.uuidString] = SimRulesCodec.snapshotJSON(snap) }
+        var accountsJSON: [String: Any] = [:]
+        for a in accounts { accountsJSON[a.id.uuidString] = SimRulesCodec.accountJSON(a) }
+        var positionsJSON: [String: Any] = [:]
+        for p in positions {
+            positionsJSON["\(p.accountID.uuidString)_\(p.metaID)"] = SimRulesCodec.positionJSON(p)
+        }
+        var lastPricesJSON: [String: Any] = [:]
+        for (k, v) in lastPrices { lastPricesJSON[String(k)] = v }
+        var prevClosesJSON: [String: Any] = [:]
+        for (k, v) in prevCloses { prevClosesJSON[String(k)] = v }
+
+        let input: [String: Any] = [
+            "orders": orders.compactMap(SimRulesCodec.condOrderJSON),
+            "snapshots": snapshotsJSON,
+            "accounts": accountsJSON,
+            "positions": positionsJSON,
+            "lastPrices": lastPricesJSON,
+            "prevCloses": prevClosesJSON,
+            "now": SimRulesCodec.isoString(now),
+            "tzOffsetSeconds": tzOffsetSeconds,
+            "existingFills": fills.map(SimRulesCodec.fillJSON),
+            "existingOrders": existingOrders.map(SimRulesCodec.orderJSON)
+        ]
+        let out = try await payloadAsync(op: "cond_sweep", input: input)
+        guard let result = out["result"] as? [String: Any] else {
+            throw SimRulesCodec.CodecError.badShape("cond_sweep.result")
+        }
+        return CondSweepResult(from: result)
+    }
+
+    /// `cond_sweep` 出参：计数 + 更新后的条件单全量 + 各类增量（引擎权威，Swift 只反解与应用）。
+    struct CondSweepResult {
+        var evaluated = 0
+        var fired = 0
+        var rejected = 0
+        var expired = 0
+        var completed = 0
+        var orders: [SimCondOrder] = []
+        var newOrders: [SimOrder] = []
+        var newFills: [SimFill] = []
+        var cashChanges: [[String: Any]] = []
+        var ledgerEntries: [[String: Any]] = []
+        var positionChanges: [[String: Any]] = []
+        var alertRecords: [[String: Any]] = []
+        var logs: [[String: Any]] = []
+
+        init(from result: [String: Any]) {
+            evaluated = SimRulesCodec.int(result["evaluated"]) ?? 0
+            fired = SimRulesCodec.int(result["fired"]) ?? 0
+            rejected = SimRulesCodec.int(result["rejected"]) ?? 0
+            expired = SimRulesCodec.int(result["expired"]) ?? 0
+            completed = SimRulesCodec.int(result["completed"]) ?? 0
+            orders = (result["orders"] as? [[String: Any]] ?? [])
+                .compactMap { try? SimRulesCodec.condOrderFromJSON($0) }
+            newOrders = (result["newOrders"] as? [[String: Any]] ?? []).map(SimRulesCodec.orderFromJSON)
+            newFills = (result["newFills"] as? [[String: Any]] ?? []).map(SimRulesCodec.fillFromJSON)
+            cashChanges = (result["cashChanges"] as? [[String: Any]] ?? [])
+                .compactMap(SubmitOrderResult.cashChangeFromJSON)
+            ledgerEntries = (result["ledgerEntries"] as? [[String: Any]] ?? [])
+                .compactMap(SubmitOrderResult.ledgerEntryFromJSON)
+            positionChanges = (result["positionChanges"] as? [[String: Any]] ?? [])
+                .compactMap(SubmitOrderResult.positionChangeFromJSON)
+            logs = (result["logs"] as? [[String: Any]] ?? [])
+                .compactMap(SubmitOrderResult.logEntryFromJSON)
+            // 预警记录的 `occurredAt` / `condID` 同样需还原为原生 `Date` / `UUID`
+            alertRecords = (result["alertRecords"] as? [[String: Any]] ?? []).compactMap { d in
+                guard let condID = SimRulesCodec.uuid(d["condID"]),
+                      let price = SimRulesCodec.num(d["price"]),
+                      let message = SimRulesCodec.str(d["message"]),
+                      !message.isEmpty,
+                      let occurredAt = SimRulesCodec.isoDate(d["occurredAt"]) else { return nil }
+                var o = d
+                o["condID"] = condID
+                o["price"] = price
+                o["message"] = message
+                o["occurredAt"] = occurredAt
+                return o
+            }
+        }
+
+        /// 本轮是否有任何写入（决定是否需要落盘）
+        var isDirty: Bool {
+            evaluated > 0 || fired > 0 || rejected > 0 || expired > 0 || completed > 0
+                || !newOrders.isEmpty || !newFills.isEmpty
+                || !cashChanges.isEmpty || !ledgerEntries.isEmpty
+                || !positionChanges.isEmpty || !alertRecords.isEmpty || !logs.isEmpty
         }
     }
 

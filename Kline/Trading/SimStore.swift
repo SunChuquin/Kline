@@ -430,11 +430,12 @@ final class SimStore: ObservableObject {
         if positions != value { positions = value }
     }
 
-    private func assignOrders(_ value: [SimOrder]) {
+    /// 内部（非 private）：条件单整环结算（`SimCondEngine` 扩展）复用同一批 applier。
+    func assignOrders(_ value: [SimOrder]) {
         if orders != value { orders = value }
     }
 
-    private func assignFills(_ value: [SimFill]) {
+    func assignFills(_ value: [SimFill]) {
         if fills != value { fills = value }
     }
 
@@ -1207,7 +1208,7 @@ final class SimStore: ObservableObject {
     }
 
     // 应用 Python 引擎返回的持仓变更。
-    private func applyPositionChangePython(_ dict: [String: Any]) {
+    func applyPositionChangePython(_ dict: [String: Any]) {
             guard let accountID = dict["accountID"] as? UUID,
                   let metaID = dict["metaID"] as? Int,
                   let code = dict["code"] as? String,
@@ -1238,7 +1239,7 @@ final class SimStore: ObservableObject {
         }
 
         // 应用 Python 引擎返回的资金变更。
-        private func applyCashChangePython(accountID: UUID, newCash: Double) {
+        func applyCashChangePython(accountID: UUID, newCash: Double) {
             guard let idx = accounts.firstIndex(where: { $0.id == accountID }) else { return }
             var arr = accounts
             arr[idx].cash = newCash
@@ -1246,7 +1247,7 @@ final class SimStore: ObservableObject {
         }
 
         // 从字典构造 LedgerEntry 并追加。
-        private func appendLedgerFromDict(_ dict: [String: Any]) {
+        func appendLedgerFromDict(_ dict: [String: Any]) {
             guard let id = dict["id"] as? UUID,
                   let accountID = dict["accountID"] as? UUID,
                   let kindStr = dict["kind"] as? String,
@@ -1261,7 +1262,7 @@ final class SimStore: ObservableObject {
         }
 
         // 从字典构造 ActionLog 并追加。
-        private func appendLogFromDict(_ dict: [String: Any]) {
+        func appendLogFromDict(_ dict: [String: Any]) {
             guard let id = dict["id"] as? UUID,
                   let accountID = dict["accountID"] as? UUID,
                   let moduleStr = dict["module"] as? String,
@@ -1719,6 +1720,29 @@ final class SimStore: ObservableObject {
         }
         assignAlertRecords(next)
         // 增量同步 alertRecords 到 Python 引擎
+        await syncAlertRecords(alertRecords: next)
+    }
+
+    /// 整环结算批量追加预警记录（`cond_sweep` 出参）：一次性 append + 保序裁剪 + 一次增量同步，
+    /// 避免逐条 `appendAlertRecord` 造成 N 次落盘。
+    func appendAlertRecordsFromSweep(_ dicts: [[String: Any]]) async {
+        var next = alertRecords
+        for d in dicts {
+            guard let id = SimRulesCodec.uuid(d["id"]),
+                  let condID = d["condID"] as? UUID,
+                  let price = d["price"] as? Double,
+                  let message = d["message"] as? String,
+                  let occurredAt = d["occurredAt"] as? Date else { continue }
+            next.append(SimAlertRecord(id: id, condID: condID,
+                                       metaID: SimRulesCodec.int(d["metaID"]) ?? 0,
+                                       code: SimRulesCodec.str(d["code"]) ?? "",
+                                       name: SimRulesCodec.str(d["name"]) ?? "",
+                                       price: price, message: message, occurredAt: occurredAt))
+        }
+        if next.count > alertRecordLimit {
+            next.removeFirst(next.count - alertRecordLimit)
+        }
+        assignAlertRecords(next)
         await syncAlertRecords(alertRecords: next)
     }
 
