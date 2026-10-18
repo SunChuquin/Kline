@@ -213,7 +213,7 @@ nonisolated enum SimCondRule {
 
     /// 分批单批数量：总数量按批数均分并向下取整到手，最后一批吃掉余数
     private static func batchQty(totalQty: Int, count: Int, index: Int) -> Int {
-        let lot = max(SimTradingRules.default.lotSize, 1)
+        let lot = max(SimTradeRuleConstants.lotSize, 1)
         let perBatch = totalQty / count / lot * lot
         if index >= count { return max(totalQty - perBatch * (count - 1), 0) }
         return max(perBatch, 0)
@@ -242,8 +242,7 @@ nonisolated enum SimCondRule {
                                now: Date = Date()) -> SimCondRejection? {
         if account.isArchived || account.id != order.accountID { return .accountUnavailable }
 
-        let rules = SimTradingRules.default
-        let lot = max(rules.lotSize, 1)
+        let lot = max(SimTradeRuleConstants.lotSize, 1)
         let p = order.params
 
         // 「仅提醒」（isAlertOnly）不产生委托：数量校验整段放行（允许数量为 0）。

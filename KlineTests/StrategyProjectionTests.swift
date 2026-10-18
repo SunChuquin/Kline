@@ -2,14 +2,14 @@
 //  StrategyProjectionTests.swift
 //  KlineTests
 //
-//  阶段 E-4：策略编辑器「引擎投影层」`StrategyProjection` 契约测试。
+//  阶段 A6：策略编辑器「引擎投影层」`StrategyProjection` 契约测试（引擎唯一后端）。
 //
 //  覆盖：
-//    ① `.swift` 模式 = 完全直通 Swift 现状（零行为变化，且**不产生**任何缓存 / 请求）；
-//    ② `.engine` 模式冷缓存 → 先给显式空态（nil / 空），`request*` + 防抖冲一次后 = 引擎值；
-//    ③ 两种 mode 下与 Swift 现状逐条相等（`strategy_dsl.json` 的 catalog / ruleLine / validate /
+//    ① `.engine` 模式冷缓存 → 先给显式空态（nil / 空），`request*` + 防抖冲一次后 = 引擎值；
+//    ② 与 Swift 现状逐条相等（`strategy_dsl.json` 的 catalog / ruleLine / validate /
 //       preview 段既有入参全量跑一遍）；
-//    ④ 同内容重复请求被去重（不重复打引擎）。
+//    ③ 同内容重复请求被去重（不重复打引擎）。
+//    （①②③ 需引擎就绪，否则 XCTSkip。）
 //
 //  用例来源：`KlineTests/Fixtures/strategy_dsl.json` 既有入参（**不新增 golden、不改 fixture**）。
 //
@@ -76,64 +76,12 @@ final class StrategyProjectionTests: XCTestCase {
         }
     }
 
-    // MARK: - ① `.swift` 模式零开销直通
-
-    func testSwiftModeDirectPassThroughLeavesCacheEmpty() async throws {
-        let saved = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = saved }
-        // 先排干上一批在途请求，再清空
-        await proj.flushAndWait()
-        proj.reset()
-        SimRulesBridge.mode = .swift
-
-        let kind = StrategyRuleKind.grid
-        let params = ["BASE": "14.60", "LOW": "13.50", "HIGH": "15.80", "STEP": "1.5", "QTY": "300"]
-        let call = StrategyRuleCall(kind: kind, params: params, raw: "")
-        let d = doc(rules: "PRICE(OP=>=, VALUE=1)")
-
-        // `.swift` 模式：request* 应直接 return（零入队）
-        proj.requestCatalog()
-        proj.requestRules([call])
-        proj.requestParse(rules: d.rules)
-        proj.requestValidate(doc: d, pickerExists: false, pickSyntaxError: nil)
-        proj.requestPreview(doc: d, pickerName: nil)
-
-        XCTAssertEqual(proj.specs(for: kind).map(specDesc),
-                       StrategyRuleCatalog.specs(for: kind).map(specDesc))
-        XCTAssertEqual(proj.ruleLine(kind: kind, params: params),
-                       StrategyRuleParser.line(for: call))
-        XCTAssertEqual(proj.overrideSummary(kind: kind, params: params)?.isEmpty,
-                       StrategyTradeParser.override(in: call).isEmpty)
-        XCTAssertEqual(proj.parse(rules: d.rules)?.errors,
-                       StrategyRuleParser.parse(lines: d.rules).errors)
-        XCTAssertEqual(proj.issues(doc: d, pickerExists: false, pickSyntaxError: nil),
-                       StrategyValidator.validate(doc: d, pickerExists: false, pickSyntaxError: nil))
-        let pv = proj.preview(doc: d, pickerName: nil)
-        XCTAssertEqual(pv?.summary, StrategyPreview.summary(doc: d, pickerName: nil))
-        XCTAssertEqual(pv?.pick, StrategyPreview.pickSummary(doc: d, pickerName: nil))
-        XCTAssertEqual(pv?.trade, StrategyPreview.tradeSummary(doc: d))
-        XCTAssertEqual(pv?.executionNotice, StrategyPreview.executionNotice)
-        XCTAssertEqual(pv?.triggers ?? [],
-                       StrategyRuleParser.parse(lines: d.rules).rules.map { StrategyPreview.triggerText($0) })
-
-        XCTAssertTrue(proj.availability.isEmpty, "`.swift` 模式不得产生引擎请求")
-        XCTAssertTrue(proj.catalog.isEmpty)
-        XCTAssertTrue(proj.ruleLines.isEmpty)
-        XCTAssertTrue(proj.overrideSummaries.isEmpty)
-        XCTAssertTrue(proj.parses.isEmpty)
-        XCTAssertTrue(proj.validations.isEmpty)
-        XCTAssertTrue(proj.previews.isEmpty)
-    }
-
-    // MARK: - ② `.engine` 冷缓存：先显式空态，再给引擎值
+    // MARK: - ① `.engine` 冷缓存：先显式空态，再给引擎值
 
     func testEngineModeColdCacheGivesNilThenEngineValue() async throws {
         try await ensureEngineReady()
-        let saved = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = saved }
         await proj.flushAndWait()
         proj.reset()
-        SimRulesBridge.mode = .engine
 
         let kind = StrategyRuleKind.price
         let params = ["OP": ">=", "VALUE": "1480"]
@@ -165,15 +113,12 @@ final class StrategyProjectionTests: XCTestCase {
         XCTAssertEqual(proj.preview(doc: d, pickerName: nil)?.trade, StrategyPreview.tradeSummary(doc: d))
     }
 
-    // MARK: - ③ `.engine` 与 Swift 现状逐条相等（fixture 全量）
+    // MARK: - ② `.engine` 与 Swift 现状逐条相等（fixture 全量）
 
     func testEngineModeMatchesSwiftOnFixture() async throws {
         try await ensureEngineReady()
-        let saved = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = saved }
         await proj.flushAndWait()
         proj.reset()
-        SimRulesBridge.mode = .engine
 
         let dsl = try loadFixture("strategy_dsl")
 
@@ -238,15 +183,12 @@ final class StrategyProjectionTests: XCTestCase {
         }
     }
 
-    // MARK: - ④ 同内容重复请求去重
+    // MARK: - ③ 同内容重复请求去重
 
     func testRepeatRequestIsDeduped() async throws {
         try await ensureEngineReady()
-        let saved = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = saved }
         await proj.flushAndWait()
         proj.reset()
-        SimRulesBridge.mode = .engine
 
         let call = StrategyRuleCall(kind: .price, params: ["OP": ">=", "VALUE": "1480"], raw: "")
         proj.requestRules([call])

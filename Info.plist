@@ -11,6 +11,17 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于与电脑在同一局域网内直连推送行情数据</string>
 
+	<!-- 联机同步（Bonjour / mDNS）：iOS 14 起，App 浏览或发布 Bonjour 服务必须在此
+	     逐条声明服务类型，否则真机上 NetService 发布报 -72008
+	     （NSNetServicesMissingRequiredConfigurationError）、NWBrowser 浏览报
+	     -65555 NoAuth，表现为「同 Wi-Fi 也扫不到对方」。模拟器不做该门禁（共享 Mac
+	     网络栈），故仅有真机暴露此问题——这正是「模拟器↔模拟器通、真机不通」的根因。
+	     类型与 LANSyncDiscovery.serviceType / LANSyncAdvertiser 发布的一致。 -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_klinesync._tcp</string>
+	</array>
+
 	<!-- ================= 状态栏 / 全屏（全局唯一配置点） =================
 	     本 App 为全屏图表型应用，要求：隐藏系统状态栏 + 不参与 iPad 分屏多任务。
 	     两项需求都只在 Info.plist 里配置，不做任何 ViewController / SwiftUI 层级适配，

@@ -56,7 +56,6 @@ final class SimRulesProjection: ObservableObject {
     // MARK: - 请求（防抖合并 + 内容去重）
 
     func request(_ orders: [SimCondOrder]) {
-        guard SimRulesBridge.mode == .engine else { return }   // 仅 `.swift` 回退时零开销
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
         var changed = false
         for o in orders {
@@ -120,41 +119,34 @@ final class SimRulesProjection: ObservableObject {
     // MARK: - 取值（与 `SimCondRule` 静态方法同名同义；视图改调本层）
 
     func conditionSummary(_ order: SimCondOrder) -> String {
-        if SimRulesBridge.mode == .swift { return SimCondRule.conditionSummary(order) }
-        return condTexts[order.id]?.condition ?? Self.placeholderText
+        condTexts[order.id]?.condition ?? Self.placeholderText
     }
 
     func directiveSummary(_ order: SimCondOrder) -> String {
-        if SimRulesBridge.mode == .swift { return SimCondRule.directiveSummary(order) }
-        return condTexts[order.id]?.directive ?? Self.placeholderText
+        condTexts[order.id]?.directive ?? Self.placeholderText
     }
 
     func directiveCore(_ order: SimCondOrder) -> String {
-        if SimRulesBridge.mode == .swift { return SimCondRule.directiveCore(order) }
-        return condTexts[order.id]?.directiveCore ?? Self.placeholderText
+        condTexts[order.id]?.directiveCore ?? Self.placeholderText
     }
 
     func validitySummary(_ order: SimCondOrder) -> String {
-        if SimRulesBridge.mode == .swift { return SimCondRule.validitySummary(order) }
-        return condTexts[order.id]?.validity ?? Self.placeholderText
+        condTexts[order.id]?.validity ?? Self.placeholderText
     }
 
     func previewSentence(_ order: SimCondOrder) -> String {
-        if SimRulesBridge.mode == .swift { return SimCondRule.previewSentence(order) }
-        return condTexts[order.id]?.preview ?? Self.placeholderText
+        condTexts[order.id]?.preview ?? Self.placeholderText
     }
 
-    /// 网格档位数。⚠️ 未就绪返回 `0`；视图请改用 `gridLevelCountIfReady`（未就绪即不渲染，
-    /// 避免「约 0 档」误导——A5-5 已落地）。
+    /// 网格档位数。未就绪返回 `0`；视图请改用 `gridLevelCountIfReady`（未就绪即不渲染，
+    /// 避免「约 0 档」误导）。
     func gridLevelCount(_ order: SimCondOrder) -> Int {
-        if SimRulesBridge.mode == .swift { return SimCondRule.gridLevelCount(order: order) }
-        return condTexts[order.id]?.gridLevelCount ?? 0
+        condTexts[order.id]?.gridLevelCount ?? 0
     }
 
     /// 网格档位数（`nil` = 未就绪）：供进度行 / 档位文案决定「是否渲染」，
-    /// 避免 `.engine` 首帧显示「约 0 档」误导（§11.23 已知取舍 → A5-5）。`.swift` 模式恒有值。
+    /// 避免首帧显示「约 0 档」误导。
     func gridLevelCountIfReady(_ order: SimCondOrder) -> Int? {
-        if SimRulesBridge.mode == .swift { return SimCondRule.gridLevelCount(order: order) }
-        return condTexts[order.id]?.gridLevelCount
+        condTexts[order.id]?.gridLevelCount
     }
 }

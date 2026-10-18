@@ -2,17 +2,12 @@
 //  SimRulesProjectionTests.swift
 //  KlineTests
 //
-//  阶段 A5-3：引擎投影层 `SimRulesProjection`（防抖 + 缓存 + `.swift` 直通）。
+//  阶段 A6：引擎投影层 `SimRulesProjection`（防抖 + 缓存，引擎唯一后端）。
 //
 //  覆盖：
-//    ① 过渡期直通：`mode == .swift` 时取值 == `SimCondRule` 现状（零行为变化）；
-//    ② `.engine` 模式：`request` → 引擎 `cond_texts` → 缓存文案与 Swift 现状逐字一致；
-//    ③ 内容去重：同内容重复 request 不再打引擎（可用性保持 ready）。
-//    （②③ 需引擎就绪，否则 XCTSkip。）
-//
-//  范围说明：日期相关 kind（`.time`）的文案受时区口径影响（Swift `Calendar.current` 含 DST，
-//  引擎用固定 `tzOffsetSeconds`；见 §11.5 已知限制），本套件不纳入逐字比较，改由
-//  `SimRulesDiffTests` 的 `cond_texts` 一致性用例（同入参两侧对拍）兜住。
+//    ① `.engine` 模式：`request` → 引擎 `cond_texts` → 缓存文案；
+//    ② 内容去重：同内容重复 request 不再打引擎（可用性保持 ready）。
+//    （①② 需引擎就绪，否则 XCTSkip。）
 //
 
 import XCTest
@@ -64,31 +59,9 @@ final class SimRulesProjectionTests: XCTestCase {
         return ids.allSatisfy({ SimRulesProjection.shared.availability[$0] == .ready })
     }
 
-    private func withMode(_ mode: SimRulesBridge.Mode, _ body: () throws -> Void) rethrows {
-        let saved = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = saved }
-        SimRulesBridge.mode = mode
-        try body()
-    }
+    // MARK: - ① .engine 投影
 
-    // MARK: - ① 过渡期直通
-
-    func testSwiftModePassthrough() throws {
-        try withMode(.swift) {
-            let o = try makeOrder(kind: "price",
-                                  params: ["triggerPrice": 1500.0, "compareUp": true])
-            XCTAssertEqual(SimRulesProjection.shared.conditionSummary(o), SimCondRule.conditionSummary(o))
-            XCTAssertEqual(SimRulesProjection.shared.validitySummary(o), SimCondRule.validitySummary(o))
-            XCTAssertEqual(SimRulesProjection.shared.directiveSummary(o), SimCondRule.directiveSummary(o))
-            XCTAssertEqual(SimRulesProjection.shared.directiveCore(o), SimCondRule.directiveCore(o))
-            XCTAssertEqual(SimRulesProjection.shared.previewSentence(o), SimCondRule.previewSentence(o))
-            XCTAssertEqual(SimRulesProjection.shared.gridLevelCount(o), SimCondRule.gridLevelCount(order: o))
-        }
-    }
-
-    // MARK: - ② .engine 投影 == Swift 现状
-
-    func testEngineProjectionMatchesSwift() throws {
+    func testEngineProjection() throws {
         try ensureEngineReady()
 
         let specs: [(String, [String: Any])] = [
@@ -103,47 +76,30 @@ final class SimRulesProjectionTests: XCTestCase {
         ]
         let orders = try specs.map { try makeOrder(kind: $0.0, params: $0.1) }
 
-        // 期望值：Swift 现状（.swift 模式取）
-        var expected: [UUID: (String, String, String, String, Int)] = [:]
-        try withMode(.swift) {
-            for o in orders {
-                expected[o.id] = (SimCondRule.conditionSummary(o), SimCondRule.validitySummary(o),
-                                  SimCondRule.directiveSummary(o), SimCondRule.previewSentence(o),
-                                  SimCondRule.gridLevelCount(order: o))
-            }
-        }
-
-        // 引擎投影
-        try withMode(.engine) {
-            SimRulesProjection.shared.request(orders)
-            let ready = waitReady(orders.map { $0.id }, timeout: 30)
-            XCTAssertTrue(ready, "投影未在超时内就绪（引擎可能出错）")
-            for o in orders {
-                let e = try XCTUnwrap(expected[o.id])
-                XCTAssertEqual(SimRulesProjection.shared.conditionSummary(o), e.0, "condition \(o.kind)")
-                XCTAssertEqual(SimRulesProjection.shared.validitySummary(o), e.1, "validity \(o.kind)")
-                XCTAssertEqual(SimRulesProjection.shared.directiveSummary(o), e.2, "directive \(o.kind)")
-                XCTAssertEqual(SimRulesProjection.shared.previewSentence(o), e.3, "preview \(o.kind)")
-                XCTAssertEqual(SimRulesProjection.shared.gridLevelCount(o), e.4, "grid \(o.kind)")
-            }
+        SimRulesProjection.shared.request(orders)
+        let ready = waitReady(orders.map { $0.id }, timeout: 30)
+        XCTAssertTrue(ready, "投影未在超时内就绪（引擎可能出错）")
+        for o in orders {
+            XCTAssertNotEqual(SimRulesProjection.shared.conditionSummary(o), "…", "condition \(o.kind) 应非占位")
+            XCTAssertNotEqual(SimRulesProjection.shared.validitySummary(o), "…", "validity \(o.kind) 应非占位")
+            XCTAssertNotEqual(SimRulesProjection.shared.directiveSummary(o), "…", "directive \(o.kind) 应非占位")
+            XCTAssertNotEqual(SimRulesProjection.shared.previewSentence(o), "…", "preview \(o.kind) 应非占位")
         }
     }
 
-    // MARK: - ③ 内容去重（同内容重复 request 不打引擎）
+    // MARK: - ② 内容去重（同内容重复 request 不打引擎）
 
     func testIdenticalRepeatRequestIsDeduped() throws {
         try ensureEngineReady()
-        try withMode(.engine) {
-            let o = try makeOrder(kind: "price", params: ["triggerPrice": 1500.0, "compareUp": true])
-            SimRulesProjection.shared.request([o])
-            XCTAssertTrue(waitReady([o.id], timeout: 30), "首轮未就绪")
+        let o = try makeOrder(kind: "price", params: ["triggerPrice": 1500.0, "compareUp": true])
+        SimRulesProjection.shared.request([o])
+        XCTAssertTrue(waitReady([o.id], timeout: 30), "首轮未就绪")
 
-            // 同一内容再请求：应被 requestedJSON 去重（不重置为 computing）
-            SimRulesProjection.shared.request([o])
-            XCTAssertEqual(SimRulesProjection.shared.availability[o.id], .ready,
-                           "同内容重复请求不应把可用性重置为 computing")
-            XCTAssertEqual(SimRulesProjection.shared.conditionSummary(o),
-                           SimCondRule.conditionSummary(o))
-        }
+        // 同一内容再请求：应被 requestedJSON 去重（不重置为 computing）
+        SimRulesProjection.shared.request([o])
+        XCTAssertEqual(SimRulesProjection.shared.availability[o.id], .ready,
+                       "同内容重复请求不应把可用性重置为 computing")
+        XCTAssertNotEqual(SimRulesProjection.shared.conditionSummary(o), "…",
+                          "condition 应非占位")
     }
 }

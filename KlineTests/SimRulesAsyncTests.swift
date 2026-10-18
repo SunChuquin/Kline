@@ -2,17 +2,12 @@
 //  SimRulesAsyncTests.swift
 //  KlineTests
 //
-//  阶段 A5-4：`SimRulesBridge` 的 **async 门面**（SimRulesAsync.swift）领域级对拍。
+//  阶段 A6：`SimRulesBridge` 的 **async 门面**（SimRulesAsync.swift）领域级对拍（引擎唯一后端）。
 //
-//  与 `SimRulesDiffTests` 的分工：
-//    · `SimRulesDiffTests` 比的是 **op 级 JSON**（两侧后端逐字段）；
+//  与 `SimRulesCodecTests` 的分工：
 //    · 本套件比的是 **领域类型**——`evaluateCond` / `tradeValidate` / … 的返回值与 Swift 现状
 //      （`SimCondRule.evaluate` / `SimTradingRules.validate` / …）逐条相等。
-//  两者合起来才能证明「引擎输出 → 领域模型」的**反解**（A5-4 新写的写回变换）无损失：
-//  只比 JSON 会漏掉「JSON 对了但反解错了」的 bug。
-//
-//  用例来源：三份 fixture 的既有入参（**不新增 golden、不改 fixture**），
-//  同一批用例在 `.swift` 与 `.engine` 两种 `mode` 下各跑一遍（引擎未就绪 → XCTSkip）。
+//  用例来源：三份 fixture 的既有入参（**不新增 golden、不改 fixture**）。
 //
 
 import XCTest
@@ -117,13 +112,9 @@ final class SimRulesAsyncTests: XCTestCase {
         }
     }
 
-    // MARK: - 全部对拍（两种 mode 共用）
+    // MARK: - 全部对拍（engine 投影 vs Swift 现状）
 
-    private func runAllParity(_ mode: SimRulesBridge.Mode) async throws {
-        let saved = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = saved }
-        SimRulesBridge.mode = mode
-
+    private func runAllParity() async throws {
         let sim = try loadFixture("sim_rules")
 
         // ---- A 组：cond_evaluate
@@ -133,7 +124,7 @@ final class SimRulesAsyncTests: XCTestCase {
             let got = try await SimRulesBridge.evaluateCond(order: o, snapshot: s,
                                                             now: date(i["now"]))
             let want = SimCondRule.evaluate(order: o, snapshot: s)
-            XCTAssertEqual(desc(got), desc(want), "\(mode) cond_evaluate \(name(c))")
+            XCTAssertEqual(desc(got), desc(want), "cond_evaluate \(name(c))")
         }
 
         // ---- A 组：cond_validate_create
@@ -146,7 +137,7 @@ final class SimRulesAsyncTests: XCTestCase {
                                                                   position: pos, snapshot: s, now: now)
             let want = SimCondRule.validateCreate(order: o, account: acct, position: pos,
                                                   snapshot: s, now: now)
-            XCTAssertEqual(desc(got), desc(want), "\(mode) cond_validate_create \(name(c))")
+            XCTAssertEqual(desc(got), desc(want), "cond_validate_create \(name(c))")
         }
 
         // ---- B 组：结算纯推进
@@ -160,29 +151,29 @@ final class SimRulesAsyncTests: XCTestCase {
                 let got = try await SimRulesBridge.condExpiredReason(order: o, now: now, calendar: cal)
                 let want = SimStore.shared.expiredReason(of: o, today: cal.startOfDay(for: now),
                                                          calendar: cal)
-                XCTAssertEqual(got ?? "<nil>", want ?? "<nil>", "\(mode) cond_expired_reason \(name(c))")
+                XCTAssertEqual(got ?? "<nil>", want ?? "<nil>", "cond_expired_reason \(name(c))")
             case "fire_dir":
                 let got = try await SimRulesBridge.condFireDirection(order: o, triggerPrice: tp)
                 XCTAssertEqual(got, SimStore.shared.fireDirection(order: o, triggerPrice: tp),
-                               "\(mode) cond_fire_direction \(name(c))")
+                               "cond_fire_direction \(name(c))")
             case "exec":
                 let dir = directive(i["directive"])
                 let got = try await SimRulesBridge.condExecutionPrice(directive: dir, triggerPrice: tp)
                 XCTAssertEqual(got, SimStore.shared.executionPrice(directive: dir, triggerPrice: tp),
-                               "\(mode) cond_execution_price \(name(c))")
+                               "cond_execution_price \(name(c))")
             case "adv":
                 let got = try await SimRulesBridge.condAdvance(order: o, triggerPrice: tp)
                 XCTAssertEqual(desc(got),
                                desc(SimStore.shared.advanceRepeatable(order: o, triggerPrice: tp)),
-                               "\(mode) cond_advance \(name(c))")
+                               "cond_advance \(name(c))")
             case "rep":
                 let got = try await SimRulesBridge.condRepeatableFinished(order: o)
                 XCTAssertEqual(got, SimStore.shared.repeatableFinished(order: o),
-                               "\(mode) cond_repeatable_finished \(name(c))")
+                               "cond_repeatable_finished \(name(c))")
             case "alert":
                 let got = try await SimRulesBridge.condAlertMessage(order: o, triggerPrice: tp)
                 XCTAssertEqual(got, SimStore.shared.alertMessage(order: o, triggerPrice: tp),
-                               "\(mode) cond_alert_message \(name(c))")
+                               "cond_alert_message \(name(c))")
             default:
                 XCTFail("sweep 段出现未覆盖的 op：\(name(c))")
             }
@@ -197,7 +188,7 @@ final class SimRulesAsyncTests: XCTestCase {
                                                              lastPrice: last, prevClose: prev)
             let want = SimTradingRules.default.validate(draft: d, account: acct, position: pos,
                                                         lastPrice: last, prevClose: prev)
-            XCTAssertEqual(desc(got), desc(want), "\(mode) trade_validate \(name(c))")
+            XCTAssertEqual(desc(got), desc(want), "trade_validate \(name(c))")
         }
 
         // ---- C 组：trade_calc（feature 子集：fee / affordableQty / sellableQty / isTradingSession / limitRange）
@@ -210,45 +201,45 @@ final class SimRulesAsyncTests: XCTestCase {
                 let amount = SimRulesCodec.num(i["amount"]) ?? 0
                 let got = try await SimRulesBridge.tradeCommission(amount: amount)
                 XCTAssertEqual(got, rules.commission(amount: amount), accuracy: 1e-9,
-                               "\(mode) trade_calc.commission \(name(c))")
+                               "trade_calc.commission \(name(c))")
             case "stampTax":
                 let dir = SimRulesCodec.str(i["direction"])
                     .flatMap(SimOrderDirection.init(rawValue:)) ?? .buy
                 let amount = SimRulesCodec.num(i["amount"]) ?? 0
                 let got = try await SimRulesBridge.tradeStampTax(amount: amount, direction: dir)
                 XCTAssertEqual(got, rules.stampTax(amount: amount, direction: dir), accuracy: 1e-9,
-                               "\(mode) trade_calc.stampTax \(name(c))")
+                               "trade_calc.stampTax \(name(c))")
             case "fee":
                 let dir = SimRulesCodec.str(i["direction"])
                     .flatMap(SimOrderDirection.init(rawValue:)) ?? .buy
                 let amount = SimRulesCodec.num(i["amount"]) ?? 0
                 let got = try await SimRulesBridge.tradeFee(amount: amount, direction: dir)
                 XCTAssertEqual(got, rules.fee(amount: amount, direction: dir), accuracy: 1e-9,
-                               "\(mode) trade_calc.fee \(name(c))")
+                               "trade_calc.fee \(name(c))")
             case "affordableQty":
                 let cash = SimRulesCodec.num(i["cash"]) ?? 0
                 let price = SimRulesCodec.num(i["price"]) ?? 0
                 let got = try await SimRulesBridge.tradeAffordableQty(cash: cash, price: price)
                 XCTAssertEqual(got, rules.affordableQty(cash: cash, price: price),
-                               "\(mode) trade_calc.affordableQty \(name(c))")
+                               "trade_calc.affordableQty \(name(c))")
             case "sellableQty":
                 guard let pos = position(i["position"]) else { break }
                 let got = try await SimRulesBridge.tradeSellableQty(position: pos)
                 XCTAssertEqual(got, rules.sellableQty(position: pos),
-                               "\(mode) trade_calc.sellableQty \(name(c))")
+                               "trade_calc.sellableQty \(name(c))")
             case "isTradingSession":
                 let at = date(i["at"])
                 let got = try await SimRulesBridge.tradeIsTradingSession(at: at)
                 XCTAssertEqual(got, rules.isTradingSession(at: at),
-                               "\(mode) trade_calc.isTradingSession \(name(c))")
+                               "trade_calc.isTradingSession \(name(c))")
             case "limitRange":
                 let prev = SimRulesCodec.num(i["prevClose"])
                 let got = try await SimRulesBridge.tradeLimitRange(prevClose: prev)
                 let want = rules.limitRange(prevClose: prev)
                 XCTAssertEqual(got?.lower ?? -1, want?.lowerBound ?? -1, accuracy: 1e-9,
-                               "\(mode) trade_calc.limitRange.lower \(name(c))")
+                               "trade_calc.limitRange.lower \(name(c))")
                 XCTAssertEqual(got?.upper ?? -1, want?.upperBound ?? -1, accuracy: 1e-9,
-                               "\(mode) trade_calc.limitRange.upper \(name(c))")
+                               "trade_calc.limitRange.upper \(name(c))")
             default:
                 XCTFail("trade_calc 出现未覆盖的 calc：\(calc)（\(name(c))）")
             }
@@ -262,7 +253,7 @@ final class SimRulesAsyncTests: XCTestCase {
             let got = try await TrainAccountRule.minCapital(price: price, lotSize: lot, lots: lots)
             let want = amount + SimTradingRules.default.fee(amount: amount, direction: .buy)
             XCTAssertEqual(got, want, accuracy: 1e-9,
-                           "\(mode) training.minCapital price=\(price) lots=\(lots)")
+                           "training.minCapital price=\(price) lots=\(lots)")
         }
 
         // ---- D 组：strategy_drafts（纯映射；本组专验 `strategyDraftFromJSON` 反解无损失）
@@ -279,9 +270,9 @@ final class SimRulesAsyncTests: XCTestCase {
             let want = StrategyCondGenerator.drafts(doc: doc, meta: meta, accountID: accountID,
                                                     lastPrice: last, costPrice: cost)
             XCTAssertEqual(got.drafts.map(desc), want.drafts.map(desc),
-                           "\(mode) strategy_drafts \(name(c))")
+                           "strategy_drafts \(name(c))")
             XCTAssertEqual(got.skips.map(skipDesc), want.skips.map(skipDesc),
-                           "\(mode) strategy_drafts.skips \(name(c))")
+                           "strategy_drafts.skips \(name(c))")
         }
 
         // ---- D 组：strategy_entry_draft（可选入场单，nil = 不生成）
@@ -297,7 +288,7 @@ final class SimRulesAsyncTests: XCTestCase {
             let want = StrategyCondGenerator.entryDraft(doc: doc, meta: meta, accountID: accountID,
                                                         lastPrice: last)
             XCTAssertEqual(got.map(desc) ?? "<nil>", want.map(desc) ?? "<nil>",
-                           "\(mode) strategy_entry_draft \(name(c))")
+                           "strategy_entry_draft \(name(c))")
         }
 
         // ---- E 组：策略 DSL 纯解析 / 校验 / 预览（本组覆盖 E 组全部新反解）
@@ -308,15 +299,15 @@ final class SimRulesAsyncTests: XCTestCase {
             let got = try await SimRulesBridge.strategyParse(lines: lines)
             let want = StrategyRuleParser.parse(lines: lines)
             XCTAssertEqual(got.rules.map(ruleDesc), want.rules.map(ruleDesc),
-                           "\(mode) strategy_parse.rules \(name(c))")
-            XCTAssertEqual(got.errors, want.errors, "\(mode) strategy_parse.errors \(name(c))")
+                           "strategy_parse.rules \(name(c))")
+            XCTAssertEqual(got.errors, want.errors, "strategy_parse.errors \(name(c))")
         }
 
         for c in cases(dsl, "strategyRuleLine") {
             guard let call = try? ruleCall(input(c)["call"]) else { continue }
             let got = try await SimRulesBridge.strategyRuleLine(call)
             XCTAssertEqual(got, StrategyRuleParser.line(for: call),
-                           "\(mode) strategy_rule_line \(name(c))")
+                           "strategy_rule_line \(name(c))")
         }
 
         for c in cases(dsl, "strategyCatalog") {
@@ -325,17 +316,17 @@ final class SimRulesAsyncTests: XCTestCase {
             let got = try await SimRulesBridge.strategyCatalog(kind: kinds.count == 1 ? kinds[0] : nil)
             for kind in kinds {
                 guard let e = got[kind] else {
-                    XCTFail("\(mode) strategy_catalog 缺 \(kind.rawValue)（\(name(c))）"); continue
+                    XCTFail("strategy_catalog 缺 \(kind.rawValue)（\(name(c))）"); continue
                 }
-                XCTAssertEqual(e.title, kind.title, "\(mode) catalog.title \(kind.rawValue)")
+                XCTAssertEqual(e.title, kind.title, "catalog.title \(kind.rawValue)")
                 XCTAssertEqual(e.conditionOrderTitle, kind.conditionOrderTitle,
-                               "\(mode) catalog.conditionOrderTitle \(kind.rawValue)")
+                               "catalog.conditionOrderTitle \(kind.rawValue)")
                 XCTAssertEqual(e.knownKeys, StrategyRuleCatalog.knownKeys(for: kind).sorted(),
-                               "\(mode) catalog.knownKeys \(kind.rawValue)")
+                               "catalog.knownKeys \(kind.rawValue)")
                 XCTAssertEqual(e.specs.map(specDesc),
                                StrategyRuleCatalog.specs(for: kind).map(specDesc),
-                               "\(mode) catalog.specs \(kind.rawValue)")
-                XCTAssertFalse(e.simCondKind.isEmpty, "\(mode) catalog.simCondKind 为空 \(kind.rawValue)")
+                               "catalog.specs \(kind.rawValue)")
+                XCTAssertFalse(e.simCondKind.isEmpty, "catalog.simCondKind 为空 \(kind.rawValue)")
             }
         }
 
@@ -345,10 +336,10 @@ final class SimRulesAsyncTests: XCTestCase {
             let exists = SimRulesCodec.bool(i["pickerExists"]) ?? false
             let syntax = SimRulesCodec.str(i["pickSyntaxError"])
             let got = try await SimRulesBridge.strategyValidate(doc: doc, pickerExists: exists,
-                                                               pickSyntaxError: syntax)
+                                                                pickSyntaxError: syntax)
             let want = StrategyValidator.validate(doc: doc, pickerExists: exists,
                                                   pickSyntaxError: syntax)
-            XCTAssertEqual(got, want, "\(mode) strategy_validate \(name(c))")
+            XCTAssertEqual(got, want, "strategy_validate \(name(c))")
         }
 
         for c in cases(dsl, "strategyPreview") {
@@ -357,16 +348,16 @@ final class SimRulesAsyncTests: XCTestCase {
             let pickerName = SimRulesCodec.str(i["pickerName"])
             let got = try await SimRulesBridge.strategyPreview(doc: doc, pickerName: pickerName)
             XCTAssertEqual(got.summary, StrategyPreview.summary(doc: doc, pickerName: pickerName),
-                           "\(mode) strategy_preview.summary \(name(c))")
+                           "strategy_preview.summary \(name(c))")
             XCTAssertEqual(got.pick, StrategyPreview.pickSummary(doc: doc, pickerName: pickerName),
-                           "\(mode) strategy_preview.pick \(name(c))")
+                           "strategy_preview.pick \(name(c))")
             XCTAssertEqual(got.trade, StrategyPreview.tradeSummary(doc: doc),
-                           "\(mode) strategy_preview.trade \(name(c))")
+                           "strategy_preview.trade \(name(c))")
             XCTAssertEqual(got.executionNotice, StrategyPreview.executionNotice,
-                           "\(mode) strategy_preview.executionNotice \(name(c))")
+                           "strategy_preview.executionNotice \(name(c))")
             let (calls, _) = StrategyRuleParser.parse(lines: doc.rules)
             XCTAssertEqual(got.triggers, calls.map { StrategyPreview.triggerText($0) },
-                           "\(mode) strategy_preview.triggers \(name(c))")
+                           "strategy_preview.triggers \(name(c))")
         }
 
         for c in cases(dsl, "tradeParse") {
@@ -375,15 +366,15 @@ final class SimRulesAsyncTests: XCTestCase {
             let want = StrategyTradeParser.parse(lines: lines)
             XCTAssertEqual(jsonDesc(SimRulesCodec.tradeSpecJSON(got.spec)),
                            jsonDesc(SimRulesCodec.tradeSpecJSON(want.spec)),
-                           "\(mode) trade_parse.spec \(name(c))")
-            XCTAssertEqual(got.errors, want.errors, "\(mode) trade_parse.errors \(name(c))")
+                           "trade_parse.spec \(name(c))")
+            XCTAssertEqual(got.errors, want.errors, "trade_parse.errors \(name(c))")
         }
 
         for c in cases(dsl, "tradeSerialize") {
             let spec = SimRulesCodec.tradeSpecFromJSON(input(c)["spec"])
             let got = try await SimRulesBridge.tradeSerialize(spec)
             XCTAssertEqual(got, StrategyTradeParser.serialize(spec),
-                           "\(mode) trade_serialize \(name(c))")
+                           "trade_serialize \(name(c))")
         }
 
         for c in cases(dsl, "tradeOverride") {
@@ -392,10 +383,10 @@ final class SimRulesAsyncTests: XCTestCase {
             let want = StrategyTradeParser.override(in: call)
             XCTAssertEqual(jsonDesc(SimRulesCodec.directiveOverrideJSON(got.override)),
                            jsonDesc(SimRulesCodec.directiveOverrideJSON(want)),
-                           "\(mode) trade_override \(name(c))")
-            XCTAssertEqual(got.isEmpty, want.isEmpty, "\(mode) trade_override.isEmpty \(name(c))")
+                           "trade_override \(name(c))")
+            XCTAssertEqual(got.isEmpty, want.isEmpty, "trade_override.isEmpty \(name(c))")
             XCTAssertEqual(got.summary ?? "<nil>", want.summary ?? "<nil>",
-                           "\(mode) trade_override.summary \(name(c))")
+                           "trade_override.summary \(name(c))")
         }
     }
 
@@ -465,14 +456,10 @@ final class SimRulesAsyncTests: XCTestCase {
             alertOnly: SimRulesCodec.bool(d["alertOnly"]))
     }
 
-    // MARK: - 用例（两种 mode）
-
-    func testParitySwiftMode() async throws {
-        try await runAllParity(.swift)
-    }
+    // MARK: - 用例
 
     func testParityEngineMode() async throws {
         try await ensureEngineReady()
-        try await runAllParity(.engine)
+        try await runAllParity()
     }
 }

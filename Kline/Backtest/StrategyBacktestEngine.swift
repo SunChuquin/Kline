@@ -905,7 +905,7 @@ final class StrategyBacktestRunner: ObservableObject {
                 self.setPhase(.simulating)
             }
 
-            // A5-4：回测子系统按 `SimRulesBridge.mode` 分派（`.swift` = 现状；`.engine` = 引擎）。
+            // A5-4：回测子系统经 `SimRulesBridge.backtestRun` 调引擎（`.engine` 唯一后端）。
             // 取消闭包只捕获锁保护的标志盒（@unchecked Sendable），不访问 @MainActor
             // 上的属性，可在后台队列安全调用。
             let runResult = SimRulesBridge.backtestRun(

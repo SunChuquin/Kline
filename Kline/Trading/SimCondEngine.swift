@@ -380,7 +380,7 @@ extension SimStore {
     /// （训练态复用：放宽为 internal，纯计算无副作用）
     func executionPrice(directive: SimCondDirective, triggerPrice: Double) -> Double? {
         guard directive.priceType == .limit else { return nil }
-        let tick = SimTradingRules.default.priceTick
+        let tick = SimTradeRuleConstants.priceTick
         return max(triggerPrice + Double(directive.offsetTicks) * tick, 0.01)
     }
 

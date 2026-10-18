@@ -103,44 +103,6 @@ final class SimRulesCodecTests: XCTestCase {
         }
     }
 
-    // MARK: - ④ 生产入口 .engine == .swift
-
-    func testBacktestRunEngineMatchesSwift() throws {
-        try ensureEngineReady()
-        let original = SimRulesBridge.mode
-        defer { SimRulesBridge.mode = original }
-
-        for c in try backtestCases() {
-            let name = c["caseName"] as? String ?? "?"
-            let input = try XCTUnwrap(c["input"] as? [String: Any])
-            let m = SimRulesCodec.backtestInputDecode(input)
-
-            SimRulesBridge.mode = .swift
-            let swiftRes = SimRulesBridge.backtestRun(doc: m.doc, bars: m.bars, pickHits: m.pickHits,
-                                                      metas: m.metas, params: m.params,
-                                                      shouldCancel: nil)
-            SimRulesBridge.mode = .engine
-            // blockingCall 有「禁止主线程」assert → 必须后台线程
-            let exp = expectation(description: "backtestRun.engine \(name)")
-            var engineRes: Result<BacktestResult, SimRulesBridge.Failure>?
-            DispatchQueue.global().async {
-                engineRes = SimRulesBridge.backtestRun(doc: m.doc, bars: m.bars, pickHits: m.pickHits,
-                                                       metas: m.metas, params: m.params,
-                                                       shouldCancel: nil)
-                exp.fulfill()
-            }
-            wait(for: [exp], timeout: 90)
-
-            guard case .success(let s) = swiftRes else { return XCTFail("\(name)：.swift 失败 \(swiftRes)") }
-            guard let er = engineRes, case .success(let e) = er else {
-                return XCTFail("\(name)：.engine 失败 \(String(describing: engineRes))")
-            }
-            let errs = SimRulesJSONCompare.report(expected: SimRulesCodec.backtestJSON(s),
-                                                  actual: SimRulesCodec.backtestJSON(e), path: "$")
-            XCTAssertTrue(errs.isEmpty, "\(name)：.engine 与 .swift 结果不一致 → \(errs)")
-        }
-    }
-
     // MARK: - 引擎侧 helper
 
     private func enginePayload(op: String, input: [String: Any]) throws -> [String: Any] {

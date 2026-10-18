@@ -156,25 +156,15 @@ struct StrategyFormulaEditorView: View {
                    trade: trade)
     }
 
-    /// 规则行 → RULES 文本（逐行按 specs 顺序拼 KEY=VAL，行间换行）
+    /// 规则行 → RULES 文本（逐行按 specs 顺序拼 KEY=VAL，行间换行）。
     ///
-    /// `.swift` 模式：与现状逐字一致（走 `StrategyRuleParser.line`）。
-    /// `.engine` 模式：走投影 `ruleLine`。⚠️ **若任一行未就绪，绝不把占位符拼进文本**——
+    /// 走投影 `ruleLine`。⚠️ **若任一行未就绪，绝不把占位符拼进文本**——
     /// 占位文本一旦进入 doc 就会被 `save()` 写库、且不可逆。故此时回退返回
     /// `lastReadyRulesText`（上一次「全部行都已就绪」的完整文本），保证 doc.rules 始终完整
     /// 且可解析；待全部行就绪后由 `.onChange(of: engineReadyRulesText)` 刷新它，
     /// 并连带改写 docSignature → 触发校验 / 预览重算。
     private var rulesText: String {
-        if SimRulesBridge.mode == .swift { return swiftRulesText }
-        return engineReadyRulesText ?? lastReadyRulesText
-    }
-
-    /// `.swift` 模式的现状序列化（零行为变化）
-    private var swiftRulesText: String {
-        rows.map { row in
-            StrategyRuleParser.line(for: StrategyRuleCall(kind: row.kind, params: row.params, raw: ""))
-        }
-        .joined(separator: "\n")
+        engineReadyRulesText ?? lastReadyRulesText
     }
 
     /// `.engine` 模式下「全部行都已就绪」的完整 RULES 文本；任一行未就绪 → `nil`。
@@ -343,10 +333,8 @@ struct StrategyFormulaEditorView: View {
         .onChange(of: pickBody) { _ in schedulePickSyntaxCheck() }
         // 启动补算 + 首帧入队（onChange 不在首帧触发，这里补一次）
         .task {
-            // `.engine` 模式下引擎可能已就绪：用引擎解析覆盖 init 的 Swift 占位解析。
-            // 启动即跑、用户尚未编辑，覆盖安全；`.swift` 模式不跑（保持逐字现状）。
-            if SimRulesBridge.mode == .engine,
-               let parsed = try? await SimRulesBridge.strategyParse(lines: initialDoc.rules) {
+            // 引擎解析覆盖 init 时的占位解析。启动即跑、用户尚未编辑，覆盖安全。
+            if let parsed = try? await SimRulesBridge.strategyParse(lines: initialDoc.rules) {
                 rows = parsed.rules.map { RuleRow(kind: $0.kind, params: $0.params) }
                 parseErrors = parsed.errors
             }
@@ -1186,19 +1174,8 @@ struct StrategyFormulaEditorView: View {
 
     /// 保存的第二段（issues 已含最新语义校验结果）
     private func finishSave() async {
-        if SimRulesBridge.mode == .swift {
-            // 现状直通：issues 就绪 + 同步保存（零行为变化）
-            guard (issues?.isEmpty == true) else { return }
-            guard let saved = await library.saveStrategy(doc) else {
-                saveError = library.strategyLoadError ?? "保存失败，请检查公式内容"
-                return
-            }
-            onSaved(saved)
-            onClose()
-            return
-        }
-        // `.engine`：保存路径直接 await 取确定值（RULES 文本逐行 + 校验），
-        // 杜绝「刚编辑完立刻保存」窗口期把回退的旧 RULES 文本写盘（A5-5，§11.25 取舍 #1）
+        // 保存路径直接 await 取确定值（RULES 文本逐行 + 校验），
+        // 杜绝「刚编辑完立刻保存」窗口期把回退的旧 RULES 文本写盘。
         guard let target = await definitiveDocAsync() else {
             saveError = "Python 引擎不可用，暂不能保存，请稍后重试"
             return

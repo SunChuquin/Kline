@@ -13,6 +13,28 @@
 import Foundation
 import Combine
 
+// MARK: - 阶段 B：Python 引擎状态持久化（状态所有权反转）
+
+/// 通过 Python 引擎异步保存完整状态到 sim.json（不阻塞调用线程）。
+/// 成功后本地 @Published 已更新，Python 侧落盘 sim.json；失败仅记日志，不影响内存现状。
+private func persistToEngine(state: [String: Any], filePath: String) {
+    SimStateBridge.simStateSave(filePath: filePath, state: state) { r in
+        if case .failure(let f) = r {
+            DebugLogger.shared.log("[SimStore] Python 持久化失败：\(f)")
+        }
+    }
+}
+
+/// 通过 Python 引擎异步加载 sim.json，完成后通过回调返回状态字典。
+/// 失败时回调不触发，由调用方保留内存现状（不清空）。
+private func loadStateFromEngine(filePath: String,
+                                 apply: @escaping ([String: Any]) -> Void) {
+    SimStateBridge.simStateLoad(filePath: filePath) { r in
+        guard case .success(let state) = r else { return }
+        apply(state)
+    }
+}
+
 // MARK: - 持久化根结构
 
 /// sim.json 的根结构（字段缺失或类型不符时逐项兜底为空，不使读档整体失败）
@@ -89,6 +111,9 @@ final class SimStore: ObservableObject {
     /// 当前选中账户；nil 或 allAccountID 表示「全部账户汇总」
     @Published var selectedAccountID: UUID?
 
+    /// 状态 revision（Python 引擎仓的权威版本号，用于状态同步与冲突检测）
+    private(set) var revision: Int = 0
+
     // MARK: 内部状态
 
     private let fm = FileManager.default
@@ -158,6 +183,15 @@ final class SimStore: ObservableObject {
 
     @discardableResult
     private func loadFromDisk() -> Bool {
+        // 阶段 B：优先通过 Python 引擎加载（状态所有权反转）；引擎未就绪时降级到本地文件
+        if KlinePythonBridge.shared.isReady {
+            loadStateFromEngine(filePath: fileURL.path) { [weak self] state in
+                guard let self else { return }
+                self.applyLoadedState(state)
+            }
+            return true
+        }
+        // 降级：本地文件同步读取
         let url = fileURL
         guard fm.fileExists(atPath: url.path) else { return false }
         do {
@@ -185,6 +219,38 @@ final class SimStore: ObservableObject {
         } catch {
             DebugLogger.shared.log("[SimStore] load failed \(error)")
             return false
+        }
+    }
+
+    /// 将 Python 引擎返回的完整状态应用到 @Published 属性。
+    private func applyLoadedState(_ state: [String: Any]) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            let data = try JSONSerialization.data(withJSONObject: state)
+            let root = try decoder.decode(SimRoot.self, from: data)
+
+            assignAccounts(root.accounts)
+            assignPositions(root.positions)
+            assignOrders(root.orders)
+            assignFills(root.fills)
+            assignLedger(root.ledger)
+            assignLogs(root.logs)
+            assignConditionalOrders(root.conditionalOrders)
+            assignAlertRecords(root.alertRecords ?? [])
+
+            if let sel = root.selectedAccountID,
+               sel == Self.allAccountID || accounts.contains(where: { $0.id == sel }) {
+                selectedAccountID = sel
+            } else {
+                selectedAccountID = accounts.first(where: { !$0.isArchived })?.id
+            }
+            // 提取 revision（Python 引擎仓的权威版本号）
+            if let rev = state["revision"] as? Int {
+                revision = rev
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] 解析 Python 状态失败 \(error)")
         }
     }
 
@@ -216,6 +282,14 @@ final class SimStore: ObservableObject {
         } catch {
             DebugLogger.shared.log("[SimStore] save failed \(error)")
         }
+        // 阶段 B：同时异步持久化到 Python 引擎（仓状态权威副本）
+        revision += 1
+        if let encoded = try? JSONEncoder().encode(root),
+           let dict = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] {
+            var stateWithRev = dict
+            stateWithRev["revision"] = revision
+            persistToEngine(state: stateWithRev, filePath: fileURL.path)
+        }
     }
 
     // MARK: - @Published 写入守卫
@@ -246,9 +320,37 @@ final class SimStore: ObservableObject {
 
     func assignConditionalOrders(_ value: [SimCondOrder]) {
         if conditionalOrders != value { conditionalOrders = value }
-        // A5-3：条件单文案投影刷新（防抖合并；`SimRulesBridge.mode == .swift` 时本层惰性 no-op，
-        // 见 Kline/Python/SimRulesProjection.swift）。所有条件单写入都经此口子 → 一处收口。
+        // A5-3：条件单文案投影刷新（防抖合并；所有条件单写入都经此口子 → 一处收口）。
         SimRulesProjection.shared.request(value)
+        // 阶段 B：增量同步条件单到 Python 引擎（仅发 condOrders 字段，避免全量状态传输）
+        applyConditionalOrdersIncremental(value)
+    }
+
+    /// 增量将条件单数组同步到 Python 引擎（sim_state_apply），仅发 condOrders 字段。
+    private func applyConditionalOrdersIncremental(_ orders: [SimCondOrder]) {
+        guard KlinePythonBridge.shared.isReady else { return }
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(orders)
+            guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+            SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: ["conditionalOrders": arr],
+                merge: ["conditionalOrders": "replace"]
+            ) { [weak self] r in
+                guard let self = self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] 增量条件单同步失败：\(f)")
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] 条件单编码失败 \(error)")
+        }
     }
 
     /// 预警记录写入守卫（private：外部只能通过 append / delete / clear 三个口子改）
@@ -693,8 +795,13 @@ final class SimStore: ObservableObject {
             return .failure(.emptyAccount)
         }
         let pos = position(accountID: draft.accountID, metaID: draft.metaID)
-        let lastPrice = SimQuoteCenter.lastPrice(metaID: draft.metaID)
-        let prevClose = SimQuoteCenter.prevClose(metaID: draft.metaID)
+        // 阶段 C：异步行情快照，优先 Python 引擎计算；失败降级为 Swift 现状
+        let lastPrice = await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
+            SimQuoteCenter.lastPriceAsync(metaID: draft.metaID) { cont.resume(returning: $0) }
+        }
+        let prevClose = await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
+            SimQuoteCenter.prevCloseAsync(metaID: draft.metaID) { cont.resume(returning: $0) }
+        }
 
         // 授权校验（C 组 `trade_validate`）：`.swift` = 现状实现；`.engine` = 引擎裁决
         // （D2：整手 / 涨跌停 / 可卖复核都在引擎）。引擎未就绪 → **显式降级** `.engineUnavailable`

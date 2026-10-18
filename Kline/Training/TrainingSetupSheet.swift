@@ -578,7 +578,7 @@ struct TrainingSetupSheet: View {
     /// 金额账户随机抽取：逐个随机候选（每只最多随机 2 个起始日）校验「2 手可买」，命中即返回。
     /// 上限 60 只，避免极端本金下长时间扫库；全部不满足则返回 nil。
     private func pickAffordable(from pool: [MetaItem]) async throws -> (meta: MetaItem, date: Date)? {
-        let lot = SimTradingRules.default.lotSize
+        let lot = SimTradeRuleConstants.lotSize
         let capital = capitalValue
         for meta in pool.shuffled().prefix(60) {
             guard let lower = TrainingDateMath.minDate(of: meta),
@@ -648,7 +648,7 @@ struct TrainingSetupSheet: View {
             // 预检费用走引擎；引擎不可用 → 显式报错不开训（§9.10）
             let need: Double
             do {
-                need = try await TrainAccountRule.minCapital(price: close, lotSize: SimTradingRules.default.lotSize)
+                need = try await TrainAccountRule.minCapital(price: close, lotSize: SimTradeRuleConstants.lotSize)
             } catch {
                 DebugLogger.shared.log("[TrainingSetup] startTraining：引擎不可用 \(error)")
                 errorText = TrainingSessionController.engineUnavailableText

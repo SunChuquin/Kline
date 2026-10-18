@@ -204,6 +204,9 @@ struct ActionLog: Identifiable, Codable, Hashable {
 
 /// 模拟交易取数：最新价 / 昨收 / 元信息（走既有的 MarketRowCache 与 DatabaseManager）。
 /// 两者均为 @MainActor 隔离，故本枚举整体标注 @MainActor。
+///
+/// 阶段 C：新增异步方法，优先走 Python 引擎计算（quote_snapshot.py）；
+/// 引擎未就绪时自动降级为 Swift 现状（MarketRowCache）。
 @MainActor
 enum SimQuoteCenter {
     /// 标的元信息（代码 / 名称 / 板块类型）
@@ -211,13 +214,55 @@ enum SimQuoteCenter {
         DatabaseManager.shared.metaList.first { $0.id == metaID }
     }
 
-    /// 最新价（行情尚未就绪时为 nil）
+    /// 最新价（行情尚未就绪时为 nil）。同步路径，供 60fps UI 使用。
     static func lastPrice(metaID: Int) -> Double? {
         MarketRowCache.shared.numberFor(metaID, .latestPrice)
     }
 
-    /// 昨收（涨跌停区间计算用，行情尚未就绪时为 nil）
+    /// 昨收（涨跌停区间计算用，行情尚未就绪时为 nil）。同步路径。
     static func prevClose(metaID: Int) -> Double? {
         MarketRowCache.shared.numberFor(metaID, .prevClose)
+    }
+
+    // MARK: - 阶段 C：异步 Python 引擎路径
+
+    /// 最新价异步版：优先 Python 引擎计算，失败降级为 Swift 现状。
+    static func lastPriceAsync(metaID: Int, completion: @escaping (Double?) -> Void) {
+        guard let row = MarketRowCache.shared.rows[metaID],
+              let bars = row.recentBars, !bars.isEmpty else {
+            completion(MarketRowCache.shared.numberFor(metaID, .latestPrice))
+            return
+        }
+        let barsDict = bars.map { ["date": $0.date, "open": $0.open, "high": $0.high,
+                                   "low": $0.low, "close": $0.close,
+                                   "volume": $0.volume, "turnover": $0.turnover] }
+        QuoteSnapshotBridge.latestPrice(bars: barsDict) { result in
+            switch result {
+            case .success(let v):
+                completion(v ?? MarketRowCache.shared.numberFor(metaID, .latestPrice))
+            case .failure:
+                completion(MarketRowCache.shared.numberFor(metaID, .latestPrice))
+            }
+        }
+    }
+
+    /// 昨收异步版：优先 Python 引擎计算，失败降级为 Swift 现状。
+    static func prevCloseAsync(metaID: Int, completion: @escaping (Double?) -> Void) {
+        guard let row = MarketRowCache.shared.rows[metaID],
+              let bars = row.recentBars, !bars.isEmpty else {
+            completion(MarketRowCache.shared.numberFor(metaID, .prevClose))
+            return
+        }
+        let barsDict = bars.map { ["date": $0.date, "open": $0.open, "high": $0.high,
+                                   "low": $0.low, "close": $0.close,
+                                   "volume": $0.volume, "turnover": $0.turnover] }
+        QuoteSnapshotBridge.prevClose(bars: barsDict) { result in
+            switch result {
+            case .success(let v):
+                completion(v ?? MarketRowCache.shared.numberFor(metaID, .prevClose))
+            case .failure:
+                completion(MarketRowCache.shared.numberFor(metaID, .prevClose))
+            }
+        }
     }
 }

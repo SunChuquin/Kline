@@ -73,12 +73,8 @@ final class FormulaLibraryStore: ObservableObject {
     private init() {
         // 选股公式库不涉引擎（无 TRADE 段）→ 同步加载，零行为变化
         reload(kind: .picker)
-        // 策略库：`.swift`（过渡期默认）→ 同步加载，零行为变化；`.engine` → 异步（TRADE 段走引擎）
-        if SimRulesBridge.mode == .swift {
-            reload(kind: .strategy)
-        } else {
-            Task { await reloadStrategy() }
-        }
+        // 策略库：异步加载（TRADE 段走引擎）
+        Task { await reloadStrategy() }
     }
 
     // MARK: - 目录
@@ -240,10 +236,6 @@ final class FormulaLibraryStore: ObservableObject {
     @discardableResult
     @MainActor
     func reloadStrategy() async -> Bool {
-        guard SimRulesBridge.mode == .engine else {
-            reload(kind: .strategy)
-            return true
-        }
         let dir = Self.dir(for: .strategy)
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         var result: [FormulaDoc] = []
@@ -276,7 +268,6 @@ final class FormulaLibraryStore: ObservableObject {
     @MainActor
     func saveStrategy(_ doc: FormulaDoc) async -> FormulaDoc? {
         guard doc.kind == .strategy else { return save(doc) }
-        guard SimRulesBridge.mode == .engine else { return save(doc) }   // `.swift` 直通
         var d = doc
         if d.id.isEmpty {
             d.id = nextID(kind: .strategy)
@@ -305,10 +296,6 @@ final class FormulaLibraryStore: ObservableObject {
     /// 删除交易策略。`.swift` 模式走同步 `delete`（零行为变化）。
     @MainActor
     func deleteStrategy(id: String) async {
-        guard SimRulesBridge.mode == .engine else {
-            delete(kind: .strategy, id: id)
-            return
-        }
         let file = CustomIndicatorStore.sanitized(id)
         guard !file.isEmpty, !Self.dir(for: .strategy).isEmpty else { return }
         let path = Self.dir(for: .strategy) + "/\(file).\(fileExt)"

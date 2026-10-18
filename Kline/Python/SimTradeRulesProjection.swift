@@ -96,9 +96,6 @@ final class SimTradeRulesProjection: ObservableObject {
 
     /// 可买整手数量（`trade_calc.affordableQty`）。未就绪 → `nil`。
     func affordableQty(cash: Double, price: Double) -> Int? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.affordableQty(cash: cash, price: price)
-        }
         let key = "affordableQty|\(cash)|\(price)"
         if let v = cachedInt(key) { return v }
         enqueue(key) { .int(try await SimRulesBridge.tradeAffordableQty(cash: cash, price: price)) }
@@ -106,12 +103,9 @@ final class SimTradeRulesProjection: ObservableObject {
     }
 
     /// 可卖整手数量（`trade_calc.sellableQty`，T+1 开启，同 `SimTradingRules.default`）。
-    /// 未就绪 → `nil`。`position == nil` → `0`（两侧现状一律 0，无需请求）。
+    /// 未就绪 → `nil`。`position == nil` → `0`。
     func sellableQty(position: SimPosition?) -> Int? {
         guard let position = position else { return 0 }
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.sellableQty(position: position)
-        }
         let key = sellableKey(position)
         if let v = cachedInt(key) { return v }
         enqueue(key) { .int(try await SimRulesBridge.tradeSellableQty(position: position)) }
@@ -122,9 +116,6 @@ final class SimTradeRulesProjection: ObservableObject {
     /// （开条件单默认数量、持仓页「卖」带量）。失败 → `nil`（调用方按「未知」处理；
     /// 真正下单仍由引擎终审，不会因预填值误成交）。
     func sellableQtyAsync(position: SimPosition) async -> Int? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.sellableQty(position: position)
-        }
         let key = sellableKey(position)
         if let v = cachedInt(key) { return v }
         do {
@@ -141,9 +132,6 @@ final class SimTradeRulesProjection: ObservableObject {
 
     /// 动作路径专用：直接 `await` 引擎取可买整手数量（并写缓存）。失败 → `nil`。
     func affordableQtyAsync(cash: Double, price: Double) async -> Int? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.affordableQty(cash: cash, price: price)
-        }
         let key = "affordableQty|\(cash)|\(price)"
         if let v = cachedInt(key) { return v }
         do {
@@ -160,9 +148,6 @@ final class SimTradeRulesProjection: ObservableObject {
 
     /// 佣金（`trade_calc.commission`）。未就绪 → `nil`。
     func commission(amount: Double) -> Double? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.commission(amount: amount)
-        }
         let key = "commission|\(amount)"
         if let v = cachedDouble(key) { return v }
         enqueue(key) { .double(try await SimRulesBridge.tradeCommission(amount: amount)) }
@@ -171,9 +156,6 @@ final class SimTradeRulesProjection: ObservableObject {
 
     /// 印花税（`trade_calc.stampTax`）。未就绪 → `nil`。
     func stampTax(amount: Double, direction: SimOrderDirection) -> Double? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.stampTax(amount: amount, direction: direction)
-        }
         let key = "stampTax|\(amount)|\(direction.rawValue)"
         if let v = cachedDouble(key) { return v }
         enqueue(key) {
@@ -184,9 +166,6 @@ final class SimTradeRulesProjection: ObservableObject {
 
     /// 合计费用（`trade_calc.fee` = 佣金 + 印花税）。未就绪 → `nil`。
     func fee(amount: Double, direction: SimOrderDirection) -> Double? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.fee(amount: amount, direction: direction)
-        }
         let key = "fee|\(amount)|\(direction.rawValue)"
         if let v = cachedDouble(key) { return v }
         enqueue(key) {
@@ -195,11 +174,8 @@ final class SimTradeRulesProjection: ObservableObject {
         return nil
     }
 
-    /// 涨跌停区间（`trade_calc.limitRange`）。未就绪 / 无昨收 → `nil`（视图不显示区间，两侧同形）。
+    /// 涨跌停区间（`trade_calc.limitRange`）。未就绪 / 无昨收 → `nil`（视图不显示区间）。
     func limitRange(prevClose: Double?) -> ClosedRange<Double>? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.limitRange(prevClose: prevClose)
-        }
         let key = "limitRange|\(prevClose.map { "\($0)" } ?? "nil")"
         if let cached = values[key] {
             switch cached {
@@ -221,9 +197,6 @@ final class SimTradeRulesProjection: ObservableObject {
     /// 若按秒为键会每秒打一次引擎；交易时段以分钟为粒度判定，故一分钟内复用同一结果。
     /// `tzOffsetSeconds` 进键：DST 切换会改变同一时刻的本机偏移（引擎按固定偏移判定）。
     func isTradingSession(at date: Date) -> Bool? {
-        if SimRulesBridge.mode == .swift {
-            return SimTradingRules.default.isTradingSession(at: date)
-        }
         let tz = TimeZone.current.secondsFromGMT(for: date)
         let key = "isTradingSession|\(Int(date.timeIntervalSince1970 / 60))|\(tz)"
         if let v = cachedFlag(key) { return v }

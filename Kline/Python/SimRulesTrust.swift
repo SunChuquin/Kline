@@ -141,19 +141,13 @@ final class SimRulesTrust: ObservableObject {
     // MARK: - 降级矩阵（§9.10）
 
     /// 交易域（条件单 / 预警 / 下单 / 回测）当前是否可用。
-    /// - 生产默认（A5-5 起 `.engine`）：仅当信任链 `trusted` **且**引擎就绪才可用，否则整体禁用；
-    /// - 显式回退（`.swift`，仅单测对拍 / Debug 页）：Swift 参考后端仍在，交易可用（A6 删实现后失效）。
+    /// 生产默认（A5-5 起 `.engine`）：仅当信任链 `trusted` **且**引擎就绪才可用，否则整体禁用。
     var isTradingAvailable: Bool {
-        Self.isTradingAvailable(mode: SimRulesBridge.mode, state: state,
-                                engineReady: KlinePythonBridge.shared.isReady)
+        Self.isTradingAvailable(state: state, engineReady: KlinePythonBridge.shared.isReady)
     }
 
-    /// 纯判定（供测试注入）：
-    /// - `.swift`（显式回退）：Swift 参考后端仍在，交易可用（A6 删实现后失效）；
-    /// - `.engine`（生产默认）：仅当信任链 `trusted` **且**引擎就绪才可用，否则整体禁用。
-    nonisolated static func isTradingAvailable(mode: SimRulesBridge.Mode, state: State,
-                                   engineReady: Bool) -> Bool {
-        if mode == .swift { return true }
-        return state.isTrusted && engineReady
+    /// 纯判定（供测试注入）：仅当信任链 `trusted` **且**引擎就绪才可用，否则整体禁用。
+    nonisolated static func isTradingAvailable(state: State, engineReady: Bool) -> Bool {
+        state.isTrusted && engineReady
     }
 }

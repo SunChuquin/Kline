@@ -54,28 +54,23 @@ struct StrategyDetailView: View {
     /// 未就绪占位：「…」= 取数中，「—」= 引擎不可用
     private var placeholder: String { engineUnavailable ? "—" : "…" }
 
-    /// 选股条件摘要：`.swift` 模式直通现状实现（零行为变化），`.engine` 模式读异步缓存。
+    /// 选股条件摘要：读异步缓存（未就绪 → 占位）。
     private var pickSummaryText: String {
-        SimRulesBridge.mode == .swift
-            ? StrategyPreview.pickSummary(doc: doc, pickerName: library.pickerName(id: doc.pickRef))
-            : (enginePreview?.pick ?? placeholder)
+        enginePreview?.pick ?? placeholder
     }
 
     /// 交易指令摘要（同上口径）
     private var tradeSummaryText: String {
-        SimRulesBridge.mode == .swift
-            ? StrategyPreview.tradeSummary(doc: doc)
-            : (enginePreview?.trade ?? placeholder)
+        enginePreview?.trade ?? placeholder
     }
 
-    /// RULES 段解析结果（`.swift` 直通 / `.engine` 读异步缓存；未就绪 → nil → 占位）
+    /// RULES 段解析结果（读异步缓存；未就绪 → nil → 占位）
     private var parsedRules: (rules: [StrategyRuleCall], errors: [String])? {
-        SimRulesBridge.mode == .swift ? StrategyRuleParser.parse(lines: doc.rules) : engineParse
+        engineParse
     }
 
-    /// 规则行触发文案：`.swift` 直通；`.engine` 取 `strategy_preview.triggers`（同序，一次请求全取）。
+    /// 规则行触发文案：取 `strategy_preview.triggers`（同序，一次请求全取）。
     private func triggerText(index: Int, call: StrategyRuleCall) -> String {
-        if SimRulesBridge.mode == .swift { return StrategyPreview.triggerText(call) }
         guard let triggers = enginePreview?.triggers, triggers.count > index else { return placeholder }
         return triggers[index]
     }
@@ -128,7 +123,6 @@ struct StrategyDetailView: View {
     /// `.swift` 模式直接返回（视图各取值点走直通，零引擎请求、零行为变化）。
     /// 引擎不可用 / 出参形状非法 → 置 `engineUnavailable`（显示 `—` 占位），**不静默用 Swift 兜底**。
     private func loadEngineValues() async {
-        guard SimRulesBridge.mode == .engine else { return }
         do {
             enginePreview = try await SimRulesBridge.strategyPreview(
                 doc: doc, pickerName: library.pickerName(id: doc.pickRef))

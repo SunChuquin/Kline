@@ -1019,9 +1019,8 @@ struct SimCondEditorView: View {
     }
 
     /// `.engine` 模式：草稿变化 → 防抖（50ms，`task(id:)` 取消即弃）后异步校验一次。
-    /// 结果供 `canSave` 门控保存按钮（未就绪 → 不可保存，fail-closed）；`.swift` 模式直接 return。
+    /// 结果供 `canSave` 门控保存按钮（未就绪 → 不可保存，fail-closed）。
     private func refreshEngineValidation() async {
-        guard SimRulesBridge.mode == .engine else { return }
         do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
         if Task.isCancelled { return }
         let rejection = await validateDraftAsync(draftOrder())
@@ -1045,8 +1044,7 @@ struct SimCondEditorView: View {
     }
 
     private var canSave: Bool {
-        // `.swift`：同步直通现状（零行为变化）；`.engine`：读防抖投影态（未就绪 → 不可保存）
-        if SimRulesBridge.mode == .swift { return validateDraft(draftOrder()) == nil }
+        // 未就绪 → 不可保存（fail-closed）
         return engineValidationReady && engineValidationRejection == nil
     }
 
@@ -1157,16 +1155,7 @@ struct SimCondEditorView: View {
     private func handleSave() {
         errorText = nil
         let draft = draftOrder()
-        if SimRulesBridge.mode == .swift {
-            // 现状直通（零行为变化）
-            if let rejection = validateDraft(draft) {
-                errorText = rejection.message
-                return
-            }
-            finishSave(draft)
-            return
-        }
-        // `.engine`：保存路径直接 await 取确定值（不复用防抖态，避免窗口期写入非法单，A5-5）
+        // 保存路径直接 await 取确定值（不复用防抖态，避免窗口期写入非法单）
         Task {
             if let rejection = await validateDraftAsync(draft) {
                 errorText = rejection.message

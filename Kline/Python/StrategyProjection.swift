@@ -121,72 +121,42 @@ final class StrategyProjection: ObservableObject {
     // MARK: - 取值（同步；视图 `body` 直接调）
 
     /// 某规则类型的参数规格清单（`strategy_catalog`）。
-    /// `.engine` 目录未就绪 → 返回空数组（视图按「参数加载中」占位，**不渲染空 specs**）。
+    /// 引擎未就绪 → 返回空数组（视图按「参数加载中」占位，**不渲染空 specs**）。
     func specs(for kind: StrategyRuleKind) -> [StrategyParamSpec] {
-        if SimRulesBridge.mode == .swift { return StrategyRuleCatalog.specs(for: kind) }
         guard availability[Self.catalogKey] == .ready else { return [] }
         return catalog[kind]?.specs ?? []
     }
 
     /// 一条规则 → RULES 文本（`strategy_rule_line`）。
-    /// `.engine` 未就绪 → `nil`（⚠️ 不用空串，否则编辑器会拼出空行 / 漏行）。
+    /// 引擎未就绪 → `nil`（⚠️ 不用空串，否则编辑器会拼出空行 / 漏行）。
     func ruleLine(kind: StrategyRuleKind, params: [String: String]) -> String? {
-        if SimRulesBridge.mode == .swift {
-            return StrategyRuleParser.line(for: StrategyRuleCall(kind: kind, params: params, raw: ""))
-        }
-        return ruleLines[Self.lineKey(kind, params)]
+        ruleLines[Self.lineKey(kind, params)]
     }
 
     /// 规则行内 ORD* 覆盖（`trade_override`）。未就绪 → `nil`（视图不显示指令提示行）。
     func overrideSummary(kind: StrategyRuleKind, params: [String: String]) -> OverrideSummary? {
-        if SimRulesBridge.mode == .swift {
-            let o = StrategyTradeParser.override(in: StrategyRuleCall(kind: kind, params: params, raw: ""))
-            return OverrideSummary(isEmpty: o.isEmpty, summary: o.summary)
-        }
-        return overrideSummaries[Self.overrideKey(kind, params)]
+        overrideSummaries[Self.overrideKey(kind, params)]
     }
 
     /// RULES 文本 → 解析结果（`strategy_parse`）。未就绪 → `nil`。
     func parse(rules: String) -> ParseResult? {
-        if SimRulesBridge.mode == .swift {
-            let r = StrategyRuleParser.parse(lines: rules)
-            return ParseResult(rules: r.rules, errors: r.errors)
-        }
-        return parses[Self.parseKey(rules)]
+        parses[Self.parseKey(rules)]
     }
 
     /// 整份策略文档静态校验（`strategy_validate`）。未就绪 → `nil`（视图显示占位，**不视为通过**）。
     func issues(doc: FormulaDoc, pickerExists: Bool, pickSyntaxError: String?) -> [String]? {
-        if SimRulesBridge.mode == .swift {
-            return StrategyValidator.validate(doc: doc, pickerExists: pickerExists,
-                                              pickSyntaxError: pickSyntaxError)
-        }
-        return validations[Self.validateKey(doc, pickerExists, pickSyntaxError)]
+        validations[Self.validateKey(doc, pickerExists, pickSyntaxError)]
     }
 
     /// 语义预览（`strategy_preview`，全为展示文案）。未就绪 → `nil`。
     func preview(doc: FormulaDoc, pickerName: String?) -> SimRulesCodec.StrategyPreviewResult? {
-        if SimRulesBridge.mode == .swift { return Self.swiftPreview(doc: doc, pickerName: pickerName) }
-        return previews[Self.previewKey(doc, pickerName)]
-    }
-
-    /// `.swift` 模式的预览（逐字段直通 `StrategyPreview.*`，与引擎出参同形状）。
-    private static func swiftPreview(doc: FormulaDoc, pickerName: String?)
-        -> SimRulesCodec.StrategyPreviewResult {
-        let (calls, _) = StrategyRuleParser.parse(lines: doc.rules)
-        return SimRulesCodec.StrategyPreviewResult(
-            summary: StrategyPreview.summary(doc: doc, pickerName: pickerName),
-            pick: StrategyPreview.pickSummary(doc: doc, pickerName: pickerName),
-            trade: StrategyPreview.tradeSummary(doc: doc),
-            executionNotice: StrategyPreview.executionNotice,
-            triggers: calls.map { StrategyPreview.triggerText($0) })
+        previews[Self.previewKey(doc, pickerName)]
     }
 
     // MARK: - 入队（状态变化时由视图显式调用；`.swift` 模式直接 return，零开销）
 
     /// 规则目录（一次取全 8 类，静态）。
     func requestCatalog() {
-        guard SimRulesBridge.mode == .engine else { return }
         let key = Self.catalogKey
         enqueue(key: key, sig: "catalog") { [weak self] in
             let catalog = try await SimRulesBridge.strategyCatalog(kind: nil)
@@ -196,7 +166,6 @@ final class StrategyProjection: ObservableObject {
 
     /// 批量：每行 ruleLine + 每行 trade_override。
     func requestRules(_ calls: [StrategyRuleCall]) {
-        guard SimRulesBridge.mode == .engine else { return }
         for call in calls {
             let lk = Self.lineKey(call.kind, call.params)
             enqueue(key: lk, sig: lk) { [weak self] in
@@ -213,7 +182,6 @@ final class StrategyProjection: ObservableObject {
 
     /// RULES 文本解析。
     func requestParse(rules: String) {
-        guard SimRulesBridge.mode == .engine else { return }
         let key = Self.parseKey(rules)
         enqueue(key: key, sig: rules) { [weak self] in
             let r = try await SimRulesBridge.strategyParse(lines: rules)
@@ -223,7 +191,6 @@ final class StrategyProjection: ObservableObject {
 
     /// 整份文档校验。
     func requestValidate(doc: FormulaDoc, pickerExists: Bool, pickSyntaxError: String?) {
-        guard SimRulesBridge.mode == .engine else { return }
         let key = Self.validateKey(doc, pickerExists, pickSyntaxError)
         enqueue(key: key, sig: key) { [weak self] in
             let list = try await SimRulesBridge.strategyValidate(doc: doc, pickerExists: pickerExists,
@@ -234,7 +201,6 @@ final class StrategyProjection: ObservableObject {
 
     /// 语义预览。
     func requestPreview(doc: FormulaDoc, pickerName: String?) {
-        guard SimRulesBridge.mode == .engine else { return }
         let key = Self.previewKey(doc, pickerName)
         enqueue(key: key, sig: key) { [weak self] in
             let r = try await SimRulesBridge.strategyPreview(doc: doc, pickerName: pickerName)

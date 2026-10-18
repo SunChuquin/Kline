@@ -113,13 +113,15 @@ final class LANSyncUITests: XCTestCase {
                 .waitForExistence(timeout: 5),
             "联机同步页未打开（未找到 lansync.local.status）")
 
-        // 4) 手动直连：输入对端地址 127.0.0.1:5052（UD2）→ 连接
+        // 4) 手动直连：输入对端地址（默认 UD2 的 127.0.0.1:5052；可用 TEST_RUNNER_LAN_PEER
+        //    覆盖为真机地址如 192.168.2.13:5051，做「模拟器 ← 真机」跨设备验收）
+        let peerAddr = ProcessInfo.processInfo.environment["LAN_PEER"] ?? "127.0.0.1:5052"
         let field = reveal("lansync.manual.field", in: app) {
             $0.textFields["lansync.manual.field"].firstMatch
         }
         field.tap()
-        field.typeText("127.0.0.1:5052")
-        print("LAN manualAddress 已输入")
+        field.typeText(peerAddr)
+        print("LAN manualAddress 已输入 \(peerAddr)")
         dismissKeyboardIfPresent(app)
 
         let connect = reveal("lansync.manual.connect", in: app) {
@@ -197,5 +199,99 @@ final class LANSyncUITests: XCTestCase {
         XCTAssertTrue(app.buttons["lansync.done.button"].firstMatch.waitForExistence(timeout: 5),
                       "完成汇总已出现但「完成」按钮不存在（done 卡片渲染不完整）")
         print("LAN 拉取完成，汇总：\(finalSummary)")
+    }
+
+    // MARK: - 用例：单次扫描能发现已暴露的对端（真机 Bonjour 浏览回归）
+
+    /// 前置：**同网段**另有一台实例已启动并暴露（外部脚本准备，如
+    /// `SIMCTL_CHILD_KLINE_EXPOSED=1 SIMCTL_CHILD_KLINE_HTTP_PORT=5052 launch`）。
+    /// 本机进「联机同步 → 扫描一次」，断言列表出现对端（lansync.peer.0）。
+    ///
+    /// 回归对象：真机缺失 `NSBonjourServices` 时 NWBrowser 浏览报 -65555 NoAuth，
+    /// 扫描恒 0 台（模拟器不做该门禁，故只有真机暴露）。此用例在真机上跑才有意义。
+    func testScanOnceDiscoversExposedPeer() throws {
+        let app = XCUIApplication()
+        // 首次声明 NSBonjourServices 后 iOS 会弹「查找本地网络中的设备」系统权限框；
+        // 点「允许」，否则 Bonjour 浏览/发布被拒（NoAuth）。
+        addUIInterruptionMonitor(withDescription: "本地网络权限") { alert in
+            for label in ["允许", "Allow", "好", "OK"] {
+                let btn = alert.buttons[label]
+                if btn.exists { btn.tap(); return true }
+            }
+            return false
+        }
+        app.launch()
+
+        XCTAssertTrue(app.buttons["tab.home"].firstMatch.waitForExistence(timeout: 20),
+                      "启动后未显示底部菜单")
+        app.buttons["tab.home"].firstMatch.tap()
+        let profileButton = app.buttons["home.profileButton"].firstMatch
+        XCTAssertTrue(profileButton.waitForExistence(timeout: 10), "首页标题栏未找到用户入口")
+        profileButton.tap()
+        XCTAssertTrue(app.staticTexts["个人中心"].firstMatch.waitForExistence(timeout: 10),
+                      "个人中心未打开")
+
+        let entry = reveal("profile.lansync.entry", in: app) {
+            $0.buttons["profile.lansync.entry"].firstMatch
+        }
+        entry.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["lansync.local.status"].firstMatch
+            .waitForExistence(timeout: 10)
+            || app.otherElements["lansync.local.status"].firstMatch
+                .waitForExistence(timeout: 5),
+            "联机同步页未打开（未找到 lansync.local.status）")
+
+        let scan = reveal("lansync.scan.once", in: app) {
+            $0.buttons["lansync.scan.once"].firstMatch
+        }
+        scan.tap()
+        print("LAN 已点击扫描一次")
+
+        // 扫描窗口 4s + 解析余量（resolve 上限 5s）：给 20s
+        let peer0 = app.descendants(matching: .any)["lansync.peer.0"].firstMatch
+        XCTAssertTrue(peer0.waitForExistence(timeout: 20),
+                      "扫描后未发现任何对端设备（真机 Bonjour 浏览失败？检查 NSBonjourServices / 本地网络权限）")
+        snap(app, "lansync.scan.discovered")
+        print("LAN 扫描发现对端：\(peer0.label)")
+    }
+
+    // MARK: - 辅助：自动化授予「本地网络」权限（真机）
+
+    /// 验收辅助用例：在「设置 → 隐私与安全性 → 本地网络」把 Kline 的开关打开。
+    /// 前置：调用前先把「设置」停在本地网络页，可用
+    /// `xcrun devicectl device process openURL --device <id> "prefs:root=Privacy&path=LOCAL_NETWORK"`。
+    /// 说明：iOS 14+ 的本地网络权限没有任何程序接口可授予，只能系统设置里点开关；
+    /// 该用例让真机验收无需人工点击（依赖「开发者 → Enable UI Automation」已开）。
+    func testEnableKlineLocalNetwork() throws {
+        // 默认跳过：它会打开「设置」并改动系统权限，只能在需要时显式运行：
+        //   TEST_RUNNER_LAN_GRANT=1 xcodebuild test ... -only-testing:KlineUITests/LANSyncUITests/testEnableKlineLocalNetwork
+        guard ProcessInfo.processInfo.environment["LAN_GRANT"] == "1" else {
+            throw XCTSkip("仅在手动授予真机本地网络权限时运行（需 TEST_RUNNER_LAN_GRANT=1）")
+        }
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        settings.activate()
+
+        let kline = settings.staticTexts["Kline"].firstMatch
+        var hit = false
+        for _ in 0..<30 {
+            if kline.exists && kline.isHittable { hit = true; break }
+            settings.swipeUp()
+            usleep(300_000)
+        }
+        XCTAssertTrue(hit, "未在「本地网络」列表中找到 Kline（设置页需先停在本地网络页）")
+
+        let y = kline.frame.midY
+        let rowSwitch = settings.switches.allElementsBoundByIndex
+            .first { abs($0.frame.midY - y) < 24 }
+        guard let sw = rowSwitch else { XCTFail("未找到 Kline 行对应的开关"); return }
+        if (sw.value as? String) == "1" {
+            print("LAN Kline 本地网络权限已经是开")
+        } else {
+            sw.tap()
+            usleep(500_000)
+            print("LAN 已打开 Kline 本地网络权限，现值=\(String(describing: sw.value))")
+        }
+        snap(settings, "settings.localNetwork.kline")
     }
 }

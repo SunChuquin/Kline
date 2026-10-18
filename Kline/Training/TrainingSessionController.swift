@@ -334,7 +334,7 @@ final class TrainingSessionController: ObservableObject {
         guard isActive else { return "当前无进行中的训练" }
         guard let close = currentClose, close > 0 else { return "当前训练日无可用行情" }
 
-        let lot = SimTradingRules.default.lotSize
+        let lot = SimTradeRuleConstants.lotSize
         if qty <= 0 || qty % lot != 0 {
             return "委托数量需为 \(lot) 股的整数倍且大于 0"
         }
