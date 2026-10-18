@@ -113,15 +113,15 @@ final class PyBridgeChanTests: XCTestCase {
                 let gv = got[i][f]
                 if let en = ev as? NSNumber, let gn = gv as? NSNumber {
                     if en.doubleValue != gn.doubleValue {
-                        return "\(corpus).\(key)[\(i)].\(f): golden=\(ev) python=\(gv)"
+                        return "\(corpus).\(key)[\(i)].\(f): golden=\(String(describing: ev)) python=\(String(describing: gv))"
                     }
                 } else if !(ev is NSNull) || !(gv is NSNull) {
                     let eIsNull = ev is NSNull, gIsNull = gv is NSNull
                     if eIsNull != gIsNull {
-                        return "\(corpus).\(key)[\(i)].\(f): null 位不一致 golden=\(ev) python=\(gv)"
+                        return "\(corpus).\(key)[\(i)].\(f): null 位不一致 golden=\(String(describing: ev)) python=\(String(describing: gv))"
                     }
                     if String(describing: ev) != String(describing: gv) {
-                        return "\(corpus).\(key)[\(i)].\(f): golden=\(ev) python=\(gv)"
+                        return "\(corpus).\(key)[\(i)].\(f): golden=\(String(describing: ev)) python=\(String(describing: gv))"
                     }
                 }
             }

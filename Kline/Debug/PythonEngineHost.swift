@@ -45,7 +45,8 @@ enum PythonEngineSource: Equatable {
 
 /// Engine.app 内 manifest.json（schema v1，两端共用契约；layout 为相对仓库根的旧前缀，
 /// 实际路径相对 Engine.app，解析时剥掉「Engine.app/」前缀）
-struct EngineManifest: Codable {
+/// nonisolated：纯值类型，需在非隔离上下文（引擎 manifest 解码 / 后台调用）使用。
+nonisolated struct EngineManifest: Codable {
     let schema: Int
     let engineId: String
     let engineVersion: String

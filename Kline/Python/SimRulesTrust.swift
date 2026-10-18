@@ -30,7 +30,8 @@ final class SimRulesTrust: ObservableObject {
     static let shared = SimRulesTrust()
 
     /// 信任状态（三重缓解的判定结果）
-    enum State: Equatable {
+    /// nonisolated：纯值枚举，自动派生的 Equatable 需在非隔离上下文（测试断言 / 纯判定）可用。
+    nonisolated enum State: Equatable {
         case unknown                 // 尚未校验
         case trusted                 // 脚本哈希 + 版本锁 + 引擎可定位 全部满足
         case untrusted(String)       // 任一不满足（拒绝使用引擎，交易整体禁用）
