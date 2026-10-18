@@ -41,9 +41,17 @@ def _err(msg):
 
 
 def _ok(result=None):
+    """出参信封：**平铺**顶层。
+
+    ⚠️ 2026-10-19 修复：此前把状态嵌在 `result` 下（`{"ok": true, "result": {...}}`），
+    但 Swift 侧 `SimStateBridge.payload` 直接把**整个信封**交给调用方，
+    `SimStore` 于是① 读不到顶层 `revision`（revision 同步协议失效）、
+    ② 读档时按顶层解码 `SimRoot` → 得到**空账户/空持仓**（静默丢档）。
+    与本仓 `sim_rules.py` 等脚本的出参口径对齐（`{"ok": True, **payload}`）。
+    """
     r = {"ok": True}
-    if result is not None:
-        r["result"] = result
+    if isinstance(result, dict):
+        r.update(result)
     return r
 
 
@@ -437,6 +445,21 @@ def run(inp):
     except Exception as e:
         return _err("脚本异常：%s" % e)
 
+
+def _main():
+    """桥接入口：`KlinePythonBridge` 以 exec 方式运行本脚本，随后读**模块级** `kline_result`。
+
+    ⚠️ 2026-10-19 修复：本脚本此前只定义 `run(inp)` 而无模块级 `kline_result`，
+    导致桥接层包装脚本报「脚本未定义 dict 类型的 kline_result」→ **生产里所有
+    `sim_state_*` 调用都失败并静默降级**（阶段 B 的状态所有权反转实际从未生效）。
+    """
+    inp = globals().get("kline_input")
+    if not isinstance(inp, dict):
+        return _err("kline_input 未注入或不是对象")
+    return run(inp)
+
+
+kline_result = _main()
 
 # 供桥接层直接 import 调用（不走 JSON 分发）
 __all__ = ["run", "SIM_STATE_SCRIPT_VERSION", "SIM_STATE_REQUIRED_API_VERSION"]

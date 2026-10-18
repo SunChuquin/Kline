@@ -176,10 +176,45 @@ _OPS = {
 }
 
 
+# bar 归一化：兼容「位置数组」与「字典」两种入参形状 -------------------------------
+
+_BAR_KEYS = ("date", "open", "high", "low", "close", "volume", "turnover")
+_BAR_ALIASES = {"volume": ("volume", "vol"), "turnover": ("turnover", "amo")}
+
+
+def _norm_bar(b):
+    """单根 bar → 位置数组 `[date, open, high, low, close, volume, turnover]`。
+
+    ⚠️ 本脚本原始契约是**位置数组**；但 Swift 侧（`MarketRowCache.flushPythonSnapshot` /
+    `SimQuoteCenter.lastPriceAsync`）实际传的是**字典**（键 = date/open/high/low/close/
+    volume/turnover）→ `_compute` 的位置索引 `last[4]` 直接抛 TypeError，
+    使整条「行情快照下沉」路径在生产里**从未生效**（2026-10-19 基线实验发现）。
+    这里把两种形状归一化，Swift 侧无需改动。
+    """
+    if isinstance(b, list):
+        return b
+    if not isinstance(b, dict):
+        return None
+    out = []
+    for key in _BAR_KEYS:
+        v = None
+        for alias in _BAR_ALIASES.get(key, (key,)):
+            if alias in b:
+                v = b[alias]
+                break
+        out.append(v)
+    return out
+
+
+def _norm_bars(bars):
+    return [nb for nb in (_norm_bar(b) for b in bars) if nb is not None]
+
+
 def _op_quote_snapshot(inp):
     bars = inp.get("bars")
     if not isinstance(bars, list):
         return _err("bars 须为数组")
+    bars = _norm_bars(bars)
     # 每根 bars 至少 7 个元素：[date, open, high, low, close, volume, turnover]
     for b in bars:
         if not isinstance(b, list) or len(b) < 5:
@@ -237,9 +272,8 @@ def _op_quote_snapshot_batch(inp):
         bars = sym.get("bars")
         if not isinstance(bars, list):
             continue
-        for b in bars:
-            if not isinstance(b, list) or len(b) < 5:
-                continue
+        # 归一化（兼容 Swift 传入的字典形状）后仍要求 ≥5 元素，不足则跳过该标的的非法 bar
+        bars = [b for b in _norm_bars(bars) if len(b) >= 5]
         key = str(metaID) if metaID is not None else str(id(sym))
         sym_result = {}
         for f in fields:
@@ -266,5 +300,21 @@ def run(inp):
     except Exception as e:
         return _err("脚本异常：%s" % e)
 
+
+def _main():
+    """桥接入口：`KlinePythonBridge` 以 exec 方式运行本脚本，随后读**模块级** `kline_result`。
+
+    ⚠️ 2026-10-19 修复：本脚本此前只定义 `run(inp)` 而无模块级 `kline_result`，
+    导致桥接层包装脚本报「脚本未定义 dict 类型的 kline_result」→ **生产里所有
+    `quote_snapshot` / `quote_snapshot_batch` 调用都失败并静默降级**（阶段 C 首批的
+    非帧快照路径实际从未生效，`MarketRowCache` 的 0.2s 防抖只是白跑）。
+    """
+    inp = globals().get("kline_input")
+    if not isinstance(inp, dict):
+        return _err("kline_input 未注入或不是对象")
+    return run(inp)
+
+
+kline_result = _main()
 
 __all__ = ["run"]
