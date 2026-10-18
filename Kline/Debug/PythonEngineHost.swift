@@ -142,6 +142,13 @@ final class PythonEngineHost: ObservableObject {
     }
 
     private let workQueue = DispatchQueue(label: "com.sunck.Kline.pyengine")   // 串行：下载/加载/跑脚本全在此排队
+    /// §11.37：跑脚本路径的备用串行队列（显式 `.userInitiated`）——仅在 A/B 开关打开时使用
+    private let runQueueUI = DispatchQueue(label: "com.sunck.Kline.pyengine.run",
+                                           qos: .userInitiated)
+    /// §11.37：跑脚本路径的提交队列 A/B 开关，**默认 `false` = 现状（`workQueue`，默认 QoS）**。
+    /// ⚠️ A/B **未定论**：两次同口径测量方向相反（−0.38ms vs +0.10ms），量级均 ≈0.3ms 噪声，
+    /// 且当前设计是「顺序测 A→B」、会与运行内漂移混淆 → **不采纳改动**，仅保留钩子供交错复测。
+    nonisolated(unsafe) static var useExplicitRunQoS = false
     private var busy = false                                                  // 只在 workQueue 上读写
     private let fm = FileManager.default
 
@@ -660,7 +667,12 @@ final class PythonEngineHost: ObservableObject {
     /// 生产桥接执行通道：GIL 保障的进程内 PyRun（无 UI busy、不刷实验室输出；失败仅记 DebugLogger）。
     /// 供 KlinePythonBridge 复用；语义与 runScript 一致（workQueue 串行 + PyGILState_Ensure/Release）。
     func runPyBridge(_ script: String, completion: @escaping (Result<Double, String>) -> Void) {
-        workQueue.async { [weak self] in
+        // §11.37 A/B 实测：跑脚本路径的**提交队列**可切换——
+        //   false（默认）= 现状 workQueue（未显式指定 QoS）
+        //   true（诊断开关）= 显式 `.userInitiated` 串行队列
+        // 只影响「跑脚本」，不触碰加载 / 下载 / UI 忙碌态。
+        let queue = Self.useExplicitRunQoS ? runQueueUI : workQueue
+        queue.async { [weak self] in
             guard let self = self, self.pyHandle != nil, let run = self.pyRunFn else {
                 DispatchQueue.main.async { completion(.failure("引擎未加载")) }
                 return

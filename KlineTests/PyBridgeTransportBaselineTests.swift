@@ -217,5 +217,52 @@ final class PyBridgeTransportBaselineTests: XCTestCase {
                    med(hop), hop.max() ?? 0))
         log("注：主线程跳转仅 0.01ms → 「引擎段」≈ PyRun + `PythonEngineHost.workQueue` 调度"
             + "（该队列未显式指定 QoS）；文件交换（前置+读回）合计仅 0.8ms。")
+
+        await reportRunQoSAblation()
+    }
+
+    /// 忙线程负载源（A/B 只有在「有竞争」时才有区分度：默认 QoS 应被 .userInitiated 抢后）。
+    /// `@unchecked Sendable`：仅一个实验用停止标志，跨线程读写的良性竞争。
+    private final class LoadBox: @unchecked Sendable { var running = true }
+
+    private func startLoad(_ threads: Int) -> LoadBox {
+        let box = LoadBox()
+        for _ in 0..<threads {
+            DispatchQueue.global(qos: .userInitiated).async {
+                var x = 1.0001
+                while box.running {
+                    for i in 0..<20_000 { x = x * 1.0000_001 + Double(i & 7) }
+                    if x > 1e12 { x = 1.0001 }
+                }
+            }
+        }
+        return box
+    }
+
+    /// ⑤ §11.37 A/B：跑脚本路径的**提交队列 QoS**（默认 `false`=旧行为 vs `true`=显式 `.userInitiated`）。
+    /// ⚠️ `useExplicitRunQoS` 的生产默认值为 `true`（§11.37 已采纳），本测点**先关再开**以复现对照。
+    private func reportRunQoSAblation() async {
+        let input: [String: Any] = ["op": "sim_format", "fn": "price", "value": 1500.0]
+        PythonEngineHost.useExplicitRunQoS = false
+        let idleDefault = await measure("sim_rules", input, rounds: 12)
+        PythonEngineHost.useExplicitRunQoS = true
+        let idleUI = await measure("sim_rules", input, rounds: 12)
+        PythonEngineHost.useExplicitRunQoS = false
+
+        let load = startLoad(4)
+        let loadDefault = await measure("sim_rules", input, rounds: 12)
+        PythonEngineHost.useExplicitRunQoS = true
+        let loadUI = await measure("sim_rules", input, rounds: 12)
+        PythonEngineHost.useExplicitRunQoS = false
+        load.running = false
+
+        log(String(format: "QoS A/B 空载：默认 %.2fms（max %.2f） vs .userInitiated %.2fms（max %.2f）"
+                   + " → %+.2fms",
+                   idleDefault.median, idleDefault.max, idleUI.median, idleUI.max,
+                   idleUI.median - idleDefault.median))
+        log(String(format: "QoS A/B 有竞争(4 × .userInitiated 忙线程)：默认 %.2fms（max %.2f）"
+                   + " vs .userInitiated %.2fms（max %.2f） → %+.2fms",
+                   loadDefault.median, loadDefault.max, loadUI.median, loadUI.max,
+                   loadUI.median - loadDefault.median))
     }
 }
