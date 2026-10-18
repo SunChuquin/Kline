@@ -2102,6 +2102,26 @@ done
 
 ---
 
+### 11.30 阶段 B 收尾：写口收口为**单一写者**（2026-10-18）
+
+> §11.29 落地的是「**过渡期双写**」（本地写 + 引擎写并存）；本轮把**写口收口**——`SimStore` 不再直接写 `sim.json`，引擎成为唯一写者（§9.9 S5 单写者原则）。
+
+**改动（`Kline/Trading/SimStore.swift`）**
+
+| 项 | 收口前 | 收口后 |
+| --- | --- | --- |
+| `saveToDisk()` | 本地 `data.write(to: sim.json, .atomic)` **+** `sim_state_apply` | **只**走 `sim_state_apply`；encode 仅用于产出引擎入参的 JSON 形状 |
+| 引擎未就绪窗口（启动早期 `warmUp` 未完成） | 本地写兜住 | 挂进 `pendingEngineState`，订阅 `PythonEngineHost.$isLoaded`（`.first()`）**就绪后一次性冲刷**——避免「未就绪窗口内的写全部丢失」（朴素做法会真实丢数据） |
+| 读档 | 引擎优先 / 本地兜底 | **不变**（保留启动期引导读：引擎未就绪时读同一份文件，避免冷启动交易页空白） |
+
+**唯一例外**：LAN 接收落盘（`LANSyncTransfer` 把对端文件 `.part` → 目标路径）仍由 Swift 直接覆盖 `sim.json`——属 §9.6 阶段 D「永不动」的网络栈，已在 `SimStateBridge` 头部注明。
+
+**验证（2026-10-18）**：`KlineTests` **83/83**（0 失败 / 0 跳过）；app + 测试 target 干净重建 → `TEST BUILD SUCCEEDED`，编译警告 **56 → 1**（残留 1 条为 `IndicatorPipeline` 调主隔离桥的既有建模不一致，见下表）；XCUITest 冒烟 4/4。
+
+**未收尾（原 ④ 的余项）**：`DatabaseManager` 拆分（§9.9 S4/S5 的 DB 侧）——本轮未动，且与 §9.6 阶段 D「SQLite 每帧查询永不动」存在张力，需先定界；`cond_sweep` 整环 op 接线（原 ⑤，可选）仍未接线。
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture
