@@ -2233,6 +2233,78 @@ done
 
 ---
 
+### 11.34 S5 追补：写前比对下沉（2026-10-18）
+
+> §11.33 只下沉了「末梢写语句」，把「哪些行要写」的判定留在 Swift。本轮按用户要求把**写前比对也下沉**，
+> 让 `live_upsert_daily` 承接**比对 + 写**整块；Swift 侧不再为这条路径做任何 `SELECT`。
+
+**改动**
+
+| 层 | 内容 |
+| --- | --- |
+| 引擎 | `db_write.py` 的 `live_upsert_daily` 改为接收**原始入参**（全量 `metas` / `bars` / `periodBars`），在引擎内完成：`SELECT` + 1e-6 容差比对（`_live_row_identical`）、`live_meta` 存在性（`_live_meta_exists`）、表名解析（`_live_table_name`，`live_` 前缀优先 / 旧版回退）、「无变化」短路，再执行写语句 |
+| 桥接 | `DbWriteBridge.liveUpsertDaily` 改为只传原始入参（`metas`/`metaUpdatedAt`/`bars`/`periodBars`） |
+| 调用点 | `LiveDataStore`：`_upsertDailyViaEngineLocked` 收敛为「保证 schema → 传原始入参与 op → 投影结果」；`_rowIdenticalLocked`/`_metaExistsLocked` 改 `static`（`rowIdentical`/`metaExists`）并新增 `localTableName(handle:table:)`；原 `_upsertDailyLocked` 改名 `upsertFullOracle`（**写前比对 + 写语句整块**的单测对拍 oracle，生产不再调用） |
+| 测试 | 场景 3 改为**同原始入参**喂两条路径（含「库内已有同值行 → 应跳过」用例）→ 4/4 一致（计数 / 两库内容 / message 全等） |
+
+**仍留在 Swift 的**（有意）：打开连接与 **schema 保证（v3 迁移）**；`trim` 的**周期日历口径**
+（`_trimBoundsLocked`，依赖 `KlinePeriod.periodDateRange`）。
+
+**若连日历口径也下沉**，需要把 `KlinePeriod.periodDateRange`（周=本周周一 / 月=1 日 / 季=当季首月 1 日 /
+年=1 月 1 日）在 Python 建为新真源，并加对拍——那是一条**独立**的决定（会引入第二真源，须配 fixture 对拍），
+本轮不做。
+
+#### 11.34.1 追问：「读路径为什么不能下沉？」——准确重述
+
+> 先把结论说准：**读路径不是「不能」下沉，而是「下沉后必须改成异步 + 投影缓存」**。
+> 之前口头说成「按红线不下沉」，是把**结论**当成了**原因**；下面把原因摆开。
+
+**① 唯一的硬约束：单次过桥的固定开销落在帧预算里**
+
+现有桥接（`KlinePythonBridge`）的形态是「临时文件交换 + `PyRun_SimpleString`」：输入 JSON 落盘 →
+PyRun → 输出 JSON 读回。实测（§候选 2 阶段 B 首帧实验）：
+
+| 观测 | 数值 |
+| --- | --- |
+| 稳态 150 根 × 4 指标端到端 | median **14.0ms**（min 4.8 / p95 15.3） |
+| `tdx_eval` 150 根 × 5 公式 | JSON median **13.8ms** / bin 零拷贝 median **13.3ms**（**只省 4%**） |
+
+bin 通道只省 4% 说明：**瓶颈不在序列化，而在 PyRun + 文件 IO 这条固定路径**。
+60fps 的帧预算是 **16.7ms**——一次过桥就几乎吃掉一整帧。所以：
+
+- **渲染期同步走 FFI 读**（`View`/`body` 求值内调用）= 必然掉帧；这正是 §9.9 原则 3「渲染零 FFI」的由来；
+- **渲染期 `await` 读**也不成立：`body` 是同步求值，不能等。
+
+**② 于是下沉后必然变成「事件期异步取 → 渲染期读 Swift DTO」**
+
+也就是说读路径下沉的真正形态是 §9.9 的 S2/S4：`MarketRowCache → MarketRowProjection`，
+`db_query` op 在**导航 / 刷新 / 生命周期**这些事件时批量把数据备好，渲染期零 FFI。
+代价有两项，都是**产品级**取舍而非技术障碍：
+
+1. **切标的时的即时性**：今天的 Swift SQLite 同步读是「瞬时可取、无序列化」；改成异步后，
+   新标的的 bar 要么短暂空态/loading，要么预取提前命中（预取窗口要够宽）。§9.6 阶段 C 的进入条件
+   写的正是「实测确认拆后行情表仍 60fps」——即这条要先量再定。
+2. **合并语义的第二真源**：读路径里还叠着「live 覆盖 main」的合并规则（`merge(live:main:)` /
+   `liveSlice` / `dataVersion` 失效），下沉要在 Python 重建这套口径，风险等级与本轮「日历口径」
+   同类（要么建新真源 + 对拍，要么不下沉）。
+
+**③ 因此本项目的读路径是「分档」做的，不是「一律留 Swift」**
+
+| 档 | 内容 | 现状 |
+| --- | --- | --- |
+| **L1 非帧读 + 派生计算** | 指标 / 公式 / 形态 / 缠论 / 快照（`quote_snapshot_batch`）/ 主库维护类查询 | **已下沉**（本轮之前）——共享受益最大、零帧风险 |
+| **L2 帧读改「异步预取 + 投影」** | bar 取数改 `db_query` op，渲染期读投影 | **未做**；门槛 = 帧率实测（§9.6 阶段 C）+ 接受切标的短 loading + 合并口径建真源 |
+| **L3 渲染期同步 FFI 读** | — | **不建议**：直接破帧预算 |
+
+**④ 还有一个前置可选项**：过桥的固定开销本身可以被压掉
+
+若把桥接从「临时文件」换成 §9.8 的 **A′ 进程内管道（pipe + NDJSON）** 或直接内存交换，
+单次调用的固定开销可从 ~10ms 量级降到亚毫秒量级——**那时「同步读」才第一次真正可行**。
+这也是 §9.11 把 L1（调用期事件流）标为「可选增强」的深层理由：它不只是性能花边，
+而是**读路径下沉的前置条件**。
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture
