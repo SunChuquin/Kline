@@ -722,8 +722,8 @@ TrollStore 场景下引擎包有两条获取通道，二者都能通过**调整�
 | 阶段 | 内容 | 进入条件 | 验证 |
 | --- | --- | --- | --- |
 | **A. 交易判定成对下沉** | 回测 + 条件单判定 + 策略 DSL 纯解析一起进引擎（`sim_rules.py`）；Swift 保留 `SimCondRule` 兜底或删除 | 红线 4 的三重缓解就位（签名 / 版本锁 / 硬约束复核） | golden 差分（复用 `StrategyBacktestModels` 既有口径）；`SimCondRule` 逐 kind 对拍 |
-| **B. 状态所有权反转**（本目标的实质） | 引擎持有 `sim.json`：`SimStore` 退化为「投影缓存 + 桥接客户端」；新增 `sim_state.py`（提交 / 成交 / 流水 / 预警记录 / 条件单管理） | 阶段 A 稳定；定义状态同步协议（revision + 全量快照，diff 留作优化） | `sim.json` schema 兼容测试；每类写操作前后状态对拍；UI 投影刷新时延实测 |
-| **C. 拆共享枢纽** | `MarketRowCache` / `SimQuoteCenter` 拆为「引擎快照 API」+「Swift 投影」；只把**非帧**的快照路径下沉 | 阶段 B 稳定；实测确认拆后行情表仍 60fps | 行情表滚动帧率；条件单快照与主库逐字段对拍 |
+| **B. 状态所有权反转**（本目标的实质） | 引擎持有 `sim.json`：`SimStore` 退化为「投影缓存 + 桥接客户端」；新增 `sim_state.py`（提交 / 成交 / 流水 / 预警记录 / 条件单管理） | 阶段 A 稳定；定义状态同步协议（revision + 全量快照，diff 留作优化） | `sim.json` schema 兼容测试；每类写操作前后状态对拍；UI 投影刷新时延实测 —— **✅ 已落地（2026-10-18，过渡期双写）**：`sim_state_*` 新增五 op（共 8）+ `SimStore` 走引擎，见 §11.29 |
+| **C. 拆共享枢纽** | `MarketRowCache` / `SimQuoteCenter` 拆为「引擎快照 API」+「Swift 投影」；只把**非帧**的快照路径下沉 | 阶段 B 稳定；实测确认拆后行情表仍 60fps | 行情表滚动帧率；条件单快照与主库逐字段对拍 —— **✅ 首批已落地（2026-10-18）**：`quote_snapshot_batch` + `MarketRowCache` 0.2s 防抖批量，见 §11.29；`DatabaseManager` 拆分未动 |
 | **D. 永不动** | 网络栈、图表 / 手势 / 布局、HTTP / LAN / 更新、引擎宿主、SQLite 每帧查询、定时触发源 | — | — |
 
 ### 9.7 决策点（2026-10-17 用户拍板）
@@ -1123,6 +1123,18 @@ golden: `strategy_dsl.json`（**手写规格**）。
 > `params` 缺省对齐 `BacktestParams`：`days=250` / `initialCapital=100000` / `executeNextOpen=true` / `includeEntry=true`（`pool` / `period` 是取数期参数，纯引擎不使用，传入即忽略）。
 > ⚠️ **A0 期 `equity` 走普通 JSON 数组**（约 250 个点，体积可忽略）；§11.1 说的 `callBin` 零拷贝通道留到接入期（届时入参形状不变，只换运输方式）。
 > `scannedCount` 引擎恒为 `len(bars)`；运行器会覆盖成「实际取数过的标的数」——**运行器侧的取数/as-of 命中不属于本 op**（那是 IO，见 §11.7），故提供可选 `scannedCount` 入参承接覆盖值。
+
+**G 组 · 执行 / 结算主循环（2026-10-18，见 §11.29）**
+
+| op | 入参键 | 出参键 | 对应 Swift |
+| --- | --- | --- | --- |
+| `submit_order` | `draft` `account` `position?` `lastPrice?` `prevClose?` `now` `tzOffsetSeconds` `fills` `orders` | `order` `fills` `positionChange` `cashChange` `ledgerEntry` `logEntry` `rejection` | `SimStore.submit`（校验 → 时段 → 建单 → 成交/持仓/资金/流水推进） |
+| `training_sweep` | `orders` `snapshots` `now` `trainingDate` `tzOffsetSeconds` | `evaluated` `fired` `rejected` `expired` `completed` `orders` `tradeIntents` `alertRecords` | `TrainingSessionController.sweepConditions` |
+| `training_execute_trade` | `sessionState` `trade` `accountType` | `trade`（成交 id/seq/费用/盈亏） | `TrainingSessionController.settleTrade` |
+| `cond_sweep` | `orders` `snapshots` `now` `tzOffsetSeconds` `accounts` `positions` `lastPrices` `prevCloses` `existingFills` `existingOrders` | `evaluated` `fired` `rejected` `expired` `completed` `orders` `newOrders` `newFills` `cashChanges` | **预留（未接线）**：整环结算 op 已实现，`SimCondEngine` 现仍走既有细粒度门面（A/B 组逐 op），本 op 作为后续收尾的可选路径保留 |
+
+> `submit_order` 是**唯一有副作用的 op**：内部复用 C 组 `trade_validate` + B 组判定，返回增量由 Swift 投影层（`applyPositionChangePython` / `appendLedgerFromDict` / `appendLogFromDict`）落到 `@Published`。
+> 另有两支脚本的 op 属阶段 B/C，不在此表：`sim_state.py`（`get_revision`/`sync`/`deposit`/`withdraw`/`create_account`）与 `quote_snapshot.py`（`quote_snapshot`/`quote_snapshot_batch`）——详见 §11.29。
 
 ### 11.4 数值与文案口径（最易踩的一处）
 
@@ -2033,6 +2045,60 @@ done
 3. 首页快捷入口在**横滑行**内（8 项合计宽 > 一屏），默认在屏外 → 需先取该 chip 的最近祖先 `ScrollView` 横滑带入可视区。
 
 **仍待补**：预警创建路径用例（自选长按 → `rowMenu.toggleAlert` → 弹窗应用）；「引擎不可用」橙色 banner（时序性，需加 launch 参数强制「引擎未就绪」才能稳定复现）。
+
+---
+
+### 11.29 阶段 B/C 完全下沉：状态所有权 + 共享枢纽 + 交易执行（2026-10-18）
+
+> 用户拍板「**完全下沉，通过 py 引擎管理**」。继 §11.26/§11.27（A5-4/A5-5）之后，本轮把 §9.6 的**阶段 B（状态所有权反转）**与**阶段 C（拆共享枢纽）**落地，并把**下单执行**与**训练态结算主循环**成对下沉。落地后 Swift 交易域不再「自己算/自己写而引擎只做判定」，而是「**引擎执行 → Swift 只投影**」。
+
+**① 交易执行下沉（`sim_rules.py`，新增 G 组 op，见 §11.3）**
+
+| op | 承接的自有实现 | 说明 |
+| --- | --- | --- |
+| `submit_order` | `SimStore.submit` | 校验 → 时段 → 建单 → 成交/持仓/资金/流水推进**整体在引擎内完成**，返回增量（`order`/`fills`/`positionChange`/`cashChange`/`ledgerEntry`/`logEntry`/`rejection`） |
+| `training_sweep` | `TrainingSessionController.sweepConditions` | 训练态条件单结算主循环（快照来自训练日收盘、有效期按训练日判、触发只返回 `tradeIntents`） |
+| `training_execute_trade` | `TrainingSessionController.settleTrade` | 训练态成交执行（费用 → 资金 → 持仓/盈亏推进） |
+| `cond_sweep` | （`SimCondEngine.sweepConditions` 的整环版） | **已实现但未接线**：`SimCondEngine` 现仍走细粒度门面；保留为后续收尾的可选路径 |
+
+**② 状态所有权反转（`sim_state.py`，阶段 B）**
+
+- 新增 `sim_state_get_revision` / `sim_state_sync` / `sim_state_deposit` / `sim_state_withdraw` / `sim_state_create_account` 五个 op；`SimStateBridge` 增对应富 API。
+- 同步协议：`revision` 单调自增；本地比服务端旧 → `sim_state_sync` **全量**拉取（**diff 留作优化**）。
+- `SimStore` 的账户/资金类写操作（出入金、新建账户）改经引擎完成，Swift 退化为「投影缓存 + 桥接客户端」；`saveToDisk` 保留一次本地写，属**过渡期双写**（Swift 解码为投影、引擎持久化为权威）。
+
+**③ 拆共享枢纽（`quote_snapshot.py`，阶段 C）**
+
+- 新增 `quote_snapshot_batch`：`symbols:[{metaID,bars}]` → `{ "<metaID>": {latestPrice,prevClose,change,changePct} }`。
+- `MarketRowCache` 以 **0.2s 防抖**把多标的合并成一次调用（后台 `computeQueue`，**只下沉非帧的快照路径**）；行内展示仍走 Swift 投影 → **红线 1（引擎不进首帧）前提未变**。
+
+**④ Swift 侧新增门面**
+
+- `SimRulesAsync.swift`：`submitOrder`+`SubmitOrderResult` / `trainingExecuteTrade`+`TrainingExecuteTradeResult` / `trainingSweep`+`TrainingSweepResult`。
+- `SimRulesCodec.swift`：`orderJSON`/`fillJSON`/`orderFromJSON`/`fillFromJSON`。
+- `SimStateBridge.swift` 五个富 API；`QuoteSnapshotBridge.swift` 的 `quoteSnapshotBatch`。
+
+**⑤ 落地时抓到并修掉的四个真实缺陷**
+
+1. `submit_order` 门面曾把 op 名写错为 `training_execute_trade` → 修正。
+2. 结果子字典里的 `UUID`/`Date` 在网络层只是字符串，须**显式解码为原生类型**——否则 `applyPositionChangePython` / `appendLedgerFromDict` / `appendLogFromDict` 的 `as? UUID` / `as? Date` 静默失败，增量丢失。
+3. 引擎 `_op_submit_order` 在**首买建仓**时 `positionChange` 缺 `accountID`/`metaID`/`code`/`name` → Python 侧从 `draft` 回填，保证 Swift 可直接落库（与「引擎返回完整数据、Swift 不补字段」的口径一致）。
+4. `cond_sweep` 有意不接线（见上），避免与 `SimCondEngine` 现有细粒度路径双跑漂移。
+
+**⑥ 信任链**：`sim_rules.py` 变更 → 重跑 `python3 scripts/gen_sim_rules_trust.py`，`expectedScriptSHA256` 更新（仅 sha256 变，`scriptVersion` / `apiVersion` / `ruleConstants` 不变）；`SimRulesTrust.swift` 与 `KlineTests/Fixtures/sim_rules_trust.json` 同步。
+
+**⑦ 验证（2026-10-18）**
+
+| 项 | 结果 |
+| --- | --- |
+| `xcodebuild -scheme Kline -configuration Debug build` | **BUILD SUCCEEDED** |
+| `xcodebuild test -only-testing:KlineTests` | **TEST SUCCEEDED** |
+| `xcodebuild test -only-testing:KlineTests/SimRulesAsyncTests`（**本轮新增 G 组 5 例**） | **全绿** |
+| `xcodebuild test -only-testing:KlineUITests/CondOrderSmokeUITests` | **4/4**（约 61s） |
+| `python3 scripts/verify_sim_rules.py` | **255/255** |
+| `python3 scripts/gen_sim_rules_trust.py --check` | 一致（无漂移） |
+
+> **G 组 op 无 golden fixture**：与 A/B/C 组不同，`submit_order` / `training_*` / `cond_sweep` 直接改状态、依赖 `SimStore` 运行时切片，未纳入 §12 的 Swift-dump fixture；本轮补 `SimRulesAsyncTests` 的 **G 组 5 例不变量回归**（`submit_order` 首买建仓 / 卖出减仓 / 资金不足被拒 + `training_execute_trade` 买卖盈亏 + `training_sweep` 空单），配合 `KlineTests` 全量与 XCUITest 冒烟守。
 
 ---
 
