@@ -215,4 +215,179 @@ final class DbWriteParityTests: XCTestCase {
                        jsonText(dumpRows(swiftDB, tables: present)))
         XCTAssertEqual(jsonText(dumpLastDate(engineDB)), jsonText(dumpLastDate(swiftDB)))
     }
+
+    // MARK: - 增量库（行级写 / 裁剪）对拍
+
+    /// 建一个临时增量库：`live_meta` + 五张 `live_*` 周期表（schema 与 `LiveDataStore.schemaSQL` 一致）。
+    private func makeTempLiveDB(_ tag: String) throws -> String {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("livewrite_\(tag)_\(UUID().uuidString).db").path
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let sql = "CREATE TABLE live_meta(file TEXT PRIMARY KEY, code TEXT, name TEXT, type TEXT, "
+            + "updated_at INTEGER);"
+            + "CREATE TABLE live_daily(file TEXT, date INTEGER, open REAL, high REAL, low REAL, "
+            + "close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));"
+            + "CREATE TABLE live_weekly(file TEXT, date INTEGER, open REAL, high REAL, low REAL, "
+            + "close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));"
+            + "CREATE TABLE live_monthly(file TEXT, date INTEGER, open REAL, high REAL, low REAL, "
+            + "close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));"
+            + "CREATE TABLE live_quarterly(file TEXT, date INTEGER, open REAL, high REAL, low REAL, "
+            + "close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));"
+            + "CREATE TABLE live_yearly(file TEXT, date INTEGER, open REAL, high REAL, low REAL, "
+            + "close REAL, vol REAL, amo REAL, PRIMARY KEY(file, date));"
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        return path
+    }
+
+    /// 读回增量库全部内容（live_meta + 五表），序列化为确定性 JSON。
+    private func dumpLive(_ path: String) -> String {
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else { return "<open failed>" }
+        defer { sqlite3_close(db) }
+        var meta: [[String: Any]] = []
+        var st: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT file,code,name,type,updated_at FROM live_meta ORDER BY file;",
+                              -1, &st, nil) == SQLITE_OK {
+            while sqlite3_step(st) == SQLITE_ROW {
+                func text(_ i: Int32) -> String {
+                    sqlite3_column_text(st, i).map { String(cString: $0) } ?? ""
+                }
+                meta.append(["file": text(0), "code": text(1), "name": text(2), "type": text(3),
+                             "updated_at": Int(sqlite3_column_int64(st, 4))])
+            }
+        }
+        sqlite3_finalize(st)
+        var bars: [[String: Any]] = []
+        for table in ["live_daily", "live_weekly", "live_monthly", "live_quarterly", "live_yearly"] {
+            var q: OpaquePointer?
+            let sql = "SELECT file,date,open,high,low,close,vol,amo FROM \(table) ORDER BY file,date;"
+            guard sqlite3_prepare_v2(db, sql, -1, &q, nil) == SQLITE_OK else { continue }
+            while sqlite3_step(q) == SQLITE_ROW {
+                bars.append(["table": table,
+                             "file": sqlite3_column_text(q, 0).map { String(cString: $0) } ?? "",
+                             "date": Int(sqlite3_column_int64(q, 1)),
+                             "open": sqlite3_column_double(q, 2),
+                             "high": sqlite3_column_double(q, 3),
+                             "low": sqlite3_column_double(q, 4),
+                             "close": sqlite3_column_double(q, 5),
+                             "vol": sqlite3_column_double(q, 6),
+                             "amo": sqlite3_column_double(q, 7)])
+            }
+            sqlite3_finalize(q)
+        }
+        return jsonText(meta) + "||" + jsonText(bars)
+    }
+
+    /// 后台线程执行（`blockingCall` 断言禁止主线程同步等待 Python）。
+    private func onBackground<T>(_ body: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { cont.resume(returning: try body()) } catch { cont.resume(throwing: error) }
+            }
+        }
+    }
+
+    private func liveBar(_ file: String, _ date: Int, close: Double) -> LiveUpsertBar {
+        LiveUpsertBar(file: file, date: date, open: 10.0, high: 11.0, low: 9.5,
+                      close: close, vol: 1000, amo: 10000)
+    }
+
+    private func liveBarJSON(_ b: LiveUpsertBar) -> [String: Any] {
+        ["file": b.file, "date": b.date, "open": b.open, "high": b.high,
+         "low": b.low, "close": b.close, "vol": b.vol, "amo": b.amo]
+    }
+
+    /// 场景 3：增量库行级写（`live_upsert_daily`）—— 库内已有 meta 行与同值 bar 时只写变化部分。
+    func testLiveUpsertDailyParity() async throws {
+        try await ensureEngineReady()
+        let swiftDB = try makeTempLiveDB("swift3")
+        let engineDB = try makeTempLiveDB("engine3")
+
+        // 两边预置同样的「库内现状」：已有 SH#600000 的 meta + 同值日线（不应再写）
+        for path in [swiftDB, engineDB] {
+            var db: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+            sqlite3_exec(db, "INSERT INTO live_meta VALUES('SH#600000','600000','浦发','1',100);", nil, nil, nil)
+            sqlite3_exec(db, "INSERT INTO live_daily VALUES('SH#600000',20260101,10.0,11.0,9.5,10.5,1000,10000);",
+                         nil, nil, nil)
+            sqlite3_close(db)
+        }
+
+        let newMetas = [LiveUpsertMeta(file: "SZ#000001", code: "000001", name: "平安", type: "1")]
+        let changedBars = [liveBar("SH#600000", 20260102, close: 12.5),
+                           liveBar("SZ#000001", 20260101, close: 20.0)]
+        let quarterly = [liveBar("SH#600000", 20260101, close: 33.0)]
+
+        // A：Swift oracle（对任意 handle 执行写语句）
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(swiftDB, &db), SQLITE_OK)
+        let a = LiveDataStore.upsertWriteOracle(
+            handle: db!, newMetas: newMetas, changedBars: changedBars,
+            changedPeriodBars: [("live_quarterly", quarterly)],
+            updatedAt: 999, periodRowCount: quarterly.count,
+            totalMetaCount: newMetas.count + 1, totalBarCount: changedBars.count)
+        sqlite3_close(db)
+
+        // B：引擎 op
+        let metasJSON = newMetas.map { ["file": $0.file, "code": $0.code, "name": $0.name, "type": $0.type] }
+        let dailyJSON = changedBars.map(liveBarJSON)
+        let quarterlyJSON = quarterly.map(liveBarJSON)
+        let b = try await onBackground {
+            try DbWriteBridge.liveUpsertDaily(
+                dbPath: engineDB, dailyTable: "live_daily",
+                quarterlyTable: "live_quarterly", yearlyTable: nil,
+                metas: metasJSON, metaUpdatedAt: 999,
+                daily: dailyJSON, quarterly: quarterlyJSON, yearly: [],
+                periodRowCount: quarterlyJSON.count,
+                totalMetaCount: metasJSON.count + 1, totalBarCount: dailyJSON.count).get()
+        }
+
+        XCTAssertEqual(b.ok, a.ok)
+        XCTAssertEqual(b.metaRows, a.metaRows)
+        XCTAssertEqual(b.dailyRows, a.dailyRows)
+        XCTAssertEqual(b.quarterlyRows, a.quarterlyRows)
+        XCTAssertEqual(b.yearlyRows, a.yearlyRows)
+        XCTAssertEqual(b.coveredFiles, a.coveredFiles)
+        XCTAssertEqual(b.message, a.message)
+        XCTAssertEqual(dumpLive(engineDB), dumpLive(swiftDB))
+    }
+
+    /// 场景 4：增量库裁剪（`live_trim`）—— 只执行 DELETE，边界由调用方算。
+    func testLiveTrimParity() async throws {
+        try await ensureEngineReady()
+        let swiftDB = try makeTempLiveDB("swift4")
+        let engineDB = try makeTempLiveDB("engine4")
+        for path in [swiftDB, engineDB] {
+            var db: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+            for date in [20251201, 20260101, 20260201] {
+                sqlite3_exec(db, "INSERT INTO live_daily VALUES('SH#600000',\(date),10,11,9,10.5,1000,10000);",
+                             nil, nil, nil)
+            }
+            for date in [20260101, 20260201] {
+                sqlite3_exec(db, "INSERT INTO live_quarterly VALUES('SH#600000',\(date),30,31,29,30.5,1,1);",
+                             nil, nil, nil)
+            }
+            sqlite3_close(db)
+        }
+        // 日线 `<= 20260101`（含等号）；季线 `< 20260101`（当期桶起始，不含等号）
+        let items: [(table: String, bound: Int, inclusive: Bool)] =
+            [("live_daily", 20260101, true), ("live_quarterly", 20260101, false)]
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(swiftDB, &db), SQLITE_OK)
+        let a = LiveDataStore.trimWriteOracle(handle: db!, items: items)
+        sqlite3_close(db)
+
+        let payload = items.map { ["table": $0.table, "bound": $0.bound, "inclusive": $0.inclusive] }
+        let b = try await onBackground {
+            try DbWriteBridge.liveTrim(dbPath: engineDB, beforeDate: 20260101, items: payload).get()
+        }
+
+        XCTAssertEqual(b.ok, a.ok)
+        XCTAssertEqual(b.deletedRows, a.deletedRows)
+        XCTAssertEqual(dumpLive(engineDB), dumpLive(swiftDB))
+    }
 }

@@ -336,7 +336,7 @@ final class LiveDataStore: ObservableObject {
                      completion: @escaping (LiveMergeResult) -> Void) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            let result = self._upsertDailyLocked(metas: metas, bars: bars,
+            let result = self._upsertDailyViaEngineLocked(metas: metas, bars: bars,
                                                  periodBars: periodBars, updatedAt: updatedAt)
             // 无变化时 metaRows / dailyRows 均为 0：库文件未变，跳过刷新（否则会白走一次指纹比对链路）
             if result.ok && (result.metaRows > 0 || result.dailyRows > 0
@@ -355,7 +355,7 @@ final class LiveDataStore: ObservableObject {
     func trim(beforeDate: Int, completion: @escaping (LiveTrimResult) -> Void) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            let result = self._trimLocked(beforeDate: beforeDate)
+            let result = self._trimViaEngineLocked(beforeDate: beforeDate)
             if result.ok && result.deletedRows > 0 { self._refreshAfterInternalWriteLocked(reason: "内部裁剪") }
             DispatchQueue.main.async { completion(result) }
         }
@@ -840,6 +840,28 @@ final class LiveDataStore: ObservableObject {
             return r
         }
 
+        return Self.upsertWriteOracle(handle: handle,
+                                      newMetas: newMetas,
+                                      changedBars: changedBars,
+                                      changedPeriodBars: changedPeriodBars,
+                                      updatedAt: updatedAt,
+                                      periodRowCount: periodRowCount,
+                                      totalMetaCount: metas.count,
+                                      totalBarCount: bars.count)
+    }
+
+    /// 增量库行级**写语句块**（可对任意已打开的增量库 handle 执行）。
+    /// ⚠️ S5（§11.33）起生产不再调用——写语句由 `db_write.py` 的 `live_upsert_daily` 承接；
+    /// 本函数保留为**单测对拍 oracle**（`KlineTests/DbWriteParityTests` 在同输入临时库上双跑比对）。
+    static func upsertWriteOracle(handle: OpaquePointer,
+                                  newMetas: [LiveUpsertMeta],
+                                  changedBars: [LiveUpsertBar],
+                                  changedPeriodBars: [(table: String, bars: [LiveUpsertBar])],
+                                  updatedAt: Int,
+                                  periodRowCount: Int,
+                                  totalMetaCount: Int,
+                                  totalBarCount: Int) -> LiveMergeResult {
+        var r = LiveMergeResult()
         guard sqlite3_exec(handle, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
             r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
             return r
@@ -944,11 +966,90 @@ final class LiveDataStore: ObservableObject {
             return r
         }
         r.ok = true
-        r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
+        r.coveredFiles = Self.liveMetaRowCount(handle)
         r.message = "写入完成 meta新增=\(r.metaRows) 条 / daily变化=\(r.dailyRows) 行"
             + " / 季\(r.quarterlyRows)行·年\(r.yearlyRows)行"
-            + "（传入 meta \(metas.count) 条 / 日线 \(bars.count) 行 / 当期季年 \(periodRowCount) 行，其余与库内一致已跳过）覆盖=\(r.coveredFiles)只"
+            + "（传入 meta \(totalMetaCount) 条 / 日线 \(totalBarCount) 行 / 当期季年 \(periodRowCount) 行，其余与库内一致已跳过）覆盖=\(r.coveredFiles)只"
         return r
+    }
+
+    /// `live_meta` 行数（静态版，供 oracle 使用）。
+    private static func liveMetaRowCount(_ handle: OpaquePointer) -> Int {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "SELECT COUNT(*) FROM live_meta;", -1, &statement, nil) == SQLITE_OK,
+              let statement else { return 0 }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int64(statement, 0)) : 0
+    }
+
+    /// S5（§11.33）生产路径：行级**写语句**下沉 `db_write.py` 的 `live_upsert_daily`。
+    /// 写前筛选（读 + 1e-6 容差比对）与表名解析仍留 Swift（§9.6 阶段 D 红线：读留 Swift），
+    /// 与 oracle `upsertWriteOracle` 共用同一批 helper（`_rowIdenticalLocked` / `_metaExistsLocked`）。
+    private func _upsertDailyViaEngineLocked(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
+                                             periodBars: [String: [LiveUpsertBar]],
+                                             updatedAt: Int) -> LiveMergeResult {
+        var r = LiveMergeResult()
+        guard !metas.isEmpty || !bars.isEmpty || !periodBars.isEmpty else {
+            r.message = "无数据可写入"
+            return r
+        }
+        guard _ensureWritableOpenLocked(), let handle = db else {
+            r.message = "本地增量库不可写（打开失败）"
+            return r
+        }
+
+        let changedBars = bars.filter { !_rowIdenticalLocked(handle, table: "live_daily", bar: $0) }
+        let newMetas = metas.filter { !_metaExistsLocked(handle, file: $0.file) }
+        var changedQuarterly: [LiveUpsertBar] = []
+        var changedYearly: [LiveUpsertBar] = []
+        for period in ["quarterly", "yearly"] {
+            guard let rows = periodBars[period], !rows.isEmpty,
+                  let table = _localTableNameLocked(period) else { continue }
+            let changed = rows.filter { !_rowIdenticalLocked(handle, table: table, bar: $0) }
+            if changed.isEmpty { continue }
+            if period == "quarterly" { changedQuarterly = changed } else { changedYearly = changed }
+        }
+        let periodRowCount = periodBars.values.reduce(0) { $0 + $1.count }
+        guard !changedBars.isEmpty || !newMetas.isEmpty
+            || !changedQuarterly.isEmpty || !changedYearly.isEmpty else {
+            r.ok = true
+            r.message = "无变化：日线 \(bars.count) 行 / meta \(metas.count) 条 / 当期季年 \(periodRowCount) 行均与库内一致 → 跳过写入"
+            return r
+        }
+
+        let outcome = DbWriteBridge.liveUpsertDaily(
+            dbPath: Self.writableDBPath,
+            dailyTable: "live_daily",
+            quarterlyTable: changedQuarterly.isEmpty ? nil : _localTableNameLocked("quarterly"),
+            yearlyTable: changedYearly.isEmpty ? nil : _localTableNameLocked("yearly"),
+            metas: newMetas.map { ["file": $0.file, "code": $0.code, "name": $0.name, "type": $0.type] },
+            metaUpdatedAt: updatedAt,
+            daily: changedBars.map(Self.barJSON),
+            quarterly: changedQuarterly.map(Self.barJSON),
+            yearly: changedYearly.map(Self.barJSON),
+            periodRowCount: periodRowCount,
+            totalMetaCount: metas.count,
+            totalBarCount: bars.count)
+        switch outcome {
+        case .failure(let f):
+            r.message = "写入失败（引擎）：\(f)"
+            return r
+        case .success(let o):
+            r.ok = o.ok
+            r.metaRows = o.metaRows
+            r.dailyRows = o.dailyRows
+            r.quarterlyRows = o.quarterlyRows
+            r.yearlyRows = o.yearlyRows
+            r.coveredFiles = o.coveredFiles
+            r.message = o.message
+            return r
+        }
+    }
+
+    /// 增量 bar → 引擎入参 JSON（键名与 `db_write.py` 契约一致）。
+    private static func barJSON(_ b: LiveUpsertBar) -> [String: Any] {
+        ["file": b.file, "date": b.date, "open": b.open, "high": b.high,
+         "low": b.low, "close": b.close, "vol": b.vol, "amo": b.amo]
     }
 
     /// 浮点比对容差：仅用于「这次要不要写」，不影响写入值的精度
@@ -1013,24 +1114,55 @@ final class LiveDataStore: ObservableObject {
         //   → 把 0831/0907/0914/0921 这 4 根**主库根本没有**的周线一并删掉（补缺口白做）。
         //   改用 beforeDate：锚桶及其之后全部保留 —— 主库那一份是**被截断**的
         //   （8 月月线只有 0801~0828），必须由增量库覆盖。
-        var total = 0
+        // S5（§11.33）：**边界由 Swift 算**（周/月/季/年的「当期日历起始」= 读侧口径，见
+        // `KlinePeriod.periodDateRange`），**DELETE 语句交给引擎**；两条路径共用同一批边界。
+        let written = Self.trimWriteOracle(handle: handle,
+                                           items: _trimBoundsLocked(beforeDate: beforeDate))
+        guard written.ok else { return written }
+        r.ok = true
+        r.deletedRows = written.deletedRows
+        r.message = "裁剪完成：删除 \(written.deletedRows) 行"
+            + "（日线 date <= \(beforeDate)；周/月/季/年 < 主库最新日 \(beforeDate) 所在周期桶起始）"
+        return r
+    }
+
+    /// 裁剪边界（表名 + 边界日 + 是否含等号）——表名解析与日历推算留 Swift，两条写路径共用。
+    private func _trimBoundsLocked(beforeDate: Int) -> [(table: String, bound: Int, inclusive: Bool)] {
+        var out: [(table: String, bound: Int, inclusive: Bool)] = []
         for period in Self.periodTables {
             guard let table = _localTableNameLocked(period) else { continue }
             let periodStart = Self.periodCalendarStart(period, referenceDate: beforeDate)
-            let bound = periodStart ?? beforeDate
-            let op = periodStart == nil ? "<=" : "<"
+            out.append((table: table, bound: periodStart ?? beforeDate,
+                        inclusive: periodStart == nil))
+        }
+        return out
+    }
+
+    /// 裁剪**写语句块**（单事务 DELETE，可对任意已打开的增量库 handle 执行）。
+    /// ⚠️ S5 起生产由 `db_write.py` 的 `live_trim` 承接；本函数保留为**单测对拍 oracle**。
+    static func trimWriteOracle(handle: OpaquePointer,
+                                items: [(table: String, bound: Int, inclusive: Bool)]) -> LiveTrimResult {
+        var r = LiveTrimResult()
+        guard sqlite3_exec(handle, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            r.message = "开启事务失败：\(String(cString: sqlite3_errmsg(handle)))"
+            return r
+        }
+        var total = 0
+        for item in items {
+            let op = item.inclusive ? "<=" : "<"
             var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(handle, "DELETE FROM \(table) WHERE date \(op) ?;", -1, &statement, nil) == SQLITE_OK else {
+            guard sqlite3_prepare_v2(handle, "DELETE FROM \(item.table) WHERE date \(op) ?;",
+                                     -1, &statement, nil) == SQLITE_OK else {
                 sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
-                r.message = "准备裁剪 \(table) 语句失败"
+                r.message = "准备裁剪 \(item.table) 语句失败"
                 return r
             }
-            sqlite3_bind_int64(statement, 1, Int64(bound))
+            sqlite3_bind_int64(statement, 1, Int64(item.bound))
             let stepOK = sqlite3_step(statement) == SQLITE_DONE
             sqlite3_finalize(statement)
             guard stepOK else {
                 sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
-                r.message = "裁剪 \(table) 失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
+                r.message = "裁剪 \(item.table) 失败（已回滚）：\(String(cString: sqlite3_errmsg(handle)))"
                 return r
             }
             total += Int(sqlite3_changes(handle))
@@ -1042,8 +1174,36 @@ final class LiveDataStore: ObservableObject {
         }
         r.ok = true
         r.deletedRows = total
-        r.message = "裁剪完成：删除 \(total) 行（日线 date <= \(beforeDate)；周/月/季/年 < 主库最新日 \(beforeDate) 所在周期桶起始）"
         return r
+    }
+
+    /// S5 生产路径：裁剪的 DELETE 交给引擎（`live_trim`）。
+    /// 引擎未就绪 → ok=false（用户 2026-10-18 拍板「先不管降级」）。
+    private func _trimViaEngineLocked(beforeDate: Int) -> LiveTrimResult {
+        var r = LiveTrimResult()
+        guard beforeDate > 0, _ensureWritableOpenLocked() else {
+            r.ok = true
+            r.message = "无需裁剪"
+            return r
+        }
+        let items = _trimBoundsLocked(beforeDate: beforeDate)
+        guard !items.isEmpty else {
+            r.ok = true
+            r.message = "无需裁剪"
+            return r
+        }
+        let payload = items.map { ["table": $0.table, "bound": $0.bound, "inclusive": $0.inclusive] }
+        switch DbWriteBridge.liveTrim(dbPath: Self.writableDBPath, beforeDate: beforeDate,
+                                      items: payload) {
+        case .failure(let f):
+            r.message = "裁剪失败（引擎）：\(f)"
+            return r
+        case .success(let o):
+            r.ok = o.ok
+            r.deletedRows = o.deletedRows
+            r.message = o.message
+            return r
+        }
     }
 
     /// 周/月/季/年线在参考日所在**当期**的日历起始日（YYYYMMDD）：

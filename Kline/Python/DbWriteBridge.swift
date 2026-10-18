@@ -62,13 +62,48 @@ enum DbWriteBridge {
         }
     }
 
-    /// 主库合并（同步阻塞；调用点须在后台队列上且持有主库串行化队列）。
-    static func mainDBMerge(dbPath: String,
-                            snapshot: [String: [[String: Any]]],
-                            timeout: TimeInterval = 120) -> Result<MainMergeOutcome, Failure> {
+    /// 增量库行级写（`live_upsert_daily`）出参。
+    struct LiveUpsertOutcome {
+        var ok = false
+        var metaRows = 0
+        var dailyRows = 0
+        var quarterlyRows = 0
+        var yearlyRows = 0
+        var coveredFiles = 0
+        var message = ""
+
+        init(from d: [String: Any]) {
+            func int(_ key: String) -> Int { (d[key] as? NSNumber)?.intValue ?? 0 }
+            ok = (d["ok"] as? Bool) ?? false
+            metaRows = int("metaRows")
+            dailyRows = int("dailyRows")
+            quarterlyRows = int("quarterlyRows")
+            yearlyRows = int("yearlyRows")
+            coveredFiles = int("coveredFiles")
+            message = (d["message"] as? String) ?? ""
+        }
+    }
+
+    /// 增量库裁剪（`live_trim`）出参。
+    struct LiveTrimOutcome {
+        var ok = false
+        var deletedRows = 0
+        var message = ""
+
+        init(from d: [String: Any]) {
+            ok = (d["ok"] as? Bool) ?? false
+            deletedRows = (d["deletedRows"] as? NSNumber)?.intValue ?? 0
+            message = (d["message"] as? String) ?? ""
+        }
+    }
+
+    /// 统一入口：跑一次 `db_write.py` op，返回 `result` 字典。
+    static func run(_ op: String, _ input: [String: Any],
+                    timeout: TimeInterval) -> Result<[String: Any], Failure> {
         guard KlinePythonBridge.shared.isReady else { return .failure(.engineNotReady) }
-        let input: [String: Any] = ["op": "main_db_merge", "dbPath": dbPath, "snapshot": snapshot]
-        switch KlinePythonBridge.shared.blockingCall(script: "db_write", input: input, timeout: timeout) {
+        var payload = input
+        payload["op"] = op
+        switch KlinePythonBridge.shared.blockingCall(script: "db_write", input: payload, timeout: timeout) {
         case .failure(let e):
             return .failure(.callError(String(describing: e)))
         case .success(let data):
@@ -82,7 +117,52 @@ enum DbWriteBridge {
             guard let result = obj["result"] as? [String: Any] else {
                 return .failure(.badOutput)
             }
-            return .success(MainMergeOutcome(from: result))
+            return .success(result)
         }
+    }
+
+    /// 主库合并（同步阻塞；调用点须在后台队列上且持有主库串行化队列）。
+    static func mainDBMerge(dbPath: String,
+                            snapshot: [String: [[String: Any]]],
+                            timeout: TimeInterval = 120) -> Result<MainMergeOutcome, Failure> {
+        run("main_db_merge", ["dbPath": dbPath, "snapshot": snapshot], timeout: timeout)
+            .map(MainMergeOutcome.init(from:))
+    }
+
+    /// 增量库行级写（同步阻塞；调用点在 `LiveDataStore.queue` 上）。
+    /// ⚠️ 「哪些行要写」的判定（读 + 容差比对）与表名解析由调用方完成，本层只传「已筛好的变化集合」。
+    static func liveUpsertDaily(dbPath: String,
+                                dailyTable: String,
+                                quarterlyTable: String?,
+                                yearlyTable: String?,
+                                metas: [[String: Any]],
+                                metaUpdatedAt: Int,
+                                daily: [[String: Any]],
+                                quarterly: [[String: Any]],
+                                yearly: [[String: Any]],
+                                periodRowCount: Int,
+                                totalMetaCount: Int,
+                                totalBarCount: Int,
+                                timeout: TimeInterval = 120) -> Result<LiveUpsertOutcome, Failure> {
+        var input: [String: Any] = ["dbPath": dbPath, "dailyTable": dailyTable,
+                                    "metaUpdatedAt": metaUpdatedAt,
+                                    "metas": metas, "daily": daily,
+                                    "quarterly": quarterly, "yearly": yearly,
+                                    "periodRowCount": periodRowCount,
+                                    "totalMetaCount": totalMetaCount,
+                                    "totalBarCount": totalBarCount]
+        if let quarterlyTable { input["quarterlyTable"] = quarterlyTable }
+        if let yearlyTable { input["yearlyTable"] = yearlyTable }
+        return run("live_upsert_daily", input, timeout: timeout)
+            .map(LiveUpsertOutcome.init(from:))
+    }
+
+    /// 增量库裁剪（同步阻塞）。`items = [{table, bound, inclusive}]`，边界由调用方算。
+    static func liveTrim(dbPath: String, beforeDate: Int,
+                         items: [[String: Any]],
+                         timeout: TimeInterval = 60) -> Result<LiveTrimOutcome, Failure> {
+        run("live_trim", ["dbPath": dbPath, "beforeDate": beforeDate, "items": items],
+            timeout: timeout)
+            .map(LiveTrimOutcome.init(from:))
     }
 }

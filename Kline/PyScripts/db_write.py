@@ -149,8 +149,168 @@ def _op_main_db_merge(inp):
         conn.close()
 
 
+_SQL_INSERT_LIVE_META = ("INSERT OR IGNORE INTO live_meta(file,code,name,type,updated_at) "
+                         "VALUES(?,?,?,?,?)")
+_SQL_BAR = "INSERT OR REPLACE INTO %s(file,date,open,high,low,close,vol,amo) VALUES(?,?,?,?,?,?,?,?)"
+
+
+def _write_bars(cur, table, rows):
+    """按 (file,date) UPSERT 一组 bar，返回本次 changes 行数。"""
+    n = 0
+    for b in rows:
+        before = cur.connection.total_changes
+        cur.execute(_SQL_BAR % table,
+                    (b.get("file"), _int(b.get("date")), _num(b.get("open")), _num(b.get("high")),
+                     _num(b.get("low")), _num(b.get("close")), _num(b.get("vol")),
+                     _num(b.get("amo"))))
+        n += cur.connection.total_changes - before
+    return n
+
+
+def _op_live_upsert_daily(inp):
+    """增量库行级写（清单日更 / 补缺口的结果落 live_*.db）。
+
+    ⚠️ 边界（§11.33）：**「哪些行需要写」的判定留在 Swift**
+    （`_rowIdenticalLocked` / `_metaExistsLocked` 的读 + 1e-6 容差比对 = 读路径，按 §9.6 阶段 D 红线留 Swift；
+    表名解析、schema 保证、日历推算同样留 Swift）。本 op 只承接**写语句**：
+    给定已筛好的「变化集合」执行 `INSERT OR IGNORE`（live_meta）+ `INSERT OR REPLACE`（各周期表）。
+
+    输入：{"dbPath", "dailyTable", "quarterlyTable"|None, "yearlyTable"|None, "metaUpdatedAt",
+           "metas":[{file,code,name,type}], "daily":[bar], "quarterly":[bar], "yearly":[bar],
+           "periodRowCount", "totalMetaCount", "totalBarCount"}
+    输出：{"ok", "metaRows", "dailyRows", "quarterlyRows", "yearlyRows", "coveredFiles", "message"}
+    """
+    db_path = inp.get("dbPath")
+    if not db_path or not os.path.exists(db_path):
+        return _ok(result={"ok": False, "message": "本地增量库不可写（打开失败）"})
+    daily_table = inp.get("dailyTable")
+    metas = inp.get("metas") or []
+    daily = inp.get("daily") or []
+    quarterly = inp.get("quarterly") or []
+    yearly = inp.get("yearly") or []
+    meta_updated_at = _int(inp.get("metaUpdatedAt"))
+    period_row_count = _int(inp.get("periodRowCount"))
+    total_meta = _int(inp.get("totalMetaCount"))
+    total_bars = _int(inp.get("totalBarCount"))
+
+    out = {"ok": True, "metaRows": 0, "dailyRows": 0, "quarterlyRows": 0,
+           "yearlyRows": 0, "coveredFiles": 0, "message": ""}
+
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        conn.isolation_level = None
+        cur = conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+        except Exception as exc:  # noqa: BLE001
+            out["ok"] = False
+            out["message"] = "开启事务失败：%s" % exc
+            return _ok(result=out)
+
+        failed = None
+        try:
+            if metas:
+                for m in metas:
+                    before = conn.total_changes
+                    cur.execute(_SQL_INSERT_LIVE_META,
+                                (m.get("file"), m.get("code"), m.get("name"), m.get("type"),
+                                 meta_updated_at))
+                    out["metaRows"] += conn.total_changes - before
+            if daily_table and daily:
+                out["dailyRows"] = _write_bars(cur, daily_table, daily)
+            if inp.get("quarterlyTable") and quarterly:
+                out["quarterlyRows"] = _write_bars(cur, inp["quarterlyTable"], quarterly)
+            if inp.get("yearlyTable") and yearly:
+                out["yearlyRows"] = _write_bars(cur, inp["yearlyTable"], yearly)
+            cur.execute("COMMIT")
+        except Exception as exc:  # noqa: BLE001
+            failed = str(exc)
+            try:
+                cur.execute("ROLLBACK")
+            except Exception:  # noqa: BLE001
+                pass
+
+        if failed is not None:
+            out["ok"] = False
+            out["metaRows"] = out["dailyRows"] = 0
+            out["quarterlyRows"] = out["yearlyRows"] = 0
+            out["coveredFiles"] = 0
+            out["message"] = "写入失败（已回滚）%s" % failed
+            return _ok(result=out)
+
+        out["coveredFiles"] = cur.execute("SELECT COUNT(*) FROM live_meta;").fetchone()[0]
+        out["message"] = ("写入完成 meta新增=%d 条 / daily变化=%d 行 / 季%d行·年%d行"
+                          "（传入 meta %d 条 / 日线 %d 行 / 当期季年 %d 行，其余与库内一致已跳过）覆盖=%d只"
+                          % (out["metaRows"], out["dailyRows"], out["quarterlyRows"],
+                             out["yearlyRows"], total_meta, total_bars, period_row_count,
+                             out["coveredFiles"]))
+        return _ok(result=out)
+    finally:
+        conn.close()
+
+
+def _op_live_trim(inp):
+    """增量库裁剪（DELETE）：**边界由 Swift 算**（周/月/季/年的「当期日历起始」依赖
+    `KlinePeriod.periodDateRange`，属读侧口径，留 Swift），本 op 只执行删除语句。
+
+    输入：{"dbPath", "beforeDate", "items":[{"table","bound","inclusive":bool}]}
+    输出：{"ok", "deletedRows", "message"}
+    """
+    db_path = inp.get("dbPath")
+    before_date = _int(inp.get("beforeDate"))
+    items = inp.get("items") or []
+    if not db_path or not os.path.exists(db_path) or before_date <= 0:
+        return _ok(result={"ok": True, "deletedRows": 0, "message": "无需裁剪"})
+
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        conn.isolation_level = None
+        cur = conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+        except Exception as exc:  # noqa: BLE001
+            return _ok(result={"ok": False, "deletedRows": 0,
+                               "message": "开启事务失败：%s" % exc})
+
+        total = 0
+        for item in items:
+            table = item.get("table")
+            if not table:
+                continue
+            op = "<=" if item.get("inclusive") else "<"
+            try:
+                before = conn.total_changes
+                cur.execute("DELETE FROM %s WHERE date %s ?" % (table, op),
+                            (_int(item.get("bound")),))
+                total += conn.total_changes - before
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    cur.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001
+                    pass
+                return _ok(result={"ok": False, "deletedRows": 0,
+                                   "message": "裁剪 %s 失败（已回滚）：%s" % (table, exc)})
+        try:
+            cur.execute("COMMIT")
+        except Exception as exc:  # noqa: BLE001
+            try:
+                cur.execute("ROLLBACK")
+            except Exception:  # noqa: BLE001
+                pass
+            return _ok(result={"ok": False, "deletedRows": 0,
+                               "message": "裁剪提交失败（已回滚）：%s" % exc})
+        return _ok(result={"ok": True, "deletedRows": total,
+                           "message": "裁剪完成：删除 %d 行（日线 date <= %d；"
+                                      "周/月/季/年 < 主库最新日 %d 所在周期桶起始）"
+                                      % (total, before_date, before_date)})
+    finally:
+        conn.close()
+
+
 _OPS = {
     "main_db_merge": _op_main_db_merge,
+    "live_upsert_daily": _op_live_upsert_daily,
+    "live_trim": _op_live_trim,
 }
 
 
