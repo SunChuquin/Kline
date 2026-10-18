@@ -47,7 +47,7 @@ final class SimRulesTrust: ObservableObject {
 
     /// sim_rules.py 的 sha256（sha256sum 全小写十六进制）
     /// nonisolated：编译期常量，需在非隔离上下文（信任链纯判定 / 测试注入）读取。
-    nonisolated static let expectedScriptSHA256 = "4c2eff2680806bb999abf2434e6529b7a9c88bfcedf7d025c590f13ca86aabea"
+    nonisolated static let expectedScriptSHA256 = "67334e0a3cd2e641dd7208da7a93d1db5b9094296b25df34c3063f4034f93eeb"
     /// sim_rules.py 的 SIM_RULES_SCRIPT_VERSION
     nonisolated static let scriptVersion = 1
     /// sim_rules.py 的 SIM_RULES_REQUIRED_API_VERSION（与 manifest.apiVersion 配对）

@@ -1347,10 +1347,53 @@ def _op_cond_sweep(inp):
         elif decision["decision"] == "fire":
             qty = int(decision.get("qty", 0) or 0)
             at = float(decision.get("at", 0) or 0)
+            directive = order.get("directive", {})
+
+            # 「仅提醒」（alertOnly）：不下单、不产生任何委托 / 成交 / 资金变动，
+            # 只写运行时状态（触发时间 / 触发价 / 文案）并追加一条预警记录。
+            # ⚠️ 镜像 SimCondEngine.fireAlertOnly：多触发类型（网格 / 分批）同样推进档位 / 批次，
+            #    且每次触发都追加记录（不覆盖历史）；文案走同源 helper `_alert_message`。
+            if directive.get("alertOnly"):
+                alert_msg = _alert_message(order, at)
+                rt = order.get("runtime", {})
+                rt["lastEvaluatedAt"] = now_str
+                rt["lastPrice"] = snapshot.get("last", rt.get("lastPrice"))
+                rt["lastTriggerPrice"] = at
+                order["runtime"] = rt
+                order["triggeredCount"] = int(order.get("triggeredCount", 0) or 0) + 1
+                order["updatedAt"] = now_str
+
+                alert_kind = order.get("kind")
+                if alert_kind in ("grid", "batch"):
+                    order["runtime"] = _advance_repeatable(order, at)
+                    if _repeatable_finished(order):
+                        order["status"] = "completed"
+                        order["runtime"]["lastMessage"] = ("已完成全部档位" if alert_kind == "grid"
+                                                           else "已完成全部批次")
+                        completed += 1
+                    else:
+                        order["runtime"]["lastMessage"] = alert_msg
+                else:
+                    order["status"] = "triggered"
+                    order["triggeredAt"] = now_str
+                    order["runtime"]["lastMessage"] = alert_msg
+                fired += 1
+
+                alert_records.append({
+                    "id": str(_uuid.uuid4()),
+                    "condID": order_id,
+                    "metaID": order.get("metaID"),
+                    "code": order.get("code"),
+                    "name": order.get("name"),
+                    "price": at,
+                    "message": alert_msg,
+                    "occurredAt": now_str,
+                })
+                updated_orders.append(order)
+                continue
 
             # 触发方向 / 执行价（B 组）
             direction = _fire_direction(order, at)
-            directive = order.get("directive", {})
             exec_price = _execution_price(directive, at)
 
             # 组装草稿
@@ -1395,9 +1438,11 @@ def _op_cond_sweep(inp):
                 rejected += 1
                 rt = order.get("runtime", {})
                 rt["lastEvaluatedAt"] = now_str
+                rt["lastPrice"] = snapshot.get("last", rt.get("lastPrice"))
                 rt["lastTriggerPrice"] = at
                 rt["lastMessage"] = sr_rejection.get("message", "")
                 order["runtime"] = rt
+                order["updatedAt"] = now_str
                 if order.get("kind") not in ("grid", "batch"):
                     order["status"] = "rejected"
                 log_entries.append({

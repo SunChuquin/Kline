@@ -1,6 +1,6 @@
 {
   "script": "sim_rules",
-  "sha256": "4c2eff2680806bb999abf2434e6529b7a9c88bfcedf7d025c590f13ca86aabea",
+  "sha256": "67334e0a3cd2e641dd7208da7a93d1db5b9094296b25df34c3063f4034f93eeb",
   "scriptVersion": 1,
   "requiredApiVersion": 1,
   "ruleConstants": {
