@@ -2170,6 +2170,34 @@ done
 
 ---
 
+### 11.32 §9.9 S5 写路径下沉（①）：主库合并下沉 `db_write.py`（2026-10-18）
+
+> 用户 2026-10-18 拍板：②「DatabaseManager 拆分」改做 **S5 写路径下沉**，**两个写路径都下沉**；
+> 引擎未就绪时的写库降级**先不管**（无引擎构建本就不写库）。分两阶段：本节 = ① 主库合并；
+> ②（增量库行级写 `upsertDaily`/`trim`）见 §11.33。
+
+**为什么只下沉写、不下沉读**：§9.6 阶段 D 把「SQLite **每帧查询**」列为**永不动**，且 §9.9 原则 3
+要求「渲染零 FFI」——图表/指标/预取每帧读盘必须留 Swift。因此 S5 的落点是**写口**，
+`Swift 侧不再 import SQLite3` 这条硬判据在本项目**不追求**（另见 §11.30 的写口收口）。
+
+**改动**
+
+| 层 | 文件 | 内容 |
+| --- | --- | --- |
+| 引擎 | `Kline/PyScripts/db_write.py`（新增） | op `main_db_merge`：镜像 `MainDBMerger.mergeLocked` 语义——`file → meta_id` 取 `ORDER BY id ASC` 首个命中；只写主库**实际存在**的周期表；`BEGIN IMMEDIATE` 单事务 + 逐行 `INSERT OR REPLACE`；任一行失败 → `ROLLBACK` 且计数**全部归零**；成功后回写 `meta.last_date`；`message` 逐字复刻 |
+| 桥接 | `Kline/Python/DbWriteBridge.swift`（新增） | 同步阻塞调用（`KlinePythonBridge.blockingCall`）；调用点本就持有 `DatabaseManager.dbQueue` → 保持「主库访问全部串行」这一既有不变式（不引入第二写者并发） |
+| 调用点 | `Kline/Data/MainDBMerger.swift` | `mergeIncrementIntoMainDB` 改走 `mergeViaEngine`；原 SQL 实现 `mergeLocked` 保留为**单测对拍 oracle**（生产不再调用，与 `SimTradingRules`/`SimCondRule` 同一打法） |
+
+**验证（2026-10-18）**：新增 `KlineTests/DbWriteParityTests.swift` —— 在同一套「临时主库 schema
++ 同一增量快照」上**双跑**（Swift oracle vs 引擎 op），逐字段比对 ① 结果计数 ② 两库五表内容
+（序列化为确定性 JSON 后逐字节比较）③ `meta.last_date`；2 例（五表齐全含「主库无此 file」/
+主库缺表）**2/2 通过（0 skip）**。
+
+**未收尾**：② 增量库行级写（`LiveDataStore.upsertDaily` / `trim`）+ **上万行过桥的吞吐实测**
+（行级写是每次同步的热路径，需先量一遍 JSON 桥成本）；引擎未就绪时的写库降级仍为「跳过不写」。
+
+---
+
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
 
 ### 12.1 三个 fixture
