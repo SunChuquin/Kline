@@ -536,9 +536,9 @@ extension SimRulesBridge {
             // 预警记录的 `occurredAt` 需还原为原生 `Date`（调用方按 `as? Date` 读取）。
             alertRecords = (result["alertRecords"] as? [[String: Any]] ?? []).compactMap { d in
                 guard let id = SimRulesCodec.str(d["id"]), !id.isEmpty,
-                      let condID = SimRulesCodec.str(d["condID"]),
+                      SimRulesCodec.str(d["condID"]) != nil,
                       let price = SimRulesCodec.num(d["price"]),
-                      let message = SimRulesCodec.str(d["message"]),
+                      SimRulesCodec.str(d["message"]) != nil,
                       let occurredAt = SimRulesCodec.isoDate(d["occurredAt"]) else { return nil }
                 var o = d
                 o["price"] = price

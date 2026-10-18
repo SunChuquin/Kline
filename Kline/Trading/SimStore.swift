@@ -292,7 +292,7 @@ final class SimStore: ObservableObject {
                 filePath: fileURL.path,
                 changes: stateWithRev,
                 merge: [:]  // 全部字段 replace 等价于全量保存，但会自增 revision
-            ) { [weak self] r in
+            ) { r in
                 if case .failure(let f) = r {
                     DebugLogger.shared.log("[SimStore] Python 持久化失败：\(f)")
                 }
@@ -319,7 +319,7 @@ final class SimStore: ObservableObject {
                 changes["logs"] = logJSON
                 merge["logs"] = "replace"
             }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: changes,
                 merge: merge
@@ -347,7 +347,7 @@ final class SimStore: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(alertRecords)
             guard let arrJSON = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: ["alertRecords": arrJSON],
                 merge: ["alertRecords": "replace"]
@@ -375,7 +375,7 @@ final class SimStore: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(positions)
             guard let arrJSON = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: ["positions": arrJSON],
                 merge: ["positions": "replace"]
@@ -887,7 +887,7 @@ final class SimStore: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode([arr[idx]])
             guard let accJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: ["accounts": [accJSON]],
                 merge: ["accounts": "replace"]
@@ -925,7 +925,7 @@ final class SimStore: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode([arr[idx]])
             guard let accJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: ["accounts": [accJSON]],
                 merge: ["accounts": "replace"]
@@ -1006,7 +1006,7 @@ final class SimStore: ObservableObject {
                 changes["conditionalOrders"] = condJSON
                 merge["conditionalOrders"] = "replace"
             }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: changes,
                 merge: merge
@@ -1051,7 +1051,7 @@ final class SimStore: ObservableObject {
             "occurredAt": ISO8601DateFormatter().string(from: now),
         ]
         // 交给 Python 引擎计算并持久化，引擎返回更新后的完整状态 + revision
-        await SimStateBridge.simStateDeposit(
+        SimStateBridge.simStateDeposit(
             filePath: fileURL.path,
             accountID: accountID,
             amount: amount,
@@ -1100,7 +1100,7 @@ final class SimStore: ObservableObject {
             "occurredAt": ISO8601DateFormatter().string(from: now),
         ]
         // 交给 Python 引擎计算并持久化，引擎返回更新后的完整状态 + revision
-        await SimStateBridge.simStateWithdraw(
+        SimStateBridge.simStateWithdraw(
             filePath: fileURL.path,
             accountID: accountID,
             amount: amount,
@@ -1401,7 +1401,7 @@ final class SimStore: ObservableObject {
                 changes["logs"] = logJSON
                 merge["logs"] = "replace"
             }
-            await SimStateBridge.simStateApply(
+            SimStateBridge.simStateApply(
                 filePath: fileURL.path,
                 changes: changes,
                 merge: merge

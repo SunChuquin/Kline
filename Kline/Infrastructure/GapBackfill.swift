@@ -686,8 +686,7 @@ final class GapBackfill: ObservableObject {
                                                                          fromDate: start)
             }
             return (daily, bases)
-        }, completion: { [weak self] (mainDaily, bases) in
-            guard let self = self else { return }
+        }, completion: { (mainDaily, bases) in
             DebugLogger.shared.log("[GapBackfill] 周期聚合：主库日线 [\(dailyFrom), \(mainLatest)] 覆盖 \(mainDaily.count) 只"
                 + " · 当期基期 bar 季 \(bases["quarterly"]?.count ?? 0) 只 / 年 \(bases["yearly"]?.count ?? 0) 只")
             LiveDataStore.shared.rebuildGapPeriods(mainLatest: mainLatest, referenceDate: today,

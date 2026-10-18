@@ -439,7 +439,7 @@ struct PythonEngineLabView: View {
 
     /// 清理已下载的 tipa / .sha256（Engine.app 本体由 TrollStore 管理，卸载在 TrollStore 内做）
     private func cleanDownloads() {
-        host.cleanDownloads { [weak host] _ in
+        host.cleanDownloads { _ in
             refreshStatus()
         }
     }

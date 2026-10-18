@@ -152,7 +152,7 @@ enum PyTDXFormulaBridge {
             var lines: [TDXOutputLine] = []
             if (u["ok"] as? Bool) == true,
                let raw = u["lines"] as? [[String: Any]] {
-                lines = raw.compactMap(assembleTextLine)
+                lines = raw.compactMap { assembleTextLine($0) }
             }
             return PyUnitEval(name: name, text: text, lines: lines,
                               error: (u["error"] as? String))
@@ -169,7 +169,7 @@ enum PyTDXFormulaBridge {
                   let raw = u["lines"] as? [[String: Any]] else {
                 return .failure("(单元缺输出)")
             }
-            let unitLines = raw.compactMap(assembleTextLine)
+            let unitLines = raw.compactMap { assembleTextLine($0) }
             guard let target = unitLines.last else { return .failure("(单元缺输出)") }
             lines.append(target)
         }

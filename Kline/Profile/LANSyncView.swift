@@ -826,7 +826,7 @@ struct LANSyncView: View {
 
     /// 类别勾选圈动作：整类全选 ↔ 全不选切换（混合态 / 未选 → 整类全选）
     private func toggleCategoryPick(_ cat: LANSyncCategory) {
-        picks[cat] = (pick(of: cat) == .all) ? .none : .all
+        picks[cat] = (pick(of: cat) == .all) ? CategoryPick.none : .all
     }
 
     /// 子项勾选动作：在自定义集合中增删；空集归一为未选、全集归一为整类全选
@@ -844,7 +844,7 @@ struct LANSyncView: View {
                 set.insert(key)
             }
             if set.isEmpty {
-                picks[cat] = .none
+                picks[cat] = CategoryPick.none
             } else if set == allKeys {
                 picks[cat] = .all
             } else {

@@ -136,7 +136,8 @@ enum TrainAccountType: String, CaseIterable, Identifiable {
 /// 训练账户的规则常量与预检计算
 enum TrainAccountRule {
     /// 仓位金额账户开启训练的最低手数要求（2 手）
-    static let minLots = 2
+    /// nonisolated：need 作为 `minCapital` 的默认实参在调用方（可能非隔离）上下文求值。
+    nonisolated static let minLots = 2
     /// 仓位金额账户默认本金
     static let defaultCapital: Double = 100_000
     /// 百分比账户的名义本金：仅用于把「仓位比例」换算成股数，不参与资金校验

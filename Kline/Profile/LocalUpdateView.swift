@@ -33,7 +33,9 @@ struct LocalUpdateView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     /// 第二行的远程更新状态（引擎行复用同一组语义）
-    private enum RemoteState {
+    /// nonisolated：纯值枚举，其自动派生的 Equatable/Hashable 需在非隔离闭包（如下载进度
+    /// Timer 回调）里可用，避免"main actor-isolated conformance"告警。
+    nonisolated private enum RemoteState {
         case idle          // 未检查
         case checking      // 检查中
         case latest        // 已是最新

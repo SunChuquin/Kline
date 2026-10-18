@@ -74,7 +74,7 @@ struct EngineFlowError: LocalizedError {
 
 /// 调试代码域内统一以 String 作为 Result.Failure（本模块显式声明 conform，
 /// 免去宿主与调试页共 15+ 处 `.failure(...)` 的机械包装；仅调试文件作用，不外溢）
-extension String: Error {}
+extension String: @retroactive Error {}
 
 // MARK: - 宿主
 
@@ -610,7 +610,7 @@ final class PythonEngineHost: ObservableObject {
             // 后续 PyRun 若被 GCD 派到别的线程，PyGILState_Ensure 会永远等一个不会释放的 GIL
             // → 串行 workQueue 死锁（2026-10-05 实验①②卡死实证；同线程重入则侥幸能跑，故时好时坏）。
             // 标准嵌入姿势：init 后立刻 SaveThread 交还 GIL，之后统一走 PyGILState_Ensure/Release。
-            saveFn()
+            _ = saveFn()   // 返回值（PyThreadState*）无需使用，只为交还 GIL
             let initMs = (CFAbsoluteTimeGetCurrent() - t1) * 1000
 
             self.pyHandle = handle          // 永不 dlclose

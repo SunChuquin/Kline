@@ -31,7 +31,9 @@ struct MetaItem: Identifiable, Hashable {
     }
 }
 
-struct KlineItem: Identifiable, Hashable {
+/// nonisolated：纯值类型，需在后台线程（数据库读取 / 指标求值）与主线程共用，
+/// 其自动派生的 Equatable/Hashable 也必须可在非隔离上下文使用。
+nonisolated struct KlineItem: Identifiable, Hashable {
     let id = UUID()
     let date: Int
     let open: Double

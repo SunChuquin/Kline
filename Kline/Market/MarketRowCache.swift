@@ -195,8 +195,11 @@ final class MarketRowCache: ObservableObject {
         pythonSnapshotPending[metaID] = bars
         pythonSnapshotTimer?.invalidate()
         pythonSnapshotTimer = Timer.scheduledTimer(withTimeInterval: pythonSnapshotDebounce, repeats: false) { [weak self] _ in
+            // Timer 回调非隔离，显式切回主线程再执行快照批量计算
             guard let self else { return }
-            self.flushPythonSnapshot()
+            Task { @MainActor in
+                self.flushPythonSnapshot()
+            }
         }
     }
 

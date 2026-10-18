@@ -424,33 +424,32 @@ final class TrainingSessionController: ObservableObject {
 
             // 拒绝 → 不落库
             if let rejection = result.rejection {
-                if let code = rejection["code"] as? String,
+                if rejection["code"] is String,
                    let message = rejection["message"] as? String {
                     return message
                 }
                 return Self.engineUnavailableText
             }
 
-            // 应用更新后的状态
-            if let state = result.state as? [String: Any] {
-                if let newCash = state["cash"] as? Double {
-                    cash = newCash
-                }
-                if let newPositionQty = state["positionQty"] as? Int {
-                    positionQtyValue = newPositionQty
-                }
-                if let newAvgCost = state["avgCost"] as? Double {
-                    avgCostValue = newAvgCost
-                }
-                if let newLockedQty = state["lockedQty"] as? Int {
-                    lockedQtyValue = newLockedQty
-                }
-                if let newRealizedPnl = state["realizedPnl"] as? Double {
-                    realizedPnlValue = newRealizedPnl
-                }
-                if let newInvestedCost = state["investedCost"] as? Double {
-                    investedCostValue = newInvestedCost
-                }
+            // 应用更新后的状态（引擎返回的 state 必为字典，无需条件解包）
+            let state = result.state
+            if let newCash = state["cash"] as? Double {
+                cash = newCash
+            }
+            if let newPositionQty = state["positionQty"] as? Int {
+                positionQtyValue = newPositionQty
+            }
+            if let newAvgCost = state["avgCost"] as? Double {
+                avgCostValue = newAvgCost
+            }
+            if let newLockedQty = state["lockedQty"] as? Int {
+                lockedQtyValue = newLockedQty
+            }
+            if let newRealizedPnl = state["realizedPnl"] as? Double {
+                realizedPnlValue = newRealizedPnl
+            }
+            if let newInvestedCost = state["investedCost"] as? Double {
+                investedCostValue = newInvestedCost
             }
 
             // 落库交易记录

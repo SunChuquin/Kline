@@ -124,7 +124,8 @@ def rules_swift_text(v):
         "\n"
         "import Foundation\n"
         "\n"
-        "enum SimTradeRuleConstants {\n"
+        "/// nonisolated：纯常量类型，呈现层与后台线程都要同步读（见上方「同步读到正确常量」）。\n"
+        "nonisolated enum SimTradeRuleConstants {\n"
         "%s"
         "}\n"
         % (", ".join(n for _, n, _ in _RULE_CONSTS), "".join(rows))

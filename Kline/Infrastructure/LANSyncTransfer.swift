@@ -169,7 +169,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         defer {
             s.finishTasksAndInvalidate()
             if session === s { session = nil }
-            boxesLock.lock(); boxes.removeAll(); boxesLock.unlock()
+            clearBoxes()   // 非 async 辅助：NSLock 的 lock/unlock 在 async 上下文中不可用
         }
 
         do {
@@ -732,6 +732,13 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         boxesLock.lock()
         boxes[task.taskIdentifier] = box
         boxesLock.unlock()
+    }
+
+    /// 清空登记表（同步辅助：NSLock 的 lock/unlock 在 async 上下文中不可用）
+    private func clearBoxes() {
+        boxesLock.lock()
+        defer { boxesLock.unlock() }
+        boxes.removeAll()
     }
 
     /// 取出但不移除（进度回调阶段）

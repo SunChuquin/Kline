@@ -35,7 +35,8 @@ final class SimRulesTrust: ObservableObject {
         case trusted                 // 脚本哈希 + 版本锁 + 引擎可定位 全部满足
         case untrusted(String)       // 任一不满足（拒绝使用引擎，交易整体禁用）
 
-        var isTrusted: Bool {
+        /// nonisolated：纯判定，供非隔离的信任链纯函数读取。
+        nonisolated var isTrusted: Bool {
             if case .trusted = self { return true }
             return false
         }
@@ -44,14 +45,15 @@ final class SimRulesTrust: ObservableObject {
     // MARK: - 编译期常量（sim_rules.py 声明的镜像；自动生成，勿手改）
 
     /// sim_rules.py 的 sha256（sha256sum 全小写十六进制）
-    static let expectedScriptSHA256 = "4c2eff2680806bb999abf2434e6529b7a9c88bfcedf7d025c590f13ca86aabea"
+    /// nonisolated：编译期常量，需在非隔离上下文（信任链纯判定 / 测试注入）读取。
+    nonisolated static let expectedScriptSHA256 = "4c2eff2680806bb999abf2434e6529b7a9c88bfcedf7d025c590f13ca86aabea"
     /// sim_rules.py 的 SIM_RULES_SCRIPT_VERSION
-    static let scriptVersion = 1
+    nonisolated static let scriptVersion = 1
     /// sim_rules.py 的 SIM_RULES_REQUIRED_API_VERSION（与 manifest.apiVersion 配对）
-    static let requiredAPIVersion = 1
+    nonisolated static let requiredAPIVersion = 1
 
     /// 业务脚本名（桥接按 Bundle 内 <name>.py 定位）
-    static let scriptName = "sim_rules"
+    nonisolated static let scriptName = "sim_rules"
 
     @Published private(set) var state: State = .unknown
 

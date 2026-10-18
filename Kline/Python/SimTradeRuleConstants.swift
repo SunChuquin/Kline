@@ -19,7 +19,8 @@
 
 import Foundation
 
-enum SimTradeRuleConstants {
+/// nonisolated：纯常量类型，呈现层与后台线程都要同步读（见上方「同步读到正确常量」）。
+nonisolated enum SimTradeRuleConstants {
     /// sim_rules.py `_LOT_SIZE`
     static let lotSize = 100
     /// sim_rules.py `_PRICE_TICK`
