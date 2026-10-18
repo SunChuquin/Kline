@@ -462,4 +462,154 @@ final class SimRulesAsyncTests: XCTestCase {
         try await ensureEngineReady()
         try await runAllParity()
     }
+
+    // MARK: - G 组：执行 / 结算主循环（`submit_order` / `training_*`）
+    //
+    //  G 组 op 直接改状态、依赖运行时切片，未纳入 §12 的 Swift-dump fixture，
+    //  故这里用**不变量断言**（配 `SimTradingRules` 作为费用 oracle）守住「引擎执行 → Swift 投影」链路，
+    //  重点回归两个曾出真 bug 的接缝：① 结果子字典的 `UUID`/`Date` 必须解码成原生类型；
+    //  ② 首买建仓时 `positionChange` 必须带齐身份字段。
+
+    /// 交易时段内的固定时刻（2026-01-05 周一 10:00 +08:00）。
+    private static func tradingNow() -> Date {
+        var comp = DateComponents()
+        comp.year = 2026; comp.month = 1; comp.day = 5
+        comp.hour = 10; comp.minute = 0; comp.second = 0
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 8 * 3600) ?? .current
+        return cal.date(from: comp) ?? Date(timeIntervalSince1970: 0)
+    }
+
+    private func makeAccount(_ id: UUID, cash: Double) -> SimAccount {
+        SimRulesCodec.accountFromJSON(["id": id.uuidString, "name": "测试账户",
+                                       "cash": cash, "initialCapital": 1_000_000.0])
+    }
+
+    private func makeDraft(_ accountID: UUID, direction: SimOrderDirection,
+                           price: Double, qty: Int) -> SimOrderDraft {
+        SimOrderDraft(accountID: accountID, metaID: 7, code: "600000", name: "浦发银行",
+                      direction: direction, priceType: .limit, price: price, qty: qty)
+    }
+
+    func testSubmitOrderBuyOpensPosition() async throws {
+        try await ensureEngineReady()
+        let accountID = UUID()
+        let result = try await SimRulesBridge.submitOrder(
+            draft: makeDraft(accountID, direction: .buy, price: 10.0, qty: 100),
+            account: makeAccount(accountID, cash: 100_000),
+            position: nil, lastPrice: 10.0, prevClose: 10.0,
+            now: Self.tradingNow(), tzOffsetSeconds: 8 * 3600, fills: [], orders: [])
+
+        XCTAssertNil(result.rejection, "买入应通过校验")
+        XCTAssertEqual(result.order?.qty, 100)
+
+        let fee = SimTradingRules.default.fee(amount: 1000.0, direction: .buy)
+        let fill = try XCTUnwrap(result.fills.first, "限价可成交应产生 1 笔成交")
+        XCTAssertEqual(fill.qty, 100)
+        XCTAssertEqual(fill.fee, fee, accuracy: 1e-9)
+
+        // 首买建仓：引擎须回填身份字段（回归 `_op_submit_order` 缺口 + `positionChangeFromJSON` 解码）
+        let change = try XCTUnwrap(result.positionChange, "首买应返回 positionChange")
+        XCTAssertEqual(change["accountID"] as? UUID, accountID, "positionChange.accountID 须为原生 UUID")
+        XCTAssertEqual(change["metaID"] as? Int, 7)
+        XCTAssertEqual(change["code"] as? String, "600000")
+        XCTAssertEqual(change["name"] as? String, "浦发银行")
+        XCTAssertEqual(change["qty"] as? Int, 100)
+        XCTAssertEqual(change["removed"] as? Bool, false)
+
+        // cashChange / ledgerEntry / logEntry 的 UUID / Date 必须是原生类型（调用方按 `as?` 读取）
+        let cash = try XCTUnwrap(result.cashChange)
+        XCTAssertEqual(cash["accountID"] as? UUID, accountID)
+        XCTAssertEqual((cash["cash"] as? Double) ?? -1, 100_000 - 1000 - fee, accuracy: 1e-6)
+
+        let ledger = try XCTUnwrap(result.ledgerEntry)
+        XCTAssertNotNil(ledger["id"] as? UUID, "ledgerEntry.id 须为原生 UUID")
+        XCTAssertEqual(ledger["accountID"] as? UUID, accountID)
+        XCTAssertNotNil(ledger["occurredAt"] as? Date, "ledgerEntry.occurredAt 须为原生 Date")
+
+        let log = try XCTUnwrap(result.logEntry)
+        XCTAssertNotNil(log["id"] as? UUID, "logEntry.id 须为原生 UUID")
+        XCTAssertNotNil(log["occurredAt"] as? Date, "logEntry.occurredAt 须为原生 Date")
+    }
+
+    func testSubmitOrderSellReducesPosition() async throws {
+        try await ensureEngineReady()
+        let accountID = UUID()
+        let position = SimRulesCodec.positionFromJSON(
+            ["accountID": accountID.uuidString, "metaID": 7, "code": "600000",
+             "name": "浦发银行", "qty": 200, "availableQty": 200, "costPrice": 10.0])
+        let result = try await SimRulesBridge.submitOrder(
+            draft: makeDraft(accountID, direction: .sell, price: 12.0, qty: 100),
+            account: makeAccount(accountID, cash: 10_000),
+            position: position, lastPrice: 12.0, prevClose: 12.0,
+            now: Self.tradingNow(), tzOffsetSeconds: 8 * 3600, fills: [], orders: [])
+
+        XCTAssertNil(result.rejection, "持有 200 股、卖 100 股应通过")
+        XCTAssertEqual(result.fills.first?.qty, 100)
+
+        let change = try XCTUnwrap(result.positionChange)
+        XCTAssertEqual(change["qty"] as? Int, 100, "卖出后持仓应减到 100")
+        XCTAssertEqual(change["accountID"] as? UUID, accountID)
+
+        let fee = SimTradingRules.default.fee(amount: 1200.0, direction: .sell)
+        let cash = try XCTUnwrap(result.cashChange)
+        XCTAssertEqual((cash["cash"] as? Double) ?? -1, 10_000 + 1200 - fee, accuracy: 1e-6)
+    }
+
+    func testSubmitOrderInsufficientCashRejected() async throws {
+        try await ensureEngineReady()
+        let accountID = UUID()
+        let result = try await SimRulesBridge.submitOrder(
+            draft: makeDraft(accountID, direction: .buy, price: 10.0, qty: 100),
+            account: makeAccount(accountID, cash: 100),
+            position: nil, lastPrice: 10.0, prevClose: 10.0,
+            now: Self.tradingNow(), tzOffsetSeconds: 8 * 3600, fills: [], orders: [])
+
+        guard let rejection = result.rejection, case .insufficientCash = rejection else {
+            return XCTFail("资金不足应被拒：\(String(describing: result.rejection))")
+        }
+        XCTAssertNil(result.order, "被拒时不应创建委托")
+        XCTAssertTrue(result.fills.isEmpty, "被拒时不应产生成交")
+    }
+
+    func testTrainingExecuteTradeBuyThenSell() async throws {
+        try await ensureEngineReady()
+        let base: [String: Any] = ["cash": 100_000.0, "positionQty": 0, "avgCost": 0.0,
+                                   "lockedQty": 0, "realizedPnl": 0.0, "investedCost": 0.0]
+
+        let buy = try await SimRulesBridge.trainingExecuteTrade(
+            sessionState: base, tradeDirection: .buy, tradeQty: 100, tradePrice: 10.0,
+            tradeDate: 20260105, tradeNote: "买", accountType: "fixedAmount")
+        XCTAssertNil(buy.rejection, "买入应通过")
+        XCTAssertEqual(buy.state["positionQty"] as? Int, 100)
+        XCTAssertEqual((buy.state["avgCost"] as? Double) ?? -1, 10.0, accuracy: 1e-9)
+        let buyFee = (buy.trade?["fee"] as? Double) ?? -1
+        XCTAssertEqual((buy.state["cash"] as? Double) ?? -1, 100_000 - 1000 - buyFee, accuracy: 1e-6)
+        // 训练态同样执行 T+1：当日买入份额被锁定，不可卖
+        XCTAssertEqual(buy.state["lockedQty"] as? Int, 100, "当日买入应被 T+1 锁定")
+
+        // 模拟推进到下一训练日（锁定解除）后再卖
+        var unlocked = buy.state
+        unlocked["lockedQty"] = 0
+        let sell = try await SimRulesBridge.trainingExecuteTrade(
+            sessionState: unlocked, tradeDirection: .sell, tradeQty: 100, tradePrice: 12.0,
+            tradeDate: 20260106, tradeNote: "卖", accountType: "fixedAmount")
+        XCTAssertNil(sell.rejection, "卖出应通过")
+        XCTAssertEqual(sell.state["positionQty"] as? Int, 0)
+        let sellFee = (sell.trade?["fee"] as? Double) ?? -1
+        // 引擎口径：买入先计 -buyFee；卖出 pnl = (12-10)*100 - sellFee
+        let pnl = (sell.state["realizedPnl"] as? Double) ?? .nan
+        XCTAssertEqual(pnl, 200.0 - buyFee - sellFee, accuracy: 1e-6)
+    }
+
+    func testTrainingSweepEmptyOrders() async throws {
+        try await ensureEngineReady()
+        let r = try await SimRulesBridge.trainingSweep(orders: [], snapshots: [:],
+                                                       trainingDate: 20260105,
+                                                       tzOffsetSeconds: 8 * 3600)
+        XCTAssertEqual(r.evaluated, 0)
+        XCTAssertEqual(r.fired, 0)
+        XCTAssertTrue(r.tradeIntents.isEmpty)
+        XCTAssertTrue(r.orders.isEmpty)
+    }
 }

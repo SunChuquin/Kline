@@ -135,20 +135,17 @@ final class SimRulesTrustTests: XCTestCase {
     // MARK: - ⑤ 降级矩阵（§9.10）
 
     func testTradingGateUnderEngineMode() {
-        // 过渡期：Swift 后端在，交易可用。
-        XCTAssertTrue(SimRulesTrust.isTradingAvailable(mode: .swift, state: .untrusted("x"),
-                                                       engineReady: false))
         // 引擎模式 + 未信任 → 整体禁用。
-        XCTAssertFalse(SimRulesTrust.isTradingAvailable(mode: .engine, state: .untrusted("x"),
-                                                        engineReady: true))
+        XCTAssertFalse(SimRulesTrust.isTradingAvailable(state: .untrusted("x"),
+                                                        engineReady: false))
         // 引擎模式 + 未校验 → 整体禁用（不静默放行）。
-        XCTAssertFalse(SimRulesTrust.isTradingAvailable(mode: .engine, state: .unknown,
+        XCTAssertFalse(SimRulesTrust.isTradingAvailable(state: .unknown,
                                                         engineReady: true))
         // 引擎模式 + 已信任但引擎未就绪 → 禁用。
-        XCTAssertFalse(SimRulesTrust.isTradingAvailable(mode: .engine, state: .trusted,
+        XCTAssertFalse(SimRulesTrust.isTradingAvailable(state: .trusted,
                                                         engineReady: false))
         // 引擎模式 + 已信任 + 就绪 → 可用。
-        XCTAssertTrue(SimRulesTrust.isTradingAvailable(mode: .engine, state: .trusted,
+        XCTAssertTrue(SimRulesTrust.isTradingAvailable(state: .trusted,
                                                        engineReady: true))
     }
 

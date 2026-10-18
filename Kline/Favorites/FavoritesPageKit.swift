@@ -374,7 +374,7 @@ final class FavoritesPageModel: ObservableObject {
             noteEditorTarget = target
         case .toggleAlert:
             if FavoritesAlertKit.hasAlert(metaID: meta.id) {
-                FavoritesAlertKit.cancelAlerts(metaID: meta.id)
+                Task { await FavoritesAlertKit.cancelAlerts(metaID: meta.id) }
             } else {
                 // 单只预警也走批量预警弹窗（count = 1），同一套创建路径
                 batchAlertTarget = BatchAlertTarget(metas: [meta])
@@ -508,7 +508,7 @@ final class FavoritesPageModel: ObservableObject {
             batchAlertTarget = BatchAlertTarget(metas: batchSelectedMetas())
 
         case .cancelAlert:
-            for meta in batchSelectedMetas() { FavoritesAlertKit.cancelAlerts(metaID: meta.id) }
+            for meta in batchSelectedMetas() { Task { await FavoritesAlertKit.cancelAlerts(metaID: meta.id) } }
             finishBatch()
         }
     }

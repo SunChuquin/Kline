@@ -24,8 +24,10 @@ final class MarketRow: Identifiable, Hashable {
     /// 近 N 根日线收盘价（升序，旧→新），供卡片 / 磁贴的迷你走势使用；无数据返回空数组
     var recentCloses: [Double] { (recentBars ?? []).map(\.close) }
 
-    /// 缓存字典：计算过一次的字段 Double 值
+    /// 缓存字典：计算过一次的字段 Double 值（Swift 现状计算）
     private var cache: [MarketField: Any] = [:]
+    /// Python 引擎计算的字段值缓存（阶段 C：行情快照下沉）
+    private var pythonValues: [MarketField: Double?] = [:]
     /// 文本渲染缓存：字段 key 是 rawValue + _txt 后缀
     private var textCache: [String: String] = [:]
 
@@ -40,7 +42,19 @@ final class MarketRow: Identifiable, Hashable {
     func setBars(_ bars: [KlineItem]) {
         recentBars = bars
         cache.removeAll(keepingCapacity: true)
+        pythonValues.removeAll(keepingCapacity: true)
         textCache.removeAll(keepingCapacity: true)
+    }
+
+    /// 写入 Python 引擎计算的字段值（阶段 C：行情快照下沉）。
+    /// 供 MarketRowCache 在通过 Python 引擎批量计算后调用。
+    func setPythonValue(_ value: Double?, for field: MarketField) {
+        pythonValues[field] = value
+    }
+
+    /// 清空所有 Python 计算的字段值（引擎不可用时降级）。
+    func clearPythonValues() {
+        pythonValues.removeAll()
     }
 
     static func == (lhs: MarketRow, rhs: MarketRow) -> Bool {
@@ -53,8 +67,13 @@ final class MarketRow: Identifiable, Hashable {
     // MARK: - 字段取值入口
 
     /// 获取字段的 Double 值（数值字段）；非数值字段/不可用返回 nil
+    /// 阶段 C：优先读取 Python 引擎计算的快照值；降级为 Swift 现状计算。
     func number(_ f: MarketField) -> Double? {
+        // 阶段 C：优先 Python 引擎计算值
+        if let v = pythonValues[f] { return v }
+        // 降级：Swift 现状缓存
         if let v = cache[f] as? Double { return v }
+        // 降级：Swift 现状纯函数计算
         guard let v = Self.compute(f, meta: meta, bars: recentBars) else { return nil }
         cache[f] = v
         return v

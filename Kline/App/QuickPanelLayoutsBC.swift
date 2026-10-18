@@ -252,7 +252,7 @@ struct QuickPanelBView: View {
 
     private func handleAppear() {
         // 注册持仓标的行情预取（幂等，内部会做 T+1 日切）
-        store.prepareQuotes()
+        Task { await store.prepareQuotes() }
         // 交易页标的 + 持仓页标的的行情预取，避免现价长期为空（全部汇总时只取前若干条）
         var metas: [MetaItem] = []
         if let meta = tradeMeta { metas.append(meta) }
@@ -513,7 +513,7 @@ struct QuickPanelBView: View {
             }
 
             Button {
-                _ = store.cancelAll(accountID: store.queryAccountID)
+                Task { _ = await store.cancelAll(accountID: store.queryAccountID) }
             } label: {
                 Text("全部撤单")
                     .font(.system(size: 13, weight: .semibold))
@@ -548,7 +548,7 @@ struct QuickPanelBView: View {
             Spacer(minLength: 6)
 
             QuickOutlineButton(title: "撤单", color: Color.blue, width: 40) {
-                store.cancelOrder(id: order.id)
+                Task { await store.cancelOrder(id: order.id) }
             }
         }
         .padding(.horizontal, 16)
@@ -646,7 +646,7 @@ struct QuickPanelCView: View {
 
     private func handleAppear() {
         // 注册行情预取（幂等，内部会做 T+1 日切）
-        store.prepareQuotes()
+        Task { await store.prepareQuotes() }
         if let meta = contextMeta { _ = rowCache.row(for: meta) }
         let metas = Array(watchlistMetas.prefix(5))
         if !metas.isEmpty { _ = rowCache.rows(for: metas) }

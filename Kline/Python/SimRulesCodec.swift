@@ -227,6 +227,63 @@ nonisolated enum SimRulesCodec {
          "qty": p.qty, "availableQty": p.availableQty, "costPrice": p.costPrice]
     }
 
+    /// 委托 → 引擎 JSON（`submit_order` 入参）。
+    static func orderJSON(_ o: SimOrder) -> [String: Any] {
+        ["id": o.id.uuidString, "accountID": o.accountID.uuidString, "metaID": o.metaID,
+         "code": o.code, "name": o.name, "direction": o.direction.rawValue,
+         "priceType": o.priceType.rawValue, "price": o.price as Any,
+         "qty": o.qty, "filledQty": o.filledQty, "status": o.status.rawValue,
+         "createdAt": isoString(o.createdAt), "updatedAt": isoString(o.updatedAt),
+         "originCondID": o.originCondID?.uuidString as Any]
+    }
+
+    /// 成交 → 引擎 JSON（`submit_order` 入参）。
+    static func fillJSON(_ f: SimFill) -> [String: Any] {
+        ["id": f.id.uuidString, "orderID": f.orderID.uuidString, "accountID": f.accountID.uuidString,
+         "metaID": f.metaID, "code": f.code, "name": f.name, "direction": f.direction.rawValue,
+         "price": f.price, "qty": f.qty, "amount": f.amount, "fee": f.fee,
+         "tradedAt": isoString(f.tradedAt), "contractNo": f.contractNo]
+    }
+
+    /// 引擎 JSON → 委托（`submit_order` 出参 `order`）。
+    static func orderFromJSON(_ d: [String: Any]) -> SimOrder {
+        SimOrder(
+            id: uuid(d["id"]) ?? UUID(),
+            accountID: uuid(d["accountID"]) ?? UUID(),
+            metaID: int(d["metaID"]) ?? 0,
+            code: str(d["code"]) ?? "",
+            name: str(d["name"]) ?? "",
+            direction: str(d["direction"]).flatMap(SimOrderDirection.init(rawValue:)) ?? .buy,
+            priceType: str(d["priceType"]).flatMap(SimPriceType.init(rawValue:)) ?? .market,
+            price: num(d["price"]),
+            qty: int(d["qty"]) ?? 0,
+            filledQty: int(d["filledQty"]) ?? 0,
+            status: str(d["status"]).flatMap(SimOrderStatus.init(rawValue:)) ?? .pending,
+            createdAt: isoDate(d["createdAt"]) ?? Date(),
+            updatedAt: isoDate(d["updatedAt"]) ?? Date(),
+            originCondID: uuid(d["originCondID"])
+        )
+    }
+
+    /// 引擎 JSON → 成交（`submit_order` 出参 `fills`）。
+    static func fillFromJSON(_ d: [String: Any]) -> SimFill {
+        SimFill(
+            id: uuid(d["id"]) ?? UUID(),
+            orderID: uuid(d["orderID"]) ?? UUID(),
+            accountID: uuid(d["accountID"]) ?? UUID(),
+            metaID: int(d["metaID"]) ?? 0,
+            code: str(d["code"]) ?? "",
+            name: str(d["name"]) ?? "",
+            direction: str(d["direction"]).flatMap(SimOrderDirection.init(rawValue:)) ?? .buy,
+            price: num(d["price"]) ?? 0,
+            qty: int(d["qty"]) ?? 0,
+            amount: num(d["amount"]) ?? 0,
+            fee: num(d["fee"]) ?? 0,
+            tradedAt: isoDate(d["tradedAt"]) ?? Date(),
+            contractNo: str(d["contractNo"]) ?? ""
+        )
+    }
+
     // MARK: - 策略交易规格（双向）
 
     static func tradeSpecFromJSON(_ any: Any?) -> StrategyTradeSpec {

@@ -329,7 +329,7 @@ struct SimCondListView: View {
                 SimCondStatusTag(status: order.status)
                 inlineButton("编辑", tint: .blue) { openEditor(order) }
                 if order.status == .monitoring {
-                    inlineButton("撤销", tint: Color(.secondaryLabel)) { cancel(order) }
+                    inlineButton("撤销", tint: Color(.secondaryLabel)) { Task { await cancel(order) } }
                 }
             }
 
@@ -500,8 +500,8 @@ struct SimCondListView: View {
         }
     }
 
-    private func cancel(_ order: SimCondOrder) {
-        store.cancelCondOrder(id: order.id)
+    private func cancel(_ order: SimCondOrder) async {
+        await store.cancelCondOrder(id: order.id)
         showToast("已撤销")
     }
 

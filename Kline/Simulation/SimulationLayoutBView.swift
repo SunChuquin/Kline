@@ -72,7 +72,7 @@ struct SimulationLayoutBView: View {
         }
         // 「训练记录」管理页：独立宿主，与全屏下单页 / 明细页分开挂，避免同视图多 cover 压制
         .simTrainingRecordPresentation($showTrainingRecords)
-        .onAppear { SimStore.shared.prepareQuotes() }
+        .onAppear { Task { await SimStore.shared.prepareQuotes() } }
     }
 
     /// 顶部条「条件单」入口（文字右上角叠监控中数量角标）
@@ -567,12 +567,17 @@ struct SimulationLayoutBView: View {
             showToast("初始资金需大于 0")
             return
         }
-        let account = store.createAccount(name: name.isEmpty ? "新账户" : name,
-                                          initialCapital: capital)
-        store.selectedAccountID = account.id
-        newAccountName = ""
-        newAccountCapital = "100000"
-        showToast("已创建账户「\(account.name)」")
+        Task {
+            if let account = await store.createAccount(name: name.isEmpty ? "新账户" : name,
+                                                       initialCapital: capital) {
+                store.selectedAccountID = account.id
+                newAccountName = ""
+                newAccountCapital = "100000"
+                showToast("已创建账户「\(account.name)」")
+            } else {
+                showToast("创建账户失败，Python 引擎不可用")
+            }
+        }
     }
 
     // MARK: - 助手
@@ -669,7 +674,7 @@ private struct SimModuleDetailSheet: View {
         .alert("修改委托价", isPresented: amendBinding) {
             TextField("委托价", text: $amendPriceText)
                 .keyboardType(.decimalPad)
-            Button("确认") { confirmAmend() }
+            Button("确认") { Task { await confirmAmend() } }
             Button("取消", role: .cancel) { amendTarget = nil }
         } message: {
             Text(amendTarget.map {
@@ -755,11 +760,11 @@ private struct SimModuleDetailSheet: View {
         amendTarget = order
     }
 
-    private func confirmAmend() {
+    private func confirmAmend() async {
         guard let order = amendTarget else { return }
         let price = Double(amendPriceText.filter { $0.isNumber || $0 == "." }) ?? 0
         amendTarget = nil
         guard price > 0 else { return }
-        store.amendOrderPrice(id: order.id, newPrice: price)
+        await store.amendOrderPrice(id: order.id, newPrice: price)
     }
 }

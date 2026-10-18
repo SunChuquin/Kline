@@ -1074,7 +1074,7 @@ struct StrategyFormulaEditorView: View {
     // MARK: - 预览卡
 
     private var previewCard: some View {
-        // 预览文案走投影（`.swift` 直通 StrategyPreview.*；`.engine` 未就绪 → nil → 占位）
+        // 预览文案走引擎投影（未就绪 → nil → 占位）
         let preview = projection.preview(doc: doc, pickerName: referencedPickerName)
         let placeholder = StrategyProjection.placeholderText
         return VStack(alignment: .leading, spacing: 8) {

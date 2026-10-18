@@ -243,6 +243,7 @@ nonisolated enum SimCondRule {
         if account.isArchived || account.id != order.accountID { return .accountUnavailable }
 
         let lot = max(SimTradeRuleConstants.lotSize, 1)
+        let rules = SimTradingRules.default
         let p = order.params
 
         // 「仅提醒」（isAlertOnly）不产生委托：数量校验整段放行（允许数量为 0）。

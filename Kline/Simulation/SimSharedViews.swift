@@ -582,7 +582,7 @@ struct SimModuleTable: View {
             HStack(spacing: 6) {
                 if order.status.isActive {
                     SimInlineButton(title: "撤单", tint: Color(.secondaryLabel)) {
-                        store.cancelOrder(id: order.id)
+                        Task { await store.cancelOrder(id: order.id) }
                     }
                     SimInlineButton(title: "改价", tint: .blue) { onAmend(order) }
                 }

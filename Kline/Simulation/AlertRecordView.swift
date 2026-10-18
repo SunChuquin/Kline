@@ -40,7 +40,7 @@ struct AlertRecordView: View {
         .background(Color(.systemBackground).ignoresSafeArea())
         .confirmationDialog("清空全部预警记录？", isPresented: $showClearConfirm,
                             titleVisibility: .visible) {
-            Button("清空全部", role: .destructive) { store.clearAlertRecords() }
+            Button("清空全部", role: .destructive) { Task { await store.clearAlertRecords() } }
             Button("取消", role: .cancel) { }
         }
     }
@@ -152,7 +152,7 @@ struct AlertRecordView: View {
     /// 删除单条（命中区 44×44）
     private func deleteButton(_ record: SimAlertRecord) -> some View {
         Button {
-            store.deleteAlertRecord(id: record.id)
+            Task { await store.deleteAlertRecord(id: record.id) }
         } label: {
             Image(systemName: "trash")
                 .font(.system(size: 15))

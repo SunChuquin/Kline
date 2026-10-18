@@ -391,85 +391,98 @@ final class TrainingSessionController: ObservableObject {
         return "训练持仓不足：当前可卖 \(sellableQty) 股"
     }
 
-    /// 真正成交一笔：以 price 在训练日 date 落库并维护持仓 / 资金 / 盈亏统计
+    /// 真正成交一笔：以 price 在训练日 date 落库并维护持仓 / 资金 / 盈亏统计。
     ///
-    /// A5-4（Training 路径）：费用 / 可买复核走引擎（`.swift` 模式同步直通现状）。
-    /// 引擎不可用 → 返回显式拒绝文案，**不落库**（§9.10 fail-closed，对齐 `SimStore.submit`）。
+    /// 阶段 C：成交业务逻辑全部下沉到 Python 引擎（`training_execute_trade` op）。
+    /// Swift 仅负责入参装配 + 出参应用 + 落库。
+    /// 引擎不可用 → 返回显式拒绝文案，**不落库**（§9.10 fail-closed）。
     private func settleTrade(direction: SimOrderDirection, qty: Int, note: String,
                              trigger: TrainTradeTrigger, condKind: String?,
                              price: Double, date: Int) async -> String? {
-        // 训练不支持做空；可卖上限按标的交收规则（T+1 扣当日买入锁定、T+0 全可卖）
-        if direction == .sell, qty > sellableQty { return sellRejectionText(qty: qty) }
+        // 构造会话状态快照（交给 Python 引擎计算）
+        let sessionState: [String: Any] = [
+            "cash": cash,
+            "positionQty": positionQtyValue,
+            "avgCost": avgCostValue,
+            "lockedQty": lockedQtyValue,
+            "realizedPnl": realizedPnlValue,
+            "investedCost": investedCostValue
+        ]
 
-        let amount = price * Double(qty)
-        let fee: Double
+        let accountTypeStr = accountType == .fixedAmount ? "fixedAmount" : "percent"
+
         do {
-            fee = try await SimRulesBridge.tradeFee(amount: amount, direction: direction)
-        } catch {
-            DebugLogger.shared.log("[Training] settleTrade：引擎不可用（费用）\(error)")
-            return Self.engineUnavailableText
-        }
-        // 仓位金额账户：买入前校验资金（百分比账户不校验，永远买得起）；
-        // 拒绝文案用的可买数也走引擎（仅资金不足时才取）
-        if direction == .buy, accountType == .fixedAmount, amount + fee > cash {
-            let affordable: Int
-            do {
-                affordable = try await SimRulesBridge.tradeAffordableQty(cash: cash, price: price)
-            } catch {
-                DebugLogger.shared.log("[Training] settleTrade：引擎不可用（可买复核）\(error)")
+            let result = try await SimRulesBridge.trainingExecuteTrade(
+                sessionState: sessionState,
+                tradeDirection: direction,
+                tradeQty: qty,
+                tradePrice: price,
+                tradeDate: date,
+                tradeNote: note,
+                accountType: accountTypeStr
+            )
+
+            // 拒绝 → 不落库
+            if let rejection = result.rejection {
+                if let code = rejection["code"] as? String,
+                   let message = rejection["message"] as? String {
+                    return message
+                }
                 return Self.engineUnavailableText
             }
-            return "可用资金不足，可买 \(affordable) 股（可用 \(SimFormat.amount(cash))）"
-        }
-        let pnl: Double? = direction == .sell ? (price - avgCostValue) * Double(qty) - fee : nil
-        let seq = trades.count + 1
 
-        let ok = TrainingStore.shared.appendTrade(sessionID: sessionID, seq: seq, direction: direction,
-                                                  tradeDate: date, price: price, qty: qty,
-                                                  amount: amount, fee: fee, pnl: pnl, note: note,
-                                                  trigger: trigger, condKind: condKind)
-        guard ok else { return "训练交易落库失败" }
-
-        // 持仓 / 均价：买入加权平均；卖出均价不变，清仓归零
-        if direction == .buy {
-            let q0 = positionQtyValue
-            let q = q0 + qty
-            avgCostValue = q > 0 ? (avgCostValue * Double(q0) + price * Double(qty)) / Double(q) : 0
-            positionQtyValue = q
-            // 当日买入份额在 T+1 标的当日不可卖 → 计入锁定量（T+0 标的该量不参与可卖计算）
-            lockedQtyValue += qty
-        } else {
-            positionQtyValue -= qty
-            if positionQtyValue <= 0 {
-                positionQtyValue = 0
-                avgCostValue = 0
-                lockedQtyValue = 0
-            } else {
-                // 卖出只消耗可卖（未锁定）部分，锁定量不得超过剩余持仓
-                lockedQtyValue = min(lockedQtyValue, positionQtyValue)
+            // 应用更新后的状态
+            if let state = result.state as? [String: Any] {
+                if let newCash = state["cash"] as? Double {
+                    cash = newCash
+                }
+                if let newPositionQty = state["positionQty"] as? Int {
+                    positionQtyValue = newPositionQty
+                }
+                if let newAvgCost = state["avgCost"] as? Double {
+                    avgCostValue = newAvgCost
+                }
+                if let newLockedQty = state["lockedQty"] as? Int {
+                    lockedQtyValue = newLockedQty
+                }
+                if let newRealizedPnl = state["realizedPnl"] as? Double {
+                    realizedPnlValue = newRealizedPnl
+                }
+                if let newInvestedCost = state["investedCost"] as? Double {
+                    investedCostValue = newInvestedCost
+                }
             }
-        }
 
-        // 仓位金额账户按成交额与费用记账（百分比账户不追踪资金）
-        if accountType == .fixedAmount {
-            cash += direction == .buy ? -(amount + fee) : (amount - fee)
-            if cash < 0 { cash = 0 }
-        }
+            // 落库交易记录
+            let tradeDict = result.trade ?? [:]
+            let seq = trades.count + 1
+            let tradePrice = tradeDict["price"] as? Double ?? price
+            let tradeQty = tradeDict["qty"] as? Int ?? qty
+            let tradeAmount = tradeDict["amount"] as? Double ?? (tradePrice * Double(tradeQty))
+            let tradeFee = tradeDict["fee"] as? Double ?? 0
+            let tradePnl = tradeDict["pnl"] as? Double
 
-        // 已实现盈亏累计（买入记 -费用、卖出记 (价-均价)*量-费用）：供顶栏「盈」，
-        // 百分比账户不记资金流，只能靠此口径统计收益；同时累计买入成本作收益率分母
-        if direction == .buy {
-            realizedPnlValue -= fee
-            investedCostValue += amount
-        } else {
-            realizedPnlValue += pnl ?? 0
-        }
+            let ok = TrainingStore.shared.appendTrade(sessionID: sessionID, seq: seq,
+                                                      direction: direction,
+                                                      tradeDate: date,
+                                                      price: tradePrice,
+                                                      qty: tradeQty,
+                                                      amount: tradeAmount,
+                                                      fee: tradeFee,
+                                                      pnl: tradePnl,
+                                                      note: note,
+                                                      trigger: trigger,
+                                                      condKind: condKind)
+            guard ok else { return "训练交易落库失败" }
 
-        // 直接回读库内记录（id / seq / mark 与落库一致，做 T 提升也能立刻反映）
-        trades = TrainingStore.shared.trades(sessionID: sessionID)
-        DebugLogger.shared.log("[Training] 成交 \(direction == .buy ? "买" : "卖") \(qty) 股"
-                               + " 训练日=\(trainingDate) 成交日=\(date) 价=\(price)")
-        return nil
+            trades = TrainingStore.shared.trades(sessionID: sessionID)
+            DebugLogger.shared.log("[Training] 成交 \(direction == .buy ? "买" : "卖") \(qty) 股"
+                                   + " 训练日=\(trainingDate) 成交日=\(date) 价=\(price)")
+            return nil
+        } catch {
+            DebugLogger.shared.log("[Training] settleTrade：Python 引擎异常 \(error)")
+            return Self.engineUnavailableText
+        }
     }
 
     /// 预检用：某标的在 startDate（吸附到「date ≤ startDate 的最后一根」）的收盘价。
@@ -559,90 +572,71 @@ final class TrainingSessionController: ObservableObject {
         condSweepInFlight = true
         defer { condSweepInFlight = false }
 
-        var list = conditions
-        var dirty = false
-        var fired = false
-        let now = Date()
+        // 构造输入参数
+        var snapshots: [UUID: SimCondSnapshot] = [:]
+        for record in conditions {
+            snapshots[record.order.id] = condSnapshot(for: record.order)
+        }
 
-        for index in list.indices {
-            var record = list[index]
-            guard record.order.status == .monitoring else { continue }
+        do {
+            let sweepResult = try await SimRulesBridge.trainingSweep(
+                orders: conditions.map { $0.order },
+                snapshots: snapshots,
+                trainingDate: trainingDate,
+                tzOffsetSeconds: TimeZone.current.secondsFromGMT()
+            )
 
-            // 1) 有效期（训练态按训练日判定，而非自然日）
-            if let expired = trainingExpiredReason(record) {
-                record.order.status = .expired
-                record.order.updatedAt = now
-                record.order.runtime.lastEvaluatedAt = now
-                record.order.runtime.lastMessage = expired
-                list[index] = record
-                dirty = true
-                DebugLogger.shared.log("[Training] 条件单失效(\(reason)) \(record.order.name)：\(expired)")
-                continue
+            // 应用更新后的条件单（保留原始 createdDate）
+            var updatedConditions: [TrainCondRecord] = []
+            for order in sweepResult.orders {
+                if let existing = conditions.first(where: { $0.order.id == order.id }) {
+                    updatedConditions.append(TrainCondRecord(order: order, createdDate: existing.createdDate))
+                } else {
+                    updatedConditions.append(TrainCondRecord(order: order, createdDate: TrainingSessionController.dateInt(Date())))
+                }
             }
+            conditions = updatedConditions
 
-            // 2) 判定：时间条件按训练日比较，其余走引擎（A 组 `cond_evaluate`）
-            let snapshot = condSnapshot(for: record.order)
-            let decision: SimCondDecision
-            if record.order.kind == .time {
-                decision = trainingTimeDecision(order: record.order, snapshot: snapshot)
-            } else {
-                do {
-                    guard let d = try await SimRulesBridge.evaluateCond(order: record.order,
-                                                                        snapshot: snapshot, now: now) else {
-                        DebugLogger.shared.log("[Training] 条件单结算(\(reason))：判定输出形状非法，本轮中止")
-                        return
-                    }
-                    decision = d
-                } catch {
-                    DebugLogger.shared.log("[Training] 条件单结算(\(reason))：引擎异常，本轮中止 \(error)")
-                    return
+            // 处理交易意图
+            var fired = false
+            for intent in sweepResult.tradeIntents {
+                guard let direction = SimOrderDirection(rawValue: intent["direction"] as? String ?? "") else { continue }
+                let qty = intent["qty"] as? Int ?? 0
+                let price = intent["price"] as? Double
+                let date = intent["date"] as? Int ?? trainingDate
+                let note = intent["note"] as? String ?? ""
+                let kind = SimCondKind(rawValue: intent["kind"] as? String ?? "") ?? .price
+
+                let rejection = await settleTrade(direction: direction, qty: qty, note: note,
+                                                  trigger: .cond, condKind: kind.rawValue,
+                                                  price: price ?? 0, date: date)
+                if rejection == nil {
+                    fired = true
                 }
             }
 
-            // 3) 结果落库
-            switch decision {
-            case .hold(let runtime):
-                if record.order.runtime != runtime {
-                    record.order.runtime = runtime
-                    record.order.updatedAt = now
-                    list[index] = record
-                    dirty = true
+                // 应用预警记录
+            for alertDict in sweepResult.alertRecords {
+                if let id = alertDict["id"] as? String,
+                   let condID = alertDict["condID"] as? String,
+                   let price = alertDict["price"] as? Double,
+                   let message = alertDict["message"] as? String,
+                   let occurredAt = alertDict["occurredAt"] as? Date {
+                    let record = TrainAlertRecord(id: id, sessionID: sessionID, condID: condID,
+                                                  tradeDate: trainingDate, price: price,
+                                                  message: message, occurredAt: occurredAt)
+                    alerts.append(record)
                 }
-
-            case .abort(let why):
-                record.order.status = .expired
-                record.order.updatedAt = now
-                record.order.runtime.lastEvaluatedAt = now
-                record.order.runtime.lastMessage = why
-                list[index] = record
-                dirty = true
-
-            case .complete(let why):
-                record.order.status = .completed
-                record.order.updatedAt = now
-                record.order.runtime.lastEvaluatedAt = now
-                record.order.runtime.lastMessage = why
-                list[index] = record
-                dirty = true
-
-            case .fire(let qty, let at):
-                list[index] = await fireCondition(record, qty: qty, at: at, snapshot: snapshot, now: now)
-                dirty = true
-                fired = true
             }
-        }
+            if !sweepResult.alertRecords.isEmpty {
+                reloadAlerts()
+            }
 
-        guard dirty else { return }
-        for record in list {
-            _ = TrainingStore.shared.upsertCondition(sessionID: sessionID, order: record.order,
-                                                     createdDate: record.createdDate)
-        }
-        conditions = list
-        if fired {
-            reloadAlerts()
             trades = TrainingStore.shared.trades(sessionID: sessionID)
+            DebugLogger.shared.log("[Training] 条件单结算(\(reason))：\(conditions.count) 条，\(fired ? "有" : "无")触发")
+        } catch {
+            DebugLogger.shared.log("[Training] 条件单结算(\(reason))：Python 引擎异常 \(error)")
         }
-        DebugLogger.shared.log("[Training] 条件单结算(\(reason))：\(list.count) 条，\(fired ? "有" : "无")触发")
     }
 
     // MARK: - 结算辅助

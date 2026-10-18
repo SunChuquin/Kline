@@ -26,6 +26,13 @@ final class MarketRowCache: ObservableObject {
     /// 正在预取中的 metaID 集合（防止同一标的多连查询）
     private var inFlight: Set<Int> = []
 
+    /// 阶段 C：等待 Python 引擎计算快照的标的 bars（key: metaID，value: bars）
+    private var pythonSnapshotPending: [Int: [KlineItem]] = [:]
+    /// 阶段 C：Python 快照计算防抖定时器
+    private var pythonSnapshotTimer: Timer?
+    /// 阶段 C：防抖间隔（收集多个标的后一次性批量计算）
+    private let pythonSnapshotDebounce: TimeInterval = 0.2
+
     /// 后台计算队列（公式条件分组 / 批量字段值也用这）
     let computeQueue = DispatchQueue(label: "com.sunck.kline.market.compute",
                                      qos: .utility,
@@ -180,6 +187,78 @@ final class MarketRowCache: ObservableObject {
         prefetch(metas: affected)
     }
 
+    // MARK: - 阶段 C：Python 引擎行情快照批量计算
+
+    /// 将标的加入 Python 快照计算 pending 队列，启动 debounce 定时器。
+    /// 达到 debounce 间隔后，一次性批量调用 Python 引擎计算所有 pending 标的的字段值。
+    private func enqueuePythonSnapshot(metaID: Int, bars: [KlineItem]) {
+        pythonSnapshotPending[metaID] = bars
+        pythonSnapshotTimer?.invalidate()
+        pythonSnapshotTimer = Timer.scheduledTimer(withTimeInterval: pythonSnapshotDebounce, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.flushPythonSnapshot()
+        }
+    }
+
+    /// 执行 Python 快照批量计算：收集所有 pending 标的，一次性调用 quote_snapshot_batch，
+    /// 计算结果写入对应 MarketRow.pythonValues，并通知 UI 重绘。
+    private func flushPythonSnapshot() {
+        guard !pythonSnapshotPending.isEmpty else { return }
+        pythonSnapshotTimer = nil
+
+        let batch = pythonSnapshotPending
+        pythonSnapshotPending.removeAll()
+
+        // 构建符合 quote_snapshot_batch 输入格式的 symbols 数组
+        let allFields: [String] = [
+            "latestPrice", "prevClose", "open", "high", "low", "volume", "turnover",
+            "change", "changePct", "amplitude", "volRatio",
+            "pct3d", "pct5d", "pct10d", "pct20d", "pct60d", "pctYTD",
+            "ma5", "ma10", "ma20", "ma60",
+        ]
+        let symbols: [[String: Any]] = batch.map { (metaID, bars) in
+            let barsDict = bars.map { ["date": $0.date, "open": $0.open, "high": $0.high,
+                                       "low": $0.low, "close": $0.close,
+                                       "volume": $0.volume, "turnover": $0.turnover] }
+            return ["metaID": metaID, "bars": barsDict]
+        }
+
+        QuoteSnapshotBridge.snapshotBatch(symbols: symbols, fields: allFields) { [weak self] r in
+            guard let self else { return }
+            switch r {
+            case .success(let results):
+                for (metaIDStr, fieldValues) in results {
+                    guard let metaID = Int(metaIDStr),
+                          let row = self.rows[metaID] else { continue }
+                    for (fieldName, value) in fieldValues {
+                        guard let field = MarketField(rawValue: fieldName) else { continue }
+                        row.setPythonValue(value as? Double, for: field)
+                    }
+                }
+                // 所有受影响的标的都需要 UI 重绘（数值可能从 Swift 现状切换为 Python 值）
+                self.objectWillChange.send()
+                DebugLogger.shared.log("[Cache] Python 快照批量计算完成 n=\(results.count)")
+            case .failure(let f):
+                DebugLogger.shared.log("[Cache] Python 快照批量计算失败：\(f)")
+                // 降级：清空 pythonValues，让 MarketRow 回退到 Swift 现状计算
+                for metaID in batch.keys {
+                    self.rows[metaID]?.clearPythonValues()
+                }
+                self.objectWillChange.send()
+            }
+        }
+    }
+
+    /// 清空所有 Python 快照 pending 和计算结果（引擎不可用时调用）。
+    func clearPythonSnapshotCache() {
+        pythonSnapshotTimer?.invalidate()
+        pythonSnapshotTimer = nil
+        pythonSnapshotPending.removeAll()
+        for row in rows.values {
+            row.clearPythonValues()
+        }
+    }
+
     // MARK: - 预取实现（每只标的查最近 lookback 根 DESC，翻转为 ASC 存入行）
 
     /// 整批预取入口：把传入列表当低优先级，串行 for 循环 + 逐只回写 + 单只刷新 UI。
@@ -233,6 +312,8 @@ final class MarketRowCache: ObservableObject {
                     } else {
                         DebugLogger.shared.log("[Cache] prefetch(high) OK metaID=\(m.id) code=\(m.code) bars=\(arr.count) lastClose=\(arr.last!.close)")
                     }
+                    // 阶段 C：将该标的加入 Python 快照计算 pending 队列（批量 debounce）
+                    self.enqueuePythonSnapshot(metaID: m.id, bars: arr)
                     self.objectWillChange.send()
                 }
             }
@@ -263,6 +344,8 @@ final class MarketRowCache: ObservableObject {
                     if arr.isEmpty {
                         DebugLogger.shared.log("[MarketRowCache] prefetch(\(label)) empty metaID=\(m.id) code=\(m.code)")
                     }
+                    // 阶段 C：将该标的加入 Python 快照计算 pending 队列（批量 debounce）
+                    self.enqueuePythonSnapshot(metaID: m.id, bars: arr)
                     // 逐只刷新：用户能看到行一个个出来，置顶先行
                     self.objectWillChange.send()
                 }

@@ -149,7 +149,7 @@ final class SimStore: ObservableObject {
         needsSeed = !existed
 
         // 日切时会在内部结算一次（跨日失效）；行情触发靠 rows 就绪后的合并结算
-        refreshTPlus1IfNeeded()
+        Task { await refreshTPlus1IfNeeded() }
         observeDatabase()
 
         // 行情行数据就绪 → 合并结算（批量预取时 rows 会连续高频变化，禁止逐次结算）；
@@ -282,13 +282,117 @@ final class SimStore: ObservableObject {
         } catch {
             DebugLogger.shared.log("[SimStore] save failed \(error)")
         }
-        // 阶段 B：同时异步持久化到 Python 引擎（仓状态权威副本）
+        // 阶段 B：异步增量持久化到 Python 引擎（所有字段 replace，revision 自增）
         revision += 1
         if let encoded = try? JSONEncoder().encode(root),
            let dict = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] {
             var stateWithRev = dict
             stateWithRev["revision"] = revision
-            persistToEngine(state: stateWithRev, filePath: fileURL.path)
+            SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: stateWithRev,
+                merge: [:]  // 全部字段 replace 等价于全量保存，但会自增 revision
+            ) { [weak self] r in
+                if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] Python 持久化失败：\(f)")
+                }
+            }
+        }
+    }
+
+    // MARK: - 阶段 B：增量同步辅助方法（将单字段变更经 Python 引擎持久化）
+
+    /// 增量同步 conditionalOrders + logs 到 Python 引擎（sim_state_apply）。
+    private func syncConditionalOrdersAndLogs(condOrders: [SimCondOrder], logs: [ActionLog]) async {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var changes: [String: Any] = [:]
+            var merge: [String: String] = [:]
+            let condData = try encoder.encode(condOrders)
+            if let condJSON = try JSONSerialization.jsonObject(with: condData) as? [[String: Any]] {
+                changes["conditionalOrders"] = condJSON
+                merge["conditionalOrders"] = "replace"
+            }
+            let logData = try encoder.encode(logs)
+            if let logJSON = try JSONSerialization.jsonObject(with: logData) as? [[String: Any]] {
+                changes["logs"] = logJSON
+                merge["logs"] = "replace"
+            }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: changes,
+                merge: merge
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] syncConditionalOrdersAndLogs：Python 引擎失败 \(f)")
+                    self.saveToDisk()
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] syncConditionalOrdersAndLogs 编码失败 \(error)")
+            saveToDisk()
+        }
+    }
+
+    /// 增量同步 alertRecords 到 Python 引擎（sim_state_apply）。
+    private func syncAlertRecords(alertRecords: [SimAlertRecord]) async {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(alertRecords)
+            guard let arrJSON = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: ["alertRecords": arrJSON],
+                merge: ["alertRecords": "replace"]
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] syncAlertRecords：Python 引擎失败 \(f)")
+                    self.saveToDisk()
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] syncAlertRecords 编码失败 \(error)")
+            saveToDisk()
+        }
+    }
+
+    /// 增量同步 positions 到 Python 引擎（sim_state_apply）。
+    private func syncPositions(positions: [SimPosition]) async {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(positions)
+            guard let arrJSON = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: ["positions": arrJSON],
+                merge: ["positions": "replace"]
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] syncPositions：Python 引擎失败 \(f)")
+                    self.saveToDisk()
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] syncPositions 编码失败 \(error)")
+            saveToDisk()
         }
     }
 
@@ -694,52 +798,161 @@ final class SimStore: ObservableObject {
         return account(id: id)?.name ?? "全部账户汇总"
     }
 
-    @discardableResult
-    func createAccount(name: String, initialCapital: Double) -> SimAccount {
+    /// 新建账户：交给 Python 引擎生成 UUID、创建账户并持久化，引擎为状态权威后端。
+    /// 返回新建的 SimAccount（引擎失败返回 nil）。
+    func createAccount(name: String, initialCapital: Double) async -> SimAccount? {
+        let displayName = name.isEmpty ? "新账户" : name
         let palette = ["#1E5FA8", "#B4282E", "#1F6E4F"]
-        let account = SimAccount(id: UUID(),
-                                 name: name,
-                                 badge: String(name.prefix(1)),
-                                 colorHex: palette[accounts.count % palette.count],
-                                 initialCapital: initialCapital,
-                                 cash: initialCapital,
-                                 createdAt: Date(),
-                                 isArchived: false)
-        assignAccounts(accounts + [account])
-
+        let badge = String(displayName.prefix(1))
+        let colorHex = palette[accounts.count % palette.count]
         let now = Date()
-        appendLedger(LedgerEntry(id: UUID(), accountID: account.id, kind: .deposit,
-                                 note: "新建「\(name)」初始资金",
-                                 amount: initialCapital, balanceAfter: initialCapital,
-                                 occurredAt: now))
-        appendLog(ActionLog(id: UUID(), accountID: account.id, module: .account,
-                            content: "新建账户「\(name)」，初始资金 \(SimFormat.amount0(initialCapital))",
-                            result: "成功", occurredAt: now))
-        saveToDisk()
-        return account
+        let iso = ISO8601DateFormatter()
+
+        let ledgerEntry: [String: Any] = [
+            "id": UUID().uuidString,
+            "accountID": "",      // Python 侧会替换为新生成的 UUID
+            "kind": LedgerKind.deposit.rawValue,
+            "note": "新建「\(displayName)」初始资金",
+            "amount": initialCapital,
+            "balanceAfter": initialCapital,
+            "occurredAt": iso.string(from: now),
+        ]
+        let logEntry: [String: Any] = [
+            "id": UUID().uuidString,
+            "accountID": "",      // Python 侧会替换为新生成的 UUID
+            "module": ActionModule.account.rawValue,
+            "content": "新建账户「\(displayName)」，初始资金 \(SimFormat.amount0(initialCapital))",
+            "result": "成功",
+            "occurredAt": iso.string(from: now),
+        ]
+
+        return await withCheckedContinuation { continuation in
+            SimStateBridge.simStateCreateAccount(
+                filePath: fileURL.path,
+                name: displayName,
+                badge: badge,
+                colorHex: colorHex,
+                initialCapital: initialCapital,
+                cash: initialCapital,
+                createdAt: now,
+                ledgerEntry: ledgerEntry,
+                logEntry: logEntry
+            ) { [weak self] r in
+                guard let self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                switch r {
+                case .success(let state):
+                    // 将引擎返回的完整状态应用到本地 @Published
+                    self.applyLoadedState(state)
+                    // 构造并返回新账户模型
+                    if let newAccountDict = state["newAccount"] as? [String: Any],
+                       let idStr = newAccountDict["id"] as? String,
+                       let id = UUID(uuidString: idStr) {
+                        let account = SimAccount(
+                            id: id,
+                            name: newAccountDict["name"] as? String ?? displayName,
+                            badge: newAccountDict["badge"] as? String ?? badge,
+                            colorHex: newAccountDict["colorHex"] as? String ?? colorHex,
+                            initialCapital: newAccountDict["initialCapital"] as? Double ?? initialCapital,
+                            cash: newAccountDict["cash"] as? Double ?? initialCapital,
+                            createdAt: iso.date(from: newAccountDict["createdAt"] as? String ?? "") ?? now,
+                            isArchived: newAccountDict["isArchived"] as? Bool ?? false
+                        )
+                        continuation.resume(returning: account)
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
+                case .failure(let f):
+                    DebugLogger.shared.log("[SimStore] createAccount：Python 引擎失败 \(f)")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
     }
 
-    func renameAccount(id: UUID, name: String) {
+    /// 重命名账户：交给 Python 引擎持久化 accounts 字段变更，引擎为状态权威后端。
+    func renameAccount(id: UUID, name: String) async {
         guard let idx = accounts.firstIndex(where: { $0.id == id }) else { return }
         guard accounts[idx].name != name else { return }
+        let now = Date()
+        // 先更新本地缓存
         var arr = accounts
         arr[idx].name = name
         assignAccounts(arr)
+        // 增量同步到 Python 引擎（仅 accounts 字段）
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode([arr[idx]])
+            guard let accJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: ["accounts": [accJSON]],
+                merge: ["accounts": "replace"]
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] renameAccount：Python 引擎失败 \(f)")
+                    // 回滚本地缓存
+                    arr[idx].name = accounts[idx].name
+                    self.assignAccounts(arr)
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] renameAccount 编码失败 \(error)")
+        }
+        appendLog(ActionLog(id: UUID(), accountID: id, module: .account,
+                            content: "重命名账户为「\(name)」", result: "成功", occurredAt: now))
         saveToDisk()
     }
 
-    func archiveAccount(id: UUID) {
+    /// 归档账户：交给 Python 引擎持久化 accounts 字段变更。
+    func archiveAccount(id: UUID) async {
         guard let idx = accounts.firstIndex(where: { $0.id == id }) else { return }
         guard !accounts[idx].isArchived else { return }
+        let now = Date()
         var arr = accounts
         arr[idx].isArchived = true
         assignAccounts(arr)
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode([arr[idx]])
+            guard let accJSON = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: ["accounts": [accJSON]],
+                merge: ["accounts": "replace"]
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] archiveAccount：Python 引擎失败 \(f)")
+                    arr[idx].isArchived = accounts[idx].isArchived
+                    self.assignAccounts(arr)
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] archiveAccount 编码失败 \(error)")
+        }
+        appendLog(ActionLog(id: UUID(), accountID: id, module: .account,
+                            content: "归档账户「\(arr[idx].name)」", result: "成功", occurredAt: now))
         saveToDisk()
     }
 
-    /// 重置账户：清空持仓 / 委托 / 成交 / 流水，资金回到初始资金
-    func resetAccount(id: UUID) {
+    /// 重置账户：交给 Python 引擎持久化多个字段变更（accounts/positions/orders/fills/ledger/conditionalOrders）。
+    func resetAccount(id: UUID) async {
         guard let idx = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let now = Date()
         var arr = accounts
         arr[idx].cash = arr[idx].initialCapital
         assignAccounts(arr)
@@ -750,41 +963,159 @@ final class SimStore: ObservableObject {
         assignConditionalOrders(conditionalOrders.filter { $0.accountID != id })
         appendLog(ActionLog(id: UUID(), accountID: id, module: .account,
                             content: "重置账户「\(arr[idx].name)」", result: "成功",
-                            occurredAt: Date()))
+                            occurredAt: now))
+        // 增量同步所有受影响字段到 Python 引擎
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var changes: [String: Any] = [:]
+            var merge: [String: String] = [:]
+            // accounts
+            let accData = try encoder.encode([arr[idx]])
+            if let accJSON = try JSONSerialization.jsonObject(with: accData) as? [String: Any] {
+                changes["accounts"] = [accJSON]
+                merge["accounts"] = "replace"
+            }
+            // positions
+            let posData = try encoder.encode(positions.filter { $0.accountID != id })
+            if let posJSON = try JSONSerialization.jsonObject(with: posData) as? [[String: Any]] {
+                changes["positions"] = posJSON
+                merge["positions"] = "replace"
+            }
+            // orders
+            let ordData = try encoder.encode(orders.filter { $0.accountID != id })
+            if let ordJSON = try JSONSerialization.jsonObject(with: ordData) as? [[String: Any]] {
+                changes["orders"] = ordJSON
+                merge["orders"] = "replace"
+            }
+            // fills
+            let fillData = try encoder.encode(fills.filter { $0.accountID != id })
+            if let fillJSON = try JSONSerialization.jsonObject(with: fillData) as? [[String: Any]] {
+                changes["fills"] = fillJSON
+                merge["fills"] = "replace"
+            }
+            // ledger
+            let ledData = try encoder.encode(ledger.filter { $0.accountID != id })
+            if let ledJSON = try JSONSerialization.jsonObject(with: ledData) as? [[String: Any]] {
+                changes["ledger"] = ledJSON
+                merge["ledger"] = "replace"
+            }
+            // conditionalOrders
+            let condData = try encoder.encode(conditionalOrders.filter { $0.accountID != id })
+            if let condJSON = try JSONSerialization.jsonObject(with: condData) as? [[String: Any]] {
+                changes["conditionalOrders"] = condJSON
+                merge["conditionalOrders"] = "replace"
+            }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: changes,
+                merge: merge
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] resetAccount：Python 引擎失败 \(f)")
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] resetAccount 编码失败 \(error)")
+        }
         saveToDisk()
     }
 
-    func deposit(accountID: UUID, amount: Double) {
-        guard amount > 0, let idx = accounts.firstIndex(where: { $0.id == accountID }) else { return }
-        var arr = accounts
-        arr[idx].cash += amount
-        assignAccounts(arr)
+    /// 入金：交给 Python 引擎计算新余额并持久化，引擎为状态权威后端。
+    func deposit(accountID: UUID, amount: Double) async {
+        guard amount > 0, let idx = accounts.firstIndex(where: { $0.id == accountID }) else {
+            DebugLogger.shared.log("[SimStore] deposit：账户不存在或金额非法 \(accountID), \(amount)")
+            return
+        }
         let now = Date()
-        appendLedger(LedgerEntry(id: UUID(), accountID: accountID, kind: .deposit,
-                                 note: "银证转账入金", amount: amount,
-                                 balanceAfter: arr[idx].cash, occurredAt: now))
-        appendLog(ActionLog(id: UUID(), accountID: accountID, module: .cash,
-                            content: "入金 \(SimFormat.amount(amount))", result: "成功",
-                            occurredAt: now))
-        saveToDisk()
+        let ledgerEntry: [String: Any] = [
+            "id": UUID().uuidString,
+            "accountID": accountID.uuidString,
+            "kind": LedgerKind.deposit.rawValue,
+            "note": "银证转账入金",
+            "amount": amount,
+            "balanceAfter": accounts[idx].cash + amount,
+            "occurredAt": ISO8601DateFormatter().string(from: now),
+        ]
+        let logEntry: [String: Any] = [
+            "id": UUID().uuidString,
+            "accountID": accountID.uuidString,
+            "module": ActionModule.cash.rawValue,
+            "content": "入金 \(SimFormat.amount(amount))",
+            "result": "成功",
+            "occurredAt": ISO8601DateFormatter().string(from: now),
+        ]
+        // 交给 Python 引擎计算并持久化，引擎返回更新后的完整状态 + revision
+        await SimStateBridge.simStateDeposit(
+            filePath: fileURL.path,
+            accountID: accountID,
+            amount: amount,
+            note: "银证转账入金",
+            ledgerEntry: ledgerEntry,
+            logEntry: logEntry
+        ) { [weak self] r in
+            guard let self else { return }
+            switch r {
+            case .success(let state):
+                self.applyLoadedState(state)
+            case .failure(let f):
+                DebugLogger.shared.log("[SimStore] deposit：Python 引擎失败 \(f)")
+            }
+        }
     }
 
-    func withdraw(accountID: UUID, amount: Double) {
-        guard amount > 0, let idx = accounts.firstIndex(where: { $0.id == accountID }) else { return }
-        // 出金上限为可用资金，避免账户出现负余额
-        let real = min(amount, accounts[idx].cash)
-        guard real > 0 else { return }
-        var arr = accounts
-        arr[idx].cash -= real
-        assignAccounts(arr)
+    /// 出金：交给 Python 引擎计算新余额（受可用资金限制）并持久化。
+    func withdraw(accountID: UUID, amount: Double) async {
+        guard amount > 0, let idx = accounts.firstIndex(where: { $0.id == accountID }) else {
+            DebugLogger.shared.log("[SimStore] withdraw：账户不存在或金额非法 \(accountID), \(amount)")
+            return
+        }
+        let currentCash = accounts[idx].cash
+        let real = min(amount, currentCash)
+        guard real > 0 else {
+            DebugLogger.shared.log("[SimStore] withdraw：余额不足 \(accountID) cash=\(currentCash)")
+            return
+        }
         let now = Date()
-        appendLedger(LedgerEntry(id: UUID(), accountID: accountID, kind: .withdraw,
-                                 note: "银证转账出金", amount: -real,
-                                 balanceAfter: arr[idx].cash, occurredAt: now))
-        appendLog(ActionLog(id: UUID(), accountID: accountID, module: .cash,
-                            content: "出金 \(SimFormat.amount(real))", result: "成功",
-                            occurredAt: now))
-        saveToDisk()
+        let ledgerEntry: [String: Any] = [
+            "id": UUID().uuidString,
+            "accountID": accountID.uuidString,
+            "kind": LedgerKind.withdraw.rawValue,
+            "note": "银证转账出金",
+            "amount": -real,
+            "balanceAfter": currentCash - real,
+            "occurredAt": ISO8601DateFormatter().string(from: now),
+        ]
+        let logEntry: [String: Any] = [
+            "id": UUID().uuidString,
+            "accountID": accountID.uuidString,
+            "module": ActionModule.cash.rawValue,
+            "content": "出金 \(SimFormat.amount(real))",
+            "result": "成功",
+            "occurredAt": ISO8601DateFormatter().string(from: now),
+        ]
+        // 交给 Python 引擎计算并持久化，引擎返回更新后的完整状态 + revision
+        await SimStateBridge.simStateWithdraw(
+            filePath: fileURL.path,
+            accountID: accountID,
+            amount: amount,
+            note: "银证转账出金",
+            ledgerEntry: ledgerEntry,
+            logEntry: logEntry
+        ) { [weak self] r in
+            guard let self else { return }
+            switch r {
+            case .success(let state):
+                self.applyLoadedState(state)
+            case .failure(let f):
+                DebugLogger.shared.log("[SimStore] withdraw：Python 引擎失败 \(f)")
+            }
+        }
     }
 
     // MARK: - 交易：下单
@@ -803,93 +1134,120 @@ final class SimStore: ObservableObject {
             SimQuoteCenter.prevCloseAsync(metaID: draft.metaID) { cont.resume(returning: $0) }
         }
 
-        // 授权校验（C 组 `trade_validate`）：`.swift` = 现状实现；`.engine` = 引擎裁决
-        // （D2：整手 / 涨跌停 / 可卖复核都在引擎）。引擎未就绪 → **显式降级** `.engineUnavailable`
-        // （§9.10：不静默用 Swift 兜底）。校验不通过 → 不写任何数据。
-        let rejection: SimOrderRejection?
+        // 下单执行全部下沉到 Python 引擎（submit_order op）：
+        // 校验 → 交易时段判断 → 订单创建 → 成交/持仓/资金/流水推进。
+        // Swift 仅负责将引擎返回的结果应用到 @Published 属性，不包含任何下单业务逻辑。
+        let tz = TimeZone.current.secondsFromGMT()
         do {
-            rejection = try await SimRulesBridge.tradeValidate(draft: draft, account: account,
-                                                              position: pos, lastPrice: lastPrice,
-                                                              prevClose: prevClose)
-        } catch {
-            DebugLogger.shared.log("[SimStore] submit：引擎不可用（授权校验）\(error)")
-            return .failure(.engineUnavailable)
-        }
-        if let rejection { return .failure(rejection) }
+            let result = try await SimRulesBridge.submitOrder(
+                draft: draft, account: account, position: pos,
+                lastPrice: lastPrice, prevClose: prevClose, now: Date(),
+                tzOffsetSeconds: tz,
+                fills: fills, orders: orders)
 
-        let now = Date()
-        // 校验已保证：限价单 draft.price > 0；市价单 lastPrice > 0
-        let execPrice: Double = draft.priceType == .limit ? (draft.price ?? lastPrice ?? 0)
-                                                          : (lastPrice ?? 0)
+            // 校验失败 → 不写任何数据
+            if let rejection = result.rejection {
+                return .failure(rejection)
+            }
 
-        var order = SimOrder(id: UUID(),
-                             accountID: draft.accountID,
-                             metaID: draft.metaID,
-                             code: draft.code,
-                             name: draft.name,
-                             direction: draft.direction,
-                             priceType: draft.priceType,
-                             price: draft.priceType == .limit ? draft.price : nil,
-                             qty: draft.qty,
-                             filledQty: 0,
-                             status: .pending,
-                             createdAt: now,
-                             updatedAt: now,
-                             originCondID: draft.originCondID)
-
-        let inSession: Bool
-        do {
-            inSession = try await SimRulesBridge.tradeIsTradingSession(at: now)
-        } catch {
-            DebugLogger.shared.log("[SimStore] submit：引擎不可用（交易时段）\(error)")
-            return .failure(.engineUnavailable)
-        }
-
-        if inSession {
-            // 盘中：立即全部成交
-            order.status = .filled
-            order.filledQty = draft.qty
-
-            let amount = execPrice * Double(draft.qty)
-            let fee: Double
-            do {
-                fee = try await SimRulesBridge.tradeFee(amount: amount, direction: draft.direction)
-            } catch {
-                DebugLogger.shared.log("[SimStore] submit：引擎不可用（费用）\(error)")
+            guard let order = result.order else {
+                DebugLogger.shared.log("[SimStore] submit：引擎返回空订单且无拒绝原因")
                 return .failure(.engineUnavailable)
             }
 
-            assignFills(fills + [SimFill(id: UUID(), orderID: order.id,
-                                         accountID: draft.accountID, metaID: draft.metaID,
-                                         code: draft.code, name: draft.name,
-                                         direction: draft.direction, price: execPrice,
-                                         qty: draft.qty, amount: amount, fee: fee,
-                                         tradedAt: now, contractNo: makeContractNo(at: now))])
+            // 应用引擎返回的结果到 @Published 属性
+            if !result.fills.isEmpty {
+                assignFills(fills + result.fills)
+            }
+            if let cashChange = result.cashChange,
+               let newCash = cashChange["cash"] as? Double {
+                applyCashChangePython(accountID: draft.accountID, newCash: newCash)
+            }
+            if let posChange = result.positionChange {
+                applyPositionChangePython(posChange)
+            }
+            if let ledgerDict = result.ledgerEntry {
+                appendLedgerFromDict(ledgerDict)
+            }
+            if let logDict = result.logEntry {
+                appendLogFromDict(logDict)
+            }
 
-            applyPositionChange(draft: draft, execPrice: execPrice, amount: amount, at: now)
+            assignOrders(orders + [order])
+            saveToDisk()
+            return .success(order)
+        } catch {
+            DebugLogger.shared.log("[SimStore] submit：引擎不可用 \(error)")
+            return .failure(.engineUnavailable)
+        }
+    }
 
-            let newCash = applyCashChange(accountID: draft.accountID, direction: draft.direction,
-                                          amount: amount, fee: fee)
-            appendLedger(LedgerEntry(id: UUID(), accountID: draft.accountID,
-                                     kind: draft.direction.isBuy ? .buy : .sell,
-                                     note: ledgerNote(name: draft.name, qty: draft.qty,
-                                                      direction: draft.direction, fee: fee),
-                                     amount: draft.direction.isBuy ? -(amount + fee) : (amount - fee),
-                                     balanceAfter: newCash, occurredAt: now))
-        } else {
-            // 非交易时段：挂为待报，不动资金、不写成交与流水
-            order.status = .pending
+    // 应用 Python 引擎返回的持仓变更。
+    private func applyPositionChangePython(_ dict: [String: Any]) {
+            guard let accountID = dict["accountID"] as? UUID,
+                  let metaID = dict["metaID"] as? Int,
+                  let code = dict["code"] as? String,
+                  let name = dict["name"] as? String,
+                  let qty = dict["qty"] as? Int,
+                  let availableQty = dict["availableQty"] as? Int,
+                  let costPrice = dict["costPrice"] as? Double,
+                  let openedAt = dict["openedAt"] as? Date,
+                  let removed = dict["removed"] as? Bool else { return }
+
+            if removed {
+                assignPositions(positions.filter { !($0.accountID == accountID && $0.metaID == metaID) })
+            } else if let idx = positions.firstIndex(where: {
+                $0.accountID == accountID && $0.metaID == metaID
+            }) {
+                var arr = positions
+                arr[idx] = SimPosition(id: UUID(), accountID: accountID, metaID: metaID,
+                                       code: code, name: name, qty: qty,
+                                       availableQty: availableQty, costPrice: costPrice,
+                                       openedAt: openedAt)
+                assignPositions(arr)
+            } else {
+                assignPositions(positions + [SimPosition(id: UUID(), accountID: accountID,
+                                                         metaID: metaID, code: code, name: name,
+                                                         qty: qty, availableQty: availableQty,
+                                                         costPrice: costPrice, openedAt: openedAt)])
+            }
         }
 
-        assignOrders(orders + [order])
-        appendLog(ActionLog(id: UUID(), accountID: draft.accountID, module: .order,
-                            content: orderContent(name: draft.name, direction: draft.direction,
-                                                  qty: draft.qty, priceType: draft.priceType,
-                                                  price: draft.price),
-                            result: order.status.title, occurredAt: now))
-        saveToDisk()
-        return .success(order)
-    }
+        // 应用 Python 引擎返回的资金变更。
+        private func applyCashChangePython(accountID: UUID, newCash: Double) {
+            guard let idx = accounts.firstIndex(where: { $0.id == accountID }) else { return }
+            var arr = accounts
+            arr[idx].cash = newCash
+            assignAccounts(arr)
+        }
+
+        // 从字典构造 LedgerEntry 并追加。
+        private func appendLedgerFromDict(_ dict: [String: Any]) {
+            guard let id = dict["id"] as? UUID,
+                  let accountID = dict["accountID"] as? UUID,
+                  let kindStr = dict["kind"] as? String,
+                  let kind = LedgerKind(rawValue: kindStr),
+                  let note = dict["note"] as? String,
+                  let amount = dict["amount"] as? Double,
+                  let balanceAfter = dict["balanceAfter"] as? Double,
+                  let occurredAt = dict["occurredAt"] as? Date else { return }
+            appendLedger(LedgerEntry(id: id, accountID: accountID, kind: kind, note: note,
+                                     amount: amount, balanceAfter: balanceAfter,
+                                     occurredAt: occurredAt))
+        }
+
+        // 从字典构造 ActionLog 并追加。
+        private func appendLogFromDict(_ dict: [String: Any]) {
+            guard let id = dict["id"] as? UUID,
+                  let accountID = dict["accountID"] as? UUID,
+                  let moduleStr = dict["module"] as? String,
+                  let module = ActionModule(rawValue: moduleStr),
+                  let content = dict["content"] as? String,
+                  let result = dict["result"] as? String,
+                  let occurredAt = dict["occurredAt"] as? Date else { return }
+            appendLog(ActionLog(id: id, accountID: accountID, module: module,
+                                content: content, result: result, occurredAt: occurredAt))
+        }
 
     /// 买入：加权成本 + 加仓（可卖不变，T+1）；卖出：减仓并同步扣减可卖，清零则移除
     private func applyPositionChange(draft: SimOrderDraft, execPrice: Double,
@@ -962,7 +1320,8 @@ final class SimStore: ObservableObject {
 
     // MARK: - 交易：撤单 / 改价 / 一键操作
 
-    func cancelOrder(id: UUID) {
+    /// 撤单：交给 Python 引擎持久化 orders 字段变更。
+    func cancelOrder(id: UUID) async {
         guard let idx = orders.firstIndex(where: { $0.id == id }) else { return }
         guard orders[idx].status.isActive else { return }
         let now = Date()
@@ -974,10 +1333,12 @@ final class SimStore: ObservableObject {
         assignOrders(arr)
         appendLog(ActionLog(id: UUID(), accountID: target.accountID, module: .cancel,
                             content: cancelContent(target), result: "成功", occurredAt: now))
-        saveToDisk()
+        // 增量同步 orders + logs 到 Python 引擎
+        await syncOrdersAndLogs(orders: arr, logs: logs, accountID: target.accountID, now: now)
     }
 
-    func amendOrderPrice(id: UUID, newPrice: Double) {
+    /// 改价：交给 Python 引擎持久化 orders 字段变更。
+    func amendOrderPrice(id: UUID, newPrice: Double) async {
         guard let idx = orders.firstIndex(where: { $0.id == id }) else { return }
         guard orders[idx].status.isActive else { return }
         let now = Date()
@@ -992,12 +1353,13 @@ final class SimStore: ObservableObject {
         appendLog(ActionLog(id: UUID(), accountID: target.accountID, module: .amend,
                             content: "委托价格 \(oldText) → \(SimFormat.price(newPrice))",
                             result: "成功", occurredAt: now))
-        saveToDisk()
+        // 增量同步 orders + logs 到 Python 引擎
+        await syncOrdersAndLogs(orders: arr, logs: logs, accountID: target.accountID, now: now)
     }
 
-    /// 批量撤单（nil = 全部账户），返回撤单笔数
+    /// 批量撤单（nil = 全部账户），返回撤单笔数。
     @discardableResult
-    func cancelAll(accountID: UUID?) -> Int {
+    func cancelAll(accountID: UUID?) async -> Int {
         let targets = orders.filter {
             $0.status.isActive && matches(accountID, $0.accountID)
         }
@@ -1016,8 +1378,49 @@ final class SimStore: ObservableObject {
                                      content: cancelContent(t), result: "成功", occurredAt: now))
         }
         assignLogs(newLogs)
-        saveToDisk()
+        // 增量同步 orders + logs 到 Python 引擎
+        await syncOrdersAndLogs(orders: arr, logs: newLogs, accountID: nil, now: now)
         return targets.count
+    }
+
+    /// 增量同步 orders + logs 到 Python 引擎（sim_state_apply）。
+    private func syncOrdersAndLogs(orders: [SimOrder], logs: [ActionLog],
+                                   accountID: UUID?, now: Date) async {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var changes: [String: Any] = [:]
+            var merge: [String: String] = [:]
+            let ordData = try encoder.encode(orders)
+            if let ordJSON = try JSONSerialization.jsonObject(with: ordData) as? [[String: Any]] {
+                changes["orders"] = ordJSON
+                merge["orders"] = "replace"
+            }
+            let logData = try encoder.encode(logs)
+            if let logJSON = try JSONSerialization.jsonObject(with: logData) as? [[String: Any]] {
+                changes["logs"] = logJSON
+                merge["logs"] = "replace"
+            }
+            await SimStateBridge.simStateApply(
+                filePath: fileURL.path,
+                changes: changes,
+                merge: merge
+            ) { [weak self] r in
+                guard let self else { return }
+                if case .success(let state) = r {
+                    if let rev = state["revision"] as? Int {
+                        self.revision = rev
+                    }
+                } else if case .failure(let f) = r {
+                    DebugLogger.shared.log("[SimStore] syncOrdersAndLogs：Python 引擎失败 \(f)")
+                    // 降级到本地文件
+                    self.saveToDisk()
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("[SimStore] syncOrdersAndLogs 编码失败 \(error)")
+            saveToDisk()
+        }
     }
 
     /// 一键平仓：按可卖数量生成一笔市价卖出委托，返回生成笔数（0 或 1）
@@ -1060,7 +1463,7 @@ final class SimStore: ObservableObject {
     // MARK: - T+1 日切
 
     /// 跨日刷新可卖数量：与上次刷新日期不同则把所有 availableQty 置为 qty
-    func refreshTPlus1IfNeeded() {
+    func refreshTPlus1IfNeeded() async {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd"
@@ -1073,7 +1476,8 @@ final class SimStore: ObservableObject {
             var arr = positions
             for i in arr.indices { arr[i].availableQty = arr[i].qty }
             assignPositions(arr)
-            saveToDisk()
+            // 增量同步 positions 到 Python 引擎
+            await syncPositions(positions: arr)
         }
 
         // 跨日结算一次：当日有效 / 指定日期条件单在此置为失效（tPlus1Key 日切守卫保证「每日一次」）。
@@ -1158,7 +1562,7 @@ final class SimStore: ObservableObject {
     }
 
     /// 新增或整体替换（调用方传入完整 SimCondOrder，引擎维护的字段不做级别合并），并刷新 updatedAt
-    func upsertCondOrder(_ order: SimCondOrder) {
+    func upsertCondOrder(_ order: SimCondOrder) async {
         var target = order
         target.updatedAt = Date()
         var arr = conditionalOrders
@@ -1169,17 +1573,18 @@ final class SimStore: ObservableObject {
             arr.append(target)
         }
         assignConditionalOrders(arr)
-        saveToDisk()
+        // 增量同步 conditionalOrders + logs 到 Python 引擎（不再走 saveToDisk 全量）
+        await syncConditionalOrdersAndLogs(condOrders: arr, logs: logs)
     }
 
     /// 批量新增/整体替换条件单：合并后只落盘一次；返回实际写入条数
     ///
     /// 合并口径与 `upsertCondOrder` 一致（同 id 替换、否则 append；替换时刷新 updatedAt；
-    /// 值未变的条目不计入写入也不落盘），但只做一次 `assignConditionalOrders` + 一次 `saveToDisk`，
-    /// 并按受影响账户各追加一条操作日志（严格按入参首次出现顺序）。
+    /// 值未变的条目不计入写入也不落盘），但只做一次 `assignConditionalOrders` + 一次
+    /// `saveToDisk`，并按受影响账户各追加一条操作日志（严格按入参首次出现顺序）。
     /// 空数组直接返回 0，不做任何写盘。
     @discardableResult
-    func upsertCondOrders(_ orders: [SimCondOrder]) -> Int {
+    func upsertCondOrders(_ orders: [SimCondOrder]) async -> Int {
         guard !orders.isEmpty else { return 0 }
 
         let now = Date()
@@ -1209,12 +1614,13 @@ final class SimStore: ObservableObject {
                                 content: "策略生成条件单 \(countByAccount[accountID] ?? 0) 条",
                                 result: "已创建", occurredAt: now, condID: nil))
         }
-        saveToDisk()
+        // 增量同步 conditionalOrders + logs 到 Python 引擎
+        await syncConditionalOrdersAndLogs(condOrders: arr, logs: logs)
         return countByAccount.values.reduce(0, +)
     }
 
-    /// 撤销条件单（仅「监控中」可撤）
-    func cancelCondOrder(id: UUID) {
+    /// 撤销条件单（仅「监控中」可撤）：交给 Python 引擎持久化。
+    func cancelCondOrder(id: UUID) async {
         guard let idx = conditionalOrders.firstIndex(where: { $0.id == id }) else { return }
         guard conditionalOrders[idx].status == .monitoring else { return }
         var arr = conditionalOrders
@@ -1227,13 +1633,15 @@ final class SimStore: ObservableObject {
                             content: "撤销条件单 \(arr[idx].name) · \(arr[idx].kind.title)",
                             result: arr[idx].status.title, occurredAt: now,
                             condID: arr[idx].id))
-        saveToDisk()
+        // 增量同步 conditionalOrders + logs 到 Python 引擎
+        await syncConditionalOrdersAndLogs(condOrders: arr, logs: logs)
     }
 
-    func deleteCondOrder(id: UUID) {
+    func deleteCondOrder(id: UUID) async {
         guard conditionalOrders.contains(where: { $0.id == id }) else { return }
         assignConditionalOrders(conditionalOrders.filter { $0.id != id })
-        saveToDisk()
+        // 增量同步 conditionalOrders 到 Python 引擎
+        await syncConditionalOrdersAndLogs(condOrders: conditionalOrders, logs: logs)
     }
 
     /// 创建一条「仅提醒」预警条件单（薄封装，供自选 / 行情页的长按面板与批量预警复用）：
@@ -1272,36 +1680,37 @@ final class SimStore: ObservableObject {
             DebugLogger.shared.log("[SimStore] createAlertOrder：引擎不可用（建单校验）\(error)")
             return .failure(.engineUnavailable)
         }
-        upsertCondOrder(order)
+        await upsertCondOrder(order)
         return .success(order)
     }
 
     // MARK: - 预警记录（条件单「仅提醒」触发写入；落盘在方法内部完成，与条件单写入口风格一致）
 
     /// 追加一条预警记录：写到尾部 + 落盘；超过 `alertRecordLimit` 丢最旧（保序裁剪）
-    func appendAlertRecord(_ record: SimAlertRecord) {
+    func appendAlertRecord(_ record: SimAlertRecord) async {
         var next = alertRecords
         next.append(record)
         if next.count > alertRecordLimit {
             next.removeFirst(next.count - alertRecordLimit)
         }
         assignAlertRecords(next)
-        saveToDisk()
+        // 增量同步 alertRecords 到 Python 引擎
+        await syncAlertRecords(alertRecords: next)
     }
 
     /// 删除单条预警记录（不存在则不写不落盘）
-    func deleteAlertRecord(id: UUID) {
+    func deleteAlertRecord(id: UUID) async {
         let next = alertRecords.filter { $0.id != id }
         guard next.count != alertRecords.count else { return }
         assignAlertRecords(next)
-        saveToDisk()
+        await syncAlertRecords(alertRecords: next)
     }
 
     /// 清空全部预警记录（本来就是空则不写不落盘）
-    func clearAlertRecords() {
+    func clearAlertRecords() async {
         guard !alertRecords.isEmpty else { return }
         assignAlertRecords([])
-        saveToDisk()
+        await syncAlertRecords(alertRecords: [])
     }
 
     /// 按触发时间倒序（预警记录页直接展示用）
@@ -1421,8 +1830,8 @@ final class SimStore: ObservableObject {
 
     /// 注册所有持仓标的到 MarketRowCache（触发行情预取）。
     /// 视图在 onAppear 调用一次，避免在 body 里调用 row(for:) 造成「视图更新期间改状态」
-    func prepareQuotes() {
-        refreshTPlus1IfNeeded()
+    func prepareQuotes() async {
+        await refreshTPlus1IfNeeded()
         for p in positions {
             if let meta = SimQuoteCenter.meta(metaID: p.metaID) {
                 _ = MarketRowCache.shared.row(for: meta)

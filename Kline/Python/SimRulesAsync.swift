@@ -345,4 +345,207 @@ extension SimRulesBridge {
                 SimRulesCodec.bool(out["isEmpty"]) ?? true,
                 out["summary"] as? String)
     }
+
+    // MARK: - C 组：下单执行主循环（`submit_order`，阶段 C 完全下沉）
+
+    /// 下单执行（`submit_order`）：校验 → 交易时段判断 → 订单创建 → 成交/持仓/资金/流水推进。
+    /// Swift 仅负责入参装配 + 出参反解 + 应用；**所有业务逻辑在 Python 引擎中执行**。
+    @MainActor
+    static func submitOrder(draft: SimOrderDraft, account: SimAccount, position: SimPosition?,
+                            lastPrice: Double?, prevClose: Double?, now: Date,
+                            tzOffsetSeconds: Int, fills: [SimFill],
+                            orders: [SimOrder]) async throws -> SubmitOrderResult {
+        var input: [String: Any] = [
+            "draft": SimRulesCodec.orderDraftJSON(draft),
+            "account": SimRulesCodec.accountJSON(account),
+            "position": position.map(SimRulesCodec.positionJSON) ?? NSNull(),
+            "now": SimRulesCodec.isoString(now),
+            "tzOffsetSeconds": tzOffsetSeconds,
+            "fills": fills.map(SimRulesCodec.fillJSON),
+            "orders": orders.map(SimRulesCodec.orderJSON)
+        ]
+        if let v = lastPrice { input["lastPrice"] = v }
+        if let v = prevClose { input["prevClose"] = v }
+        let out = try await payloadAsync(op: "submit_order", input: input)
+        guard let result = out["result"] as? [String: Any] else {
+            throw SimRulesCodec.CodecError.badShape("submit_order.result")
+        }
+        return SubmitOrderResult(from: result)
+    }
+
+    /// `submit_order` 出参（引擎权威；Swift 侧只做反解与应用）。
+    ///
+    /// ⚠️ `positionChange` / `ledgerEntry` / `logEntry` 里的 `UUID` / `Date` 必须还原成
+    /// **原生类型**：调用方 `SimStore.applyPositionChangePython` / `appendLedgerFromDict` /
+    /// `appendLogFromDict` 是按 `as? UUID` / `as? Date` 读取的（不是字符串）。
+    struct SubmitOrderResult {
+        var order: SimOrder?
+        var fills: [SimFill] = []
+        var rejection: SimOrderRejection?
+        var cashChange: [String: Any]?
+        var positionChange: [String: Any]?
+        var ledgerEntry: [String: Any]?
+        var logEntry: [String: Any]?
+
+        init(from result: [String: Any]) {
+            order = (result["order"] as? [String: Any]).map(SimRulesCodec.orderFromJSON)
+            fills = (result["fills"] as? [[String: Any]] ?? []).map(SimRulesCodec.fillFromJSON)
+            rejection = SimRulesCodec.orderRejectionFromJSON(result["rejection"])
+            cashChange = Self.cashChangeFromJSON(result["cashChange"])
+            positionChange = Self.positionChangeFromJSON(result["positionChange"])
+            ledgerEntry = Self.ledgerEntryFromJSON(result["ledgerEntry"])
+            logEntry = Self.logEntryFromJSON(result["logEntry"])
+        }
+
+        private static func cashChangeFromJSON(_ any: Any?) -> [String: Any]? {
+            guard let d = any as? [String: Any], let cash = SimRulesCodec.num(d["cash"]) else { return nil }
+            var o: [String: Any] = ["cash": cash]
+            if let id = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = id }
+            return o
+        }
+
+        private static func positionChangeFromJSON(_ any: Any?) -> [String: Any]? {
+            guard let d = any as? [String: Any] else { return nil }
+            var o: [String: Any] = [:]
+            if let v = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = v }
+            if let v = SimRulesCodec.int(d["metaID"]) { o["metaID"] = v }
+            if let v = SimRulesCodec.str(d["code"]) { o["code"] = v }
+            if let v = SimRulesCodec.str(d["name"]) { o["name"] = v }
+            if let v = SimRulesCodec.int(d["qty"]) { o["qty"] = v }
+            if let v = SimRulesCodec.int(d["availableQty"]) { o["availableQty"] = v }
+            if let v = SimRulesCodec.num(d["costPrice"]) { o["costPrice"] = v }
+            if let v = SimRulesCodec.isoDate(d["openedAt"]) { o["openedAt"] = v }
+            o["removed"] = SimRulesCodec.bool(d["removed"]) ?? false
+            return o
+        }
+
+        private static func ledgerEntryFromJSON(_ any: Any?) -> [String: Any]? {
+            guard let d = any as? [String: Any] else { return nil }
+            var o: [String: Any] = [:]
+            if let v = SimRulesCodec.uuid(d["id"]) { o["id"] = v }
+            if let v = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = v }
+            if let v = SimRulesCodec.str(d["kind"]) { o["kind"] = v }
+            if let v = SimRulesCodec.str(d["note"]) { o["note"] = v }
+            if let v = SimRulesCodec.num(d["amount"]) { o["amount"] = v }
+            if let v = SimRulesCodec.num(d["balanceAfter"]) { o["balanceAfter"] = v }
+            if let v = SimRulesCodec.isoDate(d["occurredAt"]) { o["occurredAt"] = v }
+            return o
+        }
+
+        private static func logEntryFromJSON(_ any: Any?) -> [String: Any]? {
+            guard let d = any as? [String: Any] else { return nil }
+            var o: [String: Any] = [:]
+            if let v = SimRulesCodec.uuid(d["id"]) { o["id"] = v }
+            if let v = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = v }
+            if let v = SimRulesCodec.str(d["module"]) { o["module"] = v }
+            if let v = SimRulesCodec.str(d["content"]) { o["content"] = v }
+            if let v = SimRulesCodec.str(d["result"]) { o["result"] = v }
+            if let v = SimRulesCodec.isoDate(d["occurredAt"]) { o["occurredAt"] = v }
+            return o
+        }
+    }
+
+    // MARK: - 训练态：成交执行 / 条件单结算（完全下沉到引擎）
+
+    /// 训练态成交执行（`training_execute_trade`）：校验 → 费用 → 资金 → 持仓/盈亏推进。
+    /// Swift 仅负责入参装配 + 出参应用 + 落库。
+    @MainActor
+    static func trainingExecuteTrade(sessionState: [String: Any],
+                                     tradeDirection: SimOrderDirection,
+                                     tradeQty: Int,
+                                     tradePrice: Double,
+                                     tradeDate: Int,
+                                     tradeNote: String,
+                                     accountType: String) async throws -> TrainingExecuteTradeResult {
+        let input: [String: Any] = [
+            "sessionState": sessionState,
+            "trade": ["direction": tradeDirection.rawValue,
+                      "qty": tradeQty,
+                      "price": tradePrice,
+                      "date": tradeDate,
+                      "note": tradeNote],
+            "accountType": accountType
+        ]
+        let out = try await payloadAsync(op: "training_execute_trade", input: input)
+        guard let result = out["result"] as? [String: Any] else {
+            throw SimRulesCodec.CodecError.badShape("training_execute_trade.result")
+        }
+        return TrainingExecuteTradeResult(from: result)
+    }
+
+    /// `training_execute_trade` 出参。
+    struct TrainingExecuteTradeResult {
+        var trade: [String: Any]?
+        var state: [String: Any]
+        var rejection: [String: Any]?
+
+        init(from result: [String: Any]) {
+            trade = result["trade"] as? [String: Any]
+            state = result["state"] as? [String: Any] ?? [:]
+            rejection = result["rejection"] as? [String: Any]
+        }
+    }
+
+    /// 训练态条件单结算（`training_sweep`）：有效期 → 快照 → 判定 → 触发意图 → 档位推进/完成 → 预警。
+    /// ⚠️ 触发后**不直接下单**：返回 `tradeIntents`，由 Swift 层调用 `settleTrade` 处理成交。
+    @MainActor
+    static func trainingSweep(orders: [SimCondOrder],
+                              snapshots: [UUID: SimCondSnapshot],
+                              trainingDate: Int,
+                              tzOffsetSeconds: Int) async throws -> TrainingSweepResult {
+        let ordersJSON = orders.compactMap { SimRulesCodec.condOrderJSON($0) }
+        var snapshotsJSON: [String: Any] = [:]
+        for (id, snap) in snapshots {
+            snapshotsJSON[id.uuidString] = SimRulesCodec.snapshotJSON(snap)
+        }
+        let input: [String: Any] = [
+            "orders": ordersJSON,
+            "snapshots": snapshotsJSON,
+            "now": SimRulesCodec.isoString(Date()),
+            "trainingDate": trainingDate,
+            "tzOffsetSeconds": tzOffsetSeconds
+        ]
+        let out = try await payloadAsync(op: "training_sweep", input: input)
+        guard let result = out["result"] as? [String: Any] else {
+            throw SimRulesCodec.CodecError.badShape("training_sweep.result")
+        }
+        return TrainingSweepResult(from: result)
+    }
+
+    /// `training_sweep` 出参。
+    struct TrainingSweepResult {
+        var evaluated = 0
+        var fired = 0
+        var rejected = 0
+        var expired = 0
+        var completed = 0
+        var orders: [SimCondOrder] = []
+        var tradeIntents: [[String: Any]] = []
+        var alertRecords: [[String: Any]] = []
+        var logs: [[String: Any]] = []
+
+        init(from result: [String: Any]) {
+            evaluated = SimRulesCodec.int(result["evaluated"]) ?? 0
+            fired = SimRulesCodec.int(result["fired"]) ?? 0
+            rejected = SimRulesCodec.int(result["rejected"]) ?? 0
+            expired = SimRulesCodec.int(result["expired"]) ?? 0
+            completed = SimRulesCodec.int(result["completed"]) ?? 0
+            orders = (result["orders"] as? [[String: Any]] ?? [])
+                .compactMap { try? SimRulesCodec.condOrderFromJSON($0) }
+            tradeIntents = result["tradeIntents"] as? [[String: Any]] ?? []
+            // 预警记录的 `occurredAt` 需还原为原生 `Date`（调用方按 `as? Date` 读取）。
+            alertRecords = (result["alertRecords"] as? [[String: Any]] ?? []).compactMap { d in
+                guard let id = SimRulesCodec.str(d["id"]), !id.isEmpty,
+                      let condID = SimRulesCodec.str(d["condID"]),
+                      let price = SimRulesCodec.num(d["price"]),
+                      let message = SimRulesCodec.str(d["message"]),
+                      let occurredAt = SimRulesCodec.isoDate(d["occurredAt"]) else { return nil }
+                var o = d
+                o["price"] = price
+                o["occurredAt"] = occurredAt
+                return o
+            }
+            logs = result["logs"] as? [[String: Any]] ?? []
+        }
+    }
 }

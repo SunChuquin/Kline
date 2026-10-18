@@ -71,8 +71,6 @@ final class SimTradeRulesProjectionTests: XCTestCase {
     }
 
     private func runProjectionParity() async throws {
-        let rules = SimTradeRuleConstants // 配置常量镜像（lotSize / priceTick / 等）
-
         let sim = try loadFixture("sim_rules")
 
         for c in cases(sim, op: "trade_calc") {

@@ -24,7 +24,7 @@ op 一览（阶段 A 已实现 A/B/C/D/E/F 组 + sim_format）
   A 组  cond_evaluate / cond_validate_create / cond_grid_level_count / cond_text / cond_texts
   B 组  cond_expired_reason / cond_fire_direction / cond_execution_price
         / cond_advance / cond_repeatable_finished / cond_alert_message
-  C 组  trade_validate / trade_calc
+  C 组  trade_validate / trade_calc / submit_order
   D 组  strategy_drafts / strategy_entry_draft
   E 组  strategy_parse / strategy_rule_line / strategy_catalog / strategy_validate
         / strategy_preview / trade_parse / trade_serialize / trade_override
@@ -984,6 +984,1040 @@ def _op_trade_validate(inp):
     rej = _trade_validate(inp.get("draft") or {}, inp.get("account") or {},
                           inp.get("position"), inp.get("lastPrice"), inp.get("prevClose"))
     return {"result": rej}
+
+
+def _op_submit_order(inp):
+    """下单执行：校验 → 交易时段判断 → 订单创建 → 成交/持仓/资金/流水推进。
+
+    输入：
+      {
+        "op": "submit_order",
+        "draft": {
+          "accountID": "...", "metaID": ..., "code": "...", "name": "...",
+          "direction": "buy|sell", "priceType": "limit|market",
+          "price": ...?, "qty": ..., "originCondID": "...?"
+        },
+        "account": {"id": "...", "cash": ..., ...},
+        "position": {...}?,          // SimPosition 或 null
+        "lastPrice": ...?,           // 当前最新价
+        "prevClose": ...?,           // 昨收
+        "now": "...",                // ISO8601 UTC 带 Z
+        "tzOffsetSeconds": ...,      // 整数秒偏移
+        "fills": [...],              // 现有成交列表（用于生成合同编号）
+        "orders": [...]              // 现有委托列表
+      }
+    输出：
+      {
+        "ok": true,
+        "result": {
+          "order": {...} | null,           // SimOrder
+          "fills": [...],                   // 新增 SimFill 列表
+          "positionChange": {...} | null,   // 持仓变更
+          "cashChange": {"accountID": "...", "cash": ...} | null,  // 资金变更（新余额）
+          "ledgerEntry": {...} | null,      // 资金流水
+          "logEntry": {...} | null,         // 操作日志
+          "rejection": {...} | null         // 拒绝原因（校验失败时）
+        }
+      }
+    """
+    import uuid as _uuid
+
+    draft = inp.get("draft") or {}
+    account = inp.get("account") or {}
+    position = inp.get("position")
+    last_price = inp.get("lastPrice")
+    prev_close = inp.get("prevClose")
+    now_str = inp.get("now") or datetime.now(timezone.utc).isoformat()
+    tz_offset = int(inp.get("tzOffsetSeconds", 0) or 0)
+    existing_fills = inp.get("fills") or []
+    existing_orders = inp.get("orders") or []
+
+    # 1) 授权校验（trade_validate 语义）
+    rej = _trade_validate(draft, account, position, last_price, prev_close)
+    if rej is not None:
+        return {"result": {
+            "order": None, "fills": [], "positionChange": None,
+            "cashChange": None, "ledgerEntry": None, "logEntry": None,
+            "rejection": rej,
+        }}
+
+    # 2) 交易时段判断
+    now_dt = _iso(now_str)
+    in_session = _is_trading_session(now_dt, tz_offset)
+
+    # 3) 构造订单
+    order_id = str(_uuid.uuid4())
+    account_id = draft.get("accountID")
+    meta_id = draft.get("metaID")
+    code = draft.get("code")
+    name = draft.get("name")
+    direction = draft.get("direction")
+    price_type = draft.get("priceType")
+    price = draft.get("price")
+    qty = int(draft.get("qty", 0) or 0)
+
+    if price_type == "market":
+        exec_price = last_price if last_price is not None and last_price > 0 else 0.0
+        order_price = None
+    else:
+        exec_price = price if price is not None and price > 0 else (last_price if last_price is not None and last_price > 0 else 0.0)
+        order_price = price
+
+    order = {
+        "id": order_id,
+        "accountID": account_id,
+        "metaID": meta_id,
+        "code": code,
+        "name": name,
+        "direction": direction,
+        "priceType": price_type,
+        "price": order_price,
+        "qty": qty,
+        "filledQty": 0,
+        "status": "pending",
+        "createdAt": now_str,
+        "updatedAt": now_str,
+        "originCondID": draft.get("originCondID"),
+    }
+
+    fills_out = []
+    position_change = None
+    cash_change = None
+    ledger_entry = None
+    log_entry = None
+
+    if in_session:
+        # 盘中：立即全部成交
+        order["status"] = "filled"
+        order["filledQty"] = qty
+
+        amount = exec_price * qty
+        fee = _fee(amount, direction)
+
+        fill_id = str(_uuid.uuid4())
+        # 合同编号：yyyyMMdd- 三位当日序号
+        now_date = now_dt.strftime("%Y%m%d")
+        prefix = now_date + "-"
+        same_day = [f for f in existing_fills if isinstance(f, dict) and str(f.get("contractNo", "")).startswith(prefix)]
+        seq = len(same_day) + 1
+        contract_no = "%s%03d" % (prefix, seq)
+
+        fill = {
+            "id": fill_id,
+            "orderID": order_id,
+            "accountID": account_id,
+            "metaID": meta_id,
+            "code": code,
+            "name": name,
+            "direction": direction,
+            "price": exec_price,
+            "qty": qty,
+            "amount": amount,
+            "fee": fee,
+            "tradedAt": now_str,
+            "contractNo": contract_no,
+        }
+        fills_out = [fill]
+
+        # 持仓变更
+        pos_change = _apply_position_change_python(position, direction, qty, exec_price, amount, now_str)
+        # 新建持仓时 helper 无既有持仓可取身份，用委托补全（对齐 Swift SimStore.applyPositionChange）
+        if pos_change is not None:
+            if pos_change.get("accountID") is None:
+                pos_change["accountID"] = account_id
+            if pos_change.get("metaID") is None:
+                pos_change["metaID"] = meta_id
+            if pos_change.get("code") is None:
+                pos_change["code"] = code
+            if pos_change.get("name") is None:
+                pos_change["name"] = name
+        position_change = pos_change
+
+        # 资金变更
+        cash = account.get("cash", 0.0) or 0.0
+        if direction == "buy":
+            new_cash = cash - (amount + fee)
+            ledger_amount = -(amount + fee)
+            note = "买入成交 %s %d 股（含费）" % (name, qty)
+        else:
+            new_cash = cash + (amount - fee)
+            ledger_amount = amount - fee
+            note = "卖出成交 %s %d 股（扣费 %.2f）" % (name, qty, fee)
+
+        cash_change = {
+            "accountID": account_id,
+            "cash": new_cash,
+        }
+
+        ledger_entry = {
+            "id": str(_uuid.uuid4()),
+            "accountID": account_id,
+            "kind": "buy" if direction == "buy" else "sell",
+            "note": note,
+            "amount": ledger_amount,
+            "balanceAfter": new_cash,
+            "occurredAt": now_str,
+        }
+
+        log_entry = {
+            "id": str(_uuid.uuid4()),
+            "accountID": account_id,
+            "module": "order",
+            "content": "%s %s %d 股 · %s%s" % (
+                direction.title(), name, qty,
+                price_type.title(),
+                " %.2f" % price if (price_type == "limit" and price is not None) else ""),
+            "result": order["status"],
+            "occurredAt": now_str,
+        }
+    else:
+        # 非交易时段：挂为待报，不动资金、不写成交与流水
+        order["status"] = "pending"
+
+        log_entry = {
+            "id": str(_uuid.uuid4()),
+            "accountID": account_id,
+            "module": "order",
+            "content": "%s %s %d 股 · %s%s" % (
+                direction.title(), name, qty,
+                price_type.title(),
+                " %.2f" % price if (price_type == "limit" and price is not None) else ""),
+            "result": order["status"],
+            "occurredAt": now_str,
+        }
+
+    return {"result": {
+        "order": order,
+        "fills": fills_out,
+        "positionChange": position_change,
+        "cashChange": cash_change,
+        "ledgerEntry": ledger_entry,
+        "logEntry": log_entry,
+        "rejection": None,
+    }}
+
+
+def _op_cond_sweep(inp):
+    """条件单结算主循环：有效期 → 快照 → 判定 → 下单 → 档位推进/完成 → 预警。
+
+    输入：
+      {
+        "op": "cond_sweep",
+        "orders": [ {完整条件单JSON}, ... ],        # 监控中的条件单
+        "snapshots": { "order_id": { "last": ..., "prevClose": ..., ... } },
+        "now": "...",           # ISO8601 UTC
+        "tzOffsetSeconds": ...,
+        "accounts": { "account_id": { "id": ..., "cash": ..., ... } },
+        "positions": { "accountID_metaID": { ... } },  # key = "accountID_metaID"
+        "lastPrices": { "metaID": ... },
+        "prevCloses": { "metaID": ... },
+        "existingFills": [ ... ],
+        "existingOrders": [ ... ]
+      }
+    输出：
+      {
+        "ok": true,
+        "result": {
+          "evaluated": int,
+          "fired": int,
+          "rejected": int,
+          "expired": int,
+          "completed": int,
+          "orders": [ ... ],        # 更新后的完整条件单列表
+          "newOrders": [ ... ],     # 新增委托（来自 submit_order）
+          "newFills": [ ... ],      # 新增成交
+          "cashChanges": [ ... ],
+          "ledgerEntries": [ ... ],
+          "positionChanges": [ ... ],
+          "alertRecords": [ ... ],
+          "logs": [ ... ]
+        }
+      }
+    """
+    import uuid as _uuid
+
+    orders_in = inp.get("orders") or []
+    snapshots = inp.get("snapshots") or {}
+    now_str = inp.get("now") or datetime.now(timezone.utc).isoformat()
+    tz_offset = int(inp.get("tzOffsetSeconds", 0) or 0)
+    accounts = inp.get("accounts") or {}
+    positions = inp.get("positions") or {}
+    last_prices = inp.get("lastPrices") or {}
+    prev_closes = inp.get("prevCloses") or {}
+    existing_fills = list(inp.get("existingFills") or [])
+    existing_orders = list(inp.get("existingOrders") or [])
+
+    now_dt = _iso(now_str)
+
+    evaluated = 0
+    fired = 0
+    rejected = 0
+    expired = 0
+    completed = 0
+
+    updated_orders = []
+    new_orders = []
+    new_fills = []
+    cash_changes = []
+    ledger_entries = []
+    log_entries = []
+    alert_records = []
+
+    for order in orders_in:
+        order_id = order.get("id")
+        if order.get("status") != "monitoring":
+            updated_orders.append(order)
+            continue
+
+        evaluated += 1
+
+        # 1) 有效期优先判定（B 组 cond_expired_reason）
+        reason = _expired_reason(order, now_dt, tz_offset)
+        if reason is not None:
+            order["status"] = "expired"
+            order["updatedAt"] = now_str
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastMessage"] = reason
+            order["runtime"] = rt
+            expired += 1
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单失效 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), reason),
+                "result": "已失效",
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+            updated_orders.append(order)
+            continue
+
+        # 2) 取快照
+        snapshot = snapshots.get(order_id, {})
+
+        # 3) 判定（A 组 cond_evaluate）
+        decision = _evaluate(order, snapshot, now_dt)
+
+        if decision["decision"] == "hold":
+            rt = decision.get("runtime", {})
+            if rt:
+                order["runtime"] = rt
+                order["updatedAt"] = now_str
+            updated_orders.append(order)
+
+        elif decision["decision"] == "abort":
+            order["status"] = "expired"
+            order["updatedAt"] = now_str
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastMessage"] = decision.get("reason", "")
+            order["runtime"] = rt
+            expired += 1
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单失效 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), decision.get("reason", "")),
+                "result": "已失效",
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+            updated_orders.append(order)
+
+        elif decision["decision"] == "complete":
+            order["status"] = "completed"
+            order["updatedAt"] = now_str
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastMessage"] = decision.get("reason", "")
+            order["runtime"] = rt
+            completed += 1
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单完成 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), decision.get("reason", "")),
+                "result": "已完成",
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+            updated_orders.append(order)
+
+        elif decision["decision"] == "fire":
+            qty = int(decision.get("qty", 0) or 0)
+            at = float(decision.get("at", 0) or 0)
+
+            # 触发方向 / 执行价（B 组）
+            direction = _fire_direction(order, at)
+            directive = order.get("directive", {})
+            exec_price = _execution_price(directive, at)
+
+            # 组装草稿
+            draft = {
+                "accountID": order.get("accountID"),
+                "metaID": order.get("metaID"),
+                "code": order.get("code"),
+                "name": order.get("name"),
+                "direction": direction,
+                "priceType": directive.get("priceType", "market"),
+                "price": exec_price if directive.get("priceType") == "limit" else None,
+                "qty": qty,
+                "originCondID": order_id,
+            }
+
+            # 账户 / 持仓 / 行情
+            account = accounts.get(order.get("accountID"), {})
+            pos_key = "%s_%s" % (order.get("accountID"), order.get("metaID"))
+            position = positions.get(pos_key, None)
+            meta_id = order.get("metaID")
+            last_price = last_prices.get(str(meta_id)) if meta_id is not None else None
+            prev_close = prev_closes.get(str(meta_id)) if meta_id is not None else None
+
+            # 调用 submit_order 逻辑
+            submit_inp = {
+                "draft": draft,
+                "account": account,
+                "position": position,
+                "lastPrice": last_price,
+                "prevClose": prev_close,
+                "now": now_str,
+                "tzOffsetSeconds": tz_offset,
+                "fills": existing_fills + new_fills,
+                "orders": existing_orders + new_orders,
+            }
+            submit_result = _op_submit_order(submit_inp)
+            sr = submit_result.get("result", {})
+            sr_rejection = sr.get("rejection")
+
+            if sr_rejection is not None:
+                # 被拒
+                rejected += 1
+                rt = order.get("runtime", {})
+                rt["lastEvaluatedAt"] = now_str
+                rt["lastTriggerPrice"] = at
+                rt["lastMessage"] = sr_rejection.get("message", "")
+                order["runtime"] = rt
+                if order.get("kind") not in ("grid", "batch"):
+                    order["status"] = "rejected"
+                log_entries.append({
+                    "id": str(_uuid.uuid4()),
+                    "accountID": order.get("accountID"),
+                    "module": "condition",
+                    "content": "条件单触发被拒 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), sr_rejection.get("message", "")),
+                    "result": order.get("status", "rejected"),
+                    "occurredAt": now_str,
+                    "condID": order_id,
+                })
+                updated_orders.append(order)
+                continue
+
+            # 下单成功
+            submited_order = sr.get("order")
+            submited_fills = sr.get("fills", [])
+
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastPrice"] = snapshot.get("last", rt.get("lastPrice"))
+            rt["lastTriggerPrice"] = at
+            order["runtime"] = rt
+            order["updatedAt"] = now_str
+
+            if submited_order:
+                order["originOrderID"] = submited_order.get("id")
+
+            order["triggeredCount"] = int(order.get("triggeredCount", 0) or 0) + 1
+            fired += 1
+
+            kind = order.get("kind")
+
+            if kind in ("grid", "batch"):
+                # 多触发：档位 / 批次推进
+                rt2 = _advance_repeatable(order, at)
+                order["runtime"] = rt2
+
+                finished = _repeatable_finished(order)
+                if finished:
+                    order["status"] = "completed"
+                    order["runtime"]["lastMessage"] = "已完成全部档位" if kind == "grid" else "已完成全部批次"
+                    completed += 1
+                else:
+                    if kind == "grid":
+                        order["runtime"]["lastMessage"] = "已成交第 %d 档" % (order.get("runtime", {}).get("gridLevel", 0))
+                    else:
+                        order["runtime"]["lastMessage"] = "已成交第 %d 批" % (order.get("runtime", {}).get("batchDone", 0))
+            else:
+                order["status"] = "triggered"
+                order["triggeredAt"] = now_str
+                order["runtime"]["lastMessage"] = "已触发并生成委托"
+
+            # 累积新订单和成交
+            if submited_order:
+                new_orders.append(submited_order)
+            new_fills.extend(submited_fills)
+
+            # 累积资金变更、流水、日志
+            if sr.get("cashChange"):
+                cash_changes.append(sr["cashChange"])
+            if sr.get("ledgerEntry"):
+                ledger_entries.append(sr["ledgerEntry"])
+            if sr.get("logEntry"):
+                log_entries.append(sr["logEntry"])
+
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单触发 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), _directive_core(order)),
+                "result": (submited_order.get("status") if submited_order else "已触发"),
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+
+            updated_orders.append(order)
+
+    return {"result": {
+        "evaluated": evaluated,
+        "fired": fired,
+        "rejected": rejected,
+        "expired": expired,
+        "completed": completed,
+        "orders": updated_orders,
+        "newOrders": new_orders,
+        "newFills": new_fills,
+        "cashChanges": cash_changes,
+        "ledgerEntries": ledger_entries,
+        "alertRecords": alert_records,
+        "logs": log_entries,
+    }}
+
+
+def _op_training_sweep(inp):
+    """训练态条件单结算主循环：有效期 → 快照 → 判定 → 触发意图 → 档位推进/完成 → 预警。
+
+    与 `cond_sweep` 的区别：
+      - 行情快照来自训练日的 K 线收盘价（Swift 层构造）
+      - 有效期按训练日判定（`.day` = 仅创建时所在的训练日有效）
+      - 时间条件按训练日比较（`trainingTimeDecision`）
+      - 触发后返回交易意图（`tradeIntents`），由 Swift 层调用 `placeTrade`/`settleTrade` 处理成交
+
+    输入：
+      {
+        "op": "training_sweep",
+        "orders": [ {完整条件单JSON}, ... ],        # 监控中的条件单
+        "snapshots": { "order_id": { "last": ..., "prevClose": ..., "high": ..., "low": ..., "changePct": ..., "ma": ... } },
+        "now": "...",           # ISO8601 UTC（仅用于日志/记录）
+        "trainingDate": 20260101,  # 当前训练日（YYYYMMDD）
+        "tzOffsetSeconds": ...,
+      }
+    输出：
+      {
+        "ok": true,
+        "result": {
+          "evaluated": int,
+          "fired": int,
+          "rejected": int,
+          "expired": int,
+          "completed": int,
+          "orders": [ ... ],        # 更新后的完整条件单列表
+          "tradeIntents": [ ... ],  # 新增交易意图（{ direction, qty, price, date, note, kind, condKind }）
+          "alertRecords": [ ... ],  # 新增预警记录
+          "logs": [ ... ],          # 操作日志
+        }
+      }
+    """
+    orders_in = inp.get("orders") or []
+    snapshots = inp.get("snapshots") or {}
+    now_str = inp.get("now") or datetime.now(timezone.utc).isoformat()
+    training_date = inp.get("trainingDate", 0)
+    tz_offset = int(inp.get("tzOffsetSeconds", 0) or 0)
+
+    now_dt = _iso(now_str)
+
+    evaluated = 0
+    fired = 0
+    rejected = 0
+    expired = 0
+    completed = 0
+
+    updated_orders = []
+    trade_intents = []
+    alert_records = []
+    log_entries = []
+
+    for order in orders_in:
+        order_id = order.get("id")
+        if order.get("status") != "monitoring":
+            updated_orders.append(order)
+            continue
+
+        evaluated += 1
+
+        # 1) 有效期（训练态按训练日判定）
+        validity = order.get("validity", "longTerm")
+        expired_reason = None
+        if validity == "longTerm":
+            expired_reason = None
+        elif validity == "day":
+            created = _iso(order.get("createdAt"))
+            if created is not None and _local_date(created, tz_offset) > training_date:
+                expired_reason = "当日有效条件单已跨训练日失效"
+        elif validity == "untilDate":
+            expires = _iso(order.get("expiresAt"))
+            if expires is not None and _local_date(expires, tz_offset) > training_date:
+                expired_reason = "已超过指定有效期"
+
+        if expired_reason is not None:
+            order["status"] = "expired"
+            order["updatedAt"] = now_str
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastMessage"] = expired_reason
+            order["runtime"] = rt
+            expired += 1
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单失效 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), expired_reason),
+                "result": "已失效",
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+            updated_orders.append(order)
+            continue
+
+        # 2) 取快照
+        snapshot = snapshots.get(order_id, {})
+
+        # 3) 判定：时间条件按训练日比较，其余走引擎（cond_evaluate）
+        kind = order.get("kind", "price")
+        decision = None
+
+        if kind == "time":
+            p = _params(order)
+            fire_date_str = p.get("fireDate")
+            if fire_date_str is None:
+                decision = _decision_abort("触发时间缺失")
+            else:
+                fire_date = _iso(fire_date_str)
+                if fire_date is None or training_date < _local_date(fire_date, tz_offset):
+                    decision = _decision_hold(order.get("runtime", {}))
+                else:
+                    last_price = snapshot.get("last")
+                    if last_price is None or last_price <= 0:
+                        decision = _decision_hold(order.get("runtime", {}))
+                    else:
+                        decision = _decision_fire(order.get("directive", {}).get("qty", 0), last_price)
+        else:
+            snapshot_for_eval = snapshots.get(order_id, {})
+            decision = _evaluate(order, snapshot_for_eval, now_dt)
+
+        if decision is None:
+            continue
+
+        if decision["decision"] == "hold":
+            rt = decision.get("runtime", {})
+            if rt:
+                order["runtime"] = rt
+                order["updatedAt"] = now_str
+            updated_orders.append(order)
+
+        elif decision["decision"] == "abort":
+            order["status"] = "expired"
+            order["updatedAt"] = now_str
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastMessage"] = decision.get("reason", "")
+            order["runtime"] = rt
+            expired += 1
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单失效 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), decision.get("reason", "")),
+                "result": "已失效",
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+            updated_orders.append(order)
+
+        elif decision["decision"] == "complete":
+            order["status"] = "completed"
+            order["updatedAt"] = now_str
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastMessage"] = decision.get("reason", "")
+            order["runtime"] = rt
+            completed += 1
+            log_entries.append({
+                "id": str(_uuid.uuid4()),
+                "accountID": order.get("accountID"),
+                "module": "condition",
+                "content": "条件单完成 %s · %s：%s" % (order.get("name", ""), order.get("kind", ""), decision.get("reason", "")),
+                "result": "已完成",
+                "occurredAt": now_str,
+                "condID": order_id,
+            })
+            updated_orders.append(order)
+
+        elif decision["decision"] == "fire":
+            qty = int(decision.get("qty", 0) or 0)
+            at = float(decision.get("at", 0) or 0)
+            directive = order.get("directive", {})
+
+            direction = _fire_direction(order, at)
+
+            # 「仅提醒」条件单：不下单，只记预警
+            if directive.get("alertOnly"):
+                alert_records.append({
+                    "id": str(_uuid.uuid4()),
+                    "condID": order_id,
+                    "metaID": order.get("metaID"),
+                    "code": order.get("code"),
+                    "name": order.get("name"),
+                    "price": at,
+                    "message": "预警：现价 %.2f 触发价格条件" % at,
+                    "occurredAt": now_str,
+                })
+                order["triggeredCount"] = int(order.get("triggeredCount", 0) or 0) + 1
+                fired += 1
+                order["status"] = "triggered"
+                order["triggeredAt"] = now_str
+                order["runtime"]["lastMessage"] = "预警触发"
+                updated_orders.append(order)
+                continue
+
+            trade_intent = {
+                "condID": order_id,
+                "direction": direction,
+                "qty": qty,
+                "price": at,
+                "date": training_date,
+                "note": "条件单：%s" % order.get("kind", ""),
+                "kind": kind,
+                "condKind": order.get("kind", ""),
+                "priceType": directive.get("priceType", "market"),
+            }
+            trade_intents.append(trade_intent)
+
+            rt = order.get("runtime", {})
+            rt["lastEvaluatedAt"] = now_str
+            rt["lastPrice"] = snapshot.get("last", rt.get("lastPrice"))
+            rt["lastTriggerPrice"] = at
+            order["runtime"] = rt
+            order["updatedAt"] = now_str
+
+            order["triggeredCount"] = int(order.get("triggeredCount", 0) or 0) + 1
+            fired += 1
+
+            if kind in ("grid", "batch"):
+                rt2 = _advance_repeatable(order, at)
+                order["runtime"] = rt2
+
+                finished = _repeatable_finished(order)
+                if finished:
+                    order["status"] = "completed"
+                    order["runtime"]["lastMessage"] = "已完成全部档位" if kind == "grid" else "已完成全部批次"
+                    completed += 1
+                else:
+                    if kind == "grid":
+                        order["runtime"]["lastMessage"] = "已成交第 %d 档" % (order.get("runtime", {}).get("gridLevel", 0))
+                    else:
+                        order["runtime"]["lastMessage"] = "已成交第 %d 批" % (order.get("runtime", {}).get("batchDone", 0))
+            else:
+                order["status"] = "triggered"
+                order["triggeredAt"] = now_str
+                order["runtime"]["lastMessage"] = "已触发并生成委托"
+
+            updated_orders.append(order)
+
+    return {"result": {
+        "evaluated": evaluated,
+        "fired": fired,
+        "rejected": rejected,
+        "expired": expired,
+        "completed": completed,
+        "orders": updated_orders,
+        "tradeIntents": trade_intents,
+        "alertRecords": alert_records,
+        "logs": log_entries,
+    }}
+
+
+def _apply_position_change_python(position, direction, qty, exec_price, amount, opened_at):
+    """模拟 Swift SimStore.applyPositionChange。
+
+    输入：
+      position: dict 或 None（现有持仓）
+      direction: "buy" | "sell"
+      qty: int
+      exec_price: float
+      amount: float  (price * qty)
+      opened_at: str (ISO8601)
+
+    输出：
+      {
+        "accountID": "...",
+        "metaID": ...,
+        "code": "...",
+        "name": "...",
+        "qty": ...,           // 新持仓数量
+        "availableQty": ...,  // 新可卖数量
+        "costPrice": ...,     // 新成本价
+        "openedAt": "...",
+        "removed": bool,      // 是否被移除（qty <= 0）
+      } | None  // 如果 position 为 None 且 direction 不是 buy，返回 None
+    """
+    if position is None:
+        if direction == "buy":
+            return {
+                "accountID": None,
+                "metaID": None,
+                "code": None,
+                "name": None,
+                "qty": qty,
+                "availableQty": 0,
+                "costPrice": exec_price,
+                "openedAt": opened_at,
+                "removed": False,
+            }
+        return None
+
+    is_buy = direction == "buy"
+    pos_qty = int(position.get("qty", 0) or 0)
+    pos_available = int(position.get("availableQty", 0) or 0)
+    pos_cost = float(position.get("costPrice", 0) or 0)
+
+    if is_buy:
+        new_qty = pos_qty + qty
+        old_cost = pos_cost
+        old_qty = pos_qty
+        new_cost = (old_qty * old_cost + amount) / new_qty if new_qty > 0 else old_cost
+        new_available = pos_available  # 买入不改变 availableQty（T+1）
+        return {
+            "accountID": position.get("accountID"),
+            "metaID": position.get("metaID"),
+            "code": position.get("code"),
+            "name": position.get("name"),
+            "qty": new_qty,
+            "availableQty": new_available,
+            "costPrice": new_cost,
+            "openedAt": position.get("openedAt", opened_at),
+            "removed": False,
+        }
+    else:
+        # 卖出
+        new_qty = pos_qty - qty
+        new_available = pos_available - qty
+        removed = new_qty <= 0
+        return {
+            "accountID": position.get("accountID"),
+            "metaID": position.get("metaID"),
+            "code": position.get("code"),
+            "name": position.get("name"),
+            "qty": new_qty,
+            "availableQty": new_available,
+            "costPrice": pos_cost,
+            "openedAt": position.get("openedAt", opened_at),
+            "removed": removed,
+        }
+
+
+def _op_training_execute_trade(inp):
+    """训练态成交执行：校验 → 费用 → 资金 → 持仓/盈亏推进。
+
+    输入：
+      {
+        "op": "training_execute_trade",
+        "sessionState": {
+          "cash": ...,           # 可用资金
+          "positionQty": ...,    # 持仓数量
+          "avgCost": ...,        # 平均成本
+          "lockedQty": ...,      # T+1 锁定数量
+          "realizedPnl": ...,    # 已实现盈亏
+          "investedCost": ...    # 投入成本
+        },
+        "trade": {
+          "direction": "buy|sell",
+          "qty": ...,            # 股数
+          "price": ...,          # 成交价
+          "date": ...,           # 训练日 YYYYMMDD
+          "note": ...            # 备注
+        },
+        "accountType": "percent|fixedAmount"  # percent 账户不校验资金，不追踪资金流
+      }
+    输出：
+      {
+        "ok": true,
+        "result": {
+          "trade": {
+            "id": ...,           # UUID
+            "seq": ...,          # 序号
+            "direction": ...,    # "buy"|"sell"
+            "tradeDate": ...,    # YYYYMMDD
+            "price": ...,        # 成交价
+            "qty": ...,          # 股数
+            "amount": ...,       # price * qty
+            "fee": ...,          # 费用
+            "pnl": ... | null,   # 卖出时的已实现盈亏
+            "note": ...,         # 备注
+            "trigger": ...,      # "manual"|"cond"
+            "condKind": ... | null
+          },
+          "state": {
+            "cash": ...,         # 更新后的资金
+            "positionQty": ...,  # 更新后的持仓数量
+            "avgCost": ...,      # 更新后的平均成本
+            "lockedQty": ...,    # 更新后的锁定数量
+            "realizedPnl": ...,  # 更新后的已实现盈亏
+            "investedCost": ...  # 更新后的投入成本
+          },
+          "rejection": ... | null  # 拒绝原因
+        }
+      }
+    """
+    import uuid as _uuid
+
+    session_state = inp.get("sessionState") or {}
+    trade = inp.get("trade") or {}
+    account_type = inp.get("accountType", "percent")
+
+    cash = float(session_state.get("cash", 0) or 0)
+    position_qty = int(session_state.get("positionQty", 0) or 0)
+    avg_cost = float(session_state.get("avgCost", 0) or 0)
+    locked_qty = int(session_state.get("lockedQty", 0) or 0)
+    realized_pnl = float(session_state.get("realizedPnl", 0) or 0)
+    invested_cost = float(session_state.get("investedCost", 0) or 0)
+
+    direction = trade.get("direction", "buy")
+    qty = int(trade.get("qty", 0) or 0)
+    price = float(trade.get("price", 0) or 0)
+    date = int(trade.get("date", 0) or 0)
+    note = trade.get("note", "")
+
+    # 训练不支持做空
+    if direction == "sell" and qty <= 0:
+        return {"result": {
+            "trade": None,
+            "state": {
+                "cash": cash,
+                "positionQty": position_qty,
+                "avgCost": avg_cost,
+                "lockedQty": locked_qty,
+                "realizedPnl": realized_pnl,
+                "investedCost": invested_cost
+            },
+            "rejection": {"code": "emptyQty", "message": "卖出数量必须大于 0"}
+        }}
+
+    # 可卖上限：T+1 扣当日买入锁定、T+0 全可卖
+    sellable = position_qty - locked_qty
+    if direction == "sell" and qty > sellable:
+        return {"result": {
+            "trade": None,
+            "state": {
+                "cash": cash,
+                "positionQty": position_qty,
+                "avgCost": avg_cost,
+                "lockedQty": locked_qty,
+                "realizedPnl": realized_pnl,
+                "investedCost": invested_cost
+            },
+            "rejection": {"code": "insufficientShares", "message": "持仓不足，可卖 %d 股" % sellable}
+        }}
+
+    amount = price * qty
+
+    # 费用
+    fee = _fee(amount, direction)
+
+    # 买入前资金校验（仓位金额账户）
+    if direction == "buy" and account_type == "fixedAmount" and amount + fee > cash:
+        affordable = int((cash - fee) / price) if price > 0 else 0
+        affordable = max(affordable, 0)
+        return {"result": {
+            "trade": None,
+            "state": {
+                "cash": cash,
+                "positionQty": position_qty,
+                "avgCost": avg_cost,
+                "lockedQty": locked_qty,
+                "realizedPnl": realized_pnl,
+                "investedCost": invested_cost
+            },
+            "rejection": {"code": "insufficientCash", "message": "可用资金不足，可买 %d 股（可用 %.2f）" % (affordable, cash)}
+        }}
+
+    # PnL
+    pnl = (price - avg_cost) * qty - fee if direction == "sell" else None
+
+    # 交易记录
+    trade_id = str(_uuid.uuid4())
+    seq = 1  # 序号由 Swift 层按会话内顺序分配，这里占位
+    trade_record = {
+        "id": trade_id,
+        "seq": seq,
+        "direction": direction,
+        "tradeDate": date,
+        "price": price,
+        "qty": qty,
+        "amount": amount,
+        "fee": fee,
+        "pnl": pnl,
+        "note": note,
+        "trigger": "manual",
+        "condKind": None
+    }
+
+    # 持仓 / 均价推进
+    if direction == "buy":
+        q0 = position_qty
+        q = q0 + qty
+        new_avg_cost = (q0 * avg_cost + amount) / q if q > 0 else 0
+        new_position_qty = q
+        new_locked_qty = locked_qty + qty  # 当日买入份额在 T+1 标的当日不可卖
+    else:
+        new_position_qty = position_qty - qty
+        if new_position_qty <= 0:
+            new_position_qty = 0
+            new_avg_cost = 0
+            new_locked_qty = 0
+        else:
+            new_avg_cost = avg_cost
+            new_locked_qty = min(locked_qty, new_position_qty)
+
+    # 资金推进（仓位金额账户）
+    new_cash = cash
+    if account_type == "fixedAmount":
+        if direction == "buy":
+            new_cash = cash - (amount + fee)
+        else:
+            new_cash = cash + (amount - fee)
+        if new_cash < 0:
+            new_cash = 0
+
+    # 已实现盈亏累计
+    new_realized_pnl = realized_pnl
+    new_invested_cost = invested_cost
+    if direction == "buy":
+        new_realized_pnl -= fee
+        new_invested_cost += amount
+    else:
+        new_realized_pnl += pnl if pnl is not None else 0
+
+    return {"result": {
+        "trade": trade_record,
+        "state": {
+            "cash": new_cash,
+            "positionQty": new_position_qty,
+            "avgCost": new_avg_cost,
+            "lockedQty": new_locked_qty,
+            "realizedPnl": new_realized_pnl,
+            "investedCost": new_invested_cost
+        },
+        "rejection": None
+    }}
 
 
 # =============================================================================
@@ -2950,8 +3984,12 @@ _OPS = {
     "cond_advance": _op_cond_advance,
     "cond_repeatable_finished": _op_cond_repeatable_finished,
     "cond_alert_message": _op_cond_alert_message,
+    "cond_sweep": _op_cond_sweep,
+    "training_sweep": _op_training_sweep,
+    "training_execute_trade": _op_training_execute_trade,
     "trade_calc": _op_trade_calc,
     "trade_validate": _op_trade_validate,
+    "submit_order": _op_submit_order,
     # E 组（策略 DSL 纯解析 / 校验 / 预览）
     "strategy_parse": _op_strategy_parse,
     "strategy_rule_line": _op_strategy_rule_line,

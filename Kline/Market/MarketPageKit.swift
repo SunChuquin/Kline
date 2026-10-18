@@ -555,7 +555,7 @@ final class MarketPageModel: ObservableObject {
             alertSheetTargets = batchSelectedMetas()
 
         case .cancelAlert:
-            for meta in batchSelectedMetas() { FavoritesAlertKit.cancelAlerts(metaID: meta.id) }
+            for meta in batchSelectedMetas() { Task { await FavoritesAlertKit.cancelAlerts(metaID: meta.id) } }
             finishBatch()
         }
     }

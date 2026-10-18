@@ -44,7 +44,7 @@ final class SimRulesTrust: ObservableObject {
     // MARK: - 编译期常量（sim_rules.py 声明的镜像；自动生成，勿手改）
 
     /// sim_rules.py 的 sha256（sha256sum 全小写十六进制）
-    static let expectedScriptSHA256 = "3c814be9a0277849dfc1279a9f94b98d7690e85b85e190780698e65089e916f6"
+    static let expectedScriptSHA256 = "4c2eff2680806bb999abf2434e6529b7a9c88bfcedf7d025c590f13ca86aabea"
     /// sim_rules.py 的 SIM_RULES_SCRIPT_VERSION
     static let scriptVersion = 1
     /// sim_rules.py 的 SIM_RULES_REQUIRED_API_VERSION（与 manifest.apiVersion 配对）

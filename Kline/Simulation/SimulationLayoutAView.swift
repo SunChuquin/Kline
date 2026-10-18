@@ -290,7 +290,7 @@ struct SimulationLayoutAView: View {
         .alert("修改委托价", isPresented: amendBinding) {
             TextField("委托价", text: $amendPriceText)
                 .keyboardType(.decimalPad)
-            Button("确认") { confirmAmend() }
+            Button("确认") { Task { await confirmAmend() } }
             Button("取消", role: .cancel) { amendTarget = nil }
         } message: {
             Text(amendTarget.map {
@@ -355,7 +355,7 @@ struct SimulationLayoutAView: View {
         HStack(spacing: 8) {
             searchBox(text: $tableKeyword, placeholder: "搜索标的名称/代码")
             toolbarButton(icon: "arrow.clockwise", title: "刷新") {
-                refreshQuotes()
+                Task { await refreshQuotes() }
             }
         }
     }
@@ -498,14 +498,14 @@ struct SimulationLayoutAView: View {
         amendTarget = order
     }
 
-    private func confirmAmend() {
+    private func confirmAmend() async {
         guard let order = amendTarget else { return }
         let price = Double(amendPriceText.filter { $0.isNumber || $0 == "." }) ?? 0
         guard price > 0 else {
             showToast("请输入有效的委托价")
             return
         }
-        store.amendOrderPrice(id: order.id, newPrice: price)
+        await store.amendOrderPrice(id: order.id, newPrice: price)
         amendTarget = nil
         showToast("已改价：\(order.name) → \(SimFormat.price(price))")
     }
@@ -519,16 +519,21 @@ struct SimulationLayoutAView: View {
             showToast("初始资金需大于 0")
             return
         }
-        let account = store.createAccount(name: name.isEmpty ? "新账户" : name,
-                                          initialCapital: capital)
-        store.selectedAccountID = account.id
-        newAccountName = ""
-        newAccountCapital = "100000"
-        showToast("已创建账户「\(account.name)」")
+        Task {
+            if let account = await store.createAccount(name: name.isEmpty ? "新账户" : name,
+                                                       initialCapital: capital) {
+                store.selectedAccountID = account.id
+                newAccountName = ""
+                newAccountCapital = "100000"
+                showToast("已创建账户「\(account.name)」")
+            } else {
+                showToast("创建账户失败，Python 引擎不可用")
+            }
+        }
     }
 
-    private func refreshQuotes() {
-        store.prepareQuotes()
+    private func refreshQuotes() async {
+        await store.prepareQuotes()
         showToast("已请求最新行情")
     }
 

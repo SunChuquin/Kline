@@ -70,7 +70,7 @@ struct QuickPanelAView: View {
 
     private func handleAppear() {
         // 注册持仓标的行情预取（幂等，内部会做 T+1 日切）
-        store.prepareQuotes()
+        Task { await store.prepareQuotes() }
         // 自选迷你列表的行情预取
         let metas = Array(watchlistMetas.prefix(6))
         if !metas.isEmpty { _ = rowCache.rows(for: metas) }
@@ -266,7 +266,7 @@ struct QuickPanelAView: View {
     private func quickActionRow(meta: MetaItem) -> some View {
         HStack(spacing: 8) {
             actionButton("全仓买入", color: Color(.systemRed)) { performFullBuy(meta: meta) }
-            actionButton("一键撤单 (\(activeOrderCount))", color: Color.primary) { performCancelAll() }
+            actionButton("一键撤单 (\(activeOrderCount))", color: Color.primary) { Task { await performCancelAll() } }
             actionButton("一键清仓", color: Color(.systemGreen), compact: true) { showCloseAllConfirm = true }
         }
         .padding(.horizontal, 16)
@@ -355,7 +355,7 @@ struct QuickPanelAView: View {
                 showMessage("未选择标的：请在下方自选列表点「买」或「卖」", isError: true)
             }
             entryButton(icon: "clock", title: "一键撤单", color: Color.primary, badge: activeOrderCount) {
-                performCancelAll()
+                Task { await performCancelAll() }
             }
             entryButton(icon: "wallet.pass", title: "资金 / 转账", color: Color.blue) {
                 showMessage("资金管理请到「模拟」Tab", isError: false)
@@ -474,7 +474,7 @@ struct QuickPanelAView: View {
                 .foregroundColor(Color(.secondaryLabel))
             Spacer(minLength: 6)
             Button {
-                store.cancelOrder(id: order.id)
+                Task { await store.cancelOrder(id: order.id) }
             } label: {
                 Text("撤单")
                     .font(.system(size: 11))
@@ -686,8 +686,8 @@ struct QuickPanelAView: View {
     }
 
     /// 一键撤单：按当前账户口径（全部汇总时撤全部）
-    private func performCancelAll() {
-        let count = store.cancelAll(accountID: store.queryAccountID)
+    private func performCancelAll() async {
+        let count = await store.cancelAll(accountID: store.queryAccountID)
         showMessage(count > 0 ? "已撤单 \(count) 笔" : "暂无在途委托", isError: false)
     }
 

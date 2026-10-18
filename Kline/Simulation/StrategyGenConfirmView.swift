@@ -110,7 +110,7 @@ struct StrategyGenConfirmView: View {
             Spacer()
 
             Button {
-                confirm()
+                Task { await confirm() }
             } label: {
                 Text("确认生成（\(draftCount) 条）")
                     .font(.system(size: 13, weight: .semibold))
@@ -271,7 +271,7 @@ struct StrategyGenConfirmView: View {
             }
 
             Button {
-                confirm()
+                Task { await confirm() }
             } label: {
                 Text("确认生成")
                     .font(.system(size: 15, weight: .bold))
@@ -364,9 +364,9 @@ struct StrategyGenConfirmView: View {
     }
 
     /// 确认生成：批量写入（一次落盘），写 0 条视为失败
-    private func confirm() {
+    private func confirm() async {
         guard let outcome = outcome, !outcome.drafts.isEmpty else { return }
-        let written = store.upsertCondOrders(outcome.drafts.map { $0.order() })
+        let written = await store.upsertCondOrders(outcome.drafts.map { $0.order() })
         if written > 0 {
             onDone(written)
         } else {

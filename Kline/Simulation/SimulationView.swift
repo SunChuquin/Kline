@@ -46,7 +46,7 @@ struct SimulationView: View {
         // 内容延伸到物理屏幕底边 + 背景铺满（避免底部露出下层导航栏）
         .background(Color(.systemBackground).ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
-        .onAppear { SimStore.shared.prepareQuotes() }
+        .onAppear { Task { await SimStore.shared.prepareQuotes() } }
     }
 }
 

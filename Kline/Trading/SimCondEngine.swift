@@ -296,7 +296,7 @@ extension SimStore {
         result.fired += 1
 
         // 记录不覆盖历史：多触发类型每触发一次都追加（appendAlertRecord 内部落盘）
-        appendAlertRecord(SimAlertRecord(id: UUID(), condID: order.id, metaID: order.metaID,
+        await appendAlertRecord(SimAlertRecord(id: UUID(), condID: order.id, metaID: order.metaID,
                                          code: order.code, name: order.name,
                                          price: triggerPrice, message: message, occurredAt: now))
         return target

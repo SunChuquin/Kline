@@ -127,7 +127,7 @@ struct SimCondDetailView: View {
 
     private var cancelButton: some View {
         Button {
-            store.cancelCondOrder(id: current.id)
+            Task { await store.cancelCondOrder(id: current.id) }
         } label: {
             Text("撤销该条件单")
                 .font(.system(size: 15, weight: .semibold))

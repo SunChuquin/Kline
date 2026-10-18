@@ -8,13 +8,23 @@ Python 侧只做纯计算，不直接访问数据库（避免跨进程文件锁�
 契约（与 KlinePythonBridge 一致）：
   - 桥接注入模块全局 dict `kline_input`；产出模块级 dict `kline_result`，
     `kline_result["ok"]` 为 bool。
-  - 输入字段：
+  - 单标的输入：
       {
         "op": "quote_snapshot",
         "bars": [[date, open, high, low, close, volume, turnover], ...],  // 升序，旧→新
         "fields": ["latestPrice", "prevClose", "change", "changePct", ...]  // 可选，缺省全算
       }
+  - 批量多标的输入：
+      {
+        "op": "quote_snapshot_batch",
+        "symbols": [
+          {"metaID": 1, "bars": [[date, open, high, low, close, volume, turnover], ...]},
+          {"metaID": 2, "bars": [...]}
+        ],
+        "fields": ["latestPrice", "prevClose", "change", "changePct"]  // 可选，缺省全算
+      }
   - 输出：{"ok": true, "result": {"latestPrice": 1452.30, "prevClose": 1448.00, ...}}
+    批量输出：{"ok": true, "result": {"1": {...}, "2": {...}}}
   - 空 bars 或不足 → 缺失字段为 null
   - 日期为整数（如 20261017），价格/量为数值
 
@@ -145,9 +155,24 @@ def _compute(field, bars):
     return None
 
 
+def _compute_all(bars):
+    """计算所有字段，返回 dict。"""
+    fields = [
+        "latestPrice", "prevClose", "open", "high", "low", "volume", "turnover",
+        "change", "changePct", "amplitude", "volRatio",
+        "pct3d", "pct5d", "pct10d", "pct20d", "pct60d", "pctYTD",
+        "ma5", "ma10", "ma20", "ma60",
+    ]
+    result = {}
+    for f in fields:
+        result[f] = _compute(f, bars)
+    return result
+
+
 # ---- op 分发表 ----
 _OPS = {
     "quote_snapshot": None,  # 下面单独处理
+    "quote_snapshot_batch": None,
 }
 
 
@@ -175,7 +200,59 @@ def _op_quote_snapshot(inp):
     return _ok(result)
 
 
+def _op_quote_snapshot_batch(inp):
+    """批量多标的快照计算。
+
+    输入：
+      {
+        "symbols": [
+          {"metaID": 1, "bars": [[date, open, high, low, close, volume, turnover], ...]},
+          {"metaID": 2, "bars": [...]}
+        ],
+        "fields": ["latestPrice", "prevClose", "change", "changePct"]  // 可选，缺省全算
+      }
+    输出：
+      {
+        "ok": true,
+        "result": {
+          "1": {"latestPrice": 1452.3, "prevClose": 1448.0, ...},
+          "2": {...}
+        }
+      }
+    """
+    symbols = inp.get("symbols")
+    if not isinstance(symbols, list):
+        return _err("symbols 须为数组")
+    fields = inp.get("fields")
+    if fields is None:
+        fields = ["latestPrice", "prevClose", "change", "changePct"]
+    if not isinstance(fields, list):
+        return _err("fields 须为数组")
+
+    result = {}
+    for sym in symbols:
+        if not isinstance(sym, dict):
+            continue
+        metaID = sym.get("metaID")
+        bars = sym.get("bars")
+        if not isinstance(bars, list):
+            continue
+        for b in bars:
+            if not isinstance(b, list) or len(b) < 5:
+                continue
+        key = str(metaID) if metaID is not None else str(id(sym))
+        sym_result = {}
+        for f in fields:
+            if not isinstance(f, str):
+                continue
+            sym_result[f] = _compute(f, bars)
+        result[key] = sym_result
+
+    return _ok(result)
+
+
 _OPS["quote_snapshot"] = _op_quote_snapshot
+_OPS["quote_snapshot_batch"] = _op_quote_snapshot_batch
 
 
 def run(inp):

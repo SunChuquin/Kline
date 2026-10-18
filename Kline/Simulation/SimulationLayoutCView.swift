@@ -94,14 +94,14 @@ struct SimulationLayoutCView: View {
         .alert("修改委托价", isPresented: amendBinding) {
             TextField("委托价", text: $amendPriceText)
                 .keyboardType(.decimalPad)
-            Button("确认") { confirmAmend() }
+            Button("确认") { Task { await confirmAmend() } }
             Button("取消", role: .cancel) { amendTarget = nil }
         } message: {
             Text(amendTarget.map {
                 "\($0.name) \($0.code) · 当前 \($0.price.map { SimFormat.price($0) } ?? "市价")"
             } ?? "")
         }
-        .onAppear { SimStore.shared.prepareQuotes() }
+        .onAppear { Task { await SimStore.shared.prepareQuotes() } }
     }
 
     // MARK: - 顶部条
@@ -291,7 +291,7 @@ struct SimulationLayoutCView: View {
     }
 
     private var refreshButton: some View {
-        Button(action: { refreshQuotes() }) {
+        Button(action: { Task { await refreshQuotes() } }) {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.clockwise").font(.system(size: 11))
                 Text("刷新").font(.system(size: 11.5))
@@ -384,7 +384,7 @@ struct SimulationLayoutCView: View {
                 .lineLimit(1)
             Spacer(minLength: 4)
             SimInlineButton(title: "撤单", tint: Color(.secondaryLabel)) {
-                store.cancelOrder(id: order.id)
+                Task { await store.cancelOrder(id: order.id) }
             }
         }
         .padding(.horizontal, 10)
@@ -498,14 +498,14 @@ struct SimulationLayoutCView: View {
         amendTarget = order
     }
 
-    private func confirmAmend() {
+    private func confirmAmend() async {
         guard let order = amendTarget else { return }
         let price = Double(amendPriceText.filter { $0.isNumber || $0 == "." }) ?? 0
         guard price > 0 else {
             showToast("请输入有效的委托价")
             return
         }
-        store.amendOrderPrice(id: order.id, newPrice: price)
+        await store.amendOrderPrice(id: order.id, newPrice: price)
         amendTarget = nil
         showToast("已改价：\(order.name) → \(SimFormat.price(price))")
     }
@@ -518,8 +518,8 @@ struct SimulationLayoutCView: View {
         showToast("可用 \(SimFormat.amount0(summary.cash)) ｜ 市值 \(SimFormat.amount0(summary.marketValue)) ｜ 总资产 \(SimFormat.amount0(summary.totalAssets))")
     }
 
-    private func refreshQuotes() {
-        store.prepareQuotes()
+    private func refreshQuotes() async {
+        await store.prepareQuotes()
         showToast("已请求最新行情")
     }
 

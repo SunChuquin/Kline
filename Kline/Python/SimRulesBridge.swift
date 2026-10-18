@@ -11,6 +11,7 @@
 //    sim_format / cond_evaluate / cond_validate_create / cond_grid_level_count / cond_text /
 //    cond_expired_reason / cond_fire_direction / cond_execution_price / cond_advance /
 //    cond_repeatable_finished / cond_alert_message / trade_calc / trade_validate /
+//    submit_order / training_sweep / training_execute_trade /
 //    strategy_drafts / strategy_entry_draft / strategy_parse / strategy_rule_line /
 //    strategy_catalog / strategy_validate / strategy_preview / trade_parse /
 //    trade_serialize / trade_override / backtest_run。
@@ -79,6 +80,34 @@ enum SimRulesBridge {
             case .failure(let e):
                 completion(.failure(.callError(String(describing: e))))
             }
+        }
+    }
+
+    // MARK: - 生产回测入口（后台线程，阻塞调用）
+
+    /// 生产回测入口（**后台线程**）：经 `SimRulesCodec` 编码 + `blockingCall(sim_rules, "backtest_run")` + 反解。
+    /// 引擎未就绪 → `.failure(.engineNotReady)`（调用方按 §9.10 显式降级，不静默用 Swift）。
+    ///
+    /// 取消语义：一次性阻塞调用，取消只在返回后生效（调用方在回调里再查取消标志）。
+    static func backtestRun(doc: FormulaDoc, bars: [Int: [KlineItem]], pickHits: [Int: Set<Int>],
+                            metas: [Int: MetaItem], params: BacktestParams,
+                            shouldCancel: (() -> Bool)?,
+                            timeout: TimeInterval = 120) -> Result<BacktestResult, Failure> {
+        guard KlinePythonBridge.shared.isReady else { return .failure(.engineNotReady) }
+        var input = SimRulesCodec.backtestInput(doc: doc, bars: bars, pickHits: pickHits,
+                                                metas: metas, params: params,
+                                                tzOffsetSeconds: TimeZone.current.secondsFromGMT())
+        input["op"] = "backtest_run"
+        switch KlinePythonBridge.shared.blockingCall(script: "sim_rules", input: input,
+                                                     timeout: timeout) {
+        case .success(let data):
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .failure(.badOutput)
+            }
+            do { return .success(try SimRulesCodec.backtestResult(from: obj, params: params)) }
+            catch { return .failure(.badOutput) }
+        case .failure(let e):
+            return .failure(.callError(String(describing: e)))
         }
     }
 

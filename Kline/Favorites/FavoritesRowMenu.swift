@@ -635,12 +635,12 @@ enum FavoritesAlertKit {
     }
 
     /// 取消预警：删除该标的的提醒型条件单（仅监控中的；已触发 / 已失效的不再纳入）
-    static func cancelAlerts(metaID: Int) {
+    static func cancelAlerts(metaID: Int) async {
         let store = SimStore.shared
         let ids = store.conditionalOrders
             .filter { $0.metaID == metaID && $0.directive.isAlertOnly && $0.status == .monitoring }
             .map(\.id)
-        for id in ids { store.deleteCondOrder(id: id) }
+        for id in ids { await store.deleteCondOrder(id: id) }
     }
 
     /// 设置预警：为每只标的创建同规则的 alertOnly 条件单（价格上穿 / 下穿）；
@@ -741,7 +741,7 @@ enum MetaRowMenuKit {
             return .note(target)
         case .toggleAlert:
             if FavoritesAlertKit.hasAlert(metaID: meta.id) {
-                FavoritesAlertKit.cancelAlerts(metaID: meta.id)
+                Task { await FavoritesAlertKit.cancelAlerts(metaID: meta.id) }
                 return nil
             }
             return .alert(meta)

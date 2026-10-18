@@ -993,17 +993,6 @@ struct SimCondEditorView: View {
                             originOrderID: editing?.originOrderID)
     }
 
-    private func validateDraft(_ draft: SimCondOrder) -> SimCondRejection? {
-        guard let account = account else { return .accountUnavailable }
-        let position = position
-        let snapshot = trainingBackend.map { $0.snapshot(draft) } ?? SimCondSnapshotCenter.snapshot(for: draft)
-        // 训练态「触发时间」是训练日语义：用训练日的「今天」做比较基准（历史数据不会被判为已过期）
-        let now = isTraining ? (trainingDateAsDate ?? Date()) : Date()
-        return SimCondRule.validateCreate(order: draft, account: account,
-                                          position: position, snapshot: snapshot, now: now)
-    }
-
-    /// 建单校验（引擎门面，A5-5）；引擎未就绪 / 异常 → `.engineUnavailable`（显式降级，§9.10）
     private func validateDraftAsync(_ draft: SimCondOrder) async -> SimCondRejection? {
         guard let account = account else { return .accountUnavailable }
         let position = position
@@ -1170,7 +1159,7 @@ struct SimCondEditorView: View {
         if let backend = trainingBackend {
             backend.save(draft)
         } else {
-            store.upsertCondOrder(draft)
+            Task { await store.upsertCondOrder(draft) }
         }
         onFinish()
     }
