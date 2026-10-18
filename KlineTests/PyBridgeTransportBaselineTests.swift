@@ -17,6 +17,7 @@
 //
 
 import XCTest
+import SQLite3
 @testable import Kline
 
 @MainActor
@@ -219,6 +220,53 @@ final class PyBridgeTransportBaselineTests: XCTestCase {
             + "（该队列未显式指定 QoS）；文件交换（前置+读回）合计仅 0.8ms。")
 
         await reportRunQoSAblation()
+        reportSwiftReadBaseline()
+    }
+
+    /// ⑥ **L2 对照基线**：当前 **Swift 同步 SQLite 读** 同样 250 根日线的耗时
+    /// （即 L2 要替换掉的那条路；不包含 live 覆盖 main 的合并，属**下界**）。
+    private func reportSwiftReadBaseline() {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("swiftread_\(UUID().uuidString).db").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else { log("Swift 读基线：建库失败"); return }
+        defer { sqlite3_close(db) }
+        let create = "CREATE TABLE daily(file TEXT, date INTEGER, open REAL, high REAL, low REAL, "
+            + "close REAL, vol REAL, amo REAL, PRIMARY KEY(file,date));"
+        guard sqlite3_exec(db, create, nil, nil, nil) == SQLITE_OK else {
+            log("Swift 读基线：建表失败"); return
+        }
+        // 灌 250 根
+        var ins: OpaquePointer?
+        _ = sqlite3_prepare_v2(db, "INSERT INTO daily VALUES(?,?,?,?,?,?,?,?);", -1, &ins, nil)
+        for i in 0..<250 {
+            sqlite3_reset(ins)
+            sqlite3_bind_text(ins, 1, "SH#600000", -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(ins, 2, Int64(20250101 + i))
+            for c in 3...8 { sqlite3_bind_double(ins, Int32(c), 10.0 + Double(i % 7)) }
+            _ = sqlite3_step(ins)
+        }
+        sqlite3_finalize(ins)
+
+        // 计时：等价于 DatabaseManager 主库读形态（prepared SELECT → 逐行读 8 列）
+        var ms: [Double] = []
+        for _ in 0..<20 {
+            let t = CFAbsoluteTimeGetCurrent()
+            var st: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT file,date,open,high,low,close,vol,amo FROM daily "
+                                  + "ORDER BY date DESC LIMIT 250;", -1, &st, nil) == SQLITE_OK {
+                var rows = 0
+                while sqlite3_step(st) == SQLITE_ROW { rows += 1 }
+                sqlite3_finalize(st)
+                if rows != 250 { log("Swift 读基线：行数异常 \(rows)") }
+            }
+            ms.append((CFAbsoluteTimeGetCurrent() - t) * 1000)
+        }
+        let sorted = ms.sorted()
+        log(String(format: "Swift 同步读基线（SAME 250 根 · 主库读形态）：median %.3fms · max %.3fms",
+                   sorted[10], sorted.last ?? 0))
+        log("对照：L2 走引擎为单标的 250 根约 3.5ms（异步）→ 二者差额即「纯度」的代价。")
     }
 
     /// 忙线程负载源（A/B 只有在「有竞争」时才有区分度：默认 QoS 应被 .userInitiated 抢后）。
