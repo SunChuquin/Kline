@@ -2194,7 +2194,42 @@ done
 主库缺表）**2/2 通过（0 skip）**。
 
 **未收尾**：② 增量库行级写（`LiveDataStore.upsertDaily` / `trim`）+ **上万行过桥的吞吐实测**
-（行级写是每次同步的热路径，需先量一遍 JSON 桥成本）；引擎未就绪时的写库降级仍为「跳过不写」。
+——见 §11.33（已完成）；引擎未就绪时的写库降级仍为「跳过不写」。
+
+---
+
+### 11.33 §9.9 S5 写路径下沉（②）：增量库行级写 / 裁剪下沉（2026-10-18）
+
+> 承 §11.32。本轮把 `LiveDataStore` 的**行级写**（`upsertDaily`）与**裁剪**（`trim`）的写语句下沉到
+> `db_write.py`（op `live_upsert_daily` / `live_trim`）。
+
+**边界（本轮最关键的一处设计）**：只下沉**末梢写语句**，「哪些行要写」的判定留在 Swift——
+
+| 环节 | 归属 | 理由 |
+| --- | --- | --- |
+| 「哪些行变化」判定（`_rowIdenticalLocked` / `_metaExistsLocked` 的 SELECT + 1e-6 容差比对） | **Swift** | 读路径；§9.6 阶段 D 红线「SQLite 每帧查询永不动」 |
+| 表名解析（`live_*` / 旧无前缀）、schema 保证（v3 迁移） | **Swift** | 与打开连接 / 生命周期耦合 |
+| 周/月/季/年的「当期日历起始」（`_trimBoundsLocked`） | **Swift** | 依赖 `KlinePeriod.periodDateRange` 既有口径，属读侧口径 |
+| `INSERT OR IGNORE`（live_meta）/ `INSERT OR REPLACE`（各周期表）/ `DELETE`（裁剪） | **引擎** | 本轮下沉对象 |
+
+**改动**
+
+| 层 | 文件 | 内容 |
+| --- | --- | --- |
+| 引擎 | `Kline/PyScripts/db_write.py` | 新增 `live_upsert_daily`（单事务：meta INSERT OR IGNORE → 各表 INSERT OR REPLACE → `coveredFiles` 计数 → 逐字复刻 message）与 `live_trim`（单事务 DELETE，边界由入参给定） |
+| 桥接 | `Kline/Python/DbWriteBridge.swift` | 新增 `liveUpsertDaily` / `liveTrim`；抽出统一入口 `run(op:input:timeout:)` |
+| 调用点 | `Kline/Data/LiveDataStore.swift` | ① 把写语句块抽为可对任意 handle 执行的 `upsertWriteOracle` / `trimWriteOracle`，并抽出 `_trimBoundsLocked`（**两条路径共用同一批边界**，避免日历口径漂移）；② 生产入口改走 `_upsertDailyViaEngineLocked` / `_trimViaEngineLocked`；③ oracle 函数标注「生产不再调用」 |
+
+**验证（2026-10-18）**
+
+| 项 | 结果 |
+| --- | --- |
+| `KlineTests/DbWriteParityTests`（扩到 **4 例**：主库合并 ×2 + 增量库行级写 / 裁剪 ×2） | **4/4（0 skip）**——同输入临时库上双跑，比对结果计数 + 两库内容（确定性 JSON）+ `live_meta` |
+| 吞吐实测（引擎侧：解析 + SQL） | 5 000 行 **19.1ms** / 20 000 行（JSON 2.79MB）**55.2ms**，≈2.7ms/千行 → 上万行走桥成本在「后台批量同步」可接受 |
+
+**未收尾**：若将来要把「写前比对」也下沉（进一步收窄 Swift），须先把 `KlinePeriod.periodDateRange`
+的日历口径与 1e-6 容差语义搬进 Python（新真源风险），本轮**有意不做**；`DatabaseManager` 读路径按
+§9.6 阶段 D 红线同样不下沉。
 
 ---
 
