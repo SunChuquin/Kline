@@ -118,8 +118,11 @@ final class MainDBMerger {
                 DispatchQueue.main.async { completion(r) }
                 return
             }
-            DatabaseManager.shared.performOnDBQueue({ (db: OpaquePointer?) -> MainMergeResult in
-                MainDBMerger.mergeLocked(db: db, snapshot: snapshot)
+            DatabaseManager.shared.performOnDBQueue({ (_: OpaquePointer?) -> MainMergeResult in
+                // S5：主库**写路径已下沉引擎**（`db_write.py` 的 `main_db_merge`）。
+                // 仍在 dbQueue 上执行 → 「主库访问全部串行」这一既有不变式不变。
+                MainDBMerger.mergeViaEngine(dbPath: DatabaseManager.writableDBPath,
+                                            snapshot: snapshot)
             }, completion: { (result: MainMergeResult) in
                 guard result.ok else {
                     completion(result)
@@ -153,6 +156,44 @@ final class MainDBMerger {
 
     // MARK: - 主库侧实现（全部在 dbQueue 上）
 
+    /// S5：生产路径 —— 经引擎 op 写主库（`db_write.py` `main_db_merge`）。
+    /// 引擎未就绪 / op 失败 → ok=false（计数归零），调用方按「本次合并未发生」处理。
+    /// ⚠️ 语义 oracle = 下方 `mergeLocked`（保留供 `KlineTests/DbWriteParityTests` 双跑对拍，**生产不再调用**）。
+    private static func mergeViaEngine(dbPath: String,
+                                       snapshot: LiveIncrementSnapshot) -> MainMergeResult {
+        var r = MainMergeResult()
+        let payload: [String: [[String: Any]]] = [
+            "daily": snapshot.daily.map(rowJSON),
+            "weekly": snapshot.weekly.map(rowJSON),
+            "monthly": snapshot.monthly.map(rowJSON),
+            "quarterly": snapshot.quarterly.map(rowJSON),
+            "yearly": snapshot.yearly.map(rowJSON),
+        ]
+        switch DbWriteBridge.mainDBMerge(dbPath: dbPath, snapshot: payload) {
+        case .failure(let f):
+            r.message = "引擎写主库失败：\(f)"
+            return r
+        case .success(let outcome):
+            r.ok = outcome.ok
+            r.dailyRows = outcome.dailyRows
+            r.weeklyRows = outcome.weeklyRows
+            r.monthlyRows = outcome.monthlyRows
+            r.quarterlyRows = outcome.quarterlyRows
+            r.yearlyRows = outcome.yearlyRows
+            r.hitSymbols = outcome.hitSymbols
+            r.skippedNoFile = outcome.skippedNoFile
+            r.latestDate = outcome.latestDate
+            r.message = outcome.message
+            return r
+        }
+    }
+
+    /// 增量行 → 引擎入参 JSON（键名与 `main_db_merge` 契约一致）。
+    private static func rowJSON(_ row: LiveIncrementRow) -> [String: Any] {
+        ["file": row.file, "date": row.date, "open": row.open, "high": row.high,
+         "low": row.low, "close": row.close, "vol": row.vol, "amo": row.amo]
+    }
+
     /// 主库 `file → meta_id` 映射（`file` 3611/3611 唯一，无需歧义处理；`code` 有 55 处重复，不能用）
     private static func buildFileMap(db: OpaquePointer) -> [String: Int] {
         var byFile: [String: Int] = [:]
@@ -180,7 +221,9 @@ final class MainDBMerger {
     }
 
     /// 单事务合并（**已在 dbQueue 上**）
-    private static func mergeLocked(db: OpaquePointer?, snapshot: LiveIncrementSnapshot) -> MainMergeResult {
+    /// ⚠️ **单测对拍 oracle**（S5 起生产不再调用；生产走 `mergeViaEngine`）：
+    /// 主库合并的 Swift 原实现，供 `DbWriteParityTests` 与引擎 op 在同输入下双跑比对。
+    static func mergeLocked(db: OpaquePointer?, snapshot: LiveIncrementSnapshot) -> MainMergeResult {
         var r = MainMergeResult()
         guard let db = db else {
             r.message = "主库未就绪（连接不可用）"
