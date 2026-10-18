@@ -130,30 +130,17 @@ enum DbWriteBridge {
     }
 
     /// 增量库行级写（同步阻塞；调用点在 `LiveDataStore.queue` 上）。
-    /// ⚠️ 「哪些行要写」的判定（读 + 容差比对）与表名解析由调用方完成，本层只传「已筛好的变化集合」。
+    /// ⚠️ 自 §11.34 起**写前比对也在引擎内**（哪些行变化 / meta 存在性 / 表名解析），
+    /// 调用方只传原始入参（全量 metas / bars / periodBars），不再预筛。
     static func liveUpsertDaily(dbPath: String,
-                                dailyTable: String,
-                                quarterlyTable: String?,
-                                yearlyTable: String?,
                                 metas: [[String: Any]],
                                 metaUpdatedAt: Int,
-                                daily: [[String: Any]],
-                                quarterly: [[String: Any]],
-                                yearly: [[String: Any]],
-                                periodRowCount: Int,
-                                totalMetaCount: Int,
-                                totalBarCount: Int,
+                                bars: [[String: Any]],
+                                periodBars: [String: [[String: Any]]],
                                 timeout: TimeInterval = 120) -> Result<LiveUpsertOutcome, Failure> {
-        var input: [String: Any] = ["dbPath": dbPath, "dailyTable": dailyTable,
-                                    "metaUpdatedAt": metaUpdatedAt,
-                                    "metas": metas, "daily": daily,
-                                    "quarterly": quarterly, "yearly": yearly,
-                                    "periodRowCount": periodRowCount,
-                                    "totalMetaCount": totalMetaCount,
-                                    "totalBarCount": totalBarCount]
-        if let quarterlyTable { input["quarterlyTable"] = quarterlyTable }
-        if let yearlyTable { input["yearlyTable"] = yearlyTable }
-        return run("live_upsert_daily", input, timeout: timeout)
+        run("live_upsert_daily", ["dbPath": dbPath, "metaUpdatedAt": metaUpdatedAt,
+                                  "metas": metas, "bars": bars, "periodBars": periodBars],
+            timeout: timeout)
             .map(LiveUpsertOutcome.init(from:))
     }
 

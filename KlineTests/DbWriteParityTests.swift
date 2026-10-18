@@ -315,33 +315,31 @@ final class DbWriteParityTests: XCTestCase {
             sqlite3_close(db)
         }
 
-        let newMetas = [LiveUpsertMeta(file: "SZ#000001", code: "000001", name: "平安", type: "1")]
-        let changedBars = [liveBar("SH#600000", 20260102, close: 12.5),
-                           liveBar("SZ#000001", 20260101, close: 20.0)]
+        // 原始入参（**不预筛**：写前比对也在引擎内）
+        let inputMetas = [LiveUpsertMeta(file: "SZ#000001", code: "000001", name: "平安", type: "1"),
+                          LiveUpsertMeta(file: "SH#600000", code: "600000", name: "浦发", type: "1")]
+        let inputBars = [liveBar("SH#600000", 20260101, close: 10.5),   // 与库内同值 → 不应写入
+                         liveBar("SH#600000", 20260102, close: 12.5),   // 库内无 → 写入
+                         liveBar("SZ#000001", 20260101, close: 20.0)]
         let quarterly = [liveBar("SH#600000", 20260101, close: 33.0)]
+        let periodBars = ["quarterly": quarterly]
 
-        // A：Swift oracle（对任意 handle 执行写语句）
+        // A：Swift oracle（写前比对 + 写语句，对任意 handle 执行）
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(swiftDB, &db), SQLITE_OK)
-        let a = LiveDataStore.upsertWriteOracle(
-            handle: db!, newMetas: newMetas, changedBars: changedBars,
-            changedPeriodBars: [("live_quarterly", quarterly)],
-            updatedAt: 999, periodRowCount: quarterly.count,
-            totalMetaCount: newMetas.count + 1, totalBarCount: changedBars.count)
+        let a = LiveDataStore.upsertFullOracle(handle: db!, metas: inputMetas, bars: inputBars,
+                                               periodBars: periodBars, updatedAt: 999)
         sqlite3_close(db)
 
-        // B：引擎 op
-        let metasJSON = newMetas.map { ["file": $0.file, "code": $0.code, "name": $0.name, "type": $0.type] }
-        let dailyJSON = changedBars.map(liveBarJSON)
+        // B：引擎 op（同原始入参）
+        let metasJSON = inputMetas.map { ["file": $0.file, "code": $0.code, "name": $0.name, "type": $0.type] }
+        let barsJSON = inputBars.map(liveBarJSON)
         let quarterlyJSON = quarterly.map(liveBarJSON)
+        let periodJSON = ["quarterly": quarterlyJSON]
         let b = try await onBackground {
-            try DbWriteBridge.liveUpsertDaily(
-                dbPath: engineDB, dailyTable: "live_daily",
-                quarterlyTable: "live_quarterly", yearlyTable: nil,
-                metas: metasJSON, metaUpdatedAt: 999,
-                daily: dailyJSON, quarterly: quarterlyJSON, yearly: [],
-                periodRowCount: quarterlyJSON.count,
-                totalMetaCount: metasJSON.count + 1, totalBarCount: dailyJSON.count).get()
+            try DbWriteBridge.liveUpsertDaily(dbPath: engineDB, metas: metasJSON,
+                                              metaUpdatedAt: 999, bars: barsJSON,
+                                              periodBars: periodJSON).get()
         }
 
         XCTAssertEqual(b.ok, a.ok)

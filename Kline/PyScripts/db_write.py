@@ -167,61 +167,118 @@ def _write_bars(cur, table, rows):
     return n
 
 
+def _live_row_identical(cur, table, bar):
+    """某表是否已有该 (file,date) 且 6 个数值字段与传入值一致（容差 1e-6，镜像 Swift）。
+    无该行 / 值不同 / 查询失败 → False（视为需要写入）。"""
+    try:
+        row = cur.execute("SELECT open,high,low,close,vol,amo FROM %s WHERE file = ? AND date = ?"
+                          % table, (bar.get("file"), _int(bar.get("date")))).fetchone()
+    except Exception:  # noqa: BLE001
+        return False
+    if row is None:
+        return False
+    return all(abs(a - b) < 1e-6 for a, b
+               in zip(row, (_num(bar.get("open")), _num(bar.get("high")), _num(bar.get("low")),
+                            _num(bar.get("close")), _num(bar.get("vol")), _num(bar.get("amo")))))
+
+
+def _live_meta_exists(cur, file):
+    try:
+        return cur.execute("SELECT 1 FROM live_meta WHERE file = ? LIMIT 1", (file,)).fetchone() \
+            is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _live_table_name(cur, table):
+    """镜像 `_localTableNameLocked`：`live_<t>` 优先，回落旧版无前缀 `<t>`，都没有 → None。"""
+    for name in ("live_" + table, table):
+        hit = cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                          (name,)).fetchone()
+        if hit:
+            return name
+    return None
+
+
 def _op_live_upsert_daily(inp):
-    """增量库行级写（清单日更 / 补缺口的结果落 live_*.db）。
+    """增量库行级写（清单日更 / 补缺口的结果落 `tdx_live.db`）。
 
-    ⚠️ 边界（§11.33）：**「哪些行需要写」的判定留在 Swift**
-    （`_rowIdenticalLocked` / `_metaExistsLocked` 的读 + 1e-6 容差比对 = 读路径，按 §9.6 阶段 D 红线留 Swift；
-    表名解析、schema 保证、日历推算同样留 Swift）。本 op 只承接**写语句**：
-    给定已筛好的「变化集合」执行 `INSERT OR IGNORE`（live_meta）+ `INSERT OR REPLACE`（各周期表）。
+    ⚠️ 边界（§11.34）：**写前比对与末梢写语句都在引擎内**——
+    「哪些行需要写」（`SELECT` + 1e-6 容差比对 / `live_meta` 存在性 / 表名解析）与
+    `INSERT OR IGNORE` / `INSERT OR REPLACE` 一并承接；Swift 只负责打开连接、保证 schema
+    （v3 迁移）与结果投影。
+    ⚠️ 仍是读侧的：**打开连接 / schema 保证 / 周期日历口径**（`LiveDataStore._trimBoundsLocked`）。
 
-    输入：{"dbPath", "dailyTable", "quarterlyTable"|None, "yearlyTable"|None, "metaUpdatedAt",
-           "metas":[{file,code,name,type}], "daily":[bar], "quarterly":[bar], "yearly":[bar],
-           "periodRowCount", "totalMetaCount", "totalBarCount"}
+    输入：{"dbPath", "metaUpdatedAt", "metas":[{file,code,name,type}],
+           "bars":[bar], "periodBars":{"quarterly":[bar], "yearly":[bar]}}
     输出：{"ok", "metaRows", "dailyRows", "quarterlyRows", "yearlyRows", "coveredFiles", "message"}
     """
     db_path = inp.get("dbPath")
-    if not db_path or not os.path.exists(db_path):
-        return _ok(result={"ok": False, "message": "本地增量库不可写（打开失败）"})
-    daily_table = inp.get("dailyTable")
     metas = inp.get("metas") or []
-    daily = inp.get("daily") or []
-    quarterly = inp.get("quarterly") or []
-    yearly = inp.get("yearly") or []
+    bars = inp.get("bars") or []
+    period_bars = inp.get("periodBars") or {}
     meta_updated_at = _int(inp.get("metaUpdatedAt"))
-    period_row_count = _int(inp.get("periodRowCount"))
-    total_meta = _int(inp.get("totalMetaCount"))
-    total_bars = _int(inp.get("totalBarCount"))
+    period_row_count = sum(len(v or []) for v in period_bars.values())
 
-    out = {"ok": True, "metaRows": 0, "dailyRows": 0, "quarterlyRows": 0,
-           "yearlyRows": 0, "coveredFiles": 0, "message": ""}
+    out = {"ok": False, "metaRows": 0, "dailyRows": 0, "quarterlyRows": 0,
+           "yearlyRows": 0, "coveredFiles": 0, "message": "无数据可写入"}
+    if not metas and not bars and not period_bars:
+        return _ok(result=out)
+    if not db_path or not os.path.exists(db_path):
+        out["message"] = "本地增量库不可写（打开失败）"
+        return _ok(result=out)
 
     conn = sqlite3.connect(db_path, timeout=30.0)
     try:
         conn.isolation_level = None
         cur = conn.cursor()
+
+        # ① 写前判定：只保留「库里没有该 (file,date)」或「任一字段不同」的日线、
+        #    live_meta 尚不存在的标的，以及库内不一致的当期季/年 bar。
+        changed_bars = [b for b in bars if not _live_row_identical(cur, "live_daily", b)]
+        new_metas = [m for m in metas if not _live_meta_exists(cur, m.get("file"))]
+        changed_period = []          # [(table, rows)]
+        for period in ("quarterly", "yearly"):
+            rows = period_bars.get(period) or []
+            if not rows:
+                continue
+            table = _live_table_name(cur, period)
+            if table is None:
+                continue
+            changed = [b for b in rows if not _live_row_identical(cur, table, b)]
+            if changed:
+                changed_period.append((table, changed))
+
+        if not changed_bars and not new_metas and not changed_period:
+            out["ok"] = True
+            out["coveredFiles"] = cur.execute("SELECT COUNT(*) FROM live_meta;").fetchone()[0]
+            out["message"] = ("无变化：日线 %d 行 / meta %d 条 / 当期季年 %d 行均与库内一致 → 跳过写入"
+                              % (len(bars), len(metas), period_row_count))
+            return _ok(result=out)
+
+        # ② 单事务写（至此与 Swift oracle 的写语句块同源）
         try:
             cur.execute("BEGIN IMMEDIATE")
         except Exception as exc:  # noqa: BLE001
-            out["ok"] = False
             out["message"] = "开启事务失败：%s" % exc
             return _ok(result=out)
 
         failed = None
         try:
-            if metas:
-                for m in metas:
-                    before = conn.total_changes
-                    cur.execute(_SQL_INSERT_LIVE_META,
-                                (m.get("file"), m.get("code"), m.get("name"), m.get("type"),
-                                 meta_updated_at))
-                    out["metaRows"] += conn.total_changes - before
-            if daily_table and daily:
-                out["dailyRows"] = _write_bars(cur, daily_table, daily)
-            if inp.get("quarterlyTable") and quarterly:
-                out["quarterlyRows"] = _write_bars(cur, inp["quarterlyTable"], quarterly)
-            if inp.get("yearlyTable") and yearly:
-                out["yearlyRows"] = _write_bars(cur, inp["yearlyTable"], yearly)
+            for m in new_metas:
+                before = conn.total_changes
+                cur.execute(_SQL_INSERT_LIVE_META,
+                            (m.get("file"), m.get("code"), m.get("name"), m.get("type"),
+                             meta_updated_at))
+                out["metaRows"] += conn.total_changes - before
+            if changed_bars:
+                out["dailyRows"] = _write_bars(cur, "live_daily", changed_bars)
+            for table, rows in changed_period:
+                n = _write_bars(cur, table, rows)
+                if table.endswith("quarterly"):
+                    out["quarterlyRows"] = n
+                else:
+                    out["yearlyRows"] = n
             cur.execute("COMMIT")
         except Exception as exc:  # noqa: BLE001
             failed = str(exc)
@@ -231,18 +288,18 @@ def _op_live_upsert_daily(inp):
                 pass
 
         if failed is not None:
-            out["ok"] = False
             out["metaRows"] = out["dailyRows"] = 0
             out["quarterlyRows"] = out["yearlyRows"] = 0
             out["coveredFiles"] = 0
             out["message"] = "写入失败（已回滚）%s" % failed
             return _ok(result=out)
 
+        out["ok"] = True
         out["coveredFiles"] = cur.execute("SELECT COUNT(*) FROM live_meta;").fetchone()[0]
         out["message"] = ("写入完成 meta新增=%d 条 / daily变化=%d 行 / 季%d行·年%d行"
                           "（传入 meta %d 条 / 日线 %d 行 / 当期季年 %d 行，其余与库内一致已跳过）覆盖=%d只"
                           % (out["metaRows"], out["dailyRows"], out["quarterlyRows"],
-                             out["yearlyRows"], total_meta, total_bars, period_row_count,
+                             out["yearlyRows"], len(metas), len(bars), period_row_count,
                              out["coveredFiles"]))
         return _ok(result=out)
     finally:

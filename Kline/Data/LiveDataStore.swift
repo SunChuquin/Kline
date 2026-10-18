@@ -809,28 +809,28 @@ final class LiveDataStore: ObservableObject {
     /// 清单日更当日K线 → 本地增量库：**先比对后写入**（单事务），全程预处理语句 + 绑定（不拼字符串 SQL），
     /// 任一步失败整体回滚。与库内完全一致（浮点容差 `upsertEpsilon`）时不写任何行、不开事务。
     /// `periodBars`（键 = `quarterly`/`yearly`）为「当期季/年 bar」，在同一事务内 UPSERT。
-    private func _upsertDailyLocked(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
-                                    periodBars: [String: [LiveUpsertBar]],
-                                    updatedAt: Int) -> LiveMergeResult {
+    /// **完整对拍 oracle**：写前比对 + 写语句（可对任意已打开的增量库 handle 执行）。
+    /// ⚠️ 自 §11.34 起生产由引擎承接**整块**（`live_upsert_daily`：比对 + 写）；
+    /// 本函数保留为单测对拍 oracle（`DbWriteParityTests` 同输入临时库双跑）。
+    static func upsertFullOracle(handle: OpaquePointer,
+                                 metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
+                                 periodBars: [String: [LiveUpsertBar]],
+                                 updatedAt: Int) -> LiveMergeResult {
         var r = LiveMergeResult()
         guard !metas.isEmpty || !bars.isEmpty || !periodBars.isEmpty else {
             r.message = "无数据可写入"
             return r
         }
-        guard _ensureWritableOpenLocked(), let handle = db else {
-            r.message = "本地增量库不可写（打开失败）"
-            return r
-        }
 
         // ① 写前判定：只保留「库里没有该 (file,date)」或「任一字段不同」的日线、live_meta 尚不存在的标的，
         //    以及库内不一致的当期季/年 bar。重复写入同一快照 → 全部为空 → 直接返回（不写库、不刷新，库文件 sha256 不变）
-        let changedBars = bars.filter { !_rowIdenticalLocked(handle, table: "live_daily", bar: $0) }
-        let newMetas = metas.filter { !_metaExistsLocked(handle, file: $0.file) }
+        let changedBars = bars.filter { !Self.rowIdentical(handle, table: "live_daily", bar: $0) }
+        let newMetas = metas.filter { !Self.metaExists(handle, file: $0.file) }
         var changedPeriodBars: [(table: String, bars: [LiveUpsertBar])] = []
         for period in ["quarterly", "yearly"] {
             guard let rows = periodBars[period], !rows.isEmpty,
-                  let table = _localTableNameLocked(period) else { continue }
-            let changed = rows.filter { !_rowIdenticalLocked(handle, table: table, bar: $0) }
+                  let table = Self.localTableName(handle: handle, table: period) else { continue }
+            let changed = rows.filter { !Self.rowIdentical(handle, table: table, bar: $0) }
             if !changed.isEmpty { changedPeriodBars.append((table: table, bars: changed)) }
         }
         let periodRowCount = periodBars.values.reduce(0) { $0 + $1.count }
@@ -982,54 +982,22 @@ final class LiveDataStore: ObservableObject {
         return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int64(statement, 0)) : 0
     }
 
-    /// S5（§11.33）生产路径：行级**写语句**下沉 `db_write.py` 的 `live_upsert_daily`。
-    /// 写前筛选（读 + 1e-6 容差比对）与表名解析仍留 Swift（§9.6 阶段 D 红线：读留 Swift），
-    /// 与 oracle `upsertWriteOracle` 共用同一批 helper（`_rowIdenticalLocked` / `_metaExistsLocked`）。
+    /// S5（§11.34）生产路径：**写前比对 + 写语句整块下沉** `db_write.py` 的 `live_upsert_daily`。
+    /// Swift 只负责打开连接 + 保证 schema（v3 迁移）+ 投影结果；**生产不再做任何 SELECT 比对**。
     private func _upsertDailyViaEngineLocked(metas: [LiveUpsertMeta], bars: [LiveUpsertBar],
                                              periodBars: [String: [LiveUpsertBar]],
                                              updatedAt: Int) -> LiveMergeResult {
         var r = LiveMergeResult()
-        guard !metas.isEmpty || !bars.isEmpty || !periodBars.isEmpty else {
-            r.message = "无数据可写入"
-            return r
-        }
-        guard _ensureWritableOpenLocked(), let handle = db else {
+        guard _ensureWritableOpenLocked() else {
             r.message = "本地增量库不可写（打开失败）"
             return r
         }
-
-        let changedBars = bars.filter { !_rowIdenticalLocked(handle, table: "live_daily", bar: $0) }
-        let newMetas = metas.filter { !_metaExistsLocked(handle, file: $0.file) }
-        var changedQuarterly: [LiveUpsertBar] = []
-        var changedYearly: [LiveUpsertBar] = []
-        for period in ["quarterly", "yearly"] {
-            guard let rows = periodBars[period], !rows.isEmpty,
-                  let table = _localTableNameLocked(period) else { continue }
-            let changed = rows.filter { !_rowIdenticalLocked(handle, table: table, bar: $0) }
-            if changed.isEmpty { continue }
-            if period == "quarterly" { changedQuarterly = changed } else { changedYearly = changed }
-        }
-        let periodRowCount = periodBars.values.reduce(0) { $0 + $1.count }
-        guard !changedBars.isEmpty || !newMetas.isEmpty
-            || !changedQuarterly.isEmpty || !changedYearly.isEmpty else {
-            r.ok = true
-            r.message = "无变化：日线 \(bars.count) 行 / meta \(metas.count) 条 / 当期季年 \(periodRowCount) 行均与库内一致 → 跳过写入"
-            return r
-        }
-
         let outcome = DbWriteBridge.liveUpsertDaily(
             dbPath: Self.writableDBPath,
-            dailyTable: "live_daily",
-            quarterlyTable: changedQuarterly.isEmpty ? nil : _localTableNameLocked("quarterly"),
-            yearlyTable: changedYearly.isEmpty ? nil : _localTableNameLocked("yearly"),
-            metas: newMetas.map { ["file": $0.file, "code": $0.code, "name": $0.name, "type": $0.type] },
+            metas: metas.map(Self.metaJSON),
             metaUpdatedAt: updatedAt,
-            daily: changedBars.map(Self.barJSON),
-            quarterly: changedQuarterly.map(Self.barJSON),
-            yearly: changedYearly.map(Self.barJSON),
-            periodRowCount: periodRowCount,
-            totalMetaCount: metas.count,
-            totalBarCount: bars.count)
+            bars: bars.map(Self.barJSON),
+            periodBars: periodBars.mapValues { $0.map(Self.barJSON) })
         switch outcome {
         case .failure(let f):
             r.message = "写入失败（引擎）：\(f)"
@@ -1046,6 +1014,11 @@ final class LiveDataStore: ObservableObject {
         }
     }
 
+    /// 增量 meta → 引擎入参 JSON（键名与 `db_write.py` 契约一致）。
+    private static func metaJSON(_ m: LiveUpsertMeta) -> [String: Any] {
+        ["file": m.file, "code": m.code, "name": m.name, "type": m.type]
+    }
+
     /// 增量 bar → 引擎入参 JSON（键名与 `db_write.py` 契约一致）。
     private static func barJSON(_ b: LiveUpsertBar) -> [String: Any] {
         ["file": b.file, "date": b.date, "open": b.open, "high": b.high,
@@ -1057,7 +1030,7 @@ final class LiveDataStore: ObservableObject {
 
     /// 某周期表是否已有该 `(file,date)` 且 6 个数值字段与传入值一致（容差 `upsertEpsilon`）。
     /// 无该行 / 值不同 / 查询失败 → false（视为需要写入）。
-    private func _rowIdenticalLocked(_ handle: OpaquePointer, table: String, bar: LiveUpsertBar) -> Bool {
+    static func rowIdentical(_ handle: OpaquePointer, table: String, bar: LiveUpsertBar) -> Bool {
         var statement: OpaquePointer?
         let sql = "SELECT open,high,low,close,vol,amo FROM \(table) WHERE file = ? AND date = ?;"
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return false }
@@ -1074,7 +1047,7 @@ final class LiveDataStore: ObservableObject {
     }
 
     /// live_meta 是否已有该 file（新增判断：已有 → 不再写，避免页面变更）
-    private func _metaExistsLocked(_ handle: OpaquePointer, file: String) -> Bool {
+    static func metaExists(_ handle: OpaquePointer, file: String) -> Bool {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, "SELECT 1 FROM live_meta WHERE file = ? LIMIT 1;", -1, &statement, nil) == SQLITE_OK else {
             return false
@@ -1086,6 +1059,23 @@ final class LiveDataStore: ObservableObject {
 
     private static func nearlyEqual(_ a: Double, _ b: Double) -> Bool {
         abs(a - b) < upsertEpsilon
+    }
+
+    /// 表名解析的**静态版**（无实例缓存）：`live_<t>` 优先，回落旧版无前缀 `<t>`，都没有 → nil。
+    /// 与 `db_write.py` 的 `_live_table_name` 同口径（对拍由 `DbWriteParityTests` 守）。
+    static func localTableName(handle: OpaquePointer, table: String) -> String? {
+        func exists(_ name: String) -> Bool {
+            var statement: OpaquePointer?
+            let sql = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?;"
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK,
+                  let statement else { return false }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT)
+            return sqlite3_step(statement) == SQLITE_ROW
+        }
+        if exists("live_" + table) { return "live_" + table }
+        if exists(table) { return table }
+        return nil
     }
 
     /// 裁剪增量库（单事务；表不存在则跳过）：
@@ -1297,7 +1287,7 @@ final class LiveDataStore: ObservableObject {
                 break
             }
             var written = 0
-            for bar in bars[period] ?? [] where !_rowIdenticalLocked(handle, table: table, bar: bar) {
+            for bar in bars[period] ?? [] where !Self.rowIdentical(handle, table: table, bar: bar) {
                 sqlite3_reset(statement)
                 sqlite3_clear_bindings(statement)
                 sqlite3_bind_text(statement, 1, bar.file, -1, SQLITE_TRANSIENT)
@@ -1487,7 +1477,7 @@ final class LiveDataStore: ObservableObject {
                 failed = "准备写入 \(anchor.table) 失败：\(String(cString: sqlite3_errmsg(handle)))"
                 break
             }
-            // 表刚被清空 → 无需再比对（`_rowIdenticalLocked` 恒为 false），直接全量写入
+            // 表刚被清空 → 无需再比对（`rowIdentical` 恒为 false），直接全量写入
             var written = 0
             for bar in bars[anchor.period] ?? [] {
                 sqlite3_reset(statement)
