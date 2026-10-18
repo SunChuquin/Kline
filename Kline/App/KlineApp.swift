@@ -26,6 +26,10 @@ struct KlineApp: App {
     static let appVersion = "1.0.2"
 
     init() {
+        // UI 测试专用：带 -uitest-reset 启动时先清空用户态（用例级 hermetic 隔离，见 UITestStateReset）。
+        // 必须放在任何 Store 读盘之前，故置于 init 首行。
+        UITestStateReset.runIfRequested()
+
         // 日志滚动：上次会话归档为 debug_log.prev.txt（保留一份），本次清空重新记录；
         // 排障取证通道：debug_log.txt（本次）/ debug_log.prev.txt（上次）/ py_stderr.log
         DebugLogger.shared.rollOnLaunch()
