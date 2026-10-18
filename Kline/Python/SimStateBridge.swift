@@ -6,8 +6,10 @@
 //
 //  角色：把 `sim_state.py` 的五个 op（sim_state_load / sim_state_save / sim_state_apply /
 //  sim_state_get_revision / sim_state_sync）封装成 Swift 异步 API，供 SimStore
-//  （投影缓存 + 桥接客户端）调用。Swift 侧不再直接读写 sim.json 文件，
-//  所有状态变更经 Python 引擎持久化。
+//  （投影缓存 + 桥接客户端）调用。**写口已收口**：SimStore 侧不再直接写 sim.json，
+//  所有状态变更经 Python 引擎持久化；例外只有 LAN 接收落盘（`LANSyncTransfer` 直接
+//  覆盖对端文件，属 §9.6 阶段 D「永不动」的网络栈）。读档保留启动期引导读
+//  （引擎未就绪时读同一份文件，见 SimStore.loadFromDisk），引擎就绪后以其 revision 为准。
 //
 //  设计：
 //    · 输入 / 输出均为 [String: Any] 字典（JSON 形状），编解码由调用方（SimStore）

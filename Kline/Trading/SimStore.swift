@@ -9,6 +9,9 @@
 //  校验失败（SimTradingRules）一律不写任何数据。
 //  schema 3：新增预警记录（alertRecords，仅保留最近 alertRecordLimit 条）。
 //
+//  阶段 B（状态所有权反转）：**引擎是 sim.json 的唯一写者**——本类所有落盘都经
+//  `sim_state_*` op 完成，Swift 侧不再直接写文件（§9.9 S5 单写者原则）。
+//
 
 import Foundation
 import Combine
@@ -16,7 +19,7 @@ import Combine
 // MARK: - 阶段 B：Python 引擎状态持久化（状态所有权反转）
 
 /// 通过 Python 引擎异步保存完整状态到 sim.json（不阻塞调用线程）。
-/// 成功后本地 @Published 已更新，Python 侧落盘 sim.json；失败仅记日志，不影响内存现状。
+/// 引擎是唯一写者；成功后本地 @Published 已更新；失败仅记日志，不影响内存现状。
 private func persistToEngine(state: [String: Any], filePath: String) {
     SimStateBridge.simStateSave(filePath: filePath, state: state) { r in
         if case .failure(let f) = r {
@@ -132,6 +135,12 @@ final class SimStore: ObservableObject {
     private var databaseLoadedCancellable: AnyCancellable?
     /// 增量库数据版本信号订阅（热刷新）
     private var dataVersionCancellable: AnyCancellable?
+
+    /// 阶段 B 单写者：引擎尚未就绪（启动早期 `warmUp` 未完成）时的待冲刷状态。
+    /// 就绪后一次性 submit，避免「未就绪窗口内的写全部丢失」。
+    private var pendingEngineState: [String: Any]?
+    /// 引擎就绪（`PythonEngineHost.isLoaded`）→ 冲刷 pendingEngineState 的一次性订阅
+    private var engineLoadedCancellable: AnyCancellable?
 
     /// 已排队的行情触发结算（合并窗口内只结算一次，避免 rows 高频回写引发结算风暴）
     private var condSweepScheduled = false
@@ -262,6 +271,11 @@ final class SimStore: ObservableObject {
         }
     }
 
+    /// 落盘：**引擎为 sim.json 的唯一写者**（阶段 B 单写者收口，§9.9 S5）。
+    /// · 引擎就绪 → 经 `sim_state_apply` 落盘（全字段 replace，引擎侧 revision 自增）；
+    /// · 引擎尚未就绪（启动早期 `warmUp` 未完成）→ 挂进 `pendingEngineState`，
+    ///   就绪后一次性冲刷，避免「未就绪窗口内的写全部丢失」。
+    /// 注意：这里的 encode 只为产出引擎入参的 JSON 形状，**不再写本地文件**。
     func saveToDisk() {
         let root = SimRoot(schemaVersion: currentSchema,
                            accounts: accounts,
@@ -276,28 +290,38 @@ final class SimStore: ObservableObject {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        do {
-            let data = try encoder.encode(root)
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            DebugLogger.shared.log("[SimStore] save failed \(error)")
+        guard let data = try? encoder.encode(root),
+              var stateWithRev = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            DebugLogger.shared.log("[SimStore] 状态编码失败，本次落盘跳过")
+            return
         }
-        // 阶段 B：异步增量持久化到 Python 引擎（所有字段 replace，revision 自增）
         revision += 1
-        if let encoded = try? JSONEncoder().encode(root),
-           let dict = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] {
-            var stateWithRev = dict
-            stateWithRev["revision"] = revision
-            SimStateBridge.simStateApply(
-                filePath: fileURL.path,
-                changes: stateWithRev,
-                merge: [:]  // 全部字段 replace 等价于全量保存，但会自增 revision
-            ) { r in
-                if case .failure(let f) = r {
-                    DebugLogger.shared.log("[SimStore] Python 持久化失败：\(f)")
-                }
-            }
+        stateWithRev["revision"] = revision
+        persistToEngineWhenReady(stateWithRev)
+    }
+
+    /// 引擎就绪则直接落盘，否则挂起待冲刷（见 `saveToDisk`）。
+    private func persistToEngineWhenReady(_ state: [String: Any]) {
+        guard KlinePythonBridge.shared.isReady else {
+            DebugLogger.shared.log("[SimStore] 引擎未就绪，落盘挂起待冲刷（revision=\(revision)）")
+            pendingEngineState = state
+            ensureEngineLoadedFlushSubscription()
+            return
         }
+        persistToEngine(state: state, filePath: fileURL.path)
+    }
+
+    /// 注册「引擎就绪 → 冲刷 pendingEngineState」的一次性订阅（`.first()`：只冲刷首轮）。
+    private func ensureEngineLoadedFlushSubscription() {
+        guard engineLoadedCancellable == nil else { return }
+        engineLoadedCancellable = PythonEngineHost.shared.$isLoaded
+            .filter { $0 }
+            .first()
+            .sink { [weak self] _ in
+                guard let self, let pending = self.pendingEngineState else { return }
+                self.pendingEngineState = nil
+                persistToEngine(state: pending, filePath: self.fileURL.path)
+            }
     }
 
     // MARK: - 阶段 B：增量同步辅助方法（将单字段变更经 Python 引擎持久化）
