@@ -2118,7 +2118,55 @@ done
 
 **验证（2026-10-18）**：`KlineTests` **83/83**（0 失败 / 0 跳过）；app + 测试 target 干净重建 → `TEST BUILD SUCCEEDED`，编译警告 **56 → 1**（残留 1 条为 `IndicatorPipeline` 调主隔离桥的既有建模不一致，见下表）；XCUITest 冒烟 4/4。
 
-**未收尾（原 ④ 的余项）**：`DatabaseManager` 拆分（§9.9 S4/S5 的 DB 侧）——本轮未动，且与 §9.6 阶段 D「SQLite 每帧查询永不动」存在张力，需先定界；`cond_sweep` 整环 op 接线（原 ⑤，可选）仍未接线。
+**未收尾（原 ④ 的余项）**：`DatabaseManager` 拆分（§9.9 S4/S5 的 DB 侧）——本轮未动，且与 §9.6 阶段 D「SQLite 每帧查询永不动」存在张力，需先定界；`cond_sweep` 整环 op 接线（原 ⑤，可选）见 §11.31。
+
+---
+
+### 11.31 `cond_sweep` 整环结算接线：先补对拍网，再切生产（2026-10-18）
+
+> 背景：`cond_sweep`（整环结算 op）自 §11.29 落地起**从未被任何用例或生产路径执行过**（纯死代码），
+> 而它要接替的 `SimCondEngine.sweepConditions` 覆盖 hold / fire / expired / abort / 网格 / 分批 /
+> 仅提醒 / 被拒 全分支。原文档因此把它标为「可选 / 预留」，理由是「避免双跑漂移」。
+> 本轮按「**先补对拍网、再接线**」推进——对拍网当场抓到 3 处真实缺陷。
+
+**① 对拍网（新增 `scripts/verify_cond_sweep_parity.py`，PC 侧，12 例）**
+
+- 细粒度路径 = 把 `SimCondEngine.sweepConditions` 的编排用**公开 op 逐条重放**
+  （`cond_expired_reason` → `cond_evaluate` → `cond_fire_direction` / `cond_execution_price` →
+  `submit_order` → `cond_advance` / `cond_repeatable_finished` / `cond_alert_message`）；
+- 两边结果投影成「确定性视图」后逐字段比较（UUID / 新生成 order id 归一化，只比出现次数与业务字段）。
+- ⚠️ 踩坑一条：`sim_rules.py` 的 handler 会**就地改写 `kline_input`**，两条路径必须各自 `deepcopy`，
+  否则第二条看到的是「已结算过」的单，对拍退化成假红/假绿。
+
+**② 对拍抓到的 3 处真实缺陷（均已修）**
+
+| # | 缺陷 | 处置 |
+| --- | --- | --- |
+| 1 | `cond_sweep` **完全没有「仅提醒」分支**（`alert_records` 只声明未写入）——接线会让「仅提醒」条件单变成下单 | 按 `SimCondEngine.fireAlertOnly` 语义补齐：`_alert_message` 文案 + 运行时状态 + 网格/分批档位推进 + 每次触发追加记录 |
+| 2 | 被拒分支**未写回 `updatedAt`** | 以 Swift 现状为权威补齐 |
+| 3 | 被拒分支**未写回 `runtime.lastPrice`** | 同上 |
+
+**③ 接线（`Kline/Trading/SimCondEngine.swift`）**
+
+- `sweepConditions` 的整段循环编排替换为**一次 `cond_sweep` 调用**：Swift 只装配入参
+  （orders / snapshots / accounts / positions / lastPrices / prevCloses / fills / orders）与应用增量；
+- 新增门面 `SimRulesBridge.condSweep` + `CondSweepResult`（`SimRulesAsync.swift`），
+  结果子字典继续按原生 `UUID` / `Date` 反解（复用 `SubmitOrderResult` 的转换器）；
+- 新增 `SimStore.appendAlertRecordsFromSweep`（一次性 append + 保序裁剪 + 一趟增量同步，避免逐条落盘）；
+- 增量应用复用既有 applier（`assignOrders` / `assignFills` / `applyCashChangePython` /
+  `applyPositionChangePython` / `appendLedgerFromDict` / `appendLogFromDict`）→ 相应放宽 `private` 为 internal；
+- 删除已无引用的 `fireCondOrder` / `fireAlertOnly` / `conditionLog`（编排权威已交给引擎 op）；
+- 写盘仍沿用「整轮只在确有写入时写一次」；
+- **信任链**：`sim_rules.py` 变更 → 重跑 `gen_sim_rules_trust.py`（sha256 更新为 `67334e0a…`）。
+
+**④ 验证（2026-10-18）**
+
+| 项 | 结果 |
+| --- | --- |
+| `python3 scripts/verify_cond_sweep_parity.py` | **12/12 一致**（接线前 8 漂移 → 修 op 后 0 漂移） |
+| `python3 scripts/verify_sim_rules.py` | **255/255** |
+| `python3 scripts/gen_sim_rules_trust.py --check` | 一致 |
+| `xcodebuild test -only-testing:KlineTests` | **83/83**（0 失败 / 0 跳过） |
 
 ---
 
