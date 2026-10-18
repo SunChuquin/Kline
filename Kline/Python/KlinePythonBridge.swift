@@ -229,6 +229,8 @@ final class KlinePythonBridge {
                             timeout: TimeInterval,
                             read: @escaping (_ script: String, _ outPath: String, _ inPath: String) -> Result<R, PyBridgeError>,
                             completion: @escaping (Result<R, PyBridgeError>) -> Void) {
+        // 传输分段计时（§11.36 基线拆解）：前置 / 引擎 / 读回 三段各占多少
+        let tEntry = CFAbsoluteTimeGetCurrent()
         // 前置：业务脚本存在（随 App bundle）
         let path = Bundle.main.bundlePath + "/PyScripts/" + script + ".py"
         guard fm.fileExists(atPath: path) else {
@@ -253,7 +255,6 @@ final class KlinePythonBridge {
             completion(.failure(.scriptError("输入 JSON 写入失败：" + error.localizedDescription)))
             return
         }
-        let t0 = CFAbsoluteTimeGetCurrent()
         let pyScript = Self.assemblePyRun(scriptPath: path, inPath: inPath, outPath: outPath)
 
         // settled 只在主线程读写：超时看门狗（main.asyncAfter）与完成回调（runPyBridge 派发主线程）
@@ -270,10 +271,11 @@ final class KlinePythonBridge {
             DebugLogger.shared.log("[PyBridge] \(script).py 超时（\(timeout)s，底层继续执行）")
             deliver(.failure(.timeout))
         }
+        let tBeforeRun = CFAbsoluteTimeGetCurrent()
         PythonEngineHost.shared.runPyBridge(pyScript) { [weak self, pin] r in
             guard let self = self else { return }
+            let tAfterRun = CFAbsoluteTimeGetCurrent()
             _ = pin   // 保活大数组：Python ctypes 读取期间地址不得失效（读取已完成才到此处）
-            let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             let result: Result<R, PyBridgeError>
             switch r {
             case .failure(let msg):
@@ -286,8 +288,13 @@ final class KlinePythonBridge {
                 result = read(script, outPath, inPath)
                 var verdict = "失败"
                 if case .success = result { verdict = "完成" }
-                DebugLogger.shared.log(String(format: "[PyBridge] %@ %@（%.0fms）",
-                                              script + ".py", verdict, ms))
+                // 传输分解（§11.36）：前置=守卫+入参落盘+包装组装 · 引擎=PyRun+主线程跳转 · 读回=出参读回+解析
+                let tEnd = CFAbsoluteTimeGetCurrent()
+                DebugLogger.shared.log(String(format:
+                    "[PyBridge] %@ %@（总 %.2fms = 前置 %.2f + 引擎 %.2f + 读回 %.2f）",
+                    script + ".py", verdict, (tEnd - tEntry) * 1000,
+                    (tBeforeRun - tEntry) * 1000, (tAfterRun - tBeforeRun) * 1000,
+                    (tEnd - tAfterRun) * 1000))
             }
             deliver(result)
         }

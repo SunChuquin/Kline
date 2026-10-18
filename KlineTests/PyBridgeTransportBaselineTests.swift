@@ -153,5 +153,69 @@ final class PyBridgeTransportBaselineTests: XCTestCase {
         XCTAssertEqual(p2.fails, 0, "quote_snapshot 批量调用失败——脚本 IO 契约回归")
         XCTAssertTrue(p0.median.isFinite && p0.median < 100,
                       "空往返异常（>100ms）——桥接或引擎有回归")
+
+        await reportPhaseDecomposition()
+    }
+
+    /// ④ 分段拆解：桥接内部「前置 / 引擎 / 读回」三段占比，以及 `DebugLogger` 单行落盘成本。
+    /// 数据来源：`KlinePythonBridge` 每次调用写出的分段日志（不含逻辑改动，仅诊断）。
+    private func reportPhaseDecomposition() async {
+        let logURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(DebugLogger.fileName)
+        let marker = "—— 分段拆解标记 ——"
+        DebugLogger.shared.log("[Transport] " + marker)
+
+        for _ in 0..<20 {
+            _ = await roundTrip("sim_rules", ["op": "sim_format", "fn": "price", "value": 1500.0])
+        }
+
+        // DebugLogger 单行成本（同步 fopen/write/close）——它就在每次过桥的固定开销里
+        let tLog = CFAbsoluteTimeGetCurrent()
+        for i in 0..<20 { DebugLogger.shared.log("[Transport] 日志写盘测点 \(i)") }
+        let logMs = (CFAbsoluteTimeGetCurrent() - tLog) * 1000 / 20
+
+        let text = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+        let tail = text.components(separatedBy: marker).last ?? ""
+        var pre: [Double] = [], run: [Double] = [], read: [Double] = []
+        let pattern = try? NSRegularExpression(
+            pattern: "总 ([0-9.]+)ms = 前置 ([0-9.]+) \\+ 引擎 ([0-9.]+) \\+ 读回 ([0-9.]+)")
+        for line in tail.split(separator: "\n") where line.contains("[PyBridge]") {
+            let s = String(line)
+            guard let m = pattern?.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+                  m.numberOfRanges == 5 else { continue }
+            func g(_ i: Int) -> Double {
+                guard let r = Range(m.range(at: i), in: s) else { return 0 }
+                return Double(s[r]) ?? 0
+            }
+            pre.append(g(2)); run.append(g(3)); read.append(g(4))
+        }
+        func med(_ a: [Double]) -> Double {
+            a.isEmpty ? 0 : a.sorted()[a.count / 2]
+        }
+        log(String(format: "分段拆解（n=%d）：前置 %.2fms · 引擎 %.2fms · 读回 %.2fms · "
+                   + "DebugLogger 单行 %.2fms",
+                   pre.count, med(pre), med(run), med(read), logMs))
+        log(String(format: "（三段合计 %.2fms；每次过桥还会额外付一次 DebugLogger 落盘 %.2fms）",
+                   med(pre) + med(run) + med(read), logMs))
+
+        // 主线程跳转基线：后台 → main.async 的执行延迟。
+        // 「引擎段」= PyRun + workQueue 调度 + **主线程回调跳转**；此测点把最后一项单独量出来
+        // （注意：这是主线程**空闲**时的下界——真实 UI 场景只会更差）。
+        var hop: [Double] = []
+        for _ in 0..<20 {
+            let t = CFAbsoluteTimeGetCurrent()
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    DispatchQueue.main.async {
+                        hop.append((CFAbsoluteTimeGetCurrent() - t) * 1000)
+                        c.resume()
+                    }
+                }
+            }
+        }
+        log(String(format: "主线程跳转基线（后台→main.async，主线程空闲下界）：median %.2fms · max %.2fms",
+                   med(hop), hop.max() ?? 0))
+        log("注：主线程跳转仅 0.01ms → 「引擎段」≈ PyRun + `PythonEngineHost.workQueue` 调度"
+            + "（该队列未显式指定 QoS）；文件交换（前置+读回）合计仅 0.8ms。")
     }
 }

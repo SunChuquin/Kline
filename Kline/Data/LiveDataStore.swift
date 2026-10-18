@@ -994,10 +994,10 @@ final class LiveDataStore: ObservableObject {
         }
         let outcome = DbWriteBridge.liveUpsertDaily(
             dbPath: Self.writableDBPath,
-            metas: metas.map(Self.metaJSON),
+            metas: metas.map { Self.metaJSON($0) },
             metaUpdatedAt: updatedAt,
-            bars: bars.map(Self.barJSON),
-            periodBars: periodBars.mapValues { $0.map(Self.barJSON) })
+            bars: bars.map { Self.barJSON($0) },
+            periodBars: periodBars.mapValues { rows in rows.map { Self.barJSON($0) } })
         switch outcome {
         case .failure(let f):
             r.message = "写入失败（引擎）：\(f)"
