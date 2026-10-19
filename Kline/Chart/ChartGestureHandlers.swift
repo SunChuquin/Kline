@@ -448,16 +448,18 @@ extension KlineChartView {
             endOffset = max(0, maxEnd - end)
             return
         }
-        // 一个光标：以光标所在K线为中心，前 49 + 1 + 后 50 = 100 根
+        // 一个光标：以光标所在K线为中心展开「本视图默认可见数」（前后各半）
         if let center = renderCursorIndex ?? pinnedIndex {
-            let start = clamp(center - 49, 0, max(0, maxEnd - 99))
-            let end = min(maxEnd, start + 99)
-            visibleCount = 100
+            let n = max(2, Int(viewDefaultVisibleCount.rounded()))
+            let half = n / 2
+            let start = clamp(center - (half - 1), 0, max(0, maxEnd - (n - 1)))
+            let end = min(maxEnd, start + n - 1)
+            visibleCount = CGFloat(n)
             endOffset = max(0, maxEnd - end)
             return
         }
-        // 无光标：恢复最新 100 根
-        visibleCount = 100
+        // 无光标：恢复最新「本视图默认可见数」根
+        visibleCount = viewDefaultVisibleCount
         endOffset = 0
     }
 

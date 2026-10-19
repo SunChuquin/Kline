@@ -67,12 +67,12 @@ extension KlineChartView {
                     Spacer()
                 }
                 // 副图1：最右侧「回到最新」按钮（右指带尾单箭头）。
-                // 屏幕最右 K 线不是最后一根时高亮可点；点击直接加载最新 K 线（屏幕显示 100 根）。
+                // 屏幕最右 K 线不是最后一根时高亮可点；点击直接加载最新 K 线（可见数回到本视图默认值）
                 if m === subTop {
                     let atLatest = endIndex >= sortedData.count - 1
                     Button {
                         withAnimation(.easeInOut(duration: 0.25)) {
-                            visibleCount = 100
+                            visibleCount = viewDefaultVisibleCount
                             endOffset = 0
                         }
                     } label: {

@@ -195,12 +195,23 @@ final class LinkedViewStore: ObservableObject {
         loadZoomsFromDisk()
     }
 
-    /// 联动视图缩放级别：返回该 (owner, 标地, 周期) 保存过的可见K线数；从未保存返回默认 100。
+    /// 联动视图缩放级别：返回该 (owner, 标地, 周期) 保存过的可见K线数；
+    /// 从未保存 → **多图默认可见数**（见 `defaultZoom(owner:)`，即"单图默认 ÷ 视图数量"）。
     func zoom(owner: Int, meta: Int, period: KlinePeriod) -> CGFloat {
-        zooms[LinkedZoomKey(owner: owner, meta: meta, period: period)] ?? 100
+        zooms[LinkedZoomKey(owner: owner, meta: meta, period: period)] ?? defaultZoom(owner: owner)
     }
 
-    /// 清除某 (owner, 标的, 周期) 的缩放记忆，恢复默认 100（单视图重置用），立即落盘。
+    /// 多图默认可见 K 线数 = **单图默认可见数 ÷ 本标的联动视图数量**，取整数（截断）。
+    /// 分子取自 `KlineChartView.defaultVisibleCount`、分母取自当前视图数量，**不写死 100/x**；
+    /// 下限 20 与图表侧可见数下限（`KlineChartView` onAppear 的 clamp）一致。
+    /// - Parameter owner: 主标的 metaID
+    func defaultZoom(owner: Int) -> CGFloat {
+        let viewCount = max(1, configs[owner]?.count ?? LinkedViewCount.two.rawValue)
+        let divided = Int(KlineChartView.defaultVisibleCount) / viewCount   // 整数除法 = 取整数（截断）
+        return CGFloat(max(20, divided))
+    }
+
+    /// 清除某 (owner, 标的, 周期) 的缩放记忆，恢复**该内容的多图默认可见数**（单视图重置用），立即落盘。
     /// 与整组 reset 清光 owner 缩放不同，这里只清目标内容键，其余视图/内容的缩放记忆保留
     func removeZoom(owner: Int, meta: Int, period: KlinePeriod) {
         let key = LinkedZoomKey(owner: owner, meta: meta, period: period)

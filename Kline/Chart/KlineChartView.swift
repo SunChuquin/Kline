@@ -104,8 +104,15 @@ struct KlineChartView: View {
     @Binding var editorOwnerIndex: Int?
     /// 编辑器被激活时冒泡（联动 tile 据此把 editorOwnerIndex = 自己下标）。
     var onEditorActivate: (() -> Void)?
-    /// 进入时用该值初始化可见K线数（缩放级别）。nil = 用默认 100。仅联动视图由 LinkedViewStore 传入持久化值。
+    /// 进入时用该值初始化可见K线数（缩放级别）。nil = 用单图默认 `defaultVisibleCount`；仅联动视图由 LinkedViewStore 传入持久化值。
     var initialVisibleCount: CGFloat? = nil
+    /// 单图的**默认可见 K 线数**（多图 tile 的默认 = 本值 ÷ 视图数量，见 `LinkedViewStore.zoom`）。
+    /// 所有"默认可见数"都以它为准，不散落写死 100。
+    static let defaultVisibleCount: CGFloat = 100
+    /// 本视图的**默认可见 K 线数**：单图 = `defaultVisibleCount`；多图 tile = 外层传入的
+    /// （持久化缩放，或"单图默认 ÷ 视图数"的等分值）。
+    /// 「回到最新 / 恢复默认窗口」等复位路径都复用它，避免在多图里突然跳成单图的 100 根。
+    var viewDefaultVisibleCount: CGFloat { initialVisibleCount ?? Self.defaultVisibleCount }
     /// 可见K线数变化回调（联动持久化缩放级别用）。nil = 不回调（单图模式无需持久化）。
     var onVisibleCountChange: (@MainActor (CGFloat) -> Void)? = nil
     /// 信息行被拖动上报（多图重置按钮高亮用）：任一信息行内容被拖动置 true。
@@ -133,7 +140,7 @@ struct KlineChartView: View {
     @State var pinnedY: CGFloat? = nil
     /// 固定光标固定时刻的横轴价格（仅主图区域有效）：平移/缩放后横轴价格不随可见窗口价格范围变化
     @State var pinnedPrice: Double? = nil
-    @State var visibleCount: CGFloat = 100
+    @State var visibleCount: CGFloat = KlineChartView.defaultVisibleCount
     @State var endOffset: Int = 0
     @State var zoomBase: CGFloat = 100
     // 缩放锚点：以双指位置对应的K线为基线缩放（而非屏幕最右端）
