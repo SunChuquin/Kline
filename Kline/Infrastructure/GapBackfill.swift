@@ -647,16 +647,24 @@ final class GapBackfill: ObservableObject {
             DebugLogger.shared.log("[GapBackfill] 写入增量库成功 \(merge.message)")
             // ⑥ 缺口区间的周/月/季/年线：日线落库后，按「主库最新日所在周期桶 → 今日」逐桶重算
             //    （日线补齐只让日线图连续；周期视图还得从新日线聚合，否则周/月/季/年仍是洞）
-            // §11.46：锚点已改为「每只标的自己的末根日」→ 周期桶起始日各不相同，
-            // 必须**按锚点分组**分别重建（各组标的互不相交，写库不会互相覆盖）
-            self.rebuildPeriodsGrouped(jobs: jobs, today: today) { detail, verdict, anyFailed in
-                lines.append(detail)
-                let periodText = verdict
-                guard !anyFailed else {
+            // ⚠️ §11.46 已知限制：缺口**日线**已按「每只自己的锚点」补齐，但周期线重建
+            //    （`LiveDataStore.rebuildGapPeriods`）是「**整表清空后按桶重写**」的设计，
+            //    其 files 取全库、锚点取单一值 → **不能按锚点分组反复调用**（会让最后一个小组的
+            //    锚点覆盖全库周期线，2026-10-19 实测踩到）。故此处仍用全局 `mainLatest` 单次调用：
+            //    对落后的 52 只而言，其**日线**已补齐（主库 Sep 23~30 那几根已在），周期线由主库既有
+            //    bar 兜底显示；「周期线也按各自锚点重建」列为后续（需改 LiveDataStore 为按 file 取锚点）。
+            self.rebuildPeriods(metas: metas, mainLatest: mainLatest, today: today) { period in
+                let periodText = period.ok
+                    ? " · 周 \(period.weeklyRows) / 月 \(period.monthlyRows)"
+                        + " / 季 \(period.quarterlyRows) / 年 \(period.yearlyRows) 行"
+                    : " · 周/月/季/年线聚合失败"
+                DebugLogger.shared.log("[GapBackfill] 周期聚合：\(period.message)")
+                lines.append("周期聚合：" + period.message)
+                guard period.ok else {
                     self.state = .failed
                     self.statusText = "周/月/季/年线聚合失败"
                     self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
-                    self.verdictText = "失败：周期聚合（见明细）"
+                    self.verdictText = "失败：周期聚合 \(period.message)"
                     self.detailLines = lines
                     LiveDataStore.shared.reloadAsync { _ in }
                     Self.fire(completion)
@@ -704,46 +712,6 @@ final class GapBackfill: ObservableObject {
                 }
             }
         }
-    }
-
-    /// 按锚点分组重建缺口区间的周/月/季/年线（§11.46）。
-    /// 混合锚点下「周期桶起始日」各不相同（如锚点 20260922 → Sep 的周/月/季桶；锚点 20260930 → 亦然），
-    /// 只能用各自的锚点分别调用 `rebuildPeriods`；各组标的互不相交 → 写增量库不会互相覆盖。
-    /// - Returns: (明细文案, verdict 后缀文案, 是否有组失败)。多组时明细逐行、verdict 汇总计数。
-    private func rebuildPeriodsGrouped(jobs: [GapJob], today: Int,
-                                       completion: @escaping (String, String, Bool) -> Void) {
-        let groups = Dictionary(grouping: jobs, by: { $0.base.date })
-        let anchors = groups.keys.sorted()
-        guard !anchors.isEmpty else { completion("周期聚合：无作业", " · 无缺口", false); return }
-
-        var details: [String] = []
-        var sums = (w: 0, m: 0, q: 0, y: 0)
-        var failed = false
-        func runGroup(_ i: Int) {
-            guard i < anchors.count else {
-                let verdict = failed
-                    ? " · 周/月/季/年线聚合失败"
-                    : " · 周 \(sums.w) / 月 \(sums.m) / 季 \(sums.q) / 年 \(sums.y) 行"
-                completion(details.joined(separator: " · "), verdict, failed)
-                return
-            }
-            let anchor = anchors[i]
-            let groupMetas = (groups[anchor] ?? []).map(\.meta)
-            self.rebuildPeriods(metas: groupMetas, mainLatest: anchor, today: today) { period in
-                DebugLogger.shared.log("[GapBackfill] 周期聚合（锚点 \(anchor)）：\(period.message)")
-                details.append(anchors.count > 1
-                    ? "周期聚合（锚点 \(anchor)）：\(period.message)"
-                    : "周期聚合：\(period.message)")
-                if period.ok {
-                    sums.w += period.weeklyRows; sums.m += period.monthlyRows
-                    sums.q += period.quarterlyRows; sums.y += period.yearlyRows
-                } else {
-                    failed = true
-                }
-                runGroup(i + 1)
-            }
-        }
-        runGroup(0)
     }
 
     /// 缺口区间的周/月/季/年线：读主库「日线（周/月锚桶窗口）」+「季/年当期基期 bar」→ 逐桶聚合。
