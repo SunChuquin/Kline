@@ -322,9 +322,39 @@ extension KlineChartView {
         var synth: KlineItem?
         if self.period.granularityRank > linkSync.sourcePeriod.granularityRank, let meta = linkedMetaID {
             synth = synthesizeBar(targetIndex: idx, asOf: date,
-                                  source: linkSourceCache.bars(metaID: meta, period: linkSync.sourcePeriod))
+                                  source: linkSourceBars(for: meta, period: linkSync.sourcePeriod))
         }
         return LinkReplay(idx: idx, synthetic: synth)
+    }
+
+    /// 合成所需的来源周期 K 线（**升序**）。
+    /// 训练态且来源周期为日线、标的与训练会话一致时，优先取会话**常驻内存的同步日线**
+    /// （`TrainingSessionController.dailyBars`）——否则首帧异步缓存未就绪 → synthetic=nil →
+    /// 那一帧只能画库内完整大周期K线，表现为"先闪未来数据那根"（用户实证：点光标时被联动大周期闪烁）。
+    /// 其余情况（非训练态 / 来源不是日线 / 别的标的）走 `LinkSourceBarCache` 的异步缓存。
+    func linkSourceBars(for meta: Int, period srcPeriod: KlinePeriod) -> [KlineItem] {
+        if srcPeriod == .daily, let sync = TrainingSessionController.shared.dailyBars(for: meta) {
+            return sync
+        }
+        return linkSourceCache.bars(metaID: meta, period: srcPeriod)
+    }
+
+    /// 【临时诊断，定位"点光标先闪完整大周期K线"用】训练态合成链路状态签名：
+    /// 每次变化（含异步缓存从 0 → N）都会打一条日志，据此可判断是"形成中K线缺失"还是"复盘合成源为空"。
+    /// 定位完成后应移除本属性与对应 onChange。
+    var trainingSynthesisDiag: String? {
+        guard trainingMaxDate != nil else { return nil }
+        let meta = linkedMetaID ?? metaId ?? 0
+        let srcPeriod = linkSync.sourcePeriod
+        let syncCount = TrainingSessionController.shared.dailyBars(for: meta)?.count ?? 0
+        let asyncCount = linkSourceCache.bars(metaID: meta, period: srcPeriod).count
+        let replay = linkReplayState
+        return "周期=\(period.rawValue) 训练日=\(trainingMaxDate ?? 0) 形成点=\(trainingFormingIndex.map(String.init) ?? "-")"
+            + " 形成K线=\(trainingFormingBar != nil ? "有" : "无")"
+            + " 复盘合点=\(replay?.synthetic != nil ? "有" : "无") 复盘idx=\(replay.map { String($0.idx) } ?? "-")"
+            + " 光标日=\(linkSync.cursorDate.map(String.init) ?? "-") 来源周期=\(srcPeriod.rawValue)"
+            + " 同步日线=\(syncCount) 异步源[\(srcPeriod.rawValue)]=\(asyncCount)"
+            + " 窗口=[\(startIndex),\(endIndex)]"
     }
 
     /// 可交互光标在某索引处用于显示/读数的 K 线：复盘合成态取合成K线，训练态右缘那根取形成中K线，其余取真实K线。

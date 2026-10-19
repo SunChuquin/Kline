@@ -858,6 +858,11 @@ struct KlineChartView: View {
             // 合成内容/光标日期/训练日/指标配置变化 → 调度（或清空）as-of 单点重算
             scheduleAsOf(t)
         }
+        // 【临时诊断】训练态合成链路状态变化（含异步源 0 → N、形成中K线 有↔无）：
+        // 定位"点光标时被联动大周期先闪一帧完整大周期K线"。定位完成后移除本挂钩与 trainingSynthesisDiag。
+        .onChange(of: trainingSynthesisDiag) { diag in
+            if let diag { DebugLogger.shared.log("[训练合成诊断] \(diag)") }
+        }
         .onChange(of: suppressCrosshair) { on in
             // 「边」开启时清除可能残留的十字光标（含固定光标、联动第二光标），并同步联动/上报
             if on { clearLocalCursors() }
