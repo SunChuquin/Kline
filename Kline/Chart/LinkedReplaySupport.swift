@@ -199,13 +199,10 @@ final class ReplayAsOfModel: ObservableObject {
     @Published var main: [Int: Double] = [:]
     /// 三个副图各自 as-of 结果：槽位下标 → 曲线数组下标 → 合成点值
     @Published var subs: [[Int: Double]] = [[:], [:], [:]]
-    /// 上述结果对应的**合成点全局索引**（nil = 无结果）。用于区分"这个点已有 as-of 值"与
-    /// "新目标点位的 as-of 还在引擎回包路上"——后者绝不能用库内（可能含未来数据）的值顶上，
-    /// 否则就是"先显示未来数据、过一会才跳到 as-of 值"的闪烁。
+    /// 上述结果对应的**合成点全局索引**（nil = 无结果）。曲线与图例只按这个索引来替换该点：
+    /// as-of 在途期间整条曲线保持上一次结果不动（既不空一下、也不拿库内可能含未来数据的值顶上），
+    /// 新结果回包后与 `main`/`subs` 一起**一次性更换**。
     @Published var appliedIndex: Int?
-    /// **在途**的 as-of 目标索引（不够 = nil）：调度了一次未命中缓存的求值时置位，
-    /// 结果回包/清场时归 nil。仅用于渲染判定"该点该留空而不是拿库内值顶上"。
-    @Published var pendingIndex: Int?
     /// as-of 后台任务序号：只接受最新一次调度的结果，快速拖动时过期结果直接丢弃
     @Published var ticket = 0
 }
@@ -344,25 +341,6 @@ extension KlineChartView {
             return sync
         }
         return linkSourceCache.bars(metaID: meta, period: srcPeriod)
-    }
-
-    /// 【临时诊断，定位"点光标先闪完整大周期K线"用】训练态合成链路状态签名：
-    /// 每次变化（含异步缓存从 0 → N）都会打一条日志，据此可判断是"形成中K线缺失"还是"复盘合成源为空"。
-    /// 定位完成后应移除本属性与对应 onChange。
-    var trainingSynthesisDiag: String? {
-        guard trainingMaxDate != nil else { return nil }
-        let meta = linkedMetaID ?? metaId ?? 0
-        let srcPeriod = linkSync.sourcePeriod
-        let syncCount = TrainingSessionController.shared.dailyBars(for: meta)?.count ?? 0
-        let asyncCount = linkSourceCache.bars(metaID: meta, period: srcPeriod).count
-        let replay = linkReplayState
-        return "周期=\(period.rawValue) 训练日=\(trainingMaxDate ?? 0) 形成点=\(trainingFormingIndex.map(String.init) ?? "-")"
-            + " 形成K线=\(trainingFormingBar != nil ? "有" : "无")"
-            + " 复盘合点=\(replay?.synthetic != nil ? "有" : "无") 复盘idx=\(replay.map { String($0.idx) } ?? "-")"
-            + " as-of应用点=\(asOfModel.appliedIndex.map(String.init) ?? "-") as-of在途点=\(asOfModel.pendingIndex.map(String.init) ?? "-")"
-            + " 光标日=\(linkSync.cursorDate.map(String.init) ?? "-") 来源周期=\(srcPeriod.rawValue)"
-            + " 同步日线=\(syncCount) 异步源[\(srcPeriod.rawValue)]=\(asyncCount)"
-            + " 窗口=[\(startIndex),\(endIndex)]"
     }
 
     /// 可交互光标在某索引处用于显示/读数的 K 线：复盘合成态取合成K线，训练态右缘那根取形成中K线，其余取真实K线。
@@ -540,7 +518,6 @@ extension KlineChartView {
             asOfModel.main = [:]
             asOfModel.subs = [[:], [:], [:]]
             asOfModel.appliedIndex = nil
-            asOfModel.pendingIndex = nil
             return
         }
         let metaID = linkedMetaID ?? metaId ?? 0
@@ -550,13 +527,9 @@ extension KlineChartView {
             asOfModel.main = cached.main
             asOfModel.subs = cached.subs
             asOfModel.appliedIndex = t.idx
-            asOfModel.pendingIndex = nil
             return
         }
         guard t.idx >= 0, t.idx < sortedData.count else { return }
-        // 未命中缓存 → 标记"该点在途"：渲染侧据此把该曲线点留空（NaN），
-        // 而不是显示基于库内完整大周期K线（含未来数据）的值再跳变
-        asOfModel.pendingIndex = t.idx
         // 主线程构造请求：取齐公式文本与[0...idx]截断数据（末项替换为合成K线）
         let synth = KlineItem(date: sortedData[t.idx].date, open: t.open, high: t.high, low: t.low,
                               close: t.close, volume: t.volume, turnover: t.turnover)
@@ -591,7 +564,6 @@ extension KlineChartView {
                 self.asOfModel.main = result.main
                 self.asOfModel.subs = result.subs
                 self.asOfModel.appliedIndex = t.idx
-                self.asOfModel.pendingIndex = nil
             }
         }
     }

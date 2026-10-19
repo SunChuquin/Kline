@@ -75,6 +75,15 @@ static func formingBar(targetDate: Int, period: KlinePeriod, trainingDate: Int, 
 （会话启动时已把该标的全量日线常驻内存，**同步可读**），`trainingFormingBar` **优先取它**，非训练标的才回退异步缓存 →
 首帧即可合成，空窗消失。（`LinkSourceBarCache` 仍保留并预请求，兼顾多图里显示其它标的的情形。）
 
+**三次修订（2026-10-19）**：K线不再闪后，用户反馈"主副图指标曲线还有闪"。
+根因：as-of 是**异步**引擎求值（实测每个非日线格子 ~40-50ms，串行排队 → 落点后约 80-100ms 才回包），
+这段在途窗口里曲线合成点显示的是"按库内完整大周期K线算出的值"（含未来部分），回包后才跳成 as-of 值。
+最终语义（用户确认）：[_asOfDrawIndex](file:///Volumes/home/repositories/Kline2/Kline/Chart/LinkedReplaySupport.swift#L474-L481)
+用「**已应用结果的索引**（`ReplayAsOfModel.appliedIndex`）」而不是"当前光标索引"来放这个点 →
+**在途期间整条曲线保持上一次结果不动，新结果回包后与数值一起一次性更换**（不闪、不空、不跳两次）。
+图例读数同样只在"正在读的那根就是已应用结果的合成点"时才用 as-of 值。
+（曾短暂实现过"在途留空（NaN）"版本，用户明确要求改回"保留上一次结果"，现已撤掉。）
+
 ## 边界
 
 - 标的日线为空 / 该周期区间内无日线 → 该根回退显示库内真实 K 线（不合成错数据）。
