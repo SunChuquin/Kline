@@ -345,8 +345,11 @@ final class GapBackfill: ObservableObject {
             Self.fire(completion)
             return
         }
-        let mainLatest = metas.compactMap { $0.lastDate }.max() ?? 0
         let today = TdxSyncManager.todayYMD()
+        let mainLatest = metas.compactMap { $0.lastDate }.max() ?? 0
+        // §11.46：锚点改为「每只标的**自己的末根日**」——因此"要不要补"的判据不再是
+        // 「全局最新日 < 今日」，而是「**还有没有标的落后于今日**」（否则长期停牌/落后标的永远补不上）。
+        let lagging = metas.compactMap { $0.lastDate }.filter { $0 < today }
 
         state = .running
         statusText = "准备中…"
@@ -356,26 +359,26 @@ final class GapBackfill: ObservableObject {
         detailLines = []
         DebugLogger.shared.log("[GapBackfill] 开始补缺口：标的 \(metas.count) 只"
             + (resolveScope == nil ? "（全市场）" : "（清单范围）")
-            + "，主库最新 \(mainLatest)，今日 \(today)")
+            + "，主库最新 \(mainLatest)，落后于今日 \(lagging.count) 只，今日 \(today)")
 
-        guard mainLatest > 0, today > mainLatest else {
+        guard mainLatest > 0, !lagging.isEmpty else {
             state = .ok
             statusText = "无缺口"
-            verdictText = "无缺口：主库 \(mainLatest) 已不早于今日 \(today)"
-            DebugLogger.shared.log("[GapBackfill] 主库已是最新（\(mainLatest) ≥ \(today)），无需补")
+            verdictText = "无缺口：全部标的主库末根日已到今日 \(today)"
+            DebugLogger.shared.log("[GapBackfill] 无标的落后于今日（主库最新 \(mainLatest) ≥ \(today)），无需补")
             Self.fire(completion)
             return
         }
 
-        // ⓪ 单只探测：源侧最新交易日 ≤ 主库最新 → 无缺口早退（节假日/已补齐时省数千次请求）。
-        //    探测失败（网络抖动）→ 照旧继续（fail-open，不因探测阻塞正常补缺口）
-        probeUpToDate(mainLatest: mainLatest, today: today, finish: { Self.fire(completion) }) {
+        // ⓪ 单只探测：源侧最新交易日 ≤ **最落后的锚点日** → 确实没有任何新数据 → 早退
+        //    （节假日/已补齐时省数千次请求）。探测失败（网络抖动）→ 照旧继续（fail-open）。
+        let probeBase = lagging.min() ?? mainLatest
+        probeUpToDate(referenceDate: probeBase, today: today, finish: { Self.fire(completion) }) {
             var metaIdByFile: [String: Int] = [:]
             for m in metas { metaIdByFile[m.file] = m.id }
-            // 基准行：主库 mainLatest 当天的 OHLCV/AMO（一次 SQL 取对应标的）
+            // 基准行（§11.46）：**每只标的自己末根日**那一行（该只的自校准锚点）；一次 SQL 取全市场
             DatabaseManager.shared.performOnDBQueue({ db in
-                DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
-                                              fromDate: mainLatest, toDate: mainLatest)
+                DatabaseManager.readMainLastRows(db: db, metaIdByFile: metaIdByFile)
             }, completion: { [weak self] baseline in
                 guard let self = self else { Self.fire(completion); return }
                 self.queue.async {
@@ -387,32 +390,34 @@ final class GapBackfill: ObservableObject {
         }
     }
 
-    /// 无缺口早退探测：拉一只活跃标的（SH#600000）最近几根，源侧最新日 ≤ 主库最新 → 判定全市场无缺口。
+    /// 无缺口早退探测：拉一只活跃标的（SH#600000）最近几根，源侧最新日 ≤ **最落后的锚点日**
+    /// → 说明源侧确实没有任何新数据（非交易日 / 已补齐）→ 早退。§11.46：参照日改为"最落后锚点"，
+    /// 这样即使全局最新日已到今日、但仍有落后标的时也不会误判「无缺口」。
     /// 回调均在主线程：无缺口早退 → finish()（不再进入取数流程）；有缺口/探测失败 → proceed()。
-    private func probeUpToDate(mainLatest: Int, today: Int, finish: @escaping () -> Void,
+    private func probeUpToDate(referenceDate: Int, today: Int, finish: @escaping () -> Void,
                                proceed: @escaping () -> Void) {
         queue.async { [weak self] in
             guard let self = self else { DispatchQueue.main.async(execute: finish); return }
             guard let item = ProbeItem(file: "SH#600000", type: "股票") else {
                 DispatchQueue.main.async(execute: proceed); return
             }
-            let (fetched, why) = self.fetchSourceBars(item: item, from: mainLatest, to: today,
+            let (fetched, why) = self.fetchSourceBars(item: item, from: referenceDate, to: today,
                                                       count: 10, session: self.sessions[0])
             if let rows = fetched, let srcLatest = rows.last?.date {
-                if srcLatest <= mainLatest {
-                    DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest) → 无缺口早退")
+                if srcLatest <= referenceDate {
+                    DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) ≤ 最落后锚点 \(referenceDate) → 无缺口早退")
                     self.publish {
                         self.state = .ok
                         self.statusText = "无缺口"
-                        self.coverageText = "主库 \(mainLatest) → 今日 \(today)"
+                        self.coverageText = "最落后锚点 \(referenceDate) → 今日 \(today)"
                         self.fetchText = "—"
-                        self.verdictText = "无缺口：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest)（非交易日或已补齐）"
-                        self.detailLines = ["探测 \(item.marketCode)：源侧最新 \(srcLatest) ≤ 主库 \(mainLatest)"]
+                        self.verdictText = "无缺口：源侧最新 \(srcLatest) ≤ 最落后锚点 \(referenceDate)（非交易日或已补齐）"
+                        self.detailLines = ["探测 \(item.marketCode)：源侧最新 \(srcLatest) ≤ 最落后锚点 \(referenceDate)"]
                     }
                     DispatchQueue.main.async(execute: finish)
                     return
                 }
-                DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) > 主库 \(mainLatest) → 有缺口，开始补")
+                DebugLogger.shared.log("[GapBackfill] 探测：源侧最新 \(srcLatest) > 最落后锚点 \(referenceDate) → 有缺口，开始补")
             } else {
                 DebugLogger.shared.log("[GapBackfill] 探测失败（\(why)）→ 照旧继续补缺口")
             }
@@ -422,12 +427,13 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 主流程（只在 queue 上）
 
-    private func perform(metas: [MetaItem], baseline: [String: [KlineItem]],
+    private func perform(metas: [MetaItem], baseline: [String: KlineItem],
                          mainLatest: Int, today: Int, mergeMain: Bool,
                          completion: (() -> Void)? = nil) {
         let t0 = Date()
 
-        // ① 筛出「需要补 + 可映射 + 有基准行」的作业
+        // ① 筛出「需要补 + 可映射 + 有自己末根行」的作业
+        //    §11.46：锚点 = **该只标的自己的末根日**（`meta.last_date`），不再要求等于全局最新日
         var jobs: [GapJob] = []
         var unmappable = 0
         var noBaseline = 0
@@ -444,9 +450,8 @@ final class GapBackfill: ObservableObject {
                 noSource += 1
                 continue
             }
-            guard last == mainLatest,
-                  let base = baseline[m.file]?.first(where: { $0.date == mainLatest }) else {
-                noBaseline += 1
+            guard let base = baseline[m.file], base.date == last else {
+                noBaseline += 1                                // 主库没有"自己末根日"那一行 → 无从自校准（安全跳过）
                 continue
             }
             jobs.append(GapJob(meta: m, item: item, base: base))
@@ -466,9 +471,9 @@ final class GapBackfill: ObservableObject {
         }
 
         // ② 并发逐只取 **wire 行**（HTTP + 结构提取留 Swift；自校准挪到 ②.5 的按批阶段，§11.43）
+        //    §11.46：每只按**自己锚点日**取 `[锚点, 今日]`，根数也按各自自然日差算
         let lock = NSLock()
         let gate = DispatchSemaphore(value: Self.concurrency)
-        let wireCount = Self.barsCount(from: mainLatest, to: today)
         var wireByIndex = [[[Any]]?](repeating: nil, count: total)
         var whyByIndex = [String](repeating: "", count: total)
         var processed = 0
@@ -476,8 +481,10 @@ final class GapBackfill: ObservableObject {
         DispatchQueue.concurrentPerform(iterations: total) { idx in
             gate.wait()
             let session = self.sessions[idx % self.sessions.count]
-            let (wire, why) = self.fetchWireRows(item: jobs[idx].item, from: mainLatest, to: today,
-                                                 count: wireCount, session: session)
+            let anchor = jobs[idx].base.date
+            let (wire, why) = self.fetchWireRows(item: jobs[idx].item, from: anchor, to: today,
+                                                 count: Self.barsCount(from: anchor, to: today),
+                                                 session: session)
             gate.signal()
             lock.lock()
             if let wire, !wire.isEmpty { wireByIndex[idx] = wire } else { whyByIndex[idx] = why }
@@ -514,8 +521,9 @@ final class GapBackfill: ObservableObject {
             while start < withWire.count {
                 let end = min(start + Self.calibrateBatchSize, withWire.count)
                 let idxs = Array(withWire[start..<end])
-                let items = idxs.map { (base: jobs[$0].base, wireRows: wireByIndex[$0]!) }
-                let got = Self.pyCalibrateBatch(items: items, mainLatest: mainLatest)
+                let items = idxs.map { (base: jobs[$0].base, wireRows: wireByIndex[$0]!,
+                                        anchor: jobs[$0].base.date) }
+                let got = Self.pyCalibrateBatch(items: items)
                 for (offset, idx) in idxs.enumerated() where got[offset] != nil {
                     outcomes[idx] = got[offset]
                 }
@@ -538,7 +546,7 @@ final class GapBackfill: ObservableObject {
                 outcomes[idx] = .failed(whyByIndex[idx].isEmpty ? "响应无 K 线数组" : whyByIndex[idx])
                 continue
             }
-            outcomes[idx] = self.calibrate(job: jobs[idx], rows: rows, mainLatest: mainLatest)
+            outcomes[idx] = self.calibrate(job: jobs[idx], rows: rows, mainLatest: jobs[idx].base.date)
         }
         publish { self.statusText = "写入增量库…" }
 
@@ -639,18 +647,16 @@ final class GapBackfill: ObservableObject {
             DebugLogger.shared.log("[GapBackfill] 写入增量库成功 \(merge.message)")
             // ⑥ 缺口区间的周/月/季/年线：日线落库后，按「主库最新日所在周期桶 → 今日」逐桶重算
             //    （日线补齐只让日线图连续；周期视图还得从新日线聚合，否则周/月/季/年仍是洞）
-            self.rebuildPeriods(metas: metas, mainLatest: mainLatest, today: today) { period in
-                let periodText = period.ok
-                    ? " · 周 \(period.weeklyRows) / 月 \(period.monthlyRows)"
-                        + " / 季 \(period.quarterlyRows) / 年 \(period.yearlyRows) 行"
-                    : " · 周/月/季/年线聚合失败"
-                DebugLogger.shared.log("[GapBackfill] 周期聚合：\(period.message)")
-                lines.append("周期聚合：" + period.message)
-                guard period.ok else {
+            // §11.46：锚点已改为「每只标的自己的末根日」→ 周期桶起始日各不相同，
+            // 必须**按锚点分组**分别重建（各组标的互不相交，写库不会互相覆盖）
+            self.rebuildPeriodsGrouped(jobs: jobs, today: today) { detail, verdict, anyFailed in
+                lines.append(detail)
+                let periodText = verdict
+                guard !anyFailed else {
                     self.state = .failed
                     self.statusText = "周/月/季/年线聚合失败"
                     self.fetchText = "补齐 \(gapFiles) 只 / \(outBars.count) 行（新写入 \(merge.dailyRows) 行）· \(dateSpan)"
-                    self.verdictText = "失败：周期聚合 \(period.message)"
+                    self.verdictText = "失败：周期聚合（见明细）"
                     self.detailLines = lines
                     LiveDataStore.shared.reloadAsync { _ in }
                     Self.fire(completion)
@@ -698,6 +704,46 @@ final class GapBackfill: ObservableObject {
                 }
             }
         }
+    }
+
+    /// 按锚点分组重建缺口区间的周/月/季/年线（§11.46）。
+    /// 混合锚点下「周期桶起始日」各不相同（如锚点 20260922 → Sep 的周/月/季桶；锚点 20260930 → 亦然），
+    /// 只能用各自的锚点分别调用 `rebuildPeriods`；各组标的互不相交 → 写增量库不会互相覆盖。
+    /// - Returns: (明细文案, verdict 后缀文案, 是否有组失败)。多组时明细逐行、verdict 汇总计数。
+    private func rebuildPeriodsGrouped(jobs: [GapJob], today: Int,
+                                       completion: @escaping (String, String, Bool) -> Void) {
+        let groups = Dictionary(grouping: jobs, by: { $0.base.date })
+        let anchors = groups.keys.sorted()
+        guard !anchors.isEmpty else { completion("周期聚合：无作业", " · 无缺口", false); return }
+
+        var details: [String] = []
+        var sums = (w: 0, m: 0, q: 0, y: 0)
+        var failed = false
+        func runGroup(_ i: Int) {
+            guard i < anchors.count else {
+                let verdict = failed
+                    ? " · 周/月/季/年线聚合失败"
+                    : " · 周 \(sums.w) / 月 \(sums.m) / 季 \(sums.q) / 年 \(sums.y) 行"
+                completion(details.joined(separator: " · "), verdict, failed)
+                return
+            }
+            let anchor = anchors[i]
+            let groupMetas = (groups[anchor] ?? []).map(\.meta)
+            self.rebuildPeriods(metas: groupMetas, mainLatest: anchor, today: today) { period in
+                DebugLogger.shared.log("[GapBackfill] 周期聚合（锚点 \(anchor)）：\(period.message)")
+                details.append(anchors.count > 1
+                    ? "周期聚合（锚点 \(anchor)）：\(period.message)"
+                    : "周期聚合：\(period.message)")
+                if period.ok {
+                    sums.w += period.weeklyRows; sums.m += period.monthlyRows
+                    sums.q += period.quarterlyRows; sums.y += period.yearlyRows
+                } else {
+                    failed = true
+                }
+                runGroup(i + 1)
+            }
+        }
+        runGroup(0)
     }
 
     /// 缺口区间的周/月/季/年线：读主库「日线（周/月锚桶窗口）」+「季/年当期基期 bar」→ 逐桶聚合。
@@ -748,9 +794,9 @@ final class GapBackfill: ObservableObject {
 
     // MARK: - 基准缺失名单（按需查询，不发网络请求）
 
-    /// 复算「基准行缺失」名单（与 [perform] 作业筛选同口径）：
-    /// ① `meta.last_date ≠ 主库最新日`（长期停牌 / 退市 / 缺行）；
-    /// ② last_date 对上但主库日线里没有最新日那一行（无从自校准）。
+    /// 复算「基准行缺失」名单（与 [perform] 作业筛选同口径，§11.46）：
+    /// **主库缺「该只自己的末根日」那一行**（`daily.date == meta.last_date` 无行）→ 无从自校准、本轮跳过。
+    /// （`last_date` 落后于全局最新日不再算缺失——那类现在会被正常补齐。）
     /// 主线程调用；主库查询走 dbQueue（复用补缺口同款「一次 SQL 取全市场」），结果回主线程。
     func queryBaselineMissing(completion: @escaping (Result<(mainLatest: Int, items: [GapBaselineMissingItem]), String>) -> Void) {
         let metas = DatabaseManager.shared.metaList
@@ -766,20 +812,17 @@ final class GapBackfill: ObservableObject {
         var metaIdByFile: [String: Int] = [:]
         for m in metas { metaIdByFile[m.file] = m.id }
         DatabaseManager.shared.performOnDBQueue({ db in
-            DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
-                                          fromDate: mainLatest, toDate: mainLatest)
+            DatabaseManager.readMainLastRows(db: db, metaIdByFile: metaIdByFile)
         }, completion: { baseline in
             var items: [GapBaselineMissingItem] = []
             for m in metas {
                 let last = m.lastDate ?? 0
-                if last != mainLatest {
+                // §11.46：锚点已是「每只自己的末根日」→ 只有"主库缺自己那一行"才是真的无从自校准。
+                // 「last_date 落后于全局最新日」不再算缺失（那类现在会被正常补齐）。
+                if baseline[m.file]?.date != last {
                     items.append(GapBaselineMissingItem(
                         file: m.file, code: m.displayCode, name: m.name, lastDate: last,
-                        cause: "主库停更于 \(last == 0 ? "-" : String(last))"))
-                } else if baseline[m.file]?.first(where: { $0.date == mainLatest }) == nil {
-                    items.append(GapBaselineMissingItem(
-                        file: m.file, code: m.displayCode, name: m.name, lastDate: last,
-                        cause: "缺主库 \(mainLatest) 那行"))
+                        cause: "主库缺末根行（last_date \(last > 0 ? String(last) : "-")）"))
                 }
             }
             items.sort { $0.file < $1.file }
@@ -1069,10 +1112,11 @@ final class GapBackfill: ObservableObject {
     private static let calibrateBatchSize = 60
 
     /// Python **按批**自校准（`quote_parse.py` op="calibrate_batch"，§11.43）。
+    /// §11.46：每项**各带自己的锚点日**（`anchor` = 该只的末根日）；引擎侧入参本就逐项带 `mainLatest`。
     /// - Returns: 与 `items` **同序等长**的数组；`nil` = 引擎没给出该只 → 调用方回退本地 Swift 判定。
     /// - Note: 仅在后台 queue / concurrentPerform 线程调用（`blockingCall` 禁主线程）。
-    private static func pyCalibrateBatch(items: [(base: KlineItem, wireRows: [[Any]])],
-                                         mainLatest: Int) -> [GapOutcome?] {
+    private static func pyCalibrateBatch(items: [(base: KlineItem, wireRows: [[Any]], anchor: Int)])
+        -> [GapOutcome?] {
         guard !items.isEmpty else { return [] }
         let none = [GapOutcome?](repeating: nil, count: items.count)
         guard KlinePythonBridge.shared.isReady else {
@@ -1087,7 +1131,7 @@ final class GapBackfill: ObservableObject {
             ["base": ["open": it.base.open, "high": it.base.high, "low": it.base.low,
                       "close": it.base.close, "vol": it.base.volume, "amo": it.base.turnover],
              "sourceRows": it.wireRows,
-             "mainLatest": mainLatest]
+             "mainLatest": it.anchor]
         }
         let input: [String: Any] = ["op": "calibrate_batch", "items": payload]
         switch KlinePythonBridge.shared.blockingCall(script: "quote_parse", input: input, timeout: 120) {

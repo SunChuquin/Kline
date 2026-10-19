@@ -115,6 +115,39 @@ class DatabaseManager: ObservableObject {
         return out
     }
 
+    /// 读主库「每只标的**自己的末根日线**」（`daily.date == meta.last_date`）——补缺口的**自校准锚点行**。
+    /// §11.46：补缺口改为**按每只自己的末根日**当锚点（不再要求等于全局最新日），
+    /// 于是长期落后于全局锚点的标的（停牌 / PC 未生成那几天）也能被补齐。
+    /// SQL 用 `meta JOIN daily ON daily.date = meta.last_date`：IN 列表走 meta 主键 → 再走 daily
+    /// `(meta_id,date)` 主键直查，**不会退化成全表扫描**。
+    /// - Note: 需在 `dbQueue` 上执行（经 `performOnDBQueue` 调用）。
+    nonisolated static func readMainLastRows(db: OpaquePointer?,
+                                             metaIdByFile: [String: Int]) -> [String: KlineItem] {
+        guard let db = db, !metaIdByFile.isEmpty else { return [:] }
+        let idToFile = Dictionary(metaIdByFile.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+        let ids = idToFile.keys.sorted().map { String($0) }.joined(separator: ",")
+        guard !ids.isEmpty else { return [:] }
+        let sql = "SELECT d.meta_id, d.date, d.open, d.high, d.low, d.close, d.vol, d.amo "
+            + "FROM meta m JOIN daily d ON d.meta_id = m.id AND d.date = m.last_date "
+            + "WHERE m.id IN (\(ids));"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        var out: [String: KlineItem] = [:]
+        out.reserveCapacity(idToFile.count)
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let file = idToFile[Int(sqlite3_column_int64(statement, 0))] else { continue }
+            out[file] = KlineItem(date: Int(sqlite3_column_int64(statement, 1)),
+                                  open: sqlite3_column_double(statement, 2),
+                                  high: sqlite3_column_double(statement, 3),
+                                  low: sqlite3_column_double(statement, 4),
+                                  close: sqlite3_column_double(statement, 5),
+                                  volume: sqlite3_column_double(statement, 6),
+                                  turnover: sqlite3_column_double(statement, 7))
+        }
+        return out
+    }
+
     /// 读主库某周期表「当期」那根 bar（键 = `file`）：`date >= fromDate` 内每个 `meta_id` 只留最新一行。
     /// 供补缺口在**不读历史日线**的前提下拿季/年线的**基期 bar**：主库那根是导入时点的快照，
     /// 只聚合到 `meta.last_date`（实测止于 20260828），由调用方叠加缺口日线得到完整当期 bar
