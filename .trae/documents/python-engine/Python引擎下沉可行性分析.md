@@ -2508,6 +2508,48 @@ payload 斜率 ≈ **0.06 ms/KB**。）
 预取读换执行者属**运行期行为变化**（有 Swift 回退），单元测试未覆盖 `MarketRowCache` 预取链路 →
 需在模拟器/真机确认**行情页与快捷面板的行数据（现价/涨跌/均线等）与改动前一致**。
 
+### 11.40 预取读取证暴露的**主线程地雷**：`blockingCall` + `dbQueue.sync` 内联执行（2026-10-19）
+
+**现象**：落地 §11.39 后写的两条运行期取证测试（在原实现里直调 `DatabaseManager.shared.fetchPeriodLimitedViaEngine`
+/ `SimStore.shared.saveToDisk()`）跑起来把**被测 App 进程**直接打断——模拟器弹「Kline 已停止运行」，测试进程被 SIGTRAP 带走。
+
+**根因（崩溃报告逐帧）**：`xcrun simctl spawn <udid> log show` + `Kline-2026-10-19-082234.ips` 显示
+
+```
+_assertionFailure
+KlinePythonBridge.blockingCall(script:input:timeout:)   ← assert(!Thread.isMainThread) 触发
+DbWriteBridge.run / dbQuery
+DatabaseManager.fetchPeriodLimitedViaEngine             ← dbQueue.sync 在**调用线程**上内联执行
+```
+
+`blockingCall` 有 `assert(!Thread.isMainThread)` 兜底；而 `DispatchQueue.sync` 在队列空闲时**不换线程**，
+直接在调用线程执行闭包 → 一旦调用者在主线程，`Thread.isMainThread == true` → Debug 断言崩；
+Release `assert` 被编译掉，改为**同步阻塞主线程到超时**（更隐蔽）。
+
+**生产影响面**：当前唯一调用点 `MarketRowCache` 的两处预取都在 `computeQueue`（后台）上，故线上未触发；
+但方法**只允许后台调用**这一契约此前只存在于注释里，主线程调用=崩/卡。这是一颗地雷，不是测试问题。
+
+**修复**
+
+1. **生产护栏**：`DatabaseManager.fetchPeriodLimitedViaEngine` 与取数核心 `mainRowsViaEngine` 首行加
+   `guard !Thread.isMainThread else { return nil }` —— 主线程一律回退 Swift 现状（返回 `nil` 即调用方 fail-open 回退），
+   与原有「引擎失败自动回退」语义一致；运行时判定，不受 MainActor 编译期标注影响。
+2. **取证测试去破坏化**：场景 6 改为在**临时主库**上后台线程跑「引擎取数 vs Swift 同 SQL mirror」逐行对拍 +
+   沙盒日志证明**确实走到引擎**（`[PyBridge] db_write.py 完成`），并**钉住主线程护栏契约**（主线程调用必须 `nil`）；
+   原场景 7（直写真实 `Documents/Simulation/sim.json`）删除——同覆盖已在
+   `PyScriptsBridgeSmokeTests.testSimStateApplyIncrementsRevision`（临时路径）里。实测 6/6 通过，App 不再被打断。
+3. **顺带清零警告**：`DbWriteBridge` 内部 3 处 `map(Type.init(from:))` 函数值丢隔离 → 改显式闭包；
+   测试类补 `@MainActor`（消除 70+ 条跨隔离告警）。app + test 两 target **0 警告**。
+
+**沉淀成纪律（写测试前先问）**
+
+- 单元测试宿主就是真实 App 进程 → **测试内一律不得触碰真实单例 / 真实沙盒数据**
+  （`DatabaseManager.shared`、`SimStore.shared`、`Documents/tdx.db`、`Documents/Simulation/sim.json`）；
+  造价路径：临时库 / 临时文件 + 独立实例，与 `DbWriteParityTests` 场景 1–5 同款。
+- 任何「同步等 Python」（`blockingCall`/`blockingCallBin`）**只允许后台线程调用**；调用点若不在后台队列上，
+  必须自己加运行时护栏，不能只写注释。
+- 取证测试**崩溃即污染现场**：被测 App 被打断后必须拉 `*.ips` 定位到帧，别把「测试没过」当成断言失败。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
