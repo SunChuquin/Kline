@@ -474,18 +474,6 @@ extension KlineChartView {
         linkSourceCache.request(metaID: meta, period: .daily)
     }
 
-    /// 画布（蜡烛 / 曲线 / 量柱）的合成点全局索引：合成点必须落在可见窗口内才谈得上绘制。
-    /// 联动复盘光标点优先（语义与改动前完全一致），其次是训练态形成中K线。
-    var asOfCanvasIndex: Int? {
-        if let r = linkReplayState, r.synthetic != nil, r.idx >= startIndex, r.idx <= endIndex {
-            return r.idx
-        }
-        if let i = trainingFormingIndex, trainingFormingBar != nil, i >= startIndex, i <= endIndex {
-            return i
-        }
-        return nil
-    }
-
     /// 图例数值栏 / 行情读数行的合成点索引：只有"正在读的就是合成点那根"时才覆盖读数。
     /// 无光标时图例读 `endIndex`（见 `legendValue`），故训练态要求形成中K线恰好在右缘。
     var asOfLegendIndex: Int? {
@@ -521,30 +509,27 @@ extension KlineChartView {
                            targetCount: sortedData.count)
     }
 
-    /// 合成点在途判定：该点位的 as-of 已调度但尚未回包，且没有可复用的同点位结果。
-    /// 渲染侧据此把这个点**留空**（而不是拿库内完整大周期K线算出的值顶上再跳变）。
-    /// 同根 K 线内继续拖动光标时（`appliedIndex == idx`）返回 false —— 保留上一次结果，
-    /// 与联动复盘既有行为一致（避免拖动过程中该点反复空白）。
-    func asOfWaiting(at idx: Int) -> Bool {
-        asOfModel.appliedIndex == idx ? false : (asOfModel.pendingIndex == idx)
+    /// 合成点**绘制索引**：用「已应用结果」的 `asOfModel.appliedIndex`（并限定在可见窗口内），
+    /// 而不是"当前光标所在索引"。
+    ///
+    /// 语义（用户要求）：as-of 仍在引擎回包路上时，整条曲线**保持上一次结果不动**，
+    /// 新结果回包后一次性更换——不出现"先拿库内（含未来数据）的值顶上再跳变"，也不会空一下。
+    var asOfDrawIndex: Int? {
+        asOfModel.appliedIndex.flatMap { ($0 >= startIndex && $0 <= endIndex) ? $0 : nil }
     }
 
-    /// 主图某条曲线的 as-of 读数（仅当图例正在读合成点那根时返回；联动复盘 / 训练态共用）。
-    /// 合成点在途 → 返回 **NaN**：图例只显示名称、不显示数值，避免"先显示库内（含未来数据）的值
-    /// → 回包后再跳变"的闪烁。
+    /// 主图某条曲线的 as-of 读数（仅当图例正在读的那根**就是已应用结果的合成点**时返回）。
+    /// 在途期间返回 nil → 图例按库内值显示（即"上一次画面"），新结果回包后一次性更换。
     func asOfMainOverride(_ lineIndex: Int) -> Double? {
-        guard let idx = asOfLegendIndex else { return nil }
-        if asOfModel.appliedIndex == idx { return asOfModel.main[lineIndex] }
-        if asOfModel.pendingIndex == idx { return .nan }
-        return nil
+        guard let idx = asOfLegendIndex, asOfModel.appliedIndex == idx else { return nil }
+        return asOfModel.main[lineIndex]
     }
 
-    /// 某副图槽位某条曲线的 as-of 读数（联动复盘 / 训练态共用；在途同样返回 NaN 抑制跳变）
+    /// 某副图槽位某条曲线的 as-of 读数（联动复盘 / 训练态共用；判定规则同主图）
     func asOfSubOverride(slot: Int, lineIndex: Int) -> Double? {
-        guard slot >= 0, slot < asOfModel.subs.count, let idx = asOfLegendIndex else { return nil }
-        if asOfModel.appliedIndex == idx { return asOfModel.subs[slot][lineIndex] }
-        if asOfModel.pendingIndex == idx { return .nan }
-        return nil
+        guard slot >= 0, slot < asOfModel.subs.count,
+              let idx = asOfLegendIndex, asOfModel.appliedIndex == idx else { return nil }
+        return asOfModel.subs[slot][lineIndex]
     }
 
     /// 按 trigger 调度 as-of 重算（缓存命中即时应用；否则后台求值、序号防过期）。
