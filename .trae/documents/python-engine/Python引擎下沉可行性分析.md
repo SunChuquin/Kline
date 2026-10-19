@@ -2550,6 +2550,49 @@ Release `assert` 被编译掉，改为**同步阻塞主线程到超时**（更�
   必须自己加运行时护栏，不能只写注释。
 - 取证测试**崩溃即污染现场**：被测 App 被打断后必须拉 `*.ips` 定位到帧，别把「测试没过」当成断言失败。
 
+### 11.41 清除全部 Swift 回退：引擎下沉后**只留引擎一路**（2026-10-19 · 用户严令）
+
+> 用户原话：**「我严令禁止你在 py 引擎实现后还留有回退到 swift 实现的方式，必须在 py 引擎中修复」**。
+> 这是架构红线（与 2026-10-15「图表指标计算唯一路径 = Python 引擎」同一原则），§11.38/§11.39
+> 里那些「引擎失败自动回退 Swift 现状」的写法全部作废。
+
+**① 清掉的回退点（本轮范围）**
+
+| 位置 | 原回退形态 | 现在 |
+| --- | --- | --- |
+| `MarketRowCache` 预取读 ×2 | `fetchPeriodLimitedViaEngine(...) ?? fetchPeriodLimited(...)` | 只调引擎口；失败 → 空数组 + 日志 |
+| `DatabaseManager.fetchPeriodLimitedViaEngine` | 失败返回 `nil` → 调用方回退 Swift 读 | 失败 → 空数组 + 日志（`fetchPeriodLimited` 不再是它的退路） |
+| `SimModels.SimQuoteCenter` 最新价/昨收 ×3 分支 | 引擎失败 / 空 → `MarketRowCache.numberFor(...)`（Swift 现状值） | 只调引擎 op；失败 → `nil` + 日志 |
+| `MarketRow` 字段算法（`compute`/`rangePct`/`ytdPct`/`ma` + `cache` 回退） | `number()` 三级回退：引擎值 → Swift 缓存 → Swift 纯函数 | **整体删除**；`number()` 只读引擎写入的 `pythonValues` |
+| `MarketRowCache.flushPythonSnapshot` 失败分支 | `clearPythonValues()` → 让 `MarketRow` 回退 Swift 计算 | `clearPythonValues()` → **显式空态**（渲染 `-`），语义已改 |
+
+**② 失败行为（用户拍板）**：引擎未就绪 / 调用失败 → **显式空态 + 落日志**，不崩、不静默、不换实现。
+主线程误用（`blockingCall` 断言禁止主线程 + `dbQueue.sync` 在调用线程内联执行）→ **拦下并记 `[DB][错误]` 日志 + 返回空**
+（不再有「返回 nil 让调用方回退」这回事；也不选 `precondition` 崩，避免首次启动窗口期打断用户）。
+
+**③ 删算法前必须先建对拍基准**：Swift 现状算法**整体搬进测试目标** `KlineTests/QuoteSnapshotOracle.swift`
+（逐字副本，生产代码不可达 → 不是运行时回退，性质同 `SimRulesProjection` 的 `.swift` 对拍模式），
+新增 `KlineTests/QuoteSnapshotParityTests.swift`：10 组边界序列（0/1/2/6/30/65/80 根、跨年 YTD 两分支、
+零基期、零成交量）× 21 字段，与引擎 `quote_snapshot_batch` **逐值对拍**（含 nil 语义）。
+
+**④ 对拍网立刻抓到并修掉一个真实引擎缺陷（修在引擎侧）**
+`quote_snapshot.py` 区间涨幅分支原写 `field[3:].isdigit()`，而真实字段名是 `pct3d`（`field[3:]` == `"3d"`），
+**永远匹配不上** → 生产里 3/5/10/20/60 日涨幅恒为 `null`，行情页这 5 列一直显示 `-`。
+改为 `field.endswith("d") and field[3:-1].isdigit()`（`pctYTD` 大写结尾不受影响）。
+—— 这正是「Swift 侧能算、引擎侧算错」被 Swift 兜底掩盖了这么久的根因；兜底一撤，对拍网就把它逼出来了。
+
+**⑤ 删掉 Swift 兜底后的**新回归风险与处置
+字段只有引擎一个来源 → **首帧（引擎就绪前）数值列为空**是预期行为，但**不能停在空态**：
+`KlinePythonBridge.ensureReady` 成功（含「已加载」快路径）时补一次 `MarketRowCache.retryEmptyRows(force: true)`，
+让「预取时引擎尚未就绪而落空」的行在引擎就绪后自动补取（原 `retryEmptyRows` 是无调用者的死代码）。
+
+**⑥ 验证**：`QuoteSnapshotParityTests` 1/1 + `DbWriteParityTests` 6/6 + 全量 `KlineTests` **94/94**，
+app + test 两 target **0 警告**（唯一保留项仍是用户指定暂不处理的 `IndicatorPipeline.swift:994`）。
+
+**⑦ 明确留待后续（本轮范围外，用户已确认按「已下沉能力」分批做）**
+`StrategyBacktestEngine` 仍用 Swift `fetchPeriodLimited` 取数（回测取数未下沉，因此不是「回退」而是尚未下沉）；
+公式/策略投射层的 `.swift` 对拍模式保留。若要全仓一次性审计，见本节 ① 的清单逐项核。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
