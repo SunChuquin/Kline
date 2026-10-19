@@ -82,12 +82,21 @@ extension KlineChartView {
             let d = r.dimFrom - startIndex
             return (d >= 0 && d < localCount) ? d : nil
         }
-        // 主图曲线可见切片：合成索引处用 as-of 重算值单点替换（历史段/未来段数组值不动）
+        // 主图曲线可见切片：合成索引处的取值规则（历史段/未来段数组值不动）——
+        // ① as-of 已就位 → 用 as-of 值；② as-of 仍在引擎回包路上 → **该点留空（NaN）**，
+        //    绝不用库内（含未来数据）的值顶上再跳变（用户实证："曲线会先显示未来数据再跳"）；
+        // ③ 该线本次 as-of 无值（如公式未产出）→ 保留库内值，与既有行为一致。
         func mainCurveValues(_ line: IndicatorLine, lineIndex: Int) -> [Double] {
             var values = mirroredSliceArr(line.values)
-            if let idx = asOfCanvasIndex, let v = asOfModel.main[lineIndex] {
+            if let idx = asOfCanvasIndex {
                 let local = idx - startIndex
-                if local >= 0, local < values.count { values[local] = mainMirrored ? -v : v }
+                if local >= 0, local < values.count {
+                    if asOfWaiting(at: idx) {
+                        values[local] = .nan
+                    } else if let v = asOfModel.main[lineIndex] {
+                        values[local] = mainMirrored ? -v : v
+                    }
+                }
             }
             return values
         }
@@ -192,12 +201,18 @@ extension KlineChartView {
                                   value: config.mainMirrored ? -v : v,
                                   isUp: p.item.isUp)
         }()
-        // 副图曲线可见切片：合成索引处用 as-of 重算值单点替换（VOL/AMO 均量线等同样适用）
+        // 副图曲线可见切片：合成索引处的取值规则与主图一致（as-of 就位→用值；在途→留空 NaN）
         func subCurveValues(_ line: IndicatorLine, lineIndex: Int) -> [Double] {
             var values = subMirroredSliceArr(line.values)
-            if let idx = asOfCanvasIndex, let v = asOfModel.subs[subSlotIndex][lineIndex] {
+            if let idx = asOfCanvasIndex {
                 let local = idx - startIndex
-                if local >= 0, local < values.count { values[local] = config.mainMirrored ? -v : v }
+                if local >= 0, local < values.count {
+                    if asOfWaiting(at: idx) {
+                        values[local] = .nan
+                    } else if let v = asOfModel.subs[subSlotIndex][lineIndex] {
+                        values[local] = config.mainMirrored ? -v : v
+                    }
+                }
             }
             return values
         }
