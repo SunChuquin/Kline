@@ -2600,7 +2600,46 @@ app + test 两 target **0 警告**（唯一保留项仍是用户指定暂不处�
 - **引擎读吞吐**：`db_query` 每次 ~12ms（前置 0.45 + 引擎 11.7 + 读回 0.45），冷启动 3354 只 ≈ 40s。
   现在数值列会随预取进度分批出值，但整批耗时不理想；若要在引擎侧提速，正路是新增**按批读 op**
   （`db_query_batch`：一次调用取 N 只标的的主库行，摊薄每次 ~12ms 的传输开销），
-  而不是在 Swift 侧找回更快的老路径（那正是用户禁止的）。
+  而不是在 Swift 侧找回更快的老路径（那正是用户禁止的）。→ **已落地，见 §11.42**
+
+### 11.42 主库读**按批下沉**：`db_query_batch`（2026-10-19）
+
+**① 动机**：§11.41 测出单只读每次 ~12ms，其中真正的 SQL 只占极小部分，其余是**每次调用的固定传输开销**
+（入参落盘 + PyRun + 出参 JSON 读回）。冷启动预取 3354 只 ≈ 40s，与「Swift 侧 0.137ms/次」差了 25-100 倍——
+但按用户红线**回调 Swift 不是选项**，只能在引擎侧摊薄。
+
+**② 做法（引擎侧）**：`db_write.py` 新增 `db_query_batch`
+- 输入 `{"dbPath","table","symbols":[{"metaID":1,"limit":80},…]}`；
+- 输出 `{"ok":true,"result":{"1":[[date,open,high,low,close,vol,amo],…],…}}`（各自 DESC）；
+- 一次 `sqlite3.connect` + 复用游标（同 SQL 语句走 sqlite3 语句缓存），逐只 `_bars_for()`
+  ——**SQL / `vol|amo` 的 REAL 判定 / 缺表返回空**与逐只读**逐字一致**（抽成公共 helper，杜绝第二口径）；
+- 逐只异常 → 该只返回 `[]`（与逐只读的「prepare 失败返回空数组」同口径）。
+
+**③ 做法（Swift 侧：收敛成一条路）**：删掉单只读通道（`DbWriteBridge.dbQuery`、`DatabaseManager.fetchPeriodLimitedViaEngine/mainRowsViaEngine`、Swift 的 `fetchPeriodLimited`），
+只留 `DatabaseManager.fetchPeriodLimitedViaEngineBatch(table:requests:)`：
+引擎给主库行 → 本类内用既有 `liveSlice` / `merge` / `prefix` 完成「增量优先 + 主库补齐」合并（**无第二真源**）。
+调用点两处全部切过去：
+- `MarketRowCache` 预取：`engineBatchSize = 50`，每批一次引擎调用，批内逐只 `setBars` + 快照入队 + `objectWillChange`（保持"逐只回写刷新 UI"体验）；
+- `StrategyBacktestEngine` 回测取数：同样 50 只/批（`readBatchSize`），批内逐只沿用原有 as-of 求值/进度/取消逻辑。
+
+**④ 实测（模拟器，冷启动全市场 3354 只）**
+
+| 指标 | 按批前 | 按批后 |
+| --- | --- | --- |
+| `db_write.py` 调用次数 | 2661 次（≈逐只） | **69 次**（≈3354/50） |
+| 整批预取耗时 | ~40s | **~5.5s** |
+| 单次调用 | 12ms / 只 | 27-82ms / 批 ≈ **1ms / 只** |
+| 失败 / 主线程误用 | 0 / 0 | 0 / 0 |
+
+**⑤ 回归网**：`DbWriteParityTests` 场景 5 改为 `db_query_batch` 双跑（两只标的：带 LIMIT 250 / 不带 LIMIT，
+含 INTEGER 型 `vol` 的 REAL 判定分支）；场景 6 改按批入口（主线程护栏 + 沙盒日志取证）。
+`scripts/verify_pyscript_io_contract.py` 9/9 通过。全量 `KlineTests` **97/97**。
+
+**⑥ 更正一条此前的错误结论**：之前多次写的「0 警告」是**增量编译的假象**——只有被重编的文件才会报告警。
+删掉 DerivedData 全量重编后暴露 **8 条**（去重后）隔离类告警：`SimRulesAsync.swift` 4 条（4 个纯 JSON
+解码器被非隔离上下文调用）、`MarketRowCache.swift` 3 条（后台批处理入口）、`IndicatorPipeline.swift` 1 条（用户指定暂不处理）。
+本轮清掉前 7 条：解码器标 `nonisolated`；预取的「引擎读」以**闭包参数**传入并让 `runEngineBatches` 走
+`nonisolated` + `Task { @MainActor in }` 回写。**结论：以后验证告警必须看全量重编日志，别信增量日志。**
 
 ---
 
