@@ -303,13 +303,20 @@ extension KlineChartView {
         let arr = mainMirrored ? mirroredSlice : slice
         let li = idx - startIndex
         guard li >= 0, li < arr.count else { return nil }
-        // 联动复盘的合成K线：全局 idx 命中时局部索引为 idx - startIndex，镜像态取负
+        // 合成K线（联动复盘光标点 / 训练态形成中K线）：全局 idx 命中时局部索引为 idx - startIndex，镜像态取负
         let synthetic: (index: Int, item: KlineItem)? = {
-            guard let r = linkReplayState, let s = r.synthetic,
-                  r.idx >= startIndex, r.idx <= endIndex else { return nil }
-            guard mainMirrored else { return (r.idx - startIndex, s) }
-            return (r.idx - startIndex, KlineItem(date: s.date, open: -s.open, high: -s.high, low: -s.low,
-                                                  close: -s.close, volume: s.volume, turnover: s.turnover))
+            let pair: (idx: Int, item: KlineItem)? = {
+                if let r = linkReplayState, let s = r.synthetic,
+                   r.idx >= startIndex, r.idx <= endIndex { return (r.idx, s) }
+                if let i = trainingFormingIndex, let s = trainingFormingBar,
+                   i >= startIndex, i <= endIndex { return (i, s) }
+                return nil
+            }()
+            guard let p = pair else { return nil }
+            guard mainMirrored else { return (p.idx - startIndex, p.item) }
+            return (p.idx - startIndex, KlineItem(date: p.item.date, open: -p.item.open, high: -p.item.high,
+                                                 low: -p.item.low, close: -p.item.close,
+                                                 volume: p.item.volume, turnover: p.item.turnover))
         }()
         func drawn(_ i: Int) -> KlineItem {
             if let sy = synthetic, sy.index == i { return sy.item }

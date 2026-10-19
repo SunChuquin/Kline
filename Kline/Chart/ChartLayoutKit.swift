@@ -56,20 +56,27 @@ extension KlineChartView {
         // 注意：K线空实心/类型直接读取 config.chartStyle —— config 已被 @ObservedObject 观察，
         // 这样「K线设置-显示组-类型」修改（含启动时从 UserDefaults 恢复）都会立即驱动主图重绘实心/空心，
         // 不依赖外部传入的 @Binding 中间层传播。
-        // 联动复盘：全局 idx → 可见切片本地索引；合成K线镜像取负与 mirroredSlice 同构。
+        // 联动复盘 / 训练态：全局 idx → 可见切片本地索引；合成K线镜像取负与 mirroredSlice 同构。
         let replay = linkReplayState
         let localCount = max(0, endIndex - startIndex + 1)
+        // 合成点（联动复盘光标点优先，其次训练态形成中K线）的单点替换
         let syntheticBar: SyntheticBar? = {
-            guard let r = replay, let s = r.synthetic,
-                  r.idx >= startIndex, r.idx <= endIndex else { return nil }
+            let pair: (idx: Int, item: KlineItem)? = {
+                if let r = replay, let s = r.synthetic,
+                   r.idx >= startIndex, r.idx <= endIndex { return (r.idx, s) }
+                if let i = trainingFormingIndex, let s = trainingFormingBar,
+                   i >= startIndex, i <= endIndex { return (i, s) }
+                return nil
+            }()
+            guard let p = pair else { return nil }
             let item: KlineItem
             if mainMirrored {
-                item = KlineItem(date: s.date, open: -s.open, high: -s.high, low: -s.low,
-                                 close: -s.close, volume: s.volume, turnover: s.turnover)
+                item = KlineItem(date: p.item.date, open: -p.item.open, high: -p.item.high, low: -p.item.low,
+                                 close: -p.item.close, volume: p.item.volume, turnover: p.item.turnover)
             } else {
-                item = s
+                item = p.item
             }
-            return SyntheticBar(index: r.idx - startIndex, item: item)
+            return SyntheticBar(index: p.idx - startIndex, item: item)
         }()
         let dimFromLocal: Int? = replay.flatMap { r in
             let d = r.dimFrom - startIndex
@@ -78,10 +85,8 @@ extension KlineChartView {
         // 主图曲线可见切片：合成索引处用 as-of 重算值单点替换（历史段/未来段数组值不动）
         func mainCurveValues(_ line: IndicatorLine, lineIndex: Int) -> [Double] {
             var values = mirroredSliceArr(line.values)
-            if let r = replay, r.synthetic != nil,
-               r.idx >= startIndex, r.idx <= endIndex,
-               let v = asOfModel.main[lineIndex] {
-                let local = r.idx - startIndex
+            if let idx = asOfCanvasIndex, let v = asOfModel.main[lineIndex] {
+                let local = idx - startIndex
                 if local >= 0, local < values.count { values[local] = mainMirrored ? -v : v }
             }
             return values
@@ -173,21 +178,25 @@ extension KlineChartView {
         // 槽位下标（0/1/2，as-of 结果索引）；注意勿与函数参数 slot: SubSlot 同名
         let subSlotIndex = m === subTop ? 0 : (m === subBottom ? 1 : 2)
         let synthStick: SyntheticStick? = {
-            guard let r = replay, let s = r.synthetic,
-                  r.idx >= startIndex, r.idx <= endIndex,
-                  m.kind == "VOL" || m.kind == "AMO" else { return nil }
-            let v = m.kind == "AMO" ? s.turnover : s.volume
-            return SyntheticStick(index: r.idx - startIndex,
+            // 合成点：联动复盘光标点优先，其次训练态形成中K线；只对 VOL/AMO 柱生效
+            let pair: (idx: Int, item: KlineItem)? = {
+                if let r = replay, let s = r.synthetic,
+                   r.idx >= startIndex, r.idx <= endIndex { return (r.idx, s) }
+                if let i = trainingFormingIndex, let s = trainingFormingBar,
+                   i >= startIndex, i <= endIndex { return (i, s) }
+                return nil
+            }()
+            guard let p = pair, m.kind == "VOL" || m.kind == "AMO" else { return nil }
+            let v = m.kind == "AMO" ? p.item.turnover : p.item.volume
+            return SyntheticStick(index: p.idx - startIndex,
                                   value: config.mainMirrored ? -v : v,
-                                  isUp: s.isUp)
+                                  isUp: p.item.isUp)
         }()
         // 副图曲线可见切片：合成索引处用 as-of 重算值单点替换（VOL/AMO 均量线等同样适用）
         func subCurveValues(_ line: IndicatorLine, lineIndex: Int) -> [Double] {
             var values = subMirroredSliceArr(line.values)
-            if let r = replay, r.synthetic != nil,
-               r.idx >= startIndex, r.idx <= endIndex,
-               let v = asOfModel.subs[subSlotIndex][lineIndex] {
-                let local = r.idx - startIndex
+            if let idx = asOfCanvasIndex, let v = asOfModel.subs[subSlotIndex][lineIndex] {
+                let local = idx - startIndex
                 if local >= 0, local < values.count { values[local] = config.mainMirrored ? -v : v }
             }
             return values

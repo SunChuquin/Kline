@@ -126,15 +126,22 @@ extension KlineChartView {
     // MARK: - 主图指标栏
 
     /// 副图 VOL/AMO 的合成量/额覆盖值：仅 stick 柱线（VOL/AMO 本体）取合成累加量/额，其余返回 nil。
-    /// （多图联动复盘时使用；单图 linkReplayState 为 nil 自然返回 nil，行为与原内联逻辑一致）
+    /// （联动复盘 / 训练态使用；非合成态自然返回 nil，行为与原内联逻辑一致）
     func subVolAmoOverride(_ m: SubChartModel, lineOffset: Int) -> Double? {
         guard m.kind == "VOL" || m.kind == "AMO" else { return nil }
         guard lineOffset < m.curves.count else { return nil }
         let line = m.curves[lineOffset]
-        guard line.style == .stick,
-              let r = linkReplayState, let s = r.synthetic,
-              r.idx == renderCursorIndex else { return nil }
-        return m.kind == "AMO" ? s.turnover : s.volume
+        guard line.style == .stick else { return nil }
+        // 联动复盘：光标正好渲染在合成点上
+        if let r = linkReplayState, let s = r.synthetic, r.idx == renderCursorIndex {
+            return m.kind == "AMO" ? s.turnover : s.volume
+        }
+        // 训练态：形成中K线正好是图例在读的那根
+        if let i = trainingFormingIndex, let s = trainingFormingBar,
+           i == (legendCursorIndex ?? endIndex) {
+            return m.kind == "AMO" ? s.turnover : s.volume
+        }
+        return nil
     }
 
     func mainLegendRow(height: CGFloat) -> some View {

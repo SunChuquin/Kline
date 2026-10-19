@@ -419,9 +419,11 @@ struct KlineChartView: View {
         return computation.gaps.map { g in GapInfo(startIdx: g.startIdx, top: -g.top, bottom: -g.bottom, isUp: g.isUp, filledIdx: g.filledIdx) }
     }
 
-    /// 镜像后的最新一根 K 线（最新价线用）
+    /// 镜像后的最新一根 K 线（最新价线用）。
+    /// 训练态取「形成中」合成K线：最新价线应落在**训练日收盘**上，而不是库内那根含训练日之后数据的完整大周期K线。
     var mirroredLatest: KlineItem? {
-        guard mainMirrored, let last = sortedAll.last else { return sortedAll.last }
+        guard let last = trainingFormingBar ?? sortedAll.last else { return nil }
+        guard mainMirrored else { return last }
         return KlineItem(date: last.date, open: -last.open, high: -last.high, low: -last.low,
                          close: -last.close, volume: last.volume, turnover: last.turnover)
     }
@@ -460,10 +462,23 @@ struct KlineChartView: View {
 
     // MARK: - 主图价格区间
 
+    /// 参与主图价格范围计算的可见 K 线：训练态把右缘那根替换为「形成中」合成形态
+    /// （其余情况与 slice 完全一致，零额外开销）
+    private var displayRangeSlice: [KlineItem] {
+        guard let idx = trainingFormingIndex, let f = trainingFormingBar,
+              idx >= startIndex, idx <= endIndex else { return slice }
+        var arr = slice
+        arr[idx - startIndex] = f
+        return arr
+    }
+
     var priceRange: ClosedRange<Double> {
         guard !slice.isEmpty else { return 0...100 }
-        var minLow = slice.map(\.low).min() ?? 0
-        var maxHigh = slice.map(\.high).max() ?? 100
+        // 训练态：右缘那根（含训练日）替换为「形成中」合成形态后参与范围计算——
+        // 否则会把训练日之后的极值（整周/整月的高低点）算进 y 轴，等于泄漏未来数据
+        let ranged = displayRangeSlice
+        var minLow = ranged.map(\.low).min() ?? 0
+        var maxHigh = ranged.map(\.high).max() ?? 100
         // 默认打开"指标不挤压K线"：范围只按K线自身计算；关闭时才纳入指标线范围（K线被挤压）
         if !displaySettings.indicatorNotSqueezeKline {
             let offsets = Array(startIndex...endIndex).filter { $0 < closes.count }
@@ -741,8 +756,10 @@ struct KlineChartView: View {
             // 联动复盘：切周期/标的导致 .id 重建后，若联动光标仍在（cursorDate 未变、
             // 不会再收到 onChange），立即补一次来源数据加载请求，命中缓存则当帧即可合成
             ensureLinkSourceBars()
+            // 训练态：确保「形成中K线」所需的（本标的, 日线）数据已请求；到达后经 revision 触发重绘
+            ensureTrainingSourceBars()
             // as-of 同理：重建后若合成态成立，直接按缓存恢复/调度指标点重算
-            scheduleAsOf(asOfTrigger)
+            scheduleAsOf(effectiveAsOfTrigger)
             // 把主图指标按钮标题/点击行为同步给外层信息栏
             syncMainLegendPortal()
             // 副图配置已持久化在共享仓库，无需重置
@@ -786,9 +803,13 @@ struct KlineChartView: View {
             if trainingMaxDate != nil, maxEndIndexUpperBound > endIndex { endOffset = maxEndOffset }
         }
         // 训练日推进（trainingMaxDate 变化）：新的右缘上界超过当前右缘时，把右缘跟进到新的训练日
-        // （nearestIndex / sortedData 变化都由本模块自行重算：切周期时视图 .id 重建走 onAppear）
+        // （nearestIndex / sortedData 变化都由本模块自行重算：切周期时视图 .id 重建走 onAppear）。
+        // ⚠️ 这里**不重载任何数据**：训练日的推进只等价于「窗口右移一根」，右缘那根的「形成中」形态
+        // 由 trainingFormingBar 单点合成 + as-of 指标点重算跟随（与非训练态手拖主图同一条廉价路径），
+        // 因此不会出现"整屏白屏转圈 / 图表重建"的闪烁。
         .onChange(of: trainingMaxDate) { _ in
             guard trainingMaxDate != nil else { return }
+            ensureTrainingSourceBars()
             if maxEndIndexUpperBound > endIndex { endOffset = maxEndOffset }
         }
         .onChange(of: selectedIndex) { newIdx in
@@ -833,8 +854,8 @@ struct KlineChartView: View {
         .onChange(of: linkSync.cursorDate) { date in
             applyLinkCursor(date)
         }
-        .onChange(of: asOfTrigger) { t in
-            // 合成内容/光标日期/指标配置变化 → 调度（或清空）as-of 单点重算
+        .onChange(of: effectiveAsOfTrigger) { t in
+            // 合成内容/光标日期/训练日/指标配置变化 → 调度（或清空）as-of 单点重算
             scheduleAsOf(t)
         }
         .onChange(of: suppressCrosshair) { on in

@@ -93,56 +93,55 @@ final class LinkSourceBarCache: ObservableObject {
     }
 }
 
-// MARK: - 训练态「时点切片」：把某周期的 K 线截到训练日，并用日线合成右缘那根「形成中大周期K线」
+// MARK: - 训练态「时点合成」：训练日所在大周期 K 线的「形成中」形态
 
-/// 训练态图表数据口径：让周/月/季/年图显示「假如时间停在训练日」的真实形态。
-///
-/// 背景：训练态原有的右缘钳制（`KlineChartView.trainingMaxDate` → `trainingEndIndex`）只保证
-/// 「训练日之后的 K 线不进可见窗口」，但库里的大周期 K 线是**整周期聚合**的（周线含当周全部交易日、
-/// 月线含整月……），于是训练日停在周中/月中时，右缘那根显示的是「整周/整月」的完整形状——
-/// 含训练日之后的数据，且训练日推进时它也不变形。
-///
-/// 本切片把该周期裁到「date ≤ 训练日」，再用**同一个标的**的日线，从该周期起点聚合到训练日，
-/// 替换右缘那一根：口径与联动复盘合成 K 线（`KlineChartView.synthesizeBar`）完全一致——
+/// 训练态时点合成：与联动复盘的 `synthesizeBar` **同口径**，只是把「光标日」换成「训练日」——
+/// 训练日落在某根大周期 K 线覆盖区间内时，那根应按「本标的日线从该周期起点聚合到训练日」的形态显示：
 /// 开 = 区间首根日线开、收 = 训练日（区间末根日线）收、高/低 = 包络、量/额 = 累加。
-/// 这样训练态大周期图的"形成中K线"与非训练态多图联动复盘是同一套形态来源。
 ///
-/// - Important: 日线必须取**该 (标的) 自己的**日线（多图里各格标的可能不同，绝不能串数据）。
-/// - Note: 日线不可用 / 区间内无日线时退化为"只裁剪不替换"，绝不合成出错数据。
+/// 为什么不做「按训练日重新切片再喂给图表」：那样每推进一个训练日都要重查库 + 重建视图实例，
+/// 表现为整屏闪烁（图表先白屏转圈、指标曲线又从头算）。本函数只产出**一根合成 K 线**，
+/// 由图表在绘制时做单点替换（与联动复盘 SyntheticBar 同一机制），训练日推进因此退化为
+/// 「窗口右移一根」——与非训练态手拖主图完全同一条廉价路径。
 enum TrainingAsOfSeries {
 
     /// - Parameters:
-    ///   - rows: 该 (标的, 周期) 的库内 K 线，**date 降序**（DatabaseManager 查询约定）
-    ///   - period: 该周期；`.daily` 只裁剪（日线本身即逐日数据，最后一根就是训练日）
-    ///   - trainingDate: 训练日 YYYYMMDD（≤ 0 视为无效，原样返回）
-    ///   - daily: 该标的日线，**date 降序**
-    /// - Returns: date 降序的切片序列（可直接 `ChartSeries(data:)`）
-    static func slice(rows: [KlineItem], period: KlinePeriod,
-                      trainingDate: Int, daily: [KlineItem]) -> [KlineItem] {
-        guard trainingDate > 0 else { return rows }
-        // 训练日之后的 K 线一律不进序列（右缘那根 = 含训练日的那根；它之后属于"尚未发生"）
-        let capped = rows.filter { $0.date <= trainingDate }
-        // 日线本身就是逐日数据，最后一根即训练日；无日线可依 / 无序列可替换 → 直接返回裁剪结果
-        guard period != .daily, let last = capped.first, !daily.isEmpty else { return capped }
-        // 大周期起点（周线=周一、月/季/年=对应首日），日线段取 [起点, 训练日]
-        let (periodStart, _) = KlinePeriod.periodDateRange(period, date: last.date)
-        let seg = daily.filter { $0.date >= periodStart && $0.date <= trainingDate }
-        guard let newest = seg.first else { return capped }   // 区间内无日线（停牌/无数据）→ 回退真实 K 线
-        let oldest = seg[seg.count - 1]                       // 降序 → 末位为区间最早一根
+    ///   - targetDate: 目标大周期 K 线自身的日期（= 该周期首个交易日）
+    ///   - period: 目标周期（日线无需合成，调用方自行跳过）
+    ///   - trainingDate: 训练日 YYYYMMDD
+    ///   - daily: **该标的自己的**日线，**date 升序**（与 LinkSourceBarCache 同约定）
+    /// - Returns: 合成 K 线（date 沿用 targetDate）；区间内无日线 / 参数非法 → nil（回退显示库内真实 K 线）
+    static func formingBar(targetDate: Int, period: KlinePeriod,
+                           trainingDate: Int, daily: [KlineItem]) -> KlineItem? {
+        guard trainingDate > 0, !daily.isEmpty else { return nil }
+        let (periodStart, _) = KlinePeriod.periodDateRange(period, date: targetDate)
+        // 升序日线中二分定位聚合区间 [periodStart, trainingDate]
+        var lo = 0, hi = daily.count - 1, start = daily.count
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if daily[mid].date >= periodStart { start = mid; hi = mid - 1 } else { lo = mid + 1 }
+        }
+        guard start < daily.count else { return nil }
+        var end = -1
+        lo = start; hi = daily.count - 1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if daily[mid].date <= trainingDate { end = mid; lo = mid + 1 } else { hi = mid - 1 }
+        }
+        guard end >= start else { return nil }   // 区间内无日线（停牌/无数据）→ 回退真实 K 线
         var high = -Double.greatestFiniteMagnitude
         var low = Double.greatestFiniteMagnitude
         var volume = 0.0
         var turnover = 0.0
-        for bar in seg {
+        for k in start...end {
+            let bar = daily[k]
             if bar.high > high { high = bar.high }
             if bar.low < low { low = bar.low }
             volume += bar.volume
             turnover += bar.turnover
         }
-        // date 沿用原周期 bar 的 date（= 该周期首个交易日），保证横轴位置/周期区间聚合口径不变
-        let forming = KlineItem(date: last.date, open: oldest.open, high: high, low: low,
-                                close: newest.close, volume: volume, turnover: turnover)
-        return [forming] + capped.dropFirst()
+        return KlineItem(date: targetDate, open: daily[start].open, high: high, low: low,
+                         close: daily[end].close, volume: volume, turnover: turnover)
     }
 }
 
@@ -328,10 +327,12 @@ extension KlineChartView {
         return LinkReplay(idx: idx, synthetic: synth)
     }
 
-    /// 可交互光标在某索引处用于显示/读数的 K 线：复盘合成态取合成K线，其余取真实K线。
+    /// 可交互光标在某索引处用于显示/读数的 K 线：复盘合成态取合成K线，训练态右缘那根取形成中K线，其余取真实K线。
     /// 固定光标（pinned）索引与复盘 idx 不可能相同（联动态无 pin），故该函数可被共用读数点直接调用。
     func cursorDisplayItem(at index: Int) -> KlineItem {
         if let r = linkReplayState, r.idx == index, let s = r.synthetic { return s }
+        // 训练态：右缘那根按「形成中」合成形态读数（训练日收盘 / 区间包络 / 累加量额）
+        if let i = trainingFormingIndex, i == index, let s = trainingFormingBar { return s }
         return sortedData[index]
     }
 
@@ -397,6 +398,71 @@ extension KlineChartView {
         return ans
     }
 
+    // MARK: - 训练态「形成中大周期K线」（与联动复盘同一套单点合成机制，**不重载数据**）
+
+    /// 训练日所在的本周期 K 线全局索引（= 右缘上界；非训练态 / 训练日早于本周期第一根 → nil）
+    var trainingFormingIndex: Int? { trainingMaxDate == nil ? nil : trainingEndIndex }
+
+    /// 训练态形成中K线：训练日落在某根大周期 K 线覆盖区间内时，用**本标的**日线聚合到训练日合成该根。
+    /// 非训练态 / 日线周期 / 该周期在训练日之前就已走完（库内那根即完整形态）/ 日线未加载 → nil。
+    ///
+    /// ⚠️ 日线取 `linkedMetaID ?? metaId`，即**该格/该图自己的标的**：多图各格标的可能不同，绝不串数据。
+    var trainingFormingBar: KlineItem? {
+        guard let maxDate = trainingMaxDate, period != .daily,
+              let idx = trainingEndIndex, idx >= 0, idx < sortedData.count,
+              let meta = linkedMetaID ?? metaId else { return nil }
+        let target = sortedData[idx]
+        let (start, end) = KlinePeriod.periodDateRange(period, date: target.date)
+        // 训练日必须仍落在这根 K 线的覆盖区间内；该周期已走完时库内那根就是真实完整形态，无需合成
+        guard maxDate >= start, maxDate <= end else { return nil }
+        let src = linkSourceCache.bars(metaID: meta, period: .daily)
+        guard !src.isEmpty else { return nil }
+        return TrainingAsOfSeries.formingBar(targetDate: target.date, period: period,
+                                             trainingDate: maxDate, daily: src)
+    }
+
+    /// 确保形成中K线所需的（本标的, 日线）数据已发起加载（命中缓存 / 已在途 → 零开销）。
+    /// 在图表 onAppear 与训练日推进两个入口调用；数据到达后由 linkSourceCache.revision 驱动重绘。
+    func ensureTrainingSourceBars() {
+        guard trainingMaxDate != nil, period != .daily, let meta = linkedMetaID ?? metaId else { return }
+        linkSourceCache.request(metaID: meta, period: .daily)
+    }
+
+    /// 画布（蜡烛 / 曲线 / 量柱）的合成点全局索引：合成点必须落在可见窗口内才谈得上绘制。
+    /// 联动复盘光标点优先（语义与改动前完全一致），其次是训练态形成中K线。
+    var asOfCanvasIndex: Int? {
+        if let r = linkReplayState, r.synthetic != nil, r.idx >= startIndex, r.idx <= endIndex {
+            return r.idx
+        }
+        if let i = trainingFormingIndex, trainingFormingBar != nil, i >= startIndex, i <= endIndex {
+            return i
+        }
+        return nil
+    }
+
+    /// 图例数值栏 / 行情读数行的合成点索引：只有"正在读的就是合成点那根"时才覆盖读数。
+    /// 无光标时图例读 `endIndex`（见 `legendValue`），故训练态要求形成中K线恰好在右缘。
+    var asOfLegendIndex: Int? {
+        if let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex { return r.idx }
+        if let i = trainingFormingIndex, trainingFormingBar != nil, i == (legendCursorIndex ?? endIndex) {
+            return i
+        }
+        return nil
+    }
+
+    /// 训练态 as-of 触发（与联动复盘 `asOfTrigger` 同构；联动态已有光标时以光标为准）
+    var trainingAsOfTrigger: AsOfTrigger? {
+        guard let idx = trainingFormingIndex, let s = trainingFormingBar else { return nil }
+        return AsOfTrigger(date: trainingMaxDate ?? s.date, idx: idx, sourcePeriod: .daily,
+                           open: s.open, high: s.high, low: s.low, close: s.close,
+                           volume: s.volume, turnover: s.turnover,
+                           fingerprint: Self.currentConfigFingerprint(period: period),
+                           targetCount: sortedData.count)
+    }
+
+    /// 当前生效的 as-of 触发：联动复盘光标优先 → 训练态训练日
+    var effectiveAsOfTrigger: AsOfTrigger? { asOfTrigger ?? trainingAsOfTrigger }
+
     // MARK: 复盘指标 as-of 调度
 
     var asOfTrigger: AsOfTrigger? {
@@ -409,16 +475,15 @@ extension KlineChartView {
                            targetCount: sortedData.count)
     }
 
-    /// 主图某条曲线在当前复盘光标处的 as-of 值（仅合成态、光标索引匹配时返回）
+    /// 主图某条曲线的 as-of 读数（仅当图例正在读合成点那根时返回；联动复盘 / 训练态共用）
     func asOfMainOverride(_ lineIndex: Int) -> Double? {
-        guard let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
+        guard asOfLegendIndex != nil else { return nil }
         return asOfModel.main[lineIndex]
     }
 
-    /// 某副图槽位某条曲线在当前复盘光标处的 as-of 值
+    /// 某副图槽位某条曲线的 as-of 读数（联动复盘 / 训练态共用）
     func asOfSubOverride(slot: Int, lineIndex: Int) -> Double? {
-        guard slot >= 0, slot < asOfModel.subs.count,
-              let r = linkReplayState, r.synthetic != nil, r.idx == renderCursorIndex else { return nil }
+        guard slot >= 0, slot < asOfModel.subs.count, asOfLegendIndex != nil else { return nil }
         return asOfModel.subs[slot][lineIndex]
     }
 
