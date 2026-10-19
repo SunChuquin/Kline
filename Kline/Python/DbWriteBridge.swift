@@ -144,27 +144,48 @@ enum DbWriteBridge {
             .map { LiveUpsertOutcome(from: $0) }
     }
 
-    /// 主库 K 线**按批读**（`db_query_batch`，同步阻塞；调用点在后台队列上）。
-    /// ⚠️ §11.42：预取 / 回测取数的**唯一读入口**——单只逐次调用的 ~12ms 传输开销按批摊薄；
+    /// 主库 K 线**按批读**（`db_query_batch`，**bin 通道**；同步阻塞，调用点在后台队列上）。
+    /// ⚠️ §11.42 按批摊薄 + §11.45 出参走二进制（省掉 2.8 万数的 JSON 编码/解析）；
     /// 只返回**主库原始行**（各自 DESC），增量库读与 live/main 合并仍由 Swift 完成。
     static func dbQueryBatch(dbPath: String, table: String,
                              requests: [(metaID: Int, limit: Int?)],
                              timeout: TimeInterval = 120) -> Result<[Int: [[Any]]], Failure> {
+        guard KlinePythonBridge.shared.isReady else { return .failure(.engineNotReady) }
         let symbols: [[String: Any]] = requests.map { r in
             var d: [String: Any] = ["metaID": r.metaID]
             if let limit = r.limit { d["limit"] = limit }
             return d
         }
-        // `run` 已把引擎顶层 `result` 解出 → 这里拿到的是 {metaID字符串: [[行]]} 本身
-        return run("db_query_batch", ["dbPath": dbPath, "table": table, "symbols": symbols],
-                   timeout: timeout).flatMap { res in
+        let input: [String: Any] = ["op": "db_query_batch", "dbPath": dbPath,
+                                    "table": table, "symbols": symbols]
+        // 出参走 `__bin_out__`（键 = metaID，值 = 行扁平化的 double 序列）→ 必须用 bin 通道读回
+        switch KlinePythonBridge.shared.blockingCallBin(script: "db_write", input: input,
+                                                        seriesBin: [:], seriesInto: "",
+                                                        timeout: timeout) {
+        case .failure(let e):
+            return .failure(.callError(String(describing: e)))
+        case .success(let bin):
             var out: [Int: [[Any]]] = [:]
-            for (key, value) in res {
-                guard let id = Int(key), let rows = value as? [[Any]] else { continue }
-                out[id] = rows
+            for (key, flat) in bin.arrays {
+                guard let id = Int(key) else { continue }
+                out[id] = Self.rows(fromFlat: flat)
             }
             return .success(out)
         }
+    }
+
+    /// 扁平 double 序列 → 行（每 7 个一组：date,open,high,low,close,vol,amo）。
+    /// `date` 还原为 `Int` —— 与 JSON 通道 / Swift mirror 同形（便于对拍与 `klineItems` 解析）。
+    private static func rows(fromFlat flat: [Double]) -> [[Any]] {
+        var out: [[Any]] = []
+        out.reserveCapacity(flat.count / 7)
+        var i = 0
+        while i + 7 <= flat.count {
+            out.append([Int(flat[i]), flat[i + 1], flat[i + 2], flat[i + 3],
+                        flat[i + 4], flat[i + 5], flat[i + 6]])
+            i += 7
+        }
+        return out
     }
 
     /// 增量库裁剪（同步阻塞）。`items = [{table, bound, inclusive}]`，边界由调用方算。

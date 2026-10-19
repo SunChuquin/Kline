@@ -168,6 +168,11 @@ final class FavoritesStore: ObservableObject {
     /// 空表 = 主库不可用：此时写档被跳过，避免把翻译失败的自选清空落盘
     private var fileByMetaId: [Int: String] = [:]
     private var metaIdByFile: [String: Int] = [:]
+    /// 主库未就绪（翻译表为空）时**暂存**的 v5 档：等主库就绪再翻译。
+    /// §11.44：此前直接翻译会把 v5 的 file 键**整体丢弃**（2026-10-19 实测冷启动自选=0）
+    private var pendingV5Root: FavoritesRootV5?
+    /// 主库就绪订阅（仅在翻译表为空时挂一次）
+    private var dbReadyCancellable: AnyCancellable?
 
     // MARK: - Lifecycle
 
@@ -178,7 +183,7 @@ final class FavoritesStore: ObservableObject {
         fileByMetaId = maps.fileByMetaId
         metaIdByFile = maps.metaIdByFile
         if fileByMetaId.isEmpty {
-            DebugLogger.shared.log("[FavoritesStore] meta 映射为空（主库缺失/损坏）——v5 翻译将产生空自选，且写档被跳过")
+            DebugLogger.shared.log("[FavoritesStore] meta 映射为空（主库尚未就绪）——v5 档暂存待翻译，写档一并跳过")
         }
         // 立即读档；档不存在则写入默认的"我的自选"分组
         if loadFromDisk() {
@@ -193,9 +198,43 @@ final class FavoritesStore: ObservableObject {
             selectedGroupID = def.id
             saveToDisk()
         }
-        
+        // 翻译表为空（主库未就绪）→ 挂一次就绪订阅：就绪后重建翻译表并翻译暂存的 v5 档
+        scheduleTranslationWhenDBReady()
+
         // 初始化持仓状态
         updatePositionedMetaIDs()
+    }
+
+    // MARK: - 主库就绪后补翻译（§11.44 冷启动竞态）
+
+    /// 主库尚未就绪时挂一次「就绪」订阅（`readFileMapsSync` 在就绪前会拿到空表）。
+    private func scheduleTranslationWhenDBReady() {
+        guard metaIdByFile.isEmpty else { return }
+        dbReadyCancellable = DatabaseManager.shared.$isLoaded
+            .filter { $0 }
+            .first()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.translateAfterDBReady() }
+    }
+
+    /// 主库就绪回调：重建翻译表 → 翻译暂存的 v5 档（本次翻译不再丢任何 file 键）。
+    private func translateAfterDBReady() {
+        let maps = DatabaseManager.shared.readFileMapsSync()
+        guard !maps.metaIdByFile.isEmpty else {
+            DebugLogger.shared.log("[FavoritesStore] 主库已就绪但 meta 表仍不可读 → 自选暂缓翻译（磁盘档未动）")
+            return
+        }
+        fileByMetaId = maps.fileByMetaId
+        metaIdByFile = maps.metaIdByFile
+        if let root = pendingV5Root {
+            pendingV5Root = nil
+            applyV5Root(root)
+            updatePositionedMetaIDs()
+            DebugLogger.shared.log("[FavoritesStore] 主库就绪后补翻译 v5 档：分组 \(groups.count) 个"
+                                   + " · 自选 \(groups.reduce(0) { $0 + $1.manualMetaIDs.count }) 只")
+        }
+        // 旧档（≤ v4）在 init 里因映射为空而跳过的「回写升级」在这里补一次
+        if needsSchemaRewrite { saveToDisk() }
     }
 
     // MARK: - 迁移
@@ -280,7 +319,14 @@ final class FavoritesStore: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             // 先试 schema 5（file 键）；decode 失败（旧档没有 manualFiles 等必填键）回落旧结构
             if let v5 = try? decoder.decode(FavoritesRootV5.self, from: data) {
-                applyV5Root(v5)
+                if metaIdByFile.isEmpty {
+                    // §11.44：主库未就绪（翻译表为空）→ **暂不翻译**（否则 file 键会被整体丢弃），
+                    // 存起来等就绪后补翻译（见 `translateAfterDBReady`）
+                    pendingV5Root = v5
+                    DebugLogger.shared.log("[FavoritesStore] 主库尚未就绪：v5 档暂存（\(v5.groups.count) 个分组）待就绪后翻译")
+                } else {
+                    applyV5Root(v5)
+                }
             } else {
                 let root = try decoder.decode(FavoritesRoot.self, from: data)
                 // 旧版本档（schemaVersion < 当前版本）打上回写标记：由 init 读档后无条件写回一次

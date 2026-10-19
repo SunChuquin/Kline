@@ -389,14 +389,17 @@ def _bars_for(cur, table, meta_id, limit):
 
 
 def _op_db_query_batch(inp):
-    """主库 K 线**按批读**（§11.42）——一次调用取 N 只标的的主库原始行。
+    """主库 K 线**按批读**（§11.42 按批摊薄；§11.45 出参改走 **bin 通道**）。
 
-    动机：单只读每次 ~12ms（前置 0.45 + 引擎 11.7 + 读回 0.45 的传输开销），
-    冷启动预取 3354 只 ≈ 40s；按批（~50 只/批）摊薄后整批降到秒级。
-    ⚠️ 摊薄的是**传输开销**，不是改变口径：SQL / REAL 判定 / 缺表语义与逐只读完全一致。
+    动机：单只读每次 ~12ms（固定传输开销，SQL 只占极小部分）→ 按批摊薄；
+    按批后单批 4000 行的**出参 JSON 编码**又成了引擎耗时大头 → 出参改二进制
+    （`__bin_out__`，键 = metaID，值 = 行扁平化的 double 序列，Swift 按 7 个一组切回行）。
+
+    ⚠️ 摊薄的是**传输**，不是改变口径：SQL / `vol|amo` 的 REAL 判定 / 缺表返回空与逐只读逐字一致。
 
     输入：{"dbPath", "table", "symbols": [{"metaID": 1, "limit": 80|None}, ...]}
-    输出：{"ok": true, "result": {"<metaID>": [[date,open,high,low,close,vol,amo], ...], ...}}  # 各自 DESC
+    输出：{"ok": true, "__bin_out__": {"<metaID>": [date,open,high,low,close,vol,amo, <下一行>…]}}
+          每个被请求的 metaID 都出现（无行 → 空序列）。
     """
     db_path = inp.get("dbPath")
     table = inp.get("table")
@@ -418,10 +421,14 @@ def _op_db_query_batch(inp):
                 continue
             key = str(_int(meta_id))
             try:
-                out[key] = _bars_for(cur, table, _int(meta_id), sym.get("limit"))
+                rows = _bars_for(cur, table, _int(meta_id), sym.get("limit"))
             except Exception:  # noqa: BLE001 —— 与逐只读的「prepare 失败返回空」同口径
-                out[key] = []
-        return _ok(result=out)
+                rows = []
+            flat = []
+            for r in rows:
+                flat.extend(r)          # 每行 7 个数：date,open,high,low,close,vol,amo
+            out[key] = flat
+        return {"ok": True, "__bin_out__": out}
     finally:
         conn.close()
 
