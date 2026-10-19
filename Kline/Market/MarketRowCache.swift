@@ -32,6 +32,10 @@ final class MarketRowCache: ObservableObject {
     private var pythonSnapshotTimer: Timer?
     /// 阶段 C：防抖间隔（收集多个标的后一次性批量计算）
     private let pythonSnapshotDebounce: TimeInterval = 0.2
+    /// 单批上限：待算标的达到此数即**立即结算**。
+    /// §11.41：字段计算已只有引擎一个来源，而长预取（3354 只 × 引擎读 ~12ms ≈ 40s）会让 0.2s
+    /// 防抖被每只重置 → 结算被饿死、数值列一路空到整批结束。达到上限即结算可让可见行先出值。
+    private let pythonSnapshotMaxBatch = 40
 
     /// 后台计算队列（公式条件分组 / 批量字段值也用这）
     let computeQueue = DispatchQueue(label: "com.sunck.kline.market.compute",
@@ -194,6 +198,13 @@ final class MarketRowCache: ObservableObject {
     private func enqueuePythonSnapshot(metaID: Int, bars: [KlineItem]) {
         pythonSnapshotPending[metaID] = bars
         pythonSnapshotTimer?.invalidate()
+        // §11.41：长预取期间防抖会被每只重置（结算饿死）→ 达到单批上限立即结算，
+        // 保证用户可见的行先拿到引擎字段值（而不是空到整批预取结束）。
+        guard pythonSnapshotPending.count < pythonSnapshotMaxBatch else {
+            pythonSnapshotTimer = nil
+            flushPythonSnapshot()
+            return
+        }
         pythonSnapshotTimer = Timer.scheduledTimer(withTimeInterval: pythonSnapshotDebounce, repeats: false) { [weak self] _ in
             // Timer 回调非隔离，显式切回主线程再执行快照批量计算
             guard let self else { return }
