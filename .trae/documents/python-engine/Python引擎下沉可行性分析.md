@@ -2477,6 +2477,37 @@ payload 斜率 ≈ **0.06 ms/KB**。）
 | 抖动/冷启动 | 引擎段 0.9↔12.9ms 两态 + 冷启动 ~300ms → 预取**必须**排在首帧之后 |
 | 收益不可感知 | 用户看不到差别；纯架构收益需长期跨平台复用才兑现 |
 
+### 11.39 L2 首批落地：**预取读**下沉 `db_query`（2026-10-19）
+
+> 按 §11.38 采纳范围（**只下沉「已在后台 + 已防抖」的预取读**；渲染期同步读不动）。
+
+**① 边界（严格按 §11.38 ②）**
+
+| 环节 | 归属 |
+| --- | --- |
+| 主库行读（`SELECT date,open,high,low,close,vol,amo WHERE meta_id=? ORDER BY date DESC [LIMIT]`） | **引擎**（`db_query`） |
+| 增量库读（`liveSlice`）、**live 覆盖 main 的合并**（`merge`）、排序 / 截断 | **Swift**（原样复用既有 helper，无第二真源） |
+| 渲染期 per-frame 读（`fetchBars` / `fetchPeriodTable`） | **Swift 不动**（红线） |
+
+**② 改动**
+
+- 引擎：`db_write.py` 新增 `db_query`（返回主库原始行 DESC；`vol/amo` **逐字对齐 Swift 的 REAL 类型判定**——非 REAL 取 0）；
+  该脚本现在承接数据层的**读 + 写**下沉（§9.9 S4/S5）。
+- 桥接：`DbWriteBridge.dbQuery`（同步阻塞；调用点在 `dbQueue` 上 → 保持「主库访问串行」）。
+- 调用点：`DatabaseManager.fetchPeriodLimitedViaEngine`（主库行取自引擎 → 其余复用 `liveSlice`/`merge`/`prefix`）；
+  `MarketRowCache` 的两处预取改走它，**失败自动回退 `fetchPeriodLimited`**（引擎未就绪时行为与改动前完全一致）。
+
+**③ 验证**
+
+- `KlineTests/DbWriteParityTests` 新增 **场景 5**：同库同参下「Swift 侧同 SQL mirror」vs 「引擎 op」双跑比对
+  → 5/5 通过（含 `vol` 为 INTEGER 型的类型判定分支）。
+- 顺带修掉 `MainDBMerger` 里 5 条**函数值丢隔离**警告（`map(rowJSON)` → `map { Self.rowJSON($0) }`；
+  这类警告只在文件被重编时才出现，此前全量未重编到它 → 之前的「0 警告」有漏网）。
+
+**④ 未验证 / 待真机**
+预取读换执行者属**运行期行为变化**（有 Swift 回退），单元测试未覆盖 `MarketRowCache` 预取链路 →
+需在模拟器/真机确认**行情页与快捷面板的行数据（现价/涨跌/均线等）与改动前一致**。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）
