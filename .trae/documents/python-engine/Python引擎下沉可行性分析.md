@@ -2641,6 +2641,42 @@ app + test 两 target **0 警告**（唯一保留项仍是用户指定暂不处�
 本轮清掉前 7 条：解码器标 `nonisolated`；预取的「引擎读」以**闭包参数**传入并让 `runEngineBatches` 走
 `nonisolated` + `Task { @MainActor in }` 回写。**结论：以后验证告警必须看全量重编日志，别信增量日志。**
 
+### 11.43 补缺口自校准**按批下沉**：`calibrate_batch`（2026-10-19）
+
+**① 动机（用户设备沙盒日志实测）**：一次全市场补缺口（3300 只）耗时 25.4s，其中
+`quote_parse.py` op=`calibrate` 被**逐只**调用 **3311 次 × 4.3ms ≈ 14.4s**，全压在**串行**的引擎队列上
+（其余 HTTP 取数只有 24 并发）→ 引擎队列是这条链的主要瓶颈，与 §11.42 修的是同一类问题。
+
+**② 做法（引擎侧）**：`quote_parse.py` 新增 op `calibrate_batch`
+- 把逐只判定（形状校验 → 腾讯行解析 → `_calibrate`）抽成 `_calibrate_one`，**单只 op 与按批 op 共用同一份**
+  （杜绝第二口径）；
+- 输入 `{"items":[{"base":{...},"sourceRows":[...],"mainLatest":N}, …]}`；
+  输出 `{"ok":true,"result":{"<下标>":{outcome...}, …}}`；
+- **形状非法 / 行解析失败的下标不出现** → Swift 侧该只单独回退本地判定（等价于改动前的逐只行为）。
+
+**③ 做法（Swift 侧：`GapBackfill` 拆两阶段）**
+- ② 并发逐只取 **wire 行**（HTTP + 结构提取仍留 Swift，信号量 24 并发不变）；
+- ②.5 **按批**自校准（`calibrateBatchSize = 60`，一次引擎调用处理一批）；
+- ②.6 引擎没给出结果的（未就绪 / 失败 / 行形状非法）→ 本地 Swift 判定
+  （`parseTencentRow` 跳过坏行 → `calibrate(job:rows:mainLatest:)`，与改动前**逐字一致**）；
+- `TencentQuoteFetcher`（清单日更，2 只）仍用逐只 `fetchGap` → 该路径保留、未改动。
+
+**④ 验证**
+- **PC 侧**：同输入下「逐只 `calibrate` × N」vs「`calibrate_batch` × 1」逐字比对 → 一致（4 个分支：
+  gap / priceOnly / anchorMissing / 量比吸附档）；
+- **引擎内**：`KlineTests/BacktestAndCalibrateBatchTests.testCalibrateBatchMatchesSingleCalibrate` 同口径对拍 → 一致；
+- **回测取数**（§11.42 按批改造的验证）：新增 `testBacktestReadPathOnRealDB` —— 真实主库 + 真实引擎、
+  按回测调用口径（`limit = days + 60`）请求 120 只、跨 3 批 → **120 只全部拿到 bars**、根数不超限、date 降序。
+  ⚠️ `StrategyBacktestRunner` 端到端**跑不了**：本机 `Documents/formula/strategy` 为空（无策略文档），
+  回测在 UI 里也无从选起 → 本次改动只换了取数那一行，故把验证收敛到取数链路（含分块算术）。
+- 全量 `KlineTests` **99/99**、app + test 两 target **0 警告**、`verify_pyscript_io_contract.py` 9/9。
+
+**⑤ 本轮顺带发现（未改，记录待办）**：冷启动日志出现
+`[FavoritesStore] meta 映射为空（主库缺失/损坏）—— v5 翻译将产生空自选，且写档被跳过`
+`[FavoritesStore] v5 载入：2 个 file 在当前主库无对应标的，已丢弃`
+—— **自选在主库就绪前完成加载会被整体丢弃**（本会话自选=0；仅靠「写档被跳过」避免污染落盘）。
+这是冷启动时序竞态，不在本轮下沉范围内，建议单独修（等 `db.isLoaded` 再翻译 v5 / 或就绪后重译）。
+
 ---
 
 ## 十二、Fixture 导出（dump 模式）具体做法（2026-10-17）

@@ -156,32 +156,62 @@ def _gap_bar(row, vol_ratio, amo_scale, round_vol):
             "vol": _num6(vol), "amo": _num6(row["amo"] * amo_scale)}
 
 
-def _op_calibrate(inp):
+def _calibrate_one(inp):
+    """单只自校准：校验入参形状 → 解析 wire 行 → `_calibrate`。
+
+    返回 result dict；形状非法 / 行解析失败 → None（调用方据此回退 Swift 本地判定）。
+    **单只 op 与按批 op 共用本函数** —— 杜绝第二口径。
+    """
     base = inp.get("base")
     source_rows = inp.get("sourceRows")
     main_latest = inp.get("mainLatest")
-    if not isinstance(base, dict):
-        return _err("calibrate: base 必须为对象（主库锚点 bar）")
-    if not isinstance(source_rows, list):
-        return _err("calibrate: sourceRows 必须为数组（腾讯 wire 行）")
+    if not isinstance(base, dict) or not isinstance(source_rows, list):
+        return None
     if not isinstance(main_latest, int) or isinstance(main_latest, bool):
-        return _err("calibrate: mainLatest 必须为 YYYYMMDD 整数")
-    fields = ("open", "high", "low", "close", "vol", "amo")
+        return None
     b = {}
-    for k in fields:
+    for k in ("open", "high", "low", "close", "vol", "amo"):
         v = base.get(k)
         if isinstance(v, bool) or not isinstance(v, (int, float)):
-            return _err("calibrate: base.%s 必须为数值" % k)
+            return None
         b[k] = float(v)
     rows = []
-    for (i, r) in enumerate(source_rows):
+    for r in source_rows:
         bar = _parse_tencent_row(r)
         if bar is None:
-            return _err("calibrate: sourceRows[%d] 解析失败（字段缺失/非数）" % i)
+            return None
         rows.append(bar)
+    return _calibrate(b, rows, main_latest)
 
-    result = _calibrate(b, rows, main_latest)
+
+def _op_calibrate(inp):
+    result = _calibrate_one(inp)
+    if result is None:
+        return _err("calibrate: 形状非法（base 对象 / sourceRows 数组 / mainLatest 整数 / 行可解析）")
     return {"ok": True, "result": result}
+
+
+def _op_calibrate_batch(inp):
+    """按批自校准（§11.43）：一次调用对 N 只做 `calibrate`。
+
+    动机：补缺口是**逐只**调用（实测 4.3ms/只，3300 只 ≈ 14.4s 全压在串行的引擎队列上，
+    占「取数 25.4s」的大头）。按批摊薄每次调用的固定开销；判定逻辑与逐只**完全同一份**。
+
+    输入：{"items": [{"base": {...}, "sourceRows": [...], "mainLatest": 20261018}, ...]}
+    输出：{"ok": true, "result": {"0": {"outcome": ...}, "2": {...}}}
+          键 = items 下标（字符串）；**形状非法 / 行解析失败的下标不出现**（Swift 侧该只回退本地判定）。
+    """
+    items = inp.get("items")
+    if not isinstance(items, list):
+        return _err("calibrate_batch: items 必须为数组")
+    out = {}
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        result = _calibrate_one(item)
+        if result is not None:
+            out[str(idx)] = result
+    return {"ok": True, "result": out}
 
 
 def _calibrate(base, rows, main_latest):
@@ -239,6 +269,7 @@ def _calibrate(base, rows, main_latest):
 _OPS = {
     "tencent_kline": _op_tencent_kline,
     "calibrate": _op_calibrate,
+    "calibrate_batch": _op_calibrate_batch,
 }
 
 

@@ -465,20 +465,22 @@ final class GapBackfill: ObservableObject {
             return
         }
 
-        // ② 并发逐只取数（结果按下标回填，共享计数加锁；信号量限制在途请求数）
+        // ② 并发逐只取 **wire 行**（HTTP + 结构提取留 Swift；自校准挪到 ②.5 的按批阶段，§11.43）
         let lock = NSLock()
         let gate = DispatchSemaphore(value: Self.concurrency)
-        var outcomes = [GapOutcome?](repeating: nil, count: total)
+        let wireCount = Self.barsCount(from: mainLatest, to: today)
+        var wireByIndex = [[[Any]]?](repeating: nil, count: total)
+        var whyByIndex = [String](repeating: "", count: total)
         var processed = 0
         var lastPublish = Date.distantPast
         DispatchQueue.concurrentPerform(iterations: total) { idx in
             gate.wait()
             let session = self.sessions[idx % self.sessions.count]
-            let outcome = self.fetchGap(job: jobs[idx], mainLatest: mainLatest, today: today,
-                                        session: session)
+            let (wire, why) = self.fetchWireRows(item: jobs[idx].item, from: mainLatest, to: today,
+                                                 count: wireCount, session: session)
             gate.signal()
             lock.lock()
-            outcomes[idx] = outcome
+            if let wire, !wire.isEmpty { wireByIndex[idx] = wire } else { whyByIndex[idx] = why }
             processed += 1
             let done = processed
             // UI 节流 0.25s：既不刷爆主线程，又让用户看到「还在跑、跑到哪」
@@ -500,6 +502,43 @@ final class GapBackfill: ObservableObject {
                                                     done, total, elapsed, rate,
                                                     Double(total - done) / max(rate, 0.001)))
             }
+        }
+
+        // ②.5 引擎**按批**自校准（§11.43）：一次调用 N 只，摊薄逐只 ~4.3ms 的固定开销
+        //     （实测 3300 只逐只 ≈ 14.4s 全压在串行的引擎队列上，占「取数 25.4s」的大头）
+        var outcomes = [GapOutcome?](repeating: nil, count: total)
+        let withWire = (0..<total).filter { wireByIndex[$0] != nil }
+        if !withWire.isEmpty {
+            publish { self.statusText = "自校准… \(withWire.count) 只" }
+            var start = 0
+            while start < withWire.count {
+                let end = min(start + Self.calibrateBatchSize, withWire.count)
+                let idxs = Array(withWire[start..<end])
+                let items = idxs.map { (base: jobs[$0].base, wireRows: wireByIndex[$0]!) }
+                let got = Self.pyCalibrateBatch(items: items, mainLatest: mainLatest)
+                for (offset, idx) in idxs.enumerated() where got[offset] != nil {
+                    outcomes[idx] = got[offset]
+                }
+                start = end
+            }
+        }
+
+        // ②.6 引擎没给出结果的（未就绪 / 失败 / 行形状非法）→ 本地 Swift 判定
+        //     （与改动前的逐只路径**逐字一致**：解析跳过坏行 → `calibrate(job:rows:mainLatest:)`）
+        for idx in 0..<total {
+            guard outcomes[idx] == nil else { continue }
+            guard let wire = wireByIndex[idx] else {
+                outcomes[idx] = .failed(whyByIndex[idx].isEmpty ? "取数失败" : whyByIndex[idx])
+                continue
+            }
+            var rows: [SourceBar] = []
+            rows.reserveCapacity(wire.count)
+            for r in wire { if let bar = Self.parseTencentRow(r) { rows.append(bar) } }
+            guard !rows.isEmpty else {
+                outcomes[idx] = .failed(whyByIndex[idx].isEmpty ? "响应无 K 线数组" : whyByIndex[idx])
+                continue
+            }
+            outcomes[idx] = self.calibrate(job: jobs[idx], rows: rows, mainLatest: mainLatest)
         }
         publish { self.statusText = "写入增量库…" }
 
@@ -1026,6 +1065,55 @@ final class GapBackfill: ObservableObject {
         }
     }
 
+    /// 每次 calibrate 引擎调用带的标的数（§11.43：按批摊薄逐只 ~4.3ms 的固定开销）
+    private static let calibrateBatchSize = 60
+
+    /// Python **按批**自校准（`quote_parse.py` op="calibrate_batch"，§11.43）。
+    /// - Returns: 与 `items` **同序等长**的数组；`nil` = 引擎没给出该只 → 调用方回退本地 Swift 判定。
+    /// - Note: 仅在后台 queue / concurrentPerform 线程调用（`blockingCall` 禁主线程）。
+    private static func pyCalibrateBatch(items: [(base: KlineItem, wireRows: [[Any]])],
+                                         mainLatest: Int) -> [GapOutcome?] {
+        guard !items.isEmpty else { return [] }
+        let none = [GapOutcome?](repeating: nil, count: items.count)
+        guard KlinePythonBridge.shared.isReady else {
+            if !pyNotReadyLogged {
+                pyNotReadyLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse calibrate_batch 跳过：引擎未就绪 → 自校准走 Swift（一次性记录）；后台触发引擎加载（本会话一次）")
+            }
+            KlinePythonBridge.shared.ensureOnce()
+            return none
+        }
+        let payload: [[String: Any]] = items.map { it in
+            ["base": ["open": it.base.open, "high": it.base.high, "low": it.base.low,
+                      "close": it.base.close, "vol": it.base.volume, "amo": it.base.turnover],
+             "sourceRows": it.wireRows,
+             "mainLatest": mainLatest]
+        }
+        let input: [String: Any] = ["op": "calibrate_batch", "items": payload]
+        switch KlinePythonBridge.shared.blockingCall(script: "quote_parse", input: input, timeout: 120) {
+        case .failure(let e):
+            DebugLogger.shared.log("[PyBridge] quote_parse calibrate_batch 失败（\(e)）→ 本批 \(items.count) 只自校准降级 Swift")
+            return none
+        case .success(let data):
+            guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let result = obj["result"] as? [String: Any] else {
+                DebugLogger.shared.log("[PyBridge] quote_parse calibrate_batch 输出解码失败 → 本批 \(items.count) 只降级 Swift")
+                return none
+            }
+            var out = none
+            for (key, value) in result {
+                guard let idx = Int(key), idx >= 0, idx < items.count,
+                      let r = value as? [String: Any] else { continue }
+                out[idx] = decodeCalibrateResult(r)
+            }
+            if !pyCalibrateOkLogged, out.contains(where: { $0 != nil }) {
+                pyCalibrateOkLogged = true
+                DebugLogger.shared.log("[PyBridge] quote_parse calibrate_batch 首次成功：本批 \(items.count) 只 / 引擎判定 \(out.filter { $0 != nil }.count) 只（按批，判定口径与逐只完全同一份）")
+            }
+            return out
+        }
+    }
+
     /// GapOutcome 的一句话摘要（日志用，不展开 bars 明细）
     private static func outcomeSummary(_ o: GapOutcome) -> String {
         switch o {
@@ -1041,8 +1129,13 @@ final class GapBackfill: ObservableObject {
     /// 解码 calibrate op 输出（outcome 五分支 + gap 的 bars/volRatio/priceOnly）。
     private static func decodeCalibrate(data: Data) -> GapOutcome? {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let result = obj["result"] as? [String: Any],
-              let outcome = result["outcome"] as? String else { return nil }
+              let result = obj["result"] as? [String: Any] else { return nil }
+        return decodeCalibrateResult(result)
+    }
+
+    /// 单只 calibrate 结果字典 → `GapOutcome`（**单只 op 与按批 op 共用**，杜绝第二口径）
+    private static func decodeCalibrateResult(_ result: [String: Any]) -> GapOutcome? {
+        guard let outcome = result["outcome"] as? String else { return nil }
         switch outcome {
         case "upToDate": return .upToDate
         case "suspended": return .suspended
