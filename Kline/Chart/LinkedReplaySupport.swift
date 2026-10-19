@@ -407,6 +407,9 @@ extension KlineChartView {
     /// 非训练态 / 日线周期 / 该周期在训练日之前就已走完（库内那根即完整形态）/ 日线未加载 → nil。
     ///
     /// ⚠️ 日线取 `linkedMetaID ?? metaId`，即**该格/该图自己的标的**：多图各格标的可能不同，绝不串数据。
+    /// ⚠️ 数据源**优先取训练会话常驻内存的同步日线**（`TrainingSessionController.dailyBars`）：
+    /// 否则首帧异步缓存未就绪时，本函数返回 nil → 该格先画库内那根完整大周期K线（含训练日之后的数据），
+    /// 表现为"先闪一根未来数据、过一会才变成训练日聚合"（用户实证）。非训练标的（多图里别的标的）才回退异步缓存。
     var trainingFormingBar: KlineItem? {
         guard let maxDate = trainingMaxDate, period != .daily,
               let idx = trainingEndIndex, idx >= 0, idx < sortedData.count,
@@ -415,7 +418,12 @@ extension KlineChartView {
         let (start, end) = KlinePeriod.periodDateRange(period, date: target.date)
         // 训练日必须仍落在这根 K 线的覆盖区间内；该周期已走完时库内那根就是真实完整形态，无需合成
         guard maxDate >= start, maxDate <= end else { return nil }
-        let src = linkSourceCache.bars(metaID: meta, period: .daily)
+        let src: [KlineItem]
+        if let sync = TrainingSessionController.shared.dailyBars(for: meta) {
+            src = sync
+        } else {
+            src = linkSourceCache.bars(metaID: meta, period: .daily)
+        }
         guard !src.isEmpty else { return nil }
         return TrainingAsOfSeries.formingBar(targetDate: target.date, period: period,
                                              trainingDate: maxDate, daily: src)

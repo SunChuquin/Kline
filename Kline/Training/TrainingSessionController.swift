@@ -100,6 +100,19 @@ final class TrainingSessionController: ObservableObject {
         bars.last(where: { $0.date <= trainingDate })?.close
     }
 
+    /// 训练标的的全量日线（**升序**，同步可读）：会话启动时已在 `begin()` 一次性查好并常驻内存。
+    ///
+    /// 供图表**首帧即时**合成"形成中大周期K线"（训练日所在那根用日线聚合到训练日）——
+    /// 若改走 `LinkSourceBarCache` 的异步查询，在数据到达前的那一两帧只能画库内那根完整大周期K线
+    /// （含训练日之后的数据），表现为"先闪一根未来数据、过一会才变成训练日聚合"。
+    ///
+    /// - Parameter metaID: 目标标的；与当前训练标的不一致（多图里某格显示别的标的）→ nil，
+    ///   由调用方回退到异步缓存（`LinkSourceBarCache`）取数。
+    func dailyBars(for metaID: Int) -> [KlineItem]? {
+        guard let meta, meta.id == metaID, !bars.isEmpty else { return nil }
+        return bars
+    }
+
     /// 训练持仓数量
     var positionQty: Int { positionQtyValue }
 
