@@ -521,8 +521,8 @@ final class GapBackfill: ObservableObject {
             while start < withWire.count {
                 let end = min(start + Self.calibrateBatchSize, withWire.count)
                 let idxs = Array(withWire[start..<end])
-                let items = idxs.map { (base: jobs[$0].base, wireRows: wireByIndex[$0]!,
-                                        anchor: jobs[$0].base.date) }
+                let items = idxs.map { (file: jobs[$0].meta.file, base: jobs[$0].base,
+                                        wireRows: wireByIndex[$0]!, anchor: jobs[$0].base.date) }
                 let got = Self.pyCalibrateBatch(items: items)
                 for (offset, idx) in idxs.enumerated() where got[offset] != nil {
                     outcomes[idx] = got[offset]
@@ -721,28 +721,33 @@ final class GapBackfill: ObservableObject {
     private func rebuildPeriods(metas: [MetaItem], mainLatest: Int, today: Int,
                                 completion: @escaping (LiveMergeResult) -> Void) {
         publish { self.statusText = "聚合周/月/季/年线…" }
-        let weekAnchor = KlinePeriod.periodDateRange(.weekly, date: mainLatest).0
-        let monthAnchor = KlinePeriod.periodDateRange(.monthly, date: mainLatest).0
-        let quarterAnchor = KlinePeriod.periodDateRange(.quarterly, date: mainLatest).0
-        let yearAnchor = KlinePeriod.periodDateRange(.yearly, date: mainLatest).0
-        let dailyFrom = Swift.min(weekAnchor, monthAnchor)
+        // §11.46：锚点**按每只自己的末根日**（缺省回退全局 mainLatest）→ 桶起始日逐只不同，
+        // 故主库日线读取窗口取「各只桶起始的最小值 ~ 各自锚点的最大值」，季/年基期 bar 也按各自锚点取。
+        var anchorByFile: [String: Int] = [:]
+        for m in metas { anchorByFile[m.file] = m.lastDate ?? mainLatest }
+        let minAnchor = anchorByFile.values.min() ?? mainLatest
+        let maxAnchor = anchorByFile.values.max() ?? mainLatest
+        let dailyFrom = Swift.min(KlinePeriod.periodDateRange(.weekly, date: minAnchor).0,
+                                  KlinePeriod.periodDateRange(.monthly, date: minAnchor).0)
         var metaIdByFile: [String: Int] = [:]
         for m in metas { metaIdByFile[m.file] = m.id }
         DatabaseManager.shared.performOnDBQueue({ db -> ([String: [KlineItem]], [String: [String: KlineItem]]) in
             let daily = DatabaseManager.readMainDaily(db: db, metaIdByFile: metaIdByFile,
-                                                      fromDate: dailyFrom, toDate: mainLatest)
+                                                      fromDate: dailyFrom, toDate: maxAnchor)
             var bases: [String: [String: KlineItem]] = [:]
-            for (period, table, start) in [("quarterly", "quarterly", quarterAnchor),
-                                           ("yearly", "yearly", yearAnchor)] {
-                bases[period] = DatabaseManager.readMainCurrentPeriodBar(db: db, table: table,
-                                                                         metaIdByFile: metaIdByFile,
-                                                                         fromDate: start)
-            }
+            bases["quarterly"] = DatabaseManager.readMainPeriodBarAtOrBefore(
+                db: db, table: "quarterly", metaIdByFile: metaIdByFile, anchorByFile: anchorByFile,
+                fromFloor: KlinePeriod.periodDateRange(.quarterly, date: minAnchor).0)
+            bases["yearly"] = DatabaseManager.readMainPeriodBarAtOrBefore(
+                db: db, table: "yearly", metaIdByFile: metaIdByFile, anchorByFile: anchorByFile,
+                fromFloor: KlinePeriod.periodDateRange(.yearly, date: minAnchor).0)
             return (daily, bases)
         }, completion: { (mainDaily, bases) in
-            DebugLogger.shared.log("[GapBackfill] 周期聚合：主库日线 [\(dailyFrom), \(mainLatest)] 覆盖 \(mainDaily.count) 只"
-                + " · 当期基期 bar 季 \(bases["quarterly"]?.count ?? 0) 只 / 年 \(bases["yearly"]?.count ?? 0) 只")
-            LiveDataStore.shared.rebuildGapPeriods(mainLatest: mainLatest, referenceDate: today,
+            DebugLogger.shared.log("[GapBackfill] 周期聚合：主库日线 [\(dailyFrom), \(maxAnchor)] 覆盖 \(mainDaily.count) 只"
+                + " · 基期 bar 季 \(bases["quarterly"]?.count ?? 0) 只 / 年 \(bases["yearly"]?.count ?? 0) 只"
+                + " · 锚点逐只 \(minAnchor)~\(maxAnchor)")
+            LiveDataStore.shared.rebuildGapPeriods(mainLatest: maxAnchor, referenceDate: today,
+                                                   anchorByFile: anchorByFile,
                                                    mainDaily: mainDaily, mainPeriodBars: bases,
                                                    completion: completion)
         })
@@ -1083,7 +1088,7 @@ final class GapBackfill: ObservableObject {
     /// §11.46：每项**各带自己的锚点日**（`anchor` = 该只的末根日）；引擎侧入参本就逐项带 `mainLatest`。
     /// - Returns: 与 `items` **同序等长**的数组；`nil` = 引擎没给出该只 → 调用方回退本地 Swift 判定。
     /// - Note: 仅在后台 queue / concurrentPerform 线程调用（`blockingCall` 禁主线程）。
-    private static func pyCalibrateBatch(items: [(base: KlineItem, wireRows: [[Any]], anchor: Int)])
+    private static func pyCalibrateBatch(items: [(file: String, base: KlineItem, wireRows: [[Any]], anchor: Int)])
         -> [GapOutcome?] {
         guard !items.isEmpty else { return [] }
         let none = [GapOutcome?](repeating: nil, count: items.count)
@@ -1117,6 +1122,25 @@ final class GapBackfill: ObservableObject {
                 guard let idx = Int(key), idx >= 0, idx < items.count,
                       let r = value as? [String: Any] else { continue }
                 out[idx] = decodeCalibrateResult(r)
+            }
+            // §11.46：逐只判定留痕（便于回答"哪几只是无重叠校准日 / 哪几只已最新"）
+            var byVerdict: [String: [String]] = [:]
+            for (offset, item) in items.enumerated() {
+                let verdict: String
+                switch out[offset] {
+                case .some(.gap): verdict = "gap"
+                case .some(.upToDate): verdict = "已最新"
+                case .some(.suspended): verdict = "停牌"
+                case .some(.anchorMissing): verdict = "无重叠校准日"
+                case .some(.anomaly): verdict = "口径异常"
+                case .some(.failed): verdict = "取数失败"
+                case .none: verdict = "引擎未判定"
+                }
+                byVerdict[verdict, default: []].append("\(item.file)@\(item.anchor)")
+            }
+            for (verdict, files) in byVerdict.sorted(by: { $0.key < $1.key }) {
+                DebugLogger.shared.log("[PyBridge] calibrate_batch 判定·\(verdict)：\(files.count) 只"
+                                       + " [\(files.prefix(10).joined(separator: " "))\(files.count > 10 ? " …" : "")]")
             }
             if !pyCalibrateOkLogged, out.contains(where: { $0 != nil }) {
                 pyCalibrateOkLogged = true

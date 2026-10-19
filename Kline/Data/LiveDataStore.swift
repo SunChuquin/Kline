@@ -410,6 +410,7 @@ final class LiveDataStore: ObservableObject {
     ///     再叠加缺口日线 —— 与 [WatchlistSyncManager.mergePeriodBar] 同一口径。
     /// completion 在主线程回调。
     func rebuildGapPeriods(mainLatest: Int, referenceDate: Int,
+                           anchorByFile: [String: Int] = [:],
                            mainDaily: [String: [KlineItem]],
                            mainPeriodBars: [String: [String: KlineItem]],
                            completion: @escaping (LiveMergeResult) -> Void) {
@@ -417,6 +418,7 @@ final class LiveDataStore: ObservableObject {
             guard let self = self else { return }
             let result = self._rebuildGapPeriodsLocked(mainLatest: mainLatest,
                                                        referenceDate: referenceDate,
+                                                       anchorByFile: anchorByFile,
                                                        mainDaily: mainDaily,
                                                        mainPeriodBars: mainPeriodBars)
             if result.ok && (result.weeklyRows > 0 || result.monthlyRows > 0
@@ -1338,6 +1340,7 @@ final class LiveDataStore: ObservableObject {
     /// `close` 取末行、`vol/amo` 累加，bar 的 `date` 取基期（= 该周期首个交易日）。
     /// 单事务「整表清空后按桶重写」。
     private func _rebuildGapPeriodsLocked(mainLatest: Int, referenceDate: Int,
+                                          anchorByFile: [String: Int],
                                           mainDaily: [String: [KlineItem]],
                                           mainPeriodBars: [String: [String: KlineItem]]) -> LiveMergeResult {
         var r = LiveMergeResult()
@@ -1345,7 +1348,9 @@ final class LiveDataStore: ObservableObject {
             r.message = "本地增量库不可写（打开失败）"
             return r
         }
-        guard mainLatest > 0, referenceDate >= mainLatest else {
+        // §11.46：锚点改为**按 file 各自锚点日**（`anchorByFile`）；缺省仍用全局 `mainLatest`（旧行为）
+        let minAnchor = anchorByFile.values.min() ?? mainLatest
+        guard mainLatest > 0, minAnchor > 0, referenceDate >= minAnchor else {
             r.ok = true
             r.message = "无缺口区间（主库 \(mainLatest) / 参考日 \(referenceDate)）→ 跳过周期桶聚合"
             return r
@@ -1358,23 +1363,12 @@ final class LiveDataStore: ObservableObject {
             r.message = "本地缺周/月/季/年表 → 跳过周期桶聚合"
             return r
         }
-        // 锚 = mainLatest 所在周期桶的日历起始（周 = 该周周一、月 = 该月 1 日、季 = 当季首月 1 日、年 = 当年 1 月 1 日）
-        guard let weekAnchor = Self.periodCalendarStart("weekly", referenceDate: mainLatest),
-              let monthAnchor = Self.periodCalendarStart("monthly", referenceDate: mainLatest),
-              let quarterAnchor = Self.periodCalendarStart("quarterly", referenceDate: mainLatest),
-              let yearAnchor = Self.periodCalendarStart("yearly", referenceDate: mainLatest) else {
+        // 增量库日线的读取下界 = **最落后锚点所在的年起始**（各 file 的桶都不早于它）
+        guard let lo = Self.periodCalendarStart("yearly", referenceDate: minAnchor) else {
             r.ok = true
             r.message = "锚桶起始日解析失败 → 跳过周期桶聚合"
             return r
         }
-        let anchors: [(period: String, table: String, start: Int)] = [
-            ("weekly", weeklyTable, weekAnchor),
-            ("monthly", monthlyTable, monthAnchor),
-            ("quarterly", quarterlyTable, quarterAnchor),
-            ("yearly", yearlyTable, yearAnchor),
-        ]
-        // 增量库日线的读取下界：四者最小值（年锚）。增量库里只有缺口那几天，读起来很轻。
-        let lo = Swift.min(Swift.min(weekAnchor, monthAnchor), Swift.min(quarterAnchor, yearAnchor))
 
         // ① 逐 file：并集日线（date 升序）→ 按周期桶分组 → 逐桶算 bar
         let liveDaily = _dailyRowsLocked(handle, from: lo, to: referenceDate)
@@ -1384,6 +1378,17 @@ final class LiveDataStore: ObservableObject {
         if let y = mainPeriodBars["yearly"] { files.formUnion(y.keys) }
         var bars: [String: [LiveUpsertBar]] = [:]
         for file in files {
+            // §11.46：**该 file 自己的锚点日** → 4 个周期桶起始（周 = 周一、月 = 1 日、
+            // 季 = 当季首月 1 日、年 = 当年 1 月 1 日）；缺省回退全局 mainLatest（旧行为）
+            let anchorDay = anchorByFile[file] ?? mainLatest
+            guard let wA = Self.periodCalendarStart("weekly", referenceDate: anchorDay),
+                  let mA = Self.periodCalendarStart("monthly", referenceDate: anchorDay),
+                  let qA = Self.periodCalendarStart("quarterly", referenceDate: anchorDay),
+                  let yA = Self.periodCalendarStart("yearly", referenceDate: anchorDay) else { continue }
+            let anchors: [(period: String, table: String, start: Int)] = [
+                ("weekly", weeklyTable, wA), ("monthly", monthlyTable, mA),
+                ("quarterly", quarterlyTable, qA), ("yearly", yearlyTable, yA),
+            ]
             var byDate: [Int: LiveIncrementRow] = [:]
             for m in mainDaily[file] ?? [] {
                 byDate[m.date] = LiveIncrementRow(file: file, date: m.date, open: m.open, high: m.high,
@@ -1464,7 +1469,12 @@ final class LiveDataStore: ObservableObject {
         var monthlyRows = 0
         var quarterlyRows = 0
         var yearlyRows = 0
-        for anchor in anchors {
+        // 写阶段只需「周期名 + 表名」（桶起始日已按 file 各自算完，结果落在 `bars[period]` 里）
+        let writeTargets: [(period: String, table: String)] = [
+            ("weekly", weeklyTable), ("monthly", monthlyTable),
+            ("quarterly", quarterlyTable), ("yearly", yearlyTable),
+        ]
+        for anchor in writeTargets {
             guard sqlite3_exec(handle, "DELETE FROM \(anchor.table);",
                                nil, nil, nil) == SQLITE_OK else {
                 failed = "清理 \(anchor.table)：\(String(cString: sqlite3_errmsg(handle)))"
@@ -1522,7 +1532,7 @@ final class LiveDataStore: ObservableObject {
         r.yearlyRows = yearlyRows
         r.coveredFiles = _scalarLocked(handle, sql: "SELECT COUNT(*) FROM live_meta;")
         r.message = "缺口周期聚合完成（主库最新 \(mainLatest) 参考日 \(referenceDate)"
-            + " 锚 周\(weekAnchor)/月\(monthAnchor)/季\(quarterAnchor)/年\(yearAnchor)）："
+            + " 锚 逐只 \(minAnchor)~\(anchorByFile.values.max() ?? mainLatest)）："
             + "周线 \(weeklyRows) / 月线 \(monthlyRows) / 季线 \(quarterlyRows) / 年线 \(yearlyRows) 行"
             + "（候选 \(files.count) 只，清空旧 bar \(deleted) 行）"
         return r
