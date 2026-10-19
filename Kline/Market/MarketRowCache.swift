@@ -304,7 +304,9 @@ final class MarketRowCache: ObservableObject {
             DebugLogger.shared.log("[Cache] computeQueue: HIGH BATCH START n=\(highTargets.count)")
             // ------ 高优先级：逐只取 → 立即回写刷新 UI ------
             for m in highTargets {
-                let all = dbm.fetchPeriodLimited(metaId: m.id, table: "daily", limit: lookback)
+                // §11.38：预取读走引擎（失败自动回退 Swift 现状）
+                let all = dbm.fetchPeriodLimitedViaEngine(metaId: m.id, table: "daily", limit: lookback)
+                    ?? dbm.fetchPeriodLimited(metaId: m.id, table: "daily", limit: lookback)
                 let arr = Array(all.reversed())
                 DispatchQueue.main.async {
                     guard let self = self else { return }
@@ -338,7 +340,9 @@ final class MarketRowCache: ObservableObject {
         let dbm = db
         computeQueue.async { [weak self] in
             for m in targets {
-                let all = dbm.fetchPeriodLimited(metaId: m.id, table: "daily", limit: lookback)
+                // §11.38：预取读走引擎（失败自动回退 Swift 现状）
+                let all = dbm.fetchPeriodLimitedViaEngine(metaId: m.id, table: "daily", limit: lookback)
+                    ?? dbm.fetchPeriodLimited(metaId: m.id, table: "daily", limit: lookback)
                 let arr = Array(all.reversed())
                 DispatchQueue.main.async {
                     guard let self = self else { return }

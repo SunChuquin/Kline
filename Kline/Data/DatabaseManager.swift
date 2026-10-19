@@ -533,6 +533,34 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// §11.38（L2 首批）：**预取读**走引擎 —— 只把「主库行」交给引擎（`db_query`），
+    /// 增量库读 + live 覆盖 main 的合并 + 截断仍在本类内（与 `fetchPeriodLimited` 同一批 helper）。
+    /// 引擎未就绪 / 调用失败 → `nil`（调用方回退到 `fetchPeriodLimited`，行为与改动前一致）。
+    func fetchPeriodLimitedViaEngine(metaId: Int, table: String, limit: Int) -> [KlineItem]? {
+        let wanted = Swift.max(1, limit)
+        let live = liveSlice(metaId: metaId, table: table)
+        // 主库最多会被增量库顶掉 live.items.count 行，故多取这么多（同 `fetchPeriodLimited`）
+        let mainLimit = live.map { wanted + $0.items.count } ?? wanted
+        let outcome = dbQueue.sync {
+            DbWriteBridge.dbQuery(dbPath: Self.writableDBPath, table: table,
+                                  metaID: metaId, limit: mainLimit)
+        }
+        guard case .success(let rows) = outcome else { return nil }
+        let main = Self.klineItems(fromRows: rows)
+        guard let live else { return Array(main.prefix(wanted)) }
+        return Array(merge(live: live, main: main).prefix(wanted))
+    }
+
+    /// 引擎返回的行（列序与 `runBarsQuery` / `db_query` 一致）→ `KlineItem`
+    private static func klineItems(fromRows rows: [[Any]]) -> [KlineItem] {
+        rows.compactMap { r in
+            guard r.count >= 7, let date = (r[0] as? NSNumber)?.intValue else { return nil }
+            func d(_ i: Int) -> Double { (r[i] as? NSNumber)?.doubleValue ?? 0 }
+            return KlineItem(date: date, open: d(1), high: d(2), low: d(3), close: d(4),
+                             volume: d(5), turnover: d(6))
+        }
+    }
+
     func searchMetaAsync(keyword: String, completion: @escaping ([MetaItem]) -> Void) {
         dbQueue.async { [weak self] in
             guard let self = self else { return }

@@ -388,4 +388,70 @@ final class DbWriteParityTests: XCTestCase {
         XCTAssertEqual(b.deletedRows, a.deletedRows)
         XCTAssertEqual(dumpLive(engineDB), dumpLive(swiftDB))
     }
+
+    // MARK: - 预取读下沉（`db_query`，§11.38 L2 首批）
+
+    /// 场景 5：`db_query` —— Swift 侧**同 SQL mirror**（等价 `DatabaseManager.runBarsQuery` 取数口径）
+    /// vs 引擎 op，同库同参双跑比对（含 `vol/amo` 的 REAL 类型判定分支）。
+    func testDBQueryParity() async throws {
+        try await ensureEngineReady()
+        let metas = [(id: 1, file: "SH#600000"), (id: 2, file: "SZ#000001")]
+        let tables = ["daily"]
+        let swiftDB = try makeTempDB("swiftq", metas: metas, tables: tables)
+        let engineDB = try makeTempDB("engineq", metas: metas, tables: tables)
+
+        for path in [swiftDB, engineDB] {
+            var db: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+            for i in 0..<300 {
+                // 每 5 根写一次 INTEGER 型 vol（SQLite 动态类型）→ 覆盖「只有 REAL 才取值，否则 0」分支
+                let vol = (i % 5 == 0) ? "1000" : "1000.5"
+                let sql = "INSERT INTO daily VALUES(1,\(20250101 + i),10.0,11.0,9.0,10.5,\(vol),10000.0);"
+                _ = sqlite3_exec(db, sql, nil, nil, nil)
+            }
+            sqlite3_close(db)
+        }
+
+        // A：Swift 侧 mirror（等价 runBarsQuery）
+        let a = swiftBarsMirror(dbPath: swiftDB, table: "daily", metaID: 1, limit: 250)
+        // B：引擎 op
+        let b = try await onBackground {
+            try DbWriteBridge.dbQuery(dbPath: engineDB, table: "daily", metaID: 1, limit: 250).get()
+        }
+
+        XCTAssertEqual(a.count, 250, "Swift mirror 行数异常")
+        XCTAssertEqual(b.count, a.count)
+        XCTAssertEqual(jsonTextAny(b), jsonTextAny(a))
+    }
+
+    /// Swift 侧 SQL mirror（与 `DatabaseManager.runBarsQuery` 逐字同口径）
+    private func swiftBarsMirror(dbPath: String, table: String, metaID: Int, limit: Int?) -> [[Any]] {
+        var db: OpaquePointer?
+        guard sqlite3_open(dbPath, &db) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+        var q = "SELECT date, open, high, low, close, vol, amo FROM \(table) WHERE meta_id = ? "
+            + "ORDER BY date DESC"
+        if limit != nil { q += " LIMIT ?" }
+        q += ";"
+        var st: OpaquePointer?
+        guard sqlite3_prepare_v2(db, q, -1, &st, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_int64(st, 1, Int64(metaID))
+        if let limit { sqlite3_bind_int64(st, 2, Int64(max(1, limit))) }
+        var out: [[Any]] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            func real(_ i: Int32) -> Double {
+                sqlite3_column_type(st, i) == SQLITE_FLOAT ? sqlite3_column_double(st, i) : 0
+            }
+            out.append([Int(sqlite3_column_int64(st, 0)), real(1), real(2), real(3),
+                        real(4), real(5), real(6)])
+        }
+        return out
+    }
+
+    private func jsonTextAny(_ rows: [[Any]]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return "<serialize failed>" }
+        return text
+    }
 }

@@ -163,11 +163,11 @@ final class MainDBMerger {
                                        snapshot: LiveIncrementSnapshot) -> MainMergeResult {
         var r = MainMergeResult()
         let payload: [String: [[String: Any]]] = [
-            "daily": snapshot.daily.map(rowJSON),
-            "weekly": snapshot.weekly.map(rowJSON),
-            "monthly": snapshot.monthly.map(rowJSON),
-            "quarterly": snapshot.quarterly.map(rowJSON),
-            "yearly": snapshot.yearly.map(rowJSON),
+            "daily": snapshot.daily.map { Self.rowJSON($0) },
+            "weekly": snapshot.weekly.map { Self.rowJSON($0) },
+            "monthly": snapshot.monthly.map { Self.rowJSON($0) },
+            "quarterly": snapshot.quarterly.map { Self.rowJSON($0) },
+            "yearly": snapshot.yearly.map { Self.rowJSON($0) },
         ]
         switch DbWriteBridge.mainDBMerge(dbPath: dbPath, snapshot: payload) {
         case .failure(let f):

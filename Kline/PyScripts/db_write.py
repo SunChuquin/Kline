@@ -364,10 +364,58 @@ def _op_live_trim(inp):
         conn.close()
 
 
+_SQL_BARS = ("SELECT date, open, high, low, close, vol, amo FROM %s WHERE meta_id = ? "
+             "ORDER BY date DESC")
+
+
+def _op_db_query(inp):
+    """主库 K 线读（§11.38 L2 首批：**只下沉「已在后台 + 已防抖」的预取读**）。
+
+    ⚠️ 边界：**只返回主库原始行**（`ORDER BY date DESC`）；
+    **增量库读 + live 覆盖 main 的合并 + 排序 / 截断全部留在 Swift**（避免第二真源）。
+
+    输入：{"dbPath", "table", "metaID", "limit"|None}
+    输出：{"ok": true, "rows": [[date,open,high,low,close,vol,amo], ...]}   # DESC
+
+    口径逐字对齐 Swift `DatabaseManager.runBarsQuery`：
+      · 表不存在 / prepare 失败 → 空数组（非错误）；
+      · `vol` / `amo` **只有 REAL 类型才取列值，其余（含 INTEGER / NULL）取 0**。
+    """
+    db_path = inp.get("dbPath")
+    table = inp.get("table")
+    if not db_path or not os.path.exists(db_path) or not table:
+        return _err("dbPath / table 缺失或库不存在")
+    meta_id = _int(inp.get("metaID"))
+    limit = inp.get("limit")
+    sql = _SQL_BARS % table
+    args = [meta_id]
+    if limit is not None:
+        sql += " LIMIT ?"
+        args.append(max(1, _int(limit)))
+
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        cur = conn.cursor()
+        rows = []
+        try:
+            for r in cur.execute(sql, args):
+                def _real(i):
+                    v = r[i]
+                    return float(v) if isinstance(v, float) else 0.0
+                rows.append([_int(r[0]), _real(1), _real(2), _real(3), _real(4),
+                             _real(5), _real(6)])
+        except Exception:  # noqa: BLE001 —— 与 Swift 的「prepare 失败返回空」同口径
+            return _ok(result={"rows": []})
+        return _ok(result={"rows": rows})
+    finally:
+        conn.close()
+
+
 _OPS = {
     "main_db_merge": _op_main_db_merge,
     "live_upsert_daily": _op_live_upsert_daily,
     "live_trim": _op_live_trim,
+    "db_query": _op_db_query,
 }
 
 

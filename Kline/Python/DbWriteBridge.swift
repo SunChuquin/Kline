@@ -144,6 +144,18 @@ enum DbWriteBridge {
             .map(LiveUpsertOutcome.init(from:))
     }
 
+    /// 主库 K 线读（`db_query`，同步阻塞；调用点在后台队列上）。
+    /// ⚠️ §11.38：只返回**主库原始行**（DESC）；增量库读与 live/main 合并仍由 Swift 完成。
+    static func dbQuery(dbPath: String, table: String, metaID: Int, limit: Int?,
+                        timeout: TimeInterval = 30) -> Result<[[Any]], Failure> {
+        var input: [String: Any] = ["dbPath": dbPath, "table": table, "metaID": metaID]
+        if let limit { input["limit"] = limit }
+        return run("db_query", input, timeout: timeout).flatMap { res in
+            guard let rows = res["rows"] as? [[Any]] else { return .failure(.badOutput) }
+            return .success(rows)
+        }
+    }
+
     /// 增量库裁剪（同步阻塞）。`items = [{table, bound, inclusive}]`，边界由调用方算。
     static func liveTrim(dbPath: String, beforeDate: Int,
                          items: [[String: Any]],
