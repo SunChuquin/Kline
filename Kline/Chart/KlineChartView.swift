@@ -361,6 +361,15 @@ struct KlineChartView: View {
     var maxEndIndexUpperBound: Int { trainingEndIndex ?? (sortedData.count - 1) }
     /// 训练态右缘锚定偏移：取该值时 endIndex 恰落在训练日（打开与推进后据此把右缘钉到训练日）
     var maxEndOffset: Int { max(0, (sortedData.count - 1) - maxEndIndexUpperBound) }
+    /// 横向平移的 endOffset **下界**：训练态不得把右缘推到训练日之后（下界即训练日锚定值），
+    /// 非训练态为 0（与改动前完全一致）。
+    /// 平移 / 惯性 / 贴边滚动 / 悬浮按钮推进都必须以它为下界：若允许 endOffset 越过锚点，
+    /// endIndex 会被 `min(maxEndIndexUpperBound)` 钉住不动、而 panOffset 仍在累计进位 →
+    /// 表现为边界上"滑一格又弹回"的高频抖动（用户实证：训练态惯性滑动期间）。
+    var minPanEndOffset: Int { trainingMaxDate == nil ? 0 : maxEndOffset }
+    /// 朝「更新方向」还能推进多少根 K 线：按**可见窗口右缘**度量（等于 maxEndIndexUpperBound - endIndex）。
+    /// 非训练态下该值恒等于 endOffset（与原实现一致）；训练态下右缘被钉住时为 0，据此立即停住惯性/滚动。
+    var panRoomTowardNewer: Int { max(0, maxEndIndexUpperBound - endIndex) }
     var endIndex: Int {
         let maxEnd = sortedData.count - 1
         let minEnd = max(0, count - 1)
@@ -951,10 +960,10 @@ struct KlineChartView: View {
         // ③ 已贴边：窗口按同方向平移「本次推进的根数」并把光标锁回新的边缘。
         // 方向取反与既有贴边分支（手指朝右推时 endOffset 减小、露出更晚的 K 线）完全一致；
         // 平移量与本次命令的根数一致（快速转动时一条命令可能带多根），这样「转一圈 = 窗口走 20 根」
-        // 才严格成立；夹在 0...maxEndOffset，到边界后差值自然为 0（④）
+        // 才严格成立；夹在 minPanEndOffset...maxEndOffset（训练态下界即训练日锚定值），到边界后差值自然为 0（④）
         let steps = abs(cmd.candles)
         let maxEndOffset = max(0, sortedData.count - count)
-        let newEndOffset = clamp(endOffset + (dir > 0 ? -steps : steps), 0, maxEndOffset)
+        let newEndOffset = clamp(endOffset + (dir > 0 ? -steps : steps), minPanEndOffset, maxEndOffset)
         guard newEndOffset != endOffset else { return }   // ④ 已到数据边界：什么都不做
         linkUserDragging = true
         drag.cursorDragging = true
@@ -1010,8 +1019,9 @@ struct KlineChartView: View {
             FloatingAccessoryCoordinator.shared.clearAllCursors()
         }
         // ① 移窗：方向取反与既有贴边分支一致，朝「更新」看 → endOffset 减小
+        // （下界 minPanEndOffset：训练态右缘不得越过训练日）
         let maxEndOffset = max(0, sortedData.count - count)
-        let newEndOffset = clamp(endOffset - cmd.candles, 0, maxEndOffset)
+        let newEndOffset = clamp(endOffset - cmd.candles, minPanEndOffset, maxEndOffset)
         let didShift = newEndOffset != endOffset
         if didShift { endOffset = newEndOffset }
         // ② 放光标：本地光标模式标记 + 显式发布 + 立即复位（理由见上方注释）

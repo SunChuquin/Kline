@@ -155,7 +155,9 @@ extension KlineChartView {
                     panOffset = clamp(panOffset, -maxOver, maxOver)
                     let shift = Int((panOffset / candleSpacing).rounded())
                     if shift != 0 {
-                        let newOffset = clamp(endOffset + shift, 0, max(0, sortedData.count - count))
+                        // 下界随右缘走（训练态 = 训练日锚定值）：右缘已被钉住时 applied=0，
+                        // 只保留亚像素"橡皮筋"余量，不出现"窗口不动却在进位来回弹"的抖动
+                        let newOffset = clamp(endOffset + shift, minPanEndOffset, max(0, sortedData.count - count))
                         let applied = newOffset - endOffset
                         endOffset = newOffset
                         panOffset -= CGFloat(applied) * candleSpacing

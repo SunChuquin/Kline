@@ -118,10 +118,14 @@ extension KlineChartView {
         let sp = candleSpacing
         let maxEndOffset = max(0, sortedData.count - count)
         let sgn: CGFloat = dirIn > 0 ? 1 : -1
-        // 沿运动方向还剩多少根K线可走；连一根都没有则不惯性（调用方立即对齐）
-        let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
+        // 沿运动方向还剩多少根K线可走；连一根都没有则不惯性（调用方立即对齐）。
+        // ⚠️ 朝「更新方向」（sgn<0 = endOffset 减小）必须按**可见窗口右缘还能推进多少根**
+        // （panRoomTowardNewer）来量，而不是 endOffset 本身：训练态右缘被钉在训练日时 endOffset 仍可能 >0，
+        // 若按 endOffset 判"前方还有空间"，惯性会在边界上继续累计 panOffset 进位（窗口已不动）
+        // → 画面"滑一格又弹回"的高频抖动（用户实证）。非训练态下两者恒等，行为不变。
+        let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : panRoomTowardNewer
         if candlesAhead < 1 {
-            DebugLogger.shared.log("[惯性启动] 未启动 原因=前方无K线空间 方向=\(sgn > 0 ? "右(更早)" : "左(更新)") endOffset=\(endOffset) maxOffset=\(maxEndOffset) (\(source))")
+            DebugLogger.shared.log("[惯性启动] 未启动 原因=前方无K线空间 方向=\(sgn > 0 ? "右(更早)" : "左(更新)") endOffset=\(endOffset) 可走=\(candlesAhead) maxOffset=\(maxEndOffset) (\(source))")
             return false
         }
 
@@ -140,10 +144,12 @@ extension KlineChartView {
         let animator = ChartMomentumAnimator()
         animator.velocity = v
         animator.onAdvance = { [self] dx in
-            // 触边帧把本帧位移截到「恰好到边界对齐点」，停得干脆且残差清零无可视跳变
+            // 触边帧把本帧位移截到「恰好到边界对齐点」，停得干脆且残差清零无可视跳变。
+            // ⚠️ 朝更新方向的余量同样按**可见窗口右缘**度量（训练态右缘被钉住时余量仅剩亚像素残差，
+            // 于是本帧即判触边停住，不会出现"窗口不动而偏移来回进位"的抖动）
             let room: CGFloat = sgn > 0
                 ? CGFloat(maxEndOffset - endOffset) * sp - panOffset
-                : CGFloat(endOffset) * sp + panOffset
+                : CGFloat(panRoomTowardNewer) * sp + panOffset
             if abs(dx) >= room {
                 stoppedByBoundary = true
                 DebugLogger.shared.log("[惯性启动] 触边立即停 room=\(String(format: "%.1f", room)) dx=\(String(format: "%.1f", dx)) endOffset=\(endOffset)/\(maxEndOffset)")
@@ -151,7 +157,7 @@ extension KlineChartView {
                     panOffset += sgn * room
                     let shift = Int((panOffset / sp).rounded())
                     if shift != 0 {
-                        endOffset = clamp(endOffset + shift, 0, maxEndOffset)
+                        endOffset = clamp(endOffset + shift, minPanEndOffset, maxEndOffset)
                         panOffset -= CGFloat(shift) * sp
                     }
                 }
@@ -161,11 +167,11 @@ extension KlineChartView {
             panOffset += dx
             let shift = Int((panOffset / sp).rounded())
             guard shift != 0 else { return true }
-            let newOffset = clamp(endOffset + shift, 0, maxEndOffset)
+            let newOffset = clamp(endOffset + shift, minPanEndOffset, maxEndOffset)
             let applied = newOffset - endOffset
             endOffset = newOffset
             panOffset -= CGFloat(applied) * sp
-            // applied != shift = endOffset 已到数据边界：惯性立即结束，无过冲无回弹
+            // applied != shift = endOffset 已到（数据或训练日）边界：惯性立即结束，无过冲无回弹
             if applied != shift {
                 stoppedByBoundary = true
                 DebugLogger.shared.log("[惯性启动] 进位触边停 endOffset=\(endOffset)/\(maxEndOffset)")
@@ -214,7 +220,8 @@ extension KlineChartView {
         // 手指方向 → 平移方向取反：手指朝右推时窗口必须向「更新」方向滚动（endOffset 减小），
         // 光标才能继续朝右走、始终贴住右缘（左推同理）
         let sgn: CGFloat = dirIn > 0 ? -1 : 1
-        let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : endOffset
+        // 朝更新方向的可滚根数按**可见窗口右缘**度量（训练态右缘被钉在训练日 → 0 → 不启动）
+        let candlesAhead = sgn > 0 ? (maxEndOffset - endOffset) : panRoomTowardNewer
         guard candlesAhead >= 1 else { return false }
         let v = sgn * candleSpacing * ChartMomentumAnimator.edgeAutoScrollCandlesPerSecond
         let animator = ChartMomentumAnimator()
@@ -225,7 +232,7 @@ extension KlineChartView {
             panOffset += dx
             let shift = Int((panOffset / candleSpacing).rounded())
             guard shift != 0 else { return true }
-            let newOffset = clamp(endOffset + shift, 0, maxEndOffset)
+            let newOffset = clamp(endOffset + shift, minPanEndOffset, maxEndOffset)
             let applied = newOffset - endOffset
             endOffset = newOffset
             panOffset -= CGFloat(applied) * candleSpacing
