@@ -795,6 +795,14 @@ struct KlineChartView: View {
             // 联动持久化缩放级别：把每次可见K线数变化上抛给外层（LinkedKlineTile 负责落盘）
             onVisibleCountChange?(newValue)
         }
+        // 外层传入的默认可见数变化（典型：改动联动视图数量 → 各格默认 = 单图默认 ÷ 视图数量）
+        // → **立即应用**，让布局改动即时生效，而不是等该格图表实例被重建。
+        // 此时该内容在 store 里的缩放记忆已被清空（见 LinkedViewStore.setViewCount），
+        // 所以这里收到的就是新默认值。
+        .onChange(of: initialVisibleCount) { newValue in
+            guard let v = newValue else { return }
+            visibleCount = clamp(v, 20, CGFloat(capVisibleCount))
+        }
         .onChange(of: mainLegendTitle) { _ in
             // 指标配置/裸K/放大模式等引起标题变化时，同步给外层信息栏按钮
             syncMainLegendPortal()

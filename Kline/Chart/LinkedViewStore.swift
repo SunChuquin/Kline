@@ -358,6 +358,7 @@ final class LinkedViewStore: ObservableObject {
                       nameHint: (name: String, code: String, type: String)? = nil) {
         var cur = configs(for: metaID, nameHint: nameHint)
         cur.sort { $0.index < $1.index }
+        let countChanged = cur.count != count.rawValue
         if cur.count < count.rawValue {
             // 补到目标数量的默认视图（后面补齐的用未占用周期）
             let periods = KlinePeriod.allCases
@@ -375,6 +376,22 @@ final class LinkedViewStore: ObservableObject {
         for i in cur.indices { cur[i].index = i }
         configs[metaID] = cur
         saveToDisk()
+        // 视图数量变化 → 清掉本标的的缩放记忆：各格的默认可见数（= 单图默认 ÷ 视图数量）随之改变，
+        // 沿用旧记忆值会让"改数量后仍显示旧根数"。清掉后 `zoom()` 立刻回落到新默认，
+        // 各格图表在 `initialVisibleCount` 变化时立即应用（见 KlineChartView 的 onChange）→ 改动即时生效。
+        // 代价：本标的手动缩放记忆在布局变更时被清除（用户已确认接受）。
+        if countChanged {
+            let hadZoom = zooms.keys.contains { $0.owner == metaID }
+            for key in zooms.keys where key.owner == metaID { zooms[key] = nil }
+            if hadZoom { saveZoomsToDisk() }
+        }
+    }
+
+    /// 缩放记忆落盘（与 `setZoom` 的防抖写盘同格式；这里用于需要立即生效的场景）
+    private func saveZoomsToDisk() {
+        if let data = try? JSONEncoder().encode(zooms) {
+            try? data.write(to: zoomFileURL, options: .atomic)
+        }
     }
 
     // MARK: - 辅助
