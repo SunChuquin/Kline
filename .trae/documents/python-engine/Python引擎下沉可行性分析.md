@@ -2581,17 +2581,26 @@ Release `assert` 被编译掉，改为**同步阻塞主线程到超时**（更�
 改为 `field.endswith("d") and field[3:-1].isdigit()`（`pctYTD` 大写结尾不受影响）。
 —— 这正是「Swift 侧能算、引擎侧算错」被 Swift 兜底掩盖了这么久的根因；兜底一撤，对拍网就把它逼出来了。
 
-**⑤ 删掉 Swift 兜底后的**新回归风险与处置
-字段只有引擎一个来源 → **首帧（引擎就绪前）数值列为空**是预期行为，但**不能停在空态**：
-`KlinePythonBridge.ensureReady` 成功（含「已加载」快路径）时补一次 `MarketRowCache.retryEmptyRows(force: true)`，
-让「预取时引擎尚未就绪而落空」的行在引擎就绪后自动补取（原 `retryEmptyRows` 是无调用者的死代码）。
+**⑤ 删掉 Swift 兜底后的**新回归风险与处置（都在引擎路径内解决，不恢复 Swift 实现）
+- **首帧空值**：字段只有引擎一个来源 → 引擎就绪前数值列为空是预期行为，但**不能停在空态**：
+  `KlinePythonBridge.ensureReady` 成功（含「已加载」快路径）时补一次 `MarketRowCache.retryEmptyRows(force: true)`，
+  让「预取时引擎尚未就绪而落空」的行在引擎就绪后自动补取（原 `retryEmptyRows` 是无调用者的死代码）。
+- **防抖饿死（实测抓到）**：`pythonSnapshotPending` 的 0.2s 防抖被每只标的重置，而冷启动预取 3354 只
+  × 引擎读 ~12ms ≈ 40s → **整个预取期间 `quote_snapshot.py` 一次都没调用**（实测计数 = 0），
+  数值列会空到整批结束（此前被 Swift 兜底掩盖）。改为 pending 达 40 只即**立即结算**：
+  实测 66 批 × 40 只、约 0.5s 一批，可见行先出值。
 
 **⑥ 验证**：`QuoteSnapshotParityTests` 1/1 + `DbWriteParityTests` 6/6 + 全量 `KlineTests` **94/94**，
 app + test 两 target **0 警告**（唯一保留项仍是用户指定暂不处理的 `IndicatorPipeline.swift:994`）。
+模拟器运行期沙盒日志：`db_write.py 完成` 2661 次 / `快照批量计算完成` 66 批 / `[DB][错误]` 0 / `引擎取数失败` 0。
 
-**⑦ 明确留待后续（本轮范围外，用户已确认按「已下沉能力」分批做）**
-`StrategyBacktestEngine` 仍用 Swift `fetchPeriodLimited` 取数（回测取数未下沉，因此不是「回退」而是尚未下沉）；
-公式/策略投射层的 `.swift` 对拍模式保留。若要全仓一次性审计，见本节 ① 的清单逐项核。
+**⑦ 明确留待后续（本轮范围外）**
+- `StrategyBacktestEngine` 仍用 Swift `fetchPeriodLimited` 取数（回测取数尚未下沉，不是「回退」）；
+  公式/策略投射层的 `.swift` 对拍模式保留。
+- **引擎读吞吐**：`db_query` 每次 ~12ms（前置 0.45 + 引擎 11.7 + 读回 0.45），冷启动 3354 只 ≈ 40s。
+  现在数值列会随预取进度分批出值，但整批耗时不理想；若要在引擎侧提速，正路是新增**按批读 op**
+  （`db_query_batch`：一次调用取 N 只标的的主库行，摊薄每次 ~12ms 的传输开销），
+  而不是在 Swift 侧找回更快的老路径（那正是用户禁止的）。
 
 ---
 
