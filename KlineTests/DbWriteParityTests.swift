@@ -390,11 +390,11 @@ final class DbWriteParityTests: XCTestCase {
         XCTAssertEqual(dumpLive(engineDB), dumpLive(swiftDB))
     }
 
-    // MARK: - 预取读下沉（`db_query`，§11.38 L2 首批）
+    // MARK: - 预取读下沉（`db_query_batch`，§11.42 按批摊薄）
 
-    /// 场景 5：`db_query` —— Swift 侧**同 SQL mirror**（等价 `DatabaseManager.runBarsQuery` 取数口径）
-    /// vs 引擎 op，同库同参双跑比对（含 `vol/amo` 的 REAL 类型判定分支）。
-    func testDBQueryParity() async throws {
+    /// 场景 5：`db_query_batch` —— Swift 侧**同 SQL mirror**（等价 `DatabaseManager.runBarsQuery` 取数口径）
+    /// vs 引擎按批读，同库同参双跑比对（含 `vol/amo` 的 REAL 类型判定分支、带/不带 LIMIT 两种请求）。
+    func testDBQueryBatchParity() async throws {
         try await ensureEngineReady()
         let metas = [(id: 1, file: "SH#600000"), (id: 2, file: "SZ#000001")]
         let tables = ["daily"]
@@ -410,19 +410,29 @@ final class DbWriteParityTests: XCTestCase {
                 let sql = "INSERT INTO daily VALUES(1,\(20250101 + i),10.0,11.0,9.0,10.5,\(vol),10000.0);"
                 _ = sqlite3_exec(db, sql, nil, nil, nil)
             }
+            // metaID=2：少量行 + 不带 LIMIT 的请求分支
+            for i in 0..<40 {
+                _ = sqlite3_exec(db, "INSERT INTO daily VALUES(2,\(20250101 + i),20.0,21.0,19.0,20.5,\(i % 7),20000.0);",
+                                 nil, nil, nil)
+            }
             sqlite3_close(db)
         }
 
         // A：Swift 侧 mirror（等价 runBarsQuery）
-        let a = swiftBarsMirror(dbPath: swiftDB, table: "daily", metaID: 1, limit: 250)
-        // B：引擎 op
+        let a1 = swiftBarsMirror(dbPath: swiftDB, table: "daily", metaID: 1, limit: 250)
+        let a2 = swiftBarsMirror(dbPath: swiftDB, table: "daily", metaID: 2, limit: nil)
+        // B：引擎按批读（一次调用取两只）
         let b = try await onBackground {
-            try DbWriteBridge.dbQuery(dbPath: engineDB, table: "daily", metaID: 1, limit: 250).get()
+            try DbWriteBridge.dbQueryBatch(dbPath: engineDB, table: "daily",
+                                           requests: [(metaID: 1, limit: 250),
+                                                      (metaID: 2, limit: nil)]).get()
         }
 
-        XCTAssertEqual(a.count, 250, "Swift mirror 行数异常")
-        XCTAssertEqual(b.count, a.count)
-        XCTAssertEqual(jsonTextAny(b), jsonTextAny(a))
+        XCTAssertEqual(a1.count, 250, "Swift mirror 行数异常")
+        XCTAssertEqual(a2.count, 40, "Swift mirror 行数异常（不带 LIMIT）")
+        XCTAssertEqual(b.count, 2, "引擎按批读应只返回被请求的两只标的")
+        XCTAssertEqual(jsonTextAny(b[1] ?? []), jsonTextAny(a1), "metaID=1 逐行不一致")
+        XCTAssertEqual(jsonTextAny(b[2] ?? []), jsonTextAny(a2), "metaID=2（不带 LIMIT）逐行不一致")
     }
 
     /// Swift 侧 SQL mirror（与 `DatabaseManager.runBarsQuery` 逐字同口径）
@@ -469,7 +479,7 @@ final class DbWriteParityTests: XCTestCase {
     }
 
     /// 场景 6：**预取读换执行者**的运行期取证 —— 在**临时主库**上
-    /// 「引擎取数 `DatabaseManager.mainRowsViaEngine` vs Swift mirror」逐行对拍，
+    /// 「引擎按批取数 `DatabaseManager.mainRowsViaEngineBatch` vs Swift mirror」逐行对拍，
     /// 并用沙盒日志证明**确实走到了引擎**（而非静默回退）。
     ///
     /// 另钉住**主线程误用护栏**（§11.41）：`blockingCall` 断言禁止主线程、`dbQueue.sync` 又在调用线程
@@ -494,18 +504,21 @@ final class DbWriteParityTests: XCTestCase {
         DebugLogger.shared.log("[取证] " + marker)
 
         // ① 主线程误用护栏：本测试方法就在主线程 → 必须返回空 + 记错日志，且**没有**触到引擎
-        let onMain = DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
+        let onMain = DatabaseManager.mainRowsViaEngineBatch(dbPath: dbPath, table: "daily",
+                                                            requests: [(metaID: 1, limit: 250)])
         XCTAssertTrue(onMain.isEmpty, "主线程调用未被拦下 → 会同步阻塞主线程等 Python（Debug 断言崩 / Release 卡死）")
         let afterMain = debugLogTail(afterMarker: marker)
-        XCTAssertTrue(afterMain.contains("[DB][错误] mainRowsViaEngine 在主线程被调用"),
+        XCTAssertTrue(afterMain.contains("[DB][错误] mainRowsViaEngineBatch 在主线程被调用"),
                       "主线程调用没有留下错误日志 → 护栏失效（静默）")
         XCTAssertFalse(afterMain.contains("[PyBridge] db_write.py 完成"),
                        "主线程调用竟然走到了引擎 → 护栏没拦住")
 
         // ② 后台线程调用（生产同款上下文：MarketRowCache.computeQueue）
-        let engineRows = try await onBackground {
-            DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
+        let batch = try await onBackground {
+            DatabaseManager.mainRowsViaEngineBatch(dbPath: dbPath, table: "daily",
+                                                   requests: [(metaID: 1, limit: 250)])
         }
+        let engineRows = batch[1] ?? []
         let swiftRows = swiftBarsMirror(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
 
         // ③ 沙盒日志证据：桥接每次调用都会写 `[PyBridge] db_write.py 完成（总 …）`

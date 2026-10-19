@@ -861,10 +861,22 @@ final class StrategyBacktestRunner: ObservableObject {
                 }
             }
 
-            for meta in candidates {
+            // §11.42：取数走引擎**按批读**（`db_query_batch`）——每批一次引擎调用，批内逐只沿用原逻辑。
+            // 单只逐次调用每次 ~12ms（全市场 3354 只 ≈ 40s）；按批（50 只/批）后整批降到秒级。
+            let readBatchSize = 50
+            var pendingRows: [Int: [KlineItem]] = [:]
+            var chunkRemaining = 0
+            for (index, meta) in candidates.enumerated() {
                 if cancelBox.isCancelled { return }     // 每只标的边界检查取消
-                let raw = db.fetchPeriodLimited(metaId: meta.id, table: params.period.folderName, limit: limit)
-                let series = Array(raw.reversed())      // date DESC → 升序
+                if chunkRemaining == 0 {
+                    let end = min(index + readBatchSize, candidates.count)
+                    pendingRows = db.fetchPeriodLimitedViaEngineBatch(
+                        table: params.period.folderName,
+                        requests: candidates[index..<end].map { (metaID: $0.id, limit: limit) })
+                    chunkRemaining = end - index
+                }
+                chunkRemaining -= 1
+                let series = Array((pendingRows[meta.id] ?? []).reversed())  // date DESC → 升序
                 done += 1
                 scannedTotal += 1
                 defer { pushProgress(done) }

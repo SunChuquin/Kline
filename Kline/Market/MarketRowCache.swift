@@ -37,6 +37,10 @@ final class MarketRowCache: ObservableObject {
     /// 防抖被每只重置 → 结算被饿死、数值列一路空到整批结束。达到上限即结算可让可见行先出值。
     private let pythonSnapshotMaxBatch = 40
 
+    /// 单次引擎**读**调用带的标的数（§11.42：`db_query_batch` 按批摊薄传输开销）。
+    /// 50 只 × 80 根 ≈ 2.8 万数值 ≈ 300KB JSON，单次往返 ~15-20ms。
+    private let engineBatchSize = 50
+
     /// 后台计算队列（公式条件分组 / 批量字段值也用这）
     let computeQueue = DispatchQueue(label: "com.sunck.kline.market.compute",
                                      qos: .utility,
@@ -287,7 +291,23 @@ final class MarketRowCache: ObservableObject {
             targets.append(m)
         }
         guard !targets.isEmpty else { return }
+        // §11.42：按批预取（drop 到后台队列；批内逐只回写）
         runPrefetchBatch(targets: targets, label: "low")
+    }
+
+    /// 整批预取入口（后台派发）：`prefetch` 与 dataVersion 热刷新共用。
+    private func runPrefetchBatch(targets: [MetaItem], label: String) {
+        guard !targets.isEmpty else { return }
+        let lookback = self.lookback
+        let batchSize = self.engineBatchSize
+        let dbm = db
+        computeQueue.async { [weak self] in
+            let read: ([(metaID: Int, limit: Int)]) -> [Int: [KlineItem]] = { requests in
+                dbm.fetchPeriodLimitedViaEngineBatch(table: "daily", requests: requests)
+            }
+            self?.runEngineBatches(targets: targets, label: label, lookback: lookback,
+                                   batchSize: batchSize, verbose: false, read: read)
+        }
     }
 
     /// 置顶/自选预取：高优先级先跑，每只完成即立即回写刷新 UI（不攒整批），
@@ -311,64 +331,64 @@ final class MarketRowCache: ObservableObject {
         guard !highTargets.isEmpty || !lowTargets.isEmpty else { return }
 
         let lookback = self.lookback
+        let batchSize = self.engineBatchSize
         let dbm = db
         computeQueue.async { [weak self] in
+            // 引擎读闭包在本闭包内构造（MainActor 上下文）→ 由 nonisolated 的 runEngineBatches 调用
+            let read: ([(metaID: Int, limit: Int)]) -> [Int: [KlineItem]] = { requests in
+                dbm.fetchPeriodLimitedViaEngineBatch(table: "daily", requests: requests)
+            }
             DebugLogger.shared.log("[Cache] computeQueue: HIGH BATCH START n=\(highTargets.count)")
-            // ------ 高优先级：逐只取 → 立即回写刷新 UI ------
-            for m in highTargets {
-                // §11.41：预取读**只有引擎一路**（`fetchPeriodLimitedViaEngine`）；失败 → 空数组 + 日志，
-                // 不回落 Swift 读（`fetchPeriodLimited`）——Swift 实现已不允许作为退路。
-                let all = dbm.fetchPeriodLimitedViaEngine(metaId: m.id, table: "daily", limit: lookback)
-                let arr = Array(all.reversed())
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    self.inFlight.remove(m.id)
-                    self.rows[m.id]?.setBars(arr)
-                    if arr.isEmpty {
-                        DebugLogger.shared.log("[Cache] prefetch(high) empty metaID=\(m.id) code=\(m.code)")
-                    } else {
-                        DebugLogger.shared.log("[Cache] prefetch(high) OK metaID=\(m.id) code=\(m.code) bars=\(arr.count) lastClose=\(arr.last!.close)")
-                    }
-                    // 阶段 C：将该标的加入 Python 快照计算 pending 队列（批量 debounce）
-                    self.enqueuePythonSnapshot(metaID: m.id, bars: arr)
-                    self.objectWillChange.send()
-                }
-            }
+            // 高优先级：按批取 → 批内逐只立即回写刷新 UI
+            self?.runEngineBatches(targets: highTargets, label: "high", lookback: lookback,
+                                   batchSize: batchSize, verbose: true, read: read)
             DebugLogger.shared.log("[Cache] computeQueue: HIGH BATCH END; LOW BATCH n=\(lowTargets.count)")
-            // ------ 低优先级：已在主线程入 targets，直接丢 runPrefetchBatch ------
-            if !lowTargets.isEmpty {
-                DispatchQueue.main.async {
-                    self?.runPrefetchBatch(targets: lowTargets, label: "low")
-                }
-            }
+            // 低优先级：接着同一后台线程跑（inFlight 已在主线程登记，无需回主线程）
+            self?.runEngineBatches(targets: lowTargets, label: "low", lookback: lookback,
+                                   batchSize: batchSize, verbose: false, read: read)
         }
     }
 
-    /// 共用的"批量串行取 + 逐只回写 + 逐只 notify"实现。
-    /// 每只查完立刻 setBars + objectWillChange.send()，不再攒完整批一次性刷新。
-    private func runPrefetchBatch(targets: [MetaItem], label: String) {
-        DebugLogger.shared.log("[Cache] runPrefetchBatch(\(label)) START n=\(targets.count)")
-        let lookback = self.lookback
-        let dbm = db
-        computeQueue.async { [weak self] in
-            for m in targets {
-                // §11.41：预取读**只有引擎一路**；失败 → 空数组 + 日志（不回落 Swift 读）
-                let all = dbm.fetchPeriodLimitedViaEngine(metaId: m.id, table: "daily", limit: lookback)
-                let arr = Array(all.reversed())
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    self.inFlight.remove(m.id)
-                    self.rows[m.id]?.setBars(arr)
-                    if arr.isEmpty {
-                        DebugLogger.shared.log("[MarketRowCache] prefetch(\(label)) empty metaID=\(m.id) code=\(m.code)")
-                    }
-                    // 阶段 C：将该标的加入 Python 快照计算 pending 队列（批量 debounce）
-                    self.enqueuePythonSnapshot(metaID: m.id, bars: arr)
-                    // 逐只刷新：用户能看到行一个个出来，置顶先行
-                    self.objectWillChange.send()
+    /// 共用的"按批取 + 逐只合并/回写 + 逐只 notify"实现（§11.42）。
+    /// 每批一次引擎调用（`db_query_batch`，摊薄单只 ~12ms 的传输开销），
+    /// 批内每只查完立刻 setBars + objectWillChange.send()，用户能看到行一个个出来。
+    /// ⚠️ 必须由**后台队列**调用（内部是同步阻塞的引擎调用）→ 本方法 `nonisolated`；
+    /// 引擎读以闭包（`read`）传入——闭包在 MainActor 调用点构造，故不产生隔离告警；
+    /// UI 侧写入一律显式 `Task { @MainActor in }` 跳回主线程。
+    private nonisolated func runEngineBatches(targets: [MetaItem], label: String, lookback: Int,
+                                              batchSize: Int, verbose: Bool,
+                                              read: ([(metaID: Int, limit: Int)]) -> [Int: [KlineItem]]) {
+        guard !targets.isEmpty else { return }
+        var start = 0
+        while start < targets.count {
+            let end = min(start + batchSize, targets.count)
+            let chunk = Array(targets[start..<end])
+            let requests = chunk.map { (metaID: $0.id, limit: lookback) }
+            let barsByMeta = read(requests)
+            for m in chunk {
+                let arr = Array((barsByMeta[m.id] ?? []).reversed())
+                Task { @MainActor in
+                    MarketRowCache.shared.applyPrefetchedBars(metaID: m.id, bars: arr, label: label, verbose: verbose)
                 }
             }
+            start = end
         }
+    }
+
+    /// 预取结果主线程回写（`inFlight` 摘除 + setBars + 快照入队 + 逐只刷新）。
+    /// 与 `runEngineBatches` 配对：读取在后台、写入在主线程。
+    private func applyPrefetchedBars(metaID: Int, bars: [KlineItem], label: String, verbose: Bool) {
+        inFlight.remove(metaID)
+        rows[metaID]?.setBars(bars)
+        if bars.isEmpty {
+            DebugLogger.shared.log("[Cache] prefetch(\(label)) empty metaID=\(metaID)")
+        } else if verbose, let last = bars.last {
+            DebugLogger.shared.log("[Cache] prefetch(\(label)) OK metaID=\(metaID) bars=\(bars.count) lastClose=\(last.close)")
+        }
+        // 阶段 C：将该标的加入 Python 快照计算 pending 队列（批量 debounce）
+        enqueuePythonSnapshot(metaID: metaID, bars: bars)
+        // 逐只刷新：用户能看到行一个个出来，置顶先行
+        objectWillChange.send()
     }
 
     // MARK: - 指标公式条件分组的计算（给自动分组用）

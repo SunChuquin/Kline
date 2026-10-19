@@ -513,68 +513,74 @@ class DatabaseManager: ObservableObject {
         }
     }
 
-    /// 取某标的某周期表最近 limit 根（ORDER BY date DESC → 结果从新→旧）。
-    /// 用于行情/自选列表表单只需要最近 80 根，避免全量读（一次 1K+ 只的话全量读会卡死）。
-    /// **增量优先 + 主库补齐**后在合并结果上取前 limit 条。
-    func fetchPeriodLimited(metaId: Int, table: String, limit: Int) -> [KlineItem] {
-        let wanted = Swift.max(1, limit)
-        if let live = liveSlice(metaId: metaId, table: table) {
-            // 主库最多会被增量库顶掉 live.items.count 行，故多取这么多，保证合并后仍够 wanted 条
-            let main: [KlineItem] = dbQueue.sync {
-                guard let db = db else { return [] }
-                return runBarsQuery(db: db, table: table, metaId: metaId,
-                                    limit: wanted + live.items.count)
-            }
-            return Array(merge(live: live, main: main).prefix(wanted))
-        }
-        return dbQueue.sync {
-            guard let db = db else { return [] }
-            return runBarsQuery(db: db, table: table, metaId: metaId, limit: wanted)
-        }
-    }
-
-    /// §11.41：预取读**只有引擎一路**（`db_query`）——引擎未就绪 / 调用失败 → 空数组 + 落日志（显式空态），
-    /// **不再回落 `fetchPeriodLimited`**（Swift 读已不允许作为退路）。
-    /// 增量库读 + live 覆盖 main 的合并 + 截断仍复用本类既有 helper（引擎给主库行，Swift 只做合并）。
+    /// §11.42：预取 / 回测取数的**唯一入口**（按批引擎读）——一次引擎调用取 N 只标的的主库行，
+    /// 再逐只完成「增量优先 + 主库补齐」合并与截断（复用本类既有 `liveSlice` / `merge`，无第二真源）。
     ///
-    /// ⚠️ 主线程误用护栏：引擎取数走 `blockingCall`（内部断言禁止主线程），且 `dbQueue.sync` 在**调用线程上
-    /// 内联执行** → 主线程调用会同步阻塞主线程等 Python（Debug 断言崩 / Release 卡到超时）。
-    /// 生产调用点只有 `MarketRowCache.computeQueue`（后台）；此处对主线程调用显式拦下并记错日志。
-    func fetchPeriodLimitedViaEngine(metaId: Int, table: String, limit: Int) -> [KlineItem] {
+    /// 为什么按批：单只逐次调用每次约 12ms（前置 0.45 + 引擎 11.7 + 读回 0.45 的传输开销），
+    /// 冷启动预取 3354 只 ≈ 40s；按批摊薄后整批降到秒级（口径与逐只读逐字一致）。
+    ///
+    /// 引擎未就绪 / 调用失败 → 该批全为空数组 + 落日志（**显式空态，不回退 Swift 读**）。
+    /// ⚠️ 主线程误用护栏：引擎调用是同步阻塞的（`blockingCall` 断言禁止主线程，且 `dbQueue.sync`
+    /// 在调用线程上内联执行）→ 主线程调用会同步阻塞主线程等 Python，此处显式拦下并记错日志。
+    ///
+    /// - Parameter requests: 每只标的 `(metaID, limit)`，limit 为**合并后**想要的根数
+    /// - Returns: metaID → 该周期表最近 limit 根（date 降序，新→旧）
+    func fetchPeriodLimitedViaEngineBatch(table: String,
+                                          requests: [(metaID: Int, limit: Int)]) -> [Int: [KlineItem]] {
+        guard !requests.isEmpty else { return [:] }
         guard !Thread.isMainThread else {
-            DebugLogger.shared.log("[DB][错误] fetchPeriodLimitedViaEngine 在主线程被调用（禁止在主线程序等 Python）"
-                                   + "→ 返回空显式空态 metaID=\(metaId) table=\(table)")
-            return []
+            DebugLogger.shared.log("[DB][错误] fetchPeriodLimitedViaEngineBatch 在主线程被调用"
+                                   + "（禁止在主线程序等 Python）→ 返回空 table=\(table) n=\(requests.count)")
+            return [:]
         }
-        let wanted = Swift.max(1, limit)
-        let live = liveSlice(metaId: metaId, table: table)
-        // 主库最多会被增量库顶掉 live.items.count 行，故多取这么多（同 `fetchPeriodLimited`）
-        let mainLimit = live.map { wanted + $0.items.count } ?? wanted
-        let rows = dbQueue.sync {
-            Self.mainRowsViaEngine(dbPath: Self.writableDBPath, table: table,
-                                   metaID: metaId, limit: mainLimit)
+        // 逐只算主库读数上限：增量库会顶掉 live.items.count 行，多取这么多以保证合并后仍够 wanted 条
+        var lives: [Int: LiveSlice] = [:]
+        var engineRequests: [(metaID: Int, limit: Int?)] = []
+        engineRequests.reserveCapacity(requests.count)
+        for r in requests {
+            let wanted = Swift.max(1, r.limit)
+            if let live = liveSlice(metaId: r.metaID, table: table) {
+                lives[r.metaID] = live
+                engineRequests.append((r.metaID, wanted + live.items.count))
+            } else {
+                engineRequests.append((r.metaID, wanted))
+            }
         }
-        let main = Self.klineItems(fromRows: rows)
-        guard let live else { return Array(main.prefix(wanted)) }
-        return Array(merge(live: live, main: main).prefix(wanted))
+
+        let rowsByMeta = dbQueue.sync {
+            Self.mainRowsViaEngineBatch(dbPath: Self.writableDBPath, table: table, requests: engineRequests)
+        }
+
+        var out: [Int: [KlineItem]] = [:]
+        out.reserveCapacity(requests.count)
+        for r in requests {
+            let wanted = Swift.max(1, r.limit)
+            let main = Self.klineItems(fromRows: rowsByMeta[r.metaID] ?? [])
+            if let live = lives[r.metaID] {
+                out[r.metaID] = Array(merge(live: live, main: main).prefix(wanted))
+            } else {
+                out[r.metaID] = Array(main.prefix(wanted))
+            }
+        }
+        return out
     }
 
-    /// 主库行取数（引擎 `db_query`，返回列序同 `runBarsQuery`）。
-    /// 失败 → 空数组 + 落日志（显式空态，不回退 Swift 读）；主线程调用 → 同样拦下并记错日志。
-    static func mainRowsViaEngine(dbPath: String, table: String,
-                                  metaID: Int, limit: Int) -> [[Any]] {
+    /// 一批标的的主库行（引擎 `db_query_batch`，列序同 `runBarsQuery`，各自 DESC）。
+    /// 失败 → 空字典 + 落日志（显式空态，不回退 Swift 读）；主线程调用 → 同样拦下并记错日志。
+    static func mainRowsViaEngineBatch(dbPath: String, table: String,
+                                       requests: [(metaID: Int, limit: Int?)]) -> [Int: [[Any]]] {
         guard !Thread.isMainThread else {
-            DebugLogger.shared.log("[DB][错误] mainRowsViaEngine 在主线程被调用 → 返回空（不在主线程等 Python）"
-                                   + " table=\(table) metaID=\(metaID)")
-            return []
+            DebugLogger.shared.log("[DB][错误] mainRowsViaEngineBatch 在主线程被调用 → 返回空"
+                                   + "（不在主线程等 Python） table=\(table) n=\(requests.count)")
+            return [:]
         }
-        switch DbWriteBridge.dbQuery(dbPath: dbPath, table: table, metaID: metaID, limit: limit) {
-        case .success(let rows):
-            return rows
+        switch DbWriteBridge.dbQueryBatch(dbPath: dbPath, table: table, requests: requests) {
+        case .success(let rowsByMeta):
+            return rowsByMeta
         case .failure(let f):
-            DebugLogger.shared.log("[DB] 引擎取数失败（db_query table=\(table) metaID=\(metaID)）："
+            DebugLogger.shared.log("[DB] 引擎按批取数失败（db_query_batch table=\(table) n=\(requests.count)）："
                                    + "\(f) → 显式空态（不回退 Swift 读）")
-            return []
+            return [:]
         }
     }
 

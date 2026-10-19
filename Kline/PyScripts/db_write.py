@@ -368,45 +368,60 @@ _SQL_BARS = ("SELECT date, open, high, low, close, vol, amo FROM %s WHERE meta_i
              "ORDER BY date DESC")
 
 
-def _op_db_query(inp):
-    """主库 K 线读（§11.38 L2 首批：**只下沉「已在后台 + 已防抖」的预取读**）。
-
-    ⚠️ 边界：**只返回主库原始行**（`ORDER BY date DESC`）；
-    **增量库读 + live 覆盖 main 的合并 + 排序 / 截断全部留在 Swift**（避免第二真源）。
-
-    输入：{"dbPath", "table", "metaID", "limit"|None}
-    输出：{"ok": true, "rows": [[date,open,high,low,close,vol,amo], ...]}   # DESC
+def _bars_for(cur, table, meta_id, limit):
+    """取某只标的的主库原始行（DESC）；表不存在 / prepare 失败 → 空数组（非错误）。
 
     口径逐字对齐 Swift `DatabaseManager.runBarsQuery`：
-      · 表不存在 / prepare 失败 → 空数组（非错误）；
       · `vol` / `amo` **只有 REAL 类型才取列值，其余（含 INTEGER / NULL）取 0**。
     """
-    db_path = inp.get("dbPath")
-    table = inp.get("table")
-    if not db_path or not os.path.exists(db_path) or not table:
-        return _err("dbPath / table 缺失或库不存在")
-    meta_id = _int(inp.get("metaID"))
-    limit = inp.get("limit")
     sql = _SQL_BARS % table
     args = [meta_id]
     if limit is not None:
         sql += " LIMIT ?"
         args.append(max(1, _int(limit)))
+    rows = []
+    for r in cur.execute(sql, args):
+        def _real(i):
+            v = r[i]
+            return float(v) if isinstance(v, float) else 0.0
+        rows.append([_int(r[0]), _real(1), _real(2), _real(3), _real(4), _real(5), _real(6)])
+    return rows
+
+
+def _op_db_query_batch(inp):
+    """主库 K 线**按批读**（§11.42）——一次调用取 N 只标的的主库原始行。
+
+    动机：单只读每次 ~12ms（前置 0.45 + 引擎 11.7 + 读回 0.45 的传输开销），
+    冷启动预取 3354 只 ≈ 40s；按批（~50 只/批）摊薄后整批降到秒级。
+    ⚠️ 摊薄的是**传输开销**，不是改变口径：SQL / REAL 判定 / 缺表语义与逐只读完全一致。
+
+    输入：{"dbPath", "table", "symbols": [{"metaID": 1, "limit": 80|None}, ...]}
+    输出：{"ok": true, "result": {"<metaID>": [[date,open,high,low,close,vol,amo], ...], ...}}  # 各自 DESC
+    """
+    db_path = inp.get("dbPath")
+    table = inp.get("table")
+    if not db_path or not os.path.exists(db_path) or not table:
+        return _err("dbPath / table 缺失或库不存在")
+    symbols = inp.get("symbols")
+    if not isinstance(symbols, list):
+        return _err("symbols 须为数组")
 
     conn = sqlite3.connect(db_path, timeout=30.0)
     try:
         cur = conn.cursor()
-        rows = []
-        try:
-            for r in cur.execute(sql, args):
-                def _real(i):
-                    v = r[i]
-                    return float(v) if isinstance(v, float) else 0.0
-                rows.append([_int(r[0]), _real(1), _real(2), _real(3), _real(4),
-                             _real(5), _real(6)])
-        except Exception:  # noqa: BLE001 —— 与 Swift 的「prepare 失败返回空」同口径
-            return _ok(result={"rows": []})
-        return _ok(result={"rows": rows})
+        out = {}
+        for sym in symbols:
+            if not isinstance(sym, dict):
+                continue
+            meta_id = sym.get("metaID")
+            if meta_id is None:
+                continue
+            key = str(_int(meta_id))
+            try:
+                out[key] = _bars_for(cur, table, _int(meta_id), sym.get("limit"))
+            except Exception:  # noqa: BLE001 —— 与逐只读的「prepare 失败返回空」同口径
+                out[key] = []
+        return _ok(result=out)
     finally:
         conn.close()
 
@@ -415,7 +430,7 @@ _OPS = {
     "main_db_merge": _op_main_db_merge,
     "live_upsert_daily": _op_live_upsert_daily,
     "live_trim": _op_live_trim,
-    "db_query": _op_db_query,
+    "db_query_batch": _op_db_query_batch,
 }
 
 

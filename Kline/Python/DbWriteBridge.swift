@@ -144,15 +144,26 @@ enum DbWriteBridge {
             .map { LiveUpsertOutcome(from: $0) }
     }
 
-    /// 主库 K 线读（`db_query`，同步阻塞；调用点在后台队列上）。
-    /// ⚠️ §11.38：只返回**主库原始行**（DESC）；增量库读与 live/main 合并仍由 Swift 完成。
-    static func dbQuery(dbPath: String, table: String, metaID: Int, limit: Int?,
-                        timeout: TimeInterval = 30) -> Result<[[Any]], Failure> {
-        var input: [String: Any] = ["dbPath": dbPath, "table": table, "metaID": metaID]
-        if let limit { input["limit"] = limit }
-        return run("db_query", input, timeout: timeout).flatMap { res in
-            guard let rows = res["rows"] as? [[Any]] else { return .failure(.badOutput) }
-            return .success(rows)
+    /// 主库 K 线**按批读**（`db_query_batch`，同步阻塞；调用点在后台队列上）。
+    /// ⚠️ §11.42：预取 / 回测取数的**唯一读入口**——单只逐次调用的 ~12ms 传输开销按批摊薄；
+    /// 只返回**主库原始行**（各自 DESC），增量库读与 live/main 合并仍由 Swift 完成。
+    static func dbQueryBatch(dbPath: String, table: String,
+                             requests: [(metaID: Int, limit: Int?)],
+                             timeout: TimeInterval = 120) -> Result<[Int: [[Any]]], Failure> {
+        let symbols: [[String: Any]] = requests.map { r in
+            var d: [String: Any] = ["metaID": r.metaID]
+            if let limit = r.limit { d["limit"] = limit }
+            return d
+        }
+        // `run` 已把引擎顶层 `result` 解出 → 这里拿到的是 {metaID字符串: [[行]]} 本身
+        return run("db_query_batch", ["dbPath": dbPath, "table": table, "symbols": symbols],
+                   timeout: timeout).flatMap { res in
+            var out: [Int: [[Any]]] = [:]
+            for (key, value) in res {
+                guard let id = Int(key), let rows = value as? [[Any]] else { continue }
+                out[id] = rows
+            }
+            return .success(out)
         }
     }
 

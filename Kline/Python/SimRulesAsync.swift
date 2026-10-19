@@ -398,14 +398,14 @@ extension SimRulesBridge {
         }
 
         /// 引擎增量字典 → 原生类型（UUID / Date）。整环结算 `cond_sweep` 复用同一批转换。
-        static func cashChangeFromJSON(_ any: Any?) -> [String: Any]? {
+        nonisolated static func cashChangeFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any], let cash = SimRulesCodec.num(d["cash"]) else { return nil }
             var o: [String: Any] = ["cash": cash]
             if let id = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = id }
             return o
         }
 
-        static func positionChangeFromJSON(_ any: Any?) -> [String: Any]? {
+        nonisolated static func positionChangeFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any] else { return nil }
             var o: [String: Any] = [:]
             if let v = SimRulesCodec.uuid(d["accountID"]) { o["accountID"] = v }
@@ -420,7 +420,7 @@ extension SimRulesBridge {
             return o
         }
 
-        static func ledgerEntryFromJSON(_ any: Any?) -> [String: Any]? {
+        nonisolated static func ledgerEntryFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any] else { return nil }
             var o: [String: Any] = [:]
             if let v = SimRulesCodec.uuid(d["id"]) { o["id"] = v }
@@ -433,7 +433,7 @@ extension SimRulesBridge {
             return o
         }
 
-        static func logEntryFromJSON(_ any: Any?) -> [String: Any]? {
+        nonisolated static func logEntryFromJSON(_ any: Any?) -> [String: Any]? {
             guard let d = any as? [String: Any] else { return nil }
             var o: [String: Any] = [:]
             if let v = SimRulesCodec.uuid(d["id"]) { o["id"] = v }
