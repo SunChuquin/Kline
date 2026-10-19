@@ -31,37 +31,47 @@
 
 ## 分步实现
 
-### 1. 新增纯函数 `TrainingAsOfSeries.slice`
+### 1. 新增纯函数 `TrainingAsOfSeries.formingBar`
 放在 [LinkedReplaySupport.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/LinkedReplaySupport.swift)（与 `synthesizeBar` 同口径、便于对照）：
 
 ```swift
-static func slice(rows: [KlineItem], period: KlinePeriod, trainingDate: Int, daily: [KlineItem]) -> [KlineItem]
+static func formingBar(targetDate: Int, period: KlinePeriod, trainingDate: Int, daily: [KlineItem]) -> KlineItem?
 ```
-- `rows` / `daily` 均为 **date 降序**（DatabaseManager 查询约定）；
-- 裁到 `date <= trainingDate`；
-- 非日线周期：取裁剪后最新一根 `last`，`periodDateRange(period, last.date).0` 为该周期起点，用日线 `[起点, 训练日]` 段替换 `last`（date 保持 `last.date`）；
-- 区间内无日线 / 无日线数据 → 只裁剪不替换（防御回退）。
+- `daily` 为**该标的自己的**日线，**date 升序**（与 `LinkSourceBarCache` 同约定），二分定位 `[周期起点, 训练日]` 段；
+- 产出一根合成 K 线（date 沿用 `targetDate`）；日线不可用 / 区间内无日线 → nil（回退真实 K 线）。
 
-### 2. 共享槽加入「训练日」身份
-[LinkedTileDataSlot](file:///Volumes/home/repositories/Kline2/Kline/Chart/LinkedViewStore.swift#L57-L71) 增 `loadedTrainingDate` / `inFlightTrainingDate`；`commitSlot` / `tryBeginFlight` 增 `trainingDate:` 入参并纳入命中判定。
-否则：进入训练态时可能命中上一次（非训练）留下的同 (标的,周期) 旧序列，切片永不生效。
+### 2. 图表内「单点合成」派生（不重载任何数据）
+[LinkedReplaySupport.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/LinkedReplaySupport.swift) 的 `extension KlineChartView` 新增：
+- `trainingFormingIndex`（= 右缘上界，`trainingEndIndex`）、`trainingFormingBar`（训练日落在该 K 线覆盖区间内才合成；日线取自 `linkedMetaID ?? metaId`，**各格各标的互不借用**）；
+- `ensureTrainingSourceBars()`（请求本标的日线，命中/在途零开销；到达后由 `linkSourceCache.revision` 驱动重绘）；
+- `asOfCanvasIndex`（画布合成点：复盘光标优先 → 训练态形成中K线）、`asOfLegendIndex`（图例/读数行读数点）、`trainingAsOfTrigger`、`effectiveAsOfTrigger`（`asOfTrigger ?? trainingAsOfTrigger`）。
 
-### 3. [LinkedKlineTile.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/LinkedKlineTile.swift)
-- `currentSeries` / `currentLoading` / `tryLoadOnAppear` / `loadData` 的槽位命中判定一并比较训练日；
-- `loadData`：训练态下 `period == .daily` 复用本行、否则取该格**自己 metaID** 的日线，调 `TrainingAsOfSeries.slice` 后再建 `ChartSeries`；
-- 新增 `.onChange(of: trainingMaxDate)`：作废本格共享槽 → `loadData`（训练日推进/退出训练都要重载）；
-- `chartIdentity` 追加训练日：训练日推进时本格序列整体重算，必须让图表实例与计算缓存一起重建，否则指标曲线会沿用旧序列。
+### 3. 各绘制点接入合成点
+- [ChartLayoutKit.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/ChartLayoutKit.swift)：`mainCanvas` 的 `syntheticBar`、`subChart` 的 `synthStick`、主/副图曲线 `mainCurveValues` / `subCurveValues` 的 as-of 单点替换（复盘优先 → 训练态）；
+- [KlineChartView.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/KlineChartView.swift)：`priceRange` 用 `displayRangeSlice`（右缘那根换成合成形态，避免把训练日之后的极值算进 y 轴）、`mirroredLatest` 取合成K线收盘；onAppear 增 `ensureTrainingSourceBars()`；`scheduleAsOf(effectiveAsOfTrigger)`、`.onChange(of: effectiveAsOfTrigger)`；`trainingMaxDate` 的 onChange 只做「右缘跟进 + 确保日线已请求」；
+- [ChartLegendKit.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/ChartLegendKit.swift)：`subVolAmoOverride` 增训练态分支（形成中K线正好是图例在读那根时，VOL/AMO 柱读合成量/额）；
+- [ChartCursorKit.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/ChartCursorKit.swift)：`drawnMainCandleExtent` 的合成K线判定增训练态分支；`cursorDisplayItem(at:)` 同步（行情数据行读数）。
 
-### 4. [KlineDetailView.swift](file:///Volumes/home/repositories/Kline2/Kline/Chart/KlineDetailView.swift)
-- `loadData`：训练态下 5 个周期各自按训练日切片（日线行已在同一次查询里拿到，零额外查询）；
-- `queryDrillInSeries`：训练态下补查钻取标的的日线再切片（钻取目标标的可能与主标的相同或不同，各用各的）；
-- 新增 `.onChange(of: trainer.trainingDate)`：训练态下重载 series（含钻取序列）；
-- `chartView(...)`：训练态 `metaId: nil`（切片序列与库中原序列不同，不能复用 (标的,周期) 指标缓存）；
-- `prefetchOtherPeriods`：训练态直接跳过（不把切片后的曲线写进全局缓存，避免被非训练视图恢复）。
+### 4. `trainingStartDate` / `trainingSignalMarks` 不变
+起始日竖轴与 B/S/T 标记仍按周期聚合绘制，与本次改动无关。
+
+## 变更记录（2026-10-19 同日修订）
+
+**初版（已废弃）**：按训练日把序列「裁到训练日 + 合成右缘那根」再喂给图表。方向正确但**引入整屏闪烁**：
+每推进一个训练日都要 ① 重查库、② 把 tile 置为加载占位（`chartSeries = nil; isLoading = true` → 白屏转圈）、
+③ `chartIdentity` 含训练日 → 图表实例被销毁重建（指标缓存清零、曲线等引擎回包）。
+
+**现版**：训练日推进退化为「窗口右移一根」——与非训练态手拖主图**完全同一条廉价路径**；
+右缘那根的"形成中"形态由 `SyntheticBar` 单点替换 + as-of 单点重算跟随，全程不重载数据、不重建视图。
+（该机制本就在联动复盘里跑通，复用即可。）
+
+**已知边界（与联动复盘同口径，非本次引入）**：
+- 合成K线为单点替换，y 轴范围已按合成形态修正（`displayRangeSlice`），但副图 VOL/AMO 的量轴仍按库内曲线取值（影响极小：泄漏值≈一根完整周期量，与其他周期同量级）；
+- VOL/AMO 的均量线（MA）在该点不走来 as-of 通道（与复盘一致），主图/其他副图指标均按训练日 as-of 重算。
 
 ## 边界
 
-- 标的日线为空 / 该周期区间内无日线 → 只裁剪（不退化为错数据）。
+- 标的日线为空 / 该周期区间内无日线 → 该根回退显示库内真实 K 线（不合成错数据）。
 - 训练日不是交易日：训练日本身由控制器锚定到实际交易日（`TrainingSessionController`），不会出现。
 - 训练日之前无该周期 K 线 → 序列为空，走既有空态。
 - 与联动复盘叠加（训练 + 开联动 + 放光标）：光标那根仍由 `synthesizeBar` 合成，光标日期 ≤ 训练日，不会引入训练日之后的数据；合成结果与切片结果一致时无害。
