@@ -14,6 +14,7 @@ import XCTest
 import SQLite3
 @testable import Kline
 
+@MainActor
 final class DbWriteParityTests: XCTestCase {
 
     private let allTables = ["daily", "weekly", "monthly", "quarterly", "yearly"]
@@ -453,5 +454,65 @@ final class DbWriteParityTests: XCTestCase {
         guard let data = try? JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return "<serialize failed>" }
         return text
+    }
+
+    // MARK: - §11.39 运行期取证（单元测试 + 沙盒日志）
+
+    private func debugLogURL() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(DebugLogger.fileName)
+    }
+
+    private func debugLogTail(afterMarker marker: String) -> String {
+        let text = (try? String(contentsOf: debugLogURL(), encoding: .utf8)) ?? ""
+        return text.components(separatedBy: marker).last ?? ""
+    }
+
+    /// 场景 6：**预取读换执行者**的运行期取证 —— 在**临时主库**上
+    /// 「引擎取数 `DatabaseManager.mainRowsViaEngine` vs Swift mirror」逐行对拍，
+    /// 并用沙盒日志证明**确实走到了引擎**（而非静默回退）。
+    ///
+    /// 刻意**不碰真实单例 / 真实主库**：`fetchPeriodLimitedViaEngine` 走 `blockingCall`，
+    /// 其 `assert(!Thread.isMainThread)` + `dbQueue.sync` 在调用线程内联执行 →
+    /// 单元测试若在主线程直调真实单例会 SIGTRAP 崩掉被测 App（2026-10-19 实测）。
+    /// 故此处只测「引擎取数核心」，并在末尾钉住「主线程调用必须回退 nil」的护栏契约。
+    func testPrefetchReadEnginePathParityAndLogEvidence() async throws {
+        try await ensureEngineReady()
+        let dbPath = try makeTempDB("prefetch", metas: [(id: 1, file: "SH#600000")], tables: ["daily"])
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &db), SQLITE_OK)
+        for i in 0..<300 {
+            // 每 5 根写一次 INTEGER 型 vol → 覆盖「只有 REAL 才取值，否则 0」分支
+            let vol = (i % 5 == 0) ? "1000" : "1000.5"
+            _ = sqlite3_exec(db, "INSERT INTO daily VALUES(1,\(20250101 + i),10.0,11.0,9.0,10.5,\(vol),10000.0);",
+                             nil, nil, nil)
+        }
+        sqlite3_close(db)
+
+        let marker = "—— prefetch 取证标记 ——"
+        DebugLogger.shared.log("[取证] " + marker)
+
+        // 后台线程调用（生产同款上下文：MarketRowCache.computeQueue）
+        let engineRows = try await onBackground {
+            DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
+        }
+        let swiftRows = swiftBarsMirror(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
+
+        // ① 沙盒日志证据：桥接每次调用都会写 `[PyBridge] db_write.py 完成（总 …）`
+        let tail = debugLogTail(afterMarker: marker)
+        XCTAssertTrue(tail.contains("[PyBridge] db_write.py 完成"),
+                      "沙盒日志里没有引擎调用行 → 预取**没走到引擎**（静默回退）")
+
+        // ② 逐行对拍
+        let e = try XCTUnwrap(engineRows, "引擎取数返回 nil——未走到引擎")
+        XCTAssertEqual(e.count, 250, "引擎取数行数异常")
+        XCTAssertEqual(jsonTextAny(e), jsonTextAny(swiftRows), "两路径逐行不一致")
+
+        // ③ 护栏契约：主线程调用必须回退 nil —— 否则 Debug 断言崩 / Release 同步阻塞主线程
+        XCTAssertNil(DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250),
+                     "主线程未被拦截 → 会在主线程同步等 Python（断言崩 / 卡死）")
+
+        DebugLogger.shared.log("[取证] 预取对拍完成：rows=\(e.count) 一致，主线程护栏生效")
     }
 }

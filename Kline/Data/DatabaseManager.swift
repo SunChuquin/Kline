@@ -536,19 +536,35 @@ class DatabaseManager: ObservableObject {
     /// §11.38（L2 首批）：**预取读**走引擎 —— 只把「主库行」交给引擎（`db_query`），
     /// 增量库读 + live 覆盖 main 的合并 + 截断仍在本类内（与 `fetchPeriodLimited` 同一批 helper）。
     /// 引擎未就绪 / 调用失败 → `nil`（调用方回退到 `fetchPeriodLimited`，行为与改动前一致）。
+    ///
+    /// ⚠️ 引擎取数走 `blockingCall`（内部 `assert(!Thread.isMainThread)`），而 `dbQueue.sync`
+    /// 会在**调用线程上内联执行**，故本方法**只允许后台线程调用**（生产仅 `MarketRowCache.computeQueue`）。
+    /// 主线程调用一律返回 `nil` 回退 Swift 现状——否则 Debug 直接断言崩，Release 会同步阻塞主线程到超时。
     func fetchPeriodLimitedViaEngine(metaId: Int, table: String, limit: Int) -> [KlineItem]? {
+        guard !Thread.isMainThread else { return nil }
         let wanted = Swift.max(1, limit)
         let live = liveSlice(metaId: metaId, table: table)
         // 主库最多会被增量库顶掉 live.items.count 行，故多取这么多（同 `fetchPeriodLimited`）
         let mainLimit = live.map { wanted + $0.items.count } ?? wanted
-        let outcome = dbQueue.sync {
-            DbWriteBridge.dbQuery(dbPath: Self.writableDBPath, table: table,
-                                  metaID: metaId, limit: mainLimit)
+        let rows = dbQueue.sync {
+            Self.mainRowsViaEngine(dbPath: Self.writableDBPath, table: table,
+                                   metaID: metaId, limit: mainLimit)
         }
-        guard case .success(let rows) = outcome else { return nil }
+        guard let rows else { return nil }
         let main = Self.klineItems(fromRows: rows)
         guard let live else { return Array(main.prefix(wanted)) }
         return Array(merge(live: live, main: main).prefix(wanted))
+    }
+
+    /// 主库行取数（引擎 `db_query`，返回列序同 `runBarsQuery`）；内含 `blockingCall` →
+    /// 主线程调用直接返回 `nil`（同上层护栏），后台线程调用才真正走引擎。
+    static func mainRowsViaEngine(dbPath: String, table: String,
+                                  metaID: Int, limit: Int) -> [[Any]]? {
+        guard !Thread.isMainThread else { return nil }
+        guard case .success(let rows) = DbWriteBridge.dbQuery(dbPath: dbPath, table: table,
+                                                             metaID: metaID, limit: limit)
+        else { return nil }
+        return rows
     }
 
     /// 引擎返回的行（列序与 `runBarsQuery` / `db_query` 一致）→ `KlineItem`

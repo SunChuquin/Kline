@@ -126,7 +126,7 @@ enum DbWriteBridge {
                             snapshot: [String: [[String: Any]]],
                             timeout: TimeInterval = 120) -> Result<MainMergeOutcome, Failure> {
         run("main_db_merge", ["dbPath": dbPath, "snapshot": snapshot], timeout: timeout)
-            .map(MainMergeOutcome.init(from:))
+            .map { MainMergeOutcome(from: $0) }
     }
 
     /// 增量库行级写（同步阻塞；调用点在 `LiveDataStore.queue` 上）。
@@ -141,7 +141,7 @@ enum DbWriteBridge {
         run("live_upsert_daily", ["dbPath": dbPath, "metaUpdatedAt": metaUpdatedAt,
                                   "metas": metas, "bars": bars, "periodBars": periodBars],
             timeout: timeout)
-            .map(LiveUpsertOutcome.init(from:))
+            .map { LiveUpsertOutcome(from: $0) }
     }
 
     /// 主库 K 线读（`db_query`，同步阻塞；调用点在后台队列上）。
@@ -162,6 +162,6 @@ enum DbWriteBridge {
                          timeout: TimeInterval = 60) -> Result<LiveTrimOutcome, Failure> {
         run("live_trim", ["dbPath": dbPath, "beforeDate": beforeDate, "items": items],
             timeout: timeout)
-            .map(LiveTrimOutcome.init(from:))
+            .map { LiveTrimOutcome(from: $0) }
     }
 }
