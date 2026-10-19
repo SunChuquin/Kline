@@ -69,6 +69,12 @@ static func formingBar(targetDate: Int, period: KlinePeriod, trainingDate: Int, 
 - 合成K线为单点替换，y 轴范围已按合成形态修正（`displayRangeSlice`），但副图 VOL/AMO 的量轴仍按库内曲线取值（影响极小：泄漏值≈一根完整周期量，与其他周期同量级）；
 - VOL/AMO 的均量线（MA）在该点不走来 as-of 通道（与复盘一致），主图/其他副图指标均按训练日 as-of 重算。
 
+**二次修订（2026-10-19）**：训练态多图 + 联动下，点击小周期主图触发光标时，被联动的大周期会"先闪一根库内完整大周期K线（含训练日之后数据），过一会才变成训练日聚合"。
+根因：`trainingFormingBar` 的日线源走 `LinkSourceBarCache` 异步查询，首帧未就绪 → 单点合成返回 nil → 该帧只能画库内那根完整 K 线。
+修复：新增 [TrainingSessionController.dailyBars(for:)](file:///Volumes/home/repositories/Kline2/Kline/Training/TrainingSessionController.swift#L103-L114)
+（会话启动时已把该标的全量日线常驻内存，**同步可读**），`trainingFormingBar` **优先取它**，非训练标的才回退异步缓存 →
+首帧即可合成，空窗消失。（`LinkSourceBarCache` 仍保留并预请求，兼顾多图里显示其它标的的情形。）
+
 ## 边界
 
 - 标的日线为空 / 该周期区间内无日线 → 该根回退显示库内真实 K 线（不合成错数据）。
