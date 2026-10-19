@@ -109,9 +109,13 @@ def _compute(field, bars):
             return None
         return today / avg
 
-    # 区间涨幅 pct3d/5d/10d/20d/60d
-    if field.startswith("pct") and field[3:].isdigit():
-        window = int(field[3:])
+    # 区间涨幅 pct3d/5d/10d/20d/60d（字段名带尾缀 d）
+    # ⚠️ 2026-10-19 §11.41 修复：此前写作 `field[3:].isdigit()`，而真实字段名是 "pct3d"
+    # （`field[3:]` == "3d" 不是纯数字）→ 本分支**永远匹配不上** → 生产里 3日/5日/10日/20日/60日
+    # 涨幅恒为 null，行情页这 5 列一直显示 "-"。由 `QuoteSnapshotParityTests` 与 Swift oracle
+    # 双跑对拍发现；按用户要求**修在引擎侧**（Swift 侧不另找退路）。
+    if field.startswith("pct") and field.endswith("d") and field[3:-1].isdigit():
+        window = int(field[3:-1])
         count = len(bars)
         if count < 2:
             return None

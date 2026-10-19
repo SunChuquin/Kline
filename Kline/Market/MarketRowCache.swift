@@ -238,12 +238,13 @@ final class MarketRowCache: ObservableObject {
                         row.setPythonValue(value as? Double, for: field)
                     }
                 }
-                // 所有受影响的标的都需要 UI 重绘（数值可能从 Swift 现状切换为 Python 值）
+                // §11.41：字段值全部来自引擎；此处对象变化即「引擎值已写入」→ 需 UI 重绘
                 self.objectWillChange.send()
                 DebugLogger.shared.log("[Cache] Python 快照批量计算完成 n=\(results.count)")
             case .failure(let f):
-                DebugLogger.shared.log("[Cache] Python 快照批量计算失败：\(f)")
-                // 降级：清空 pythonValues，让 MarketRow 回退到 Swift 现状计算
+                DebugLogger.shared.log("[Cache] Python 快照批量计算失败：\(f)——呈显式空态（不做 Swift 兜底）")
+                // §11.41：清空引擎字段值 → 该批标的的数值列渲染 "-"（显式空态）；
+                // 不再回落到 Swift 现状计算（Swift 算法已随本批次删除）。
                 for metaID in batch.keys {
                     self.rows[metaID]?.clearPythonValues()
                 }
@@ -304,9 +305,9 @@ final class MarketRowCache: ObservableObject {
             DebugLogger.shared.log("[Cache] computeQueue: HIGH BATCH START n=\(highTargets.count)")
             // ------ 高优先级：逐只取 → 立即回写刷新 UI ------
             for m in highTargets {
-                // §11.38：预取读走引擎（失败自动回退 Swift 现状）
+                // §11.41：预取读**只有引擎一路**（`fetchPeriodLimitedViaEngine`）；失败 → 空数组 + 日志，
+                // 不回落 Swift 读（`fetchPeriodLimited`）——Swift 实现已不允许作为退路。
                 let all = dbm.fetchPeriodLimitedViaEngine(metaId: m.id, table: "daily", limit: lookback)
-                    ?? dbm.fetchPeriodLimited(metaId: m.id, table: "daily", limit: lookback)
                 let arr = Array(all.reversed())
                 DispatchQueue.main.async {
                     guard let self = self else { return }
@@ -340,9 +341,8 @@ final class MarketRowCache: ObservableObject {
         let dbm = db
         computeQueue.async { [weak self] in
             for m in targets {
-                // §11.38：预取读走引擎（失败自动回退 Swift 现状）
+                // §11.41：预取读**只有引擎一路**；失败 → 空数组 + 日志（不回落 Swift 读）
                 let all = dbm.fetchPeriodLimitedViaEngine(metaId: m.id, table: "daily", limit: lookback)
-                    ?? dbm.fetchPeriodLimited(metaId: m.id, table: "daily", limit: lookback)
                 let arr = Array(all.reversed())
                 DispatchQueue.main.async {
                     guard let self = self else { return }

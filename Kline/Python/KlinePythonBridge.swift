@@ -132,6 +132,9 @@ final class KlinePythonBridge {
                     // A5-5：引擎就绪 → 策略库自动重载（E-2 取舍 #2；`.engine` 下按引擎加载，
                     // 未就绪期曾整体不可用，此处 fail-closed 恢复）
                     Task { await FormulaLibraryStore.shared.reloadStrategy() }
+                    // §11.41：行情字段只有引擎一个来源（Swift 算法已删除）→ 引擎就绪后补取
+                    // 「预取时引擎尚未就绪而落空」的行，避免行情页停在空态
+                    MarketRowCache.shared.retryEmptyRows(force: true)
                     completion(.success(()))
                 }
                 return
@@ -151,6 +154,8 @@ final class KlinePythonBridge {
                             StrategyProjection.shared.reset()
                             // A5-5：引擎就绪 → 策略库自动重载（同上，fail-closed 恢复）
                             Task { await FormulaLibraryStore.shared.reloadStrategy() }
+                            // §11.41：同上，补取「未就绪期落空」的行情行
+                            MarketRowCache.shared.retryEmptyRows(force: true)
                             completion(.success(()))
                         }
                     case .failure(let e):

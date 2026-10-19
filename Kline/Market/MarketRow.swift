@@ -24,9 +24,7 @@ final class MarketRow: Identifiable, Hashable {
     /// 近 N 根日线收盘价（升序，旧→新），供卡片 / 磁贴的迷你走势使用；无数据返回空数组
     var recentCloses: [Double] { (recentBars ?? []).map(\.close) }
 
-    /// 缓存字典：计算过一次的字段 Double 值（Swift 现状计算）
-    private var cache: [MarketField: Any] = [:]
-    /// Python 引擎计算的字段值缓存（阶段 C：行情快照下沉）
+    /// 引擎计算的字段值缓存（阶段 C / §11.41：**字段计算的唯一来源**）
     private var pythonValues: [MarketField: Double?] = [:]
     /// 文本渲染缓存：字段 key 是 rawValue + _txt 后缀
     private var textCache: [String: String] = [:]
@@ -41,7 +39,6 @@ final class MarketRow: Identifiable, Hashable {
     /// 使用最近 bars 填充（用于预取之后的一次性写入）。写入后清空之前缓存。
     func setBars(_ bars: [KlineItem]) {
         recentBars = bars
-        cache.removeAll(keepingCapacity: true)
         pythonValues.removeAll(keepingCapacity: true)
         textCache.removeAll(keepingCapacity: true)
     }
@@ -52,7 +49,8 @@ final class MarketRow: Identifiable, Hashable {
         pythonValues[field] = value
     }
 
-    /// 清空所有 Python 计算的字段值（引擎不可用时降级）。
+    /// 清空引擎计算的字段值（引擎不可用 / 失败时调用）→ UI 呈**显式空态**（渲染 "-"）。
+    /// §11.41：不做 Swift 兜底计算（Swift 现状算法已删除）。
     func clearPythonValues() {
         pythonValues.removeAll()
     }
@@ -66,16 +64,12 @@ final class MarketRow: Identifiable, Hashable {
 
     // MARK: - 字段取值入口
 
-    /// 获取字段的 Double 值（数值字段）；非数值字段/不可用返回 nil
-    /// 阶段 C：优先读取 Python 引擎计算的快照值；降级为 Swift 现状计算。
+    /// 获取字段的 Double 值（数值字段）；非数值字段 / 引擎尚未给出该字段返回 nil。
+    /// §11.41：**引擎为字段计算的唯一来源**（`quote_snapshot_batch` → `setPythonValue`）。
+    /// Swift 现状算法（compute / rangePct / ytdPct / ma）与其运行时回退已整体删除；
+    /// 对拍基准移到测试目标 `QuoteSnapshotOracle`（仅回归网用，生产不可达）。
     func number(_ f: MarketField) -> Double? {
-        // 阶段 C：优先 Python 引擎计算值
-        if let v = pythonValues[f] { return v }
-        // 降级：Swift 现状缓存
-        if let v = cache[f] as? Double { return v }
-        // 降级：Swift 现状纯函数计算
-        guard let v = Self.compute(f, meta: meta, bars: recentBars) else { return nil }
-        cache[f] = v
+        guard let v = pythonValues[f] else { return nil }
         return v
     }
 
@@ -97,66 +91,7 @@ final class MarketRow: Identifiable, Hashable {
         return .label
     }
 
-    // MARK: - 纯函数计算
-
-    /// 给定 meta + bars（升序）→ 返回字段数值
-    static func compute(_ f: MarketField, meta: MetaItem, bars: [KlineItem]?) -> Double? {
-        guard let bars = bars, !bars.isEmpty else { return nil }
-        let count = bars.count
-        let last = bars[count - 1]
-        switch f {
-        // 现价
-        case .latestPrice: return last.close
-        // 昨收 = 倒数第二根 close；不足则退化为 open（通达信在首日时的惯例）
-        case .prevClose:
-            return count >= 2 ? bars[count - 2].close : nil
-        case .open: return last.open
-        case .high: return last.high
-        case .low: return last.low
-        case .volume: return last.volume
-        case .turnover: return last.turnover
-
-        // 涨跌额 / 涨跌幅
-        case .change:
-            guard let pc = Self.compute(.prevClose, meta: meta, bars: bars), pc > 0 else { return nil }
-            return last.close - pc
-        case .changePct:
-            guard let pc = Self.compute(.prevClose, meta: meta, bars: bars), pc > 0 else { return nil }
-            return (last.close - pc) / pc * 100.0
-        case .amplitude:
-            guard let pc = Self.compute(.prevClose, meta: meta, bars: bars), pc > 0 else { return nil }
-            return (last.high - last.low) / pc * 100.0
-        case .volRatio:
-            // 当日成交量 / 前5日平均成交量（不足则尽量取到的天数）
-            guard count >= 2 else { return nil }
-            let today = last.volume
-            let before = bars[0..<(count-1)]
-            let base = Array(before.suffix(5))
-            let avg = base.reduce(0.0) { $0 + $1.volume } / Double(max(base.count, 1))
-            guard avg > 0 else { return nil }
-            return today / avg
-
-        // 区间涨幅
-        case .pct3d:  return rangePct(bars: bars, window: 3)
-        case .pct5d:  return rangePct(bars: bars, window: 5)
-        case .pct10d: return rangePct(bars: bars, window: 10)
-        case .pct20d: return rangePct(bars: bars, window: 20)
-        case .pct60d: return rangePct(bars: bars, window: 60)
-        case .pctYTD: return ytdPct(bars: bars)
-
-        // 均线值
-        case .ma5:  return ma(bars: bars, n: 5)
-        case .ma10: return ma(bars: bars, n: 10)
-        case .ma20: return ma(bars: bars, n: 20)
-        case .ma60: return ma(bars: bars, n: 60)
-
-        // 换手：没有流通股本 → 无法计算，保持 nil，渲染为"-"
-        case .turnoverRate: return nil
-
-        // 纯元数据（不支持数字）
-        case .code, .name, .type, .lastDate: return nil
-        }
-    }
+    // MARK: - 纯函数渲染（只做展示格式化，不做数值计算）
 
     /// 给定 meta + bars → 渲染成字符串
     static func render(_ f: MarketField, meta: MetaItem, number: Double?, bars: [KlineItem]?) -> String {
@@ -192,50 +127,7 @@ final class MarketRow: Identifiable, Hashable {
         }
     }
 
-    // MARK: - 辅助
-
-    /// window 日区间涨跌幅：(当日收盘 / window 前一日收盘 - 1) * 100。
-    /// 不足 window 根时取到的全部（至少2根才返回）。
-    static func rangePct(bars: [KlineItem], window: Int) -> Double? {
-        let count = bars.count
-        guard count >= 2 else { return nil }
-        let start = max(0, count - window - 1)
-        // start 为"起点前一根收盘"（即 window 前一日）；极端情况下 window 太大时 start=0 作为 base
-        // 但若 count - 1 - start < 1（即 start == count-1），至少得往前挪1根
-        let baseIdx = min(start, count - 2)
-        let base = bars[baseIdx].close
-        guard base > 0 else { return nil }
-        let last = bars[count - 1].close
-        return (last - base) / base * 100.0
-    }
-
-    static func ytdPct(bars: [KlineItem]) -> Double? {
-        let count = bars.count
-        guard count >= 2 else { return nil }
-        let last = bars[count - 1]
-        let yearOfLast = last.date / 10000
-        // 找当年第一根
-        var baseIdx = count - 1
-        for i in stride(from: count - 1, through: 0, by: -1) {
-            if bars[i].date / 10000 == yearOfLast { baseIdx = i } else { break }
-        }
-        // 昨收 = 当年第一根的前一根收盘（若存在），否则当年第一根的 open
-        let base: Double
-        if baseIdx > 0 {
-            base = bars[baseIdx - 1].close
-        } else {
-            base = bars[baseIdx].open
-        }
-        guard base > 0 else { return nil }
-        return (last.close - base) / base * 100.0
-    }
-
-    static func ma(bars: [KlineItem], n: Int) -> Double? {
-        let tail = Array(bars.suffix(n))
-        guard tail.count == n else { return nil }
-        let sum = tail.reduce(0.0) { $0 + $1.close }
-        return sum / Double(n)
-    }
+    // MARK: - 辅助（展示格式化）
 
     static func formatVolume(_ v: Double) -> String {
         if v >= 100_000_000 { return String(format: "%.2f亿", v / 100_000_000) }

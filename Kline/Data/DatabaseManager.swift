@@ -533,15 +533,19 @@ class DatabaseManager: ObservableObject {
         }
     }
 
-    /// §11.38（L2 首批）：**预取读**走引擎 —— 只把「主库行」交给引擎（`db_query`），
-    /// 增量库读 + live 覆盖 main 的合并 + 截断仍在本类内（与 `fetchPeriodLimited` 同一批 helper）。
-    /// 引擎未就绪 / 调用失败 → `nil`（调用方回退到 `fetchPeriodLimited`，行为与改动前一致）。
+    /// §11.41：预取读**只有引擎一路**（`db_query`）——引擎未就绪 / 调用失败 → 空数组 + 落日志（显式空态），
+    /// **不再回落 `fetchPeriodLimited`**（Swift 读已不允许作为退路）。
+    /// 增量库读 + live 覆盖 main 的合并 + 截断仍复用本类既有 helper（引擎给主库行，Swift 只做合并）。
     ///
-    /// ⚠️ 引擎取数走 `blockingCall`（内部 `assert(!Thread.isMainThread)`），而 `dbQueue.sync`
-    /// 会在**调用线程上内联执行**，故本方法**只允许后台线程调用**（生产仅 `MarketRowCache.computeQueue`）。
-    /// 主线程调用一律返回 `nil` 回退 Swift 现状——否则 Debug 直接断言崩，Release 会同步阻塞主线程到超时。
-    func fetchPeriodLimitedViaEngine(metaId: Int, table: String, limit: Int) -> [KlineItem]? {
-        guard !Thread.isMainThread else { return nil }
+    /// ⚠️ 主线程误用护栏：引擎取数走 `blockingCall`（内部断言禁止主线程），且 `dbQueue.sync` 在**调用线程上
+    /// 内联执行** → 主线程调用会同步阻塞主线程等 Python（Debug 断言崩 / Release 卡到超时）。
+    /// 生产调用点只有 `MarketRowCache.computeQueue`（后台）；此处对主线程调用显式拦下并记错日志。
+    func fetchPeriodLimitedViaEngine(metaId: Int, table: String, limit: Int) -> [KlineItem] {
+        guard !Thread.isMainThread else {
+            DebugLogger.shared.log("[DB][错误] fetchPeriodLimitedViaEngine 在主线程被调用（禁止在主线程序等 Python）"
+                                   + "→ 返回空显式空态 metaID=\(metaId) table=\(table)")
+            return []
+        }
         let wanted = Swift.max(1, limit)
         let live = liveSlice(metaId: metaId, table: table)
         // 主库最多会被增量库顶掉 live.items.count 行，故多取这么多（同 `fetchPeriodLimited`）
@@ -550,21 +554,28 @@ class DatabaseManager: ObservableObject {
             Self.mainRowsViaEngine(dbPath: Self.writableDBPath, table: table,
                                    metaID: metaId, limit: mainLimit)
         }
-        guard let rows else { return nil }
         let main = Self.klineItems(fromRows: rows)
         guard let live else { return Array(main.prefix(wanted)) }
         return Array(merge(live: live, main: main).prefix(wanted))
     }
 
-    /// 主库行取数（引擎 `db_query`，返回列序同 `runBarsQuery`）；内含 `blockingCall` →
-    /// 主线程调用直接返回 `nil`（同上层护栏），后台线程调用才真正走引擎。
+    /// 主库行取数（引擎 `db_query`，返回列序同 `runBarsQuery`）。
+    /// 失败 → 空数组 + 落日志（显式空态，不回退 Swift 读）；主线程调用 → 同样拦下并记错日志。
     static func mainRowsViaEngine(dbPath: String, table: String,
-                                  metaID: Int, limit: Int) -> [[Any]]? {
-        guard !Thread.isMainThread else { return nil }
-        guard case .success(let rows) = DbWriteBridge.dbQuery(dbPath: dbPath, table: table,
-                                                             metaID: metaID, limit: limit)
-        else { return nil }
-        return rows
+                                  metaID: Int, limit: Int) -> [[Any]] {
+        guard !Thread.isMainThread else {
+            DebugLogger.shared.log("[DB][错误] mainRowsViaEngine 在主线程被调用 → 返回空（不在主线程等 Python）"
+                                   + " table=\(table) metaID=\(metaID)")
+            return []
+        }
+        switch DbWriteBridge.dbQuery(dbPath: dbPath, table: table, metaID: metaID, limit: limit) {
+        case .success(let rows):
+            return rows
+        case .failure(let f):
+            DebugLogger.shared.log("[DB] 引擎取数失败（db_query table=\(table) metaID=\(metaID)）："
+                                   + "\(f) → 显式空态（不回退 Swift 读）")
+            return []
+        }
     }
 
     /// 引擎返回的行（列序与 `runBarsQuery` / `db_query` 一致）→ `KlineItem`

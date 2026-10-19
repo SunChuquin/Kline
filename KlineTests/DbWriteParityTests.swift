@@ -472,10 +472,10 @@ final class DbWriteParityTests: XCTestCase {
     /// 「引擎取数 `DatabaseManager.mainRowsViaEngine` vs Swift mirror」逐行对拍，
     /// 并用沙盒日志证明**确实走到了引擎**（而非静默回退）。
     ///
-    /// 刻意**不碰真实单例 / 真实主库**：`fetchPeriodLimitedViaEngine` 走 `blockingCall`，
-    /// 其 `assert(!Thread.isMainThread)` + `dbQueue.sync` 在调用线程内联执行 →
-    /// 单元测试若在主线程直调真实单例会 SIGTRAP 崩掉被测 App（2026-10-19 实测）。
-    /// 故此处只测「引擎取数核心」，并在末尾钉住「主线程调用必须回退 nil」的护栏契约。
+    /// 另钉住**主线程误用护栏**（§11.41）：`blockingCall` 断言禁止主线程、`dbQueue.sync` 又在调用线程
+    /// 内联执行 → 主线程调用必须先被拦下（返回空 + 记错日志），不得阻塞主线程、更不得崩。
+    ///
+    /// 刻意**不碰真实单例 / 真实主库**（造价路径与场景 1–5 同款：临时库 + 独立实例）。
     func testPrefetchReadEnginePathParityAndLogEvidence() async throws {
         try await ensureEngineReady()
         let dbPath = try makeTempDB("prefetch", metas: [(id: 1, file: "SH#600000")], tables: ["daily"])
@@ -493,26 +493,30 @@ final class DbWriteParityTests: XCTestCase {
         let marker = "—— prefetch 取证标记 ——"
         DebugLogger.shared.log("[取证] " + marker)
 
-        // 后台线程调用（生产同款上下文：MarketRowCache.computeQueue）
+        // ① 主线程误用护栏：本测试方法就在主线程 → 必须返回空 + 记错日志，且**没有**触到引擎
+        let onMain = DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
+        XCTAssertTrue(onMain.isEmpty, "主线程调用未被拦下 → 会同步阻塞主线程等 Python（Debug 断言崩 / Release 卡死）")
+        let afterMain = debugLogTail(afterMarker: marker)
+        XCTAssertTrue(afterMain.contains("[DB][错误] mainRowsViaEngine 在主线程被调用"),
+                      "主线程调用没有留下错误日志 → 护栏失效（静默）")
+        XCTAssertFalse(afterMain.contains("[PyBridge] db_write.py 完成"),
+                       "主线程调用竟然走到了引擎 → 护栏没拦住")
+
+        // ② 后台线程调用（生产同款上下文：MarketRowCache.computeQueue）
         let engineRows = try await onBackground {
             DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
         }
         let swiftRows = swiftBarsMirror(dbPath: dbPath, table: "daily", metaID: 1, limit: 250)
 
-        // ① 沙盒日志证据：桥接每次调用都会写 `[PyBridge] db_write.py 完成（总 …）`
+        // ③ 沙盒日志证据：桥接每次调用都会写 `[PyBridge] db_write.py 完成（总 …）`
         let tail = debugLogTail(afterMarker: marker)
         XCTAssertTrue(tail.contains("[PyBridge] db_write.py 完成"),
                       "沙盒日志里没有引擎调用行 → 预取**没走到引擎**（静默回退）")
 
-        // ② 逐行对拍
-        let e = try XCTUnwrap(engineRows, "引擎取数返回 nil——未走到引擎")
-        XCTAssertEqual(e.count, 250, "引擎取数行数异常")
-        XCTAssertEqual(jsonTextAny(e), jsonTextAny(swiftRows), "两路径逐行不一致")
+        // ④ 逐行对拍
+        XCTAssertEqual(engineRows.count, 250, "引擎取数行数异常")
+        XCTAssertEqual(jsonTextAny(engineRows), jsonTextAny(swiftRows), "两路径逐行不一致")
 
-        // ③ 护栏契约：主线程调用必须回退 nil —— 否则 Debug 断言崩 / Release 同步阻塞主线程
-        XCTAssertNil(DatabaseManager.mainRowsViaEngine(dbPath: dbPath, table: "daily", metaID: 1, limit: 250),
-                     "主线程未被拦截 → 会在主线程同步等 Python（断言崩 / 卡死）")
-
-        DebugLogger.shared.log("[取证] 预取对拍完成：rows=\(e.count) 一致，主线程护栏生效")
+        DebugLogger.shared.log("[取证] 预取对拍完成：rows=\(engineRows.count) 一致，主线程护栏生效")
     }
 }
