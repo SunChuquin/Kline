@@ -45,14 +45,21 @@ final class MarketRow: Identifiable, Hashable {
 
     /// 写入 Python 引擎计算的字段值（阶段 C：行情快照下沉）。
     /// 供 MarketRowCache 在通过 Python 引擎批量计算后调用。
+    ///
+    /// ⚠️ §11.41 回归点：**必须同时失效该字段的文本缓存**。引擎值到达前 UI 已经渲染过一次，
+    /// 那时 `number()` 为空 → `text()` 把 `"-"` 写进 `textCache`；若不失效，
+    /// 之后引擎真值写入也不会让 `text()` 更新（`textCache` 只在 `setBars` 时整体清），
+    /// 表现为**行情表/卡片全列恒显 "-"**（2026-10-19 实测）。
     func setPythonValue(_ value: Double?, for field: MarketField) {
         pythonValues[field] = value
+        textCache.removeValue(forKey: field.rawValue + "_txt")
     }
 
     /// 清空引擎计算的字段值（引擎不可用 / 失败时调用）→ UI 呈**显式空态**（渲染 "-"）。
-    /// §11.41：不做 Swift 兜底计算（Swift 现状算法已删除）。
+    /// §11.41：不做 Swift 兜底计算（Swift 现状算法已删除）；同样需失效文本缓存。
     func clearPythonValues() {
         pythonValues.removeAll()
+        textCache.removeAll(keepingCapacity: true)
     }
 
     static func == (lhs: MarketRow, rhs: MarketRow) -> Bool {
