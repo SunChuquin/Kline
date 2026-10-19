@@ -128,7 +128,7 @@ struct LinkedKlineTile: View {
             guard newValue.metaID != view.metaID || newValue.period != view.period else { return }
             DebugLogger.shared.log("[LinkedTile#\(newValue.index)] CONFIG_CHANGE \(view.metaID)/\(view.period.rawValue) → \(newValue.metaID)/\(newValue.period.rawValue)（外部改配置，显式重载）")
             loadData(targetMetaID: newValue.metaID, targetPeriod: newValue.period,
-                     initiator: "CONFIG_CHANGE")
+                     initiator: "CONFIG_CHANGE", trainingDate: trainingMaxDate)
         }
         // 增量库热刷新（dataVersion 仅在内容确实变化时自增）：isLoaded 已为 true 时上面两条都不会触发，
         // 故此处补一条。先作废本格共享槽（否则 loadData 的「槽位已持有 series → SKIP」守卫会拦住重查），
@@ -142,7 +142,8 @@ struct LinkedKlineTile: View {
             linkedStore.commitSlot(ownerMetaID: ownerMetaID, tileIndex: idx,
                                    metaID: targetMetaID, period: targetPeriod,
                                    series: nil, isLoading: false)
-            loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod, initiator: "DATA_VERSION")
+            loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod,
+                     initiator: "DATA_VERSION", trainingDate: trainingMaxDate)
         }
         // 训练日推进（训练态右缘上界变化）：本格序列口径随之变化（裁到训练日 + 右缘那根按日线合成），
         // 必须先作废本格共享槽（否则 loadData 的槽位命中守卫会拦住重查），再用闭包参数显式触发重载。
@@ -155,7 +156,8 @@ struct LinkedKlineTile: View {
             linkedStore.commitSlot(ownerMetaID: ownerMetaID, tileIndex: idx,
                                    metaID: targetMetaID, period: targetPeriod,
                                    series: nil, isLoading: false)
-            loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod, initiator: "TRAINING_DATE")
+            loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod,
+                     initiator: "TRAINING_DATE", trainingDate: newValue)
         }
     }
 
@@ -185,7 +187,8 @@ struct LinkedKlineTile: View {
             return
         }
         // 4) 以上都不满足 → 真正发起一次加载
-        loadData(targetMetaID: view.metaID, targetPeriod: view.period, initiator: "onAppear")
+        loadData(targetMetaID: view.metaID, targetPeriod: view.period,
+                 initiator: "onAppear", trainingDate: trainingMaxDate)
     }
 
     // MARK: - 数据加载
@@ -198,8 +201,12 @@ struct LinkedKlineTile: View {
     ///   - targetMetaID: 本次必须去查的标的 ID
     ///   - targetPeriod: 本次必须去查的周期
     ///   - initiator: 日志标记（"onAppear" / "SWIPE_IMMEDIATE_LOAD" / "SWITCH_ITEM" / "SEARCH"）
+    ///   - trainingDate: 本次切片所用的训练日（nil = 非训练态）。
+    ///     ⚠️ 必须由调用方**显式传入**，绝不在函数体内部读 `self.trainingMaxDate`——
+    ///     `.onChange(of: trainingMaxDate)` 的回调里读 self 属性拿到的可能是旧快照（iOS 16 已知坑），
+    ///     会把上一个训练日的切片写进共享槽，随后本格永远对不上新训练日、卡在加载态。
     private func loadData(targetMetaID: Int, targetPeriod: KlinePeriod,
-                          initiator: String = "caller") {
+                          initiator: String = "caller", trainingDate: Int?) {
         let idx = view.index
         // 0) DB 未就绪：只把该格标记为加载中，返回后由 isLoaded.onChange 驱动真查询
         guard databaseManager.isLoaded else {
@@ -211,7 +218,6 @@ struct LinkedKlineTile: View {
         //    onAppear）可能先后到达，若前一路已完成提交，后路直接复用，避免同数据反复查库。
         //    series 为 nil（明确无数据）或在途/加载中不拦截，保证"重查拿新数据"语义不变。
         let held = linkedStore.slot(ownerMetaID: ownerMetaID, tileIndex: idx)
-        let trainingDate = trainingMaxDate
         if held.matches(metaID: targetMetaID, period: targetPeriod, trainingDate: trainingDate),
            held.series != nil, !held.isLoading {
             DebugLogger.shared.log("[LinkedTile#\(idx)] loadData⏭️ [\(initiator)] SKIP(槽位已持有 \(targetPeriod.rawValue))")
@@ -370,7 +376,7 @@ struct LinkedKlineTile: View {
                                    // 发现已登记 inFlight → SKIP，不会重复查 / 反向覆盖。
                                    DebugLogger.shared.log("[LinkedTile#\(idx)] SWIPE_IMMEDIATE_LOAD meta=\(v.metaID) period=\(newPeriod.rawValue)（不依赖 onChange）")
                                    loadData(targetMetaID: v.metaID, targetPeriod: newPeriod,
-                                            initiator: "SWIPE_IMMEDIATE_LOAD")
+                                            initiator: "SWIPE_IMMEDIATE_LOAD", trainingDate: trainingMaxDate)
                                }
                            } else {
                                DebugLogger.shared.log("🛑 [LinkedTile#\(idx)] 写后回读找不到第 \(idx) 格视图！ reread.count=\(reread.count)")
@@ -469,7 +475,8 @@ struct LinkedKlineTile: View {
         linkedStore.setConfigs(replace(v, in: ownerMetaID), for: ownerMetaID)
         // 写后立刻显式取一次（新 metaID / 原周期）。tryBeginFlight 会防止 .id 重建后的
         // 新实例 onAppear 再重复发起一次查询。
-        loadData(targetMetaID: next.id, targetPeriod: p, initiator: "SWITCH_ITEM")
+        loadData(targetMetaID: next.id, targetPeriod: p, initiator: "SWITCH_ITEM",
+                 trainingDate: trainingMaxDate)
     }
 
     // MARK: - 副图二搜索栏（覆盖式）
@@ -552,7 +559,8 @@ struct LinkedKlineTile: View {
             searchText = ""
             searchFocused = false
             // 写后立刻显式取一次（新 metaID / 原周期）。tryBeginFlight 防止新实例 onAppear 重复查。
-            loadData(targetMetaID: result.id, targetPeriod: p, initiator: "SEARCH")
+            loadData(targetMetaID: result.id, targetPeriod: p, initiator: "SEARCH",
+                     trainingDate: trainingMaxDate)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
