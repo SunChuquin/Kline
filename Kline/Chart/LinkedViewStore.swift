@@ -61,13 +61,24 @@ final class LinkedTileDataSlot {
     /// 最后一次成功写入时的目标 (metaID, period) —— 命中则 onAppear 直接复用，不再查 DB
     var loadedMetaID: Int?
     var loadedPeriod: KlinePeriod?
+    /// 最后一次成功写入时的训练日（非训练态 nil）：训练态序列是「裁到训练日 + 右缘那根按日线合成」的
+    /// 时点切片，训练日一变内容就变，故命中判定必须连训练日一起比——否则会命中上一训练日留下的
+    /// 旧切片（甚至上一次非训练态留下的完整周期序列），导致切片口径静默失效。
+    var loadedTrainingDate: Int?
     /// 是否正在加载中（用于 isLoading 显示占位圈）
     var isLoading: Bool = true
     /// 在途查询目标：若命中则 onAppear 不重复发起 DB 查询
     var inFlightMetaID: Int?
     var inFlightPeriod: KlinePeriod?
+    /// 在途查询的训练日（判同规则与 loadedTrainingDate 一致）
+    var inFlightTrainingDate: Int?
     /// 在途查询发起时间（DebugLogger 诊断用）
     var inFlightStart: Date?
+
+    /// 槽内序列是否可直接用于目标 (metaID, period, trainingDate)：三者全等才算命中
+    func matches(metaID: Int, period: KlinePeriod, trainingDate: Int?) -> Bool {
+        loadedMetaID == metaID && loadedPeriod == period && loadedTrainingDate == trainingDate
+    }
 }
 
 /// 联动视图缩放持久化 key：跟随「视图内容 (标地, 周期)」而非视图下标。
@@ -133,20 +144,23 @@ final class LinkedViewStore: ObservableObject {
         return s
     }
 
-    /// 把某格 series 成功写入槽（同步更新 loadedMetaID/loadedPeriod，清在途标记，触发 UI 刷新）
+    /// 把某格 series 成功写入槽（同步更新 loadedMetaID/loadedPeriod/loadedTrainingDate，清在途标记，触发 UI 刷新）
     func commitSlot(ownerMetaID: Int, tileIndex: Int,
                     metaID: Int, period: KlinePeriod,
+                    trainingDate: Int? = nil,
                     series: ChartSeries?,
                     isLoading: Bool = false) {
         let s = slot(ownerMetaID: ownerMetaID, tileIndex: tileIndex)
         s.series = series
         s.loadedMetaID = metaID
         s.loadedPeriod = period
+        s.loadedTrainingDate = trainingDate
         s.isLoading = isLoading
         // 清在途（仅当在途仍是本次提交的目标时才清，避免快速切两次时后发的 inFlight 被误清）
-        if s.inFlightMetaID == metaID, s.inFlightPeriod == period {
+        if s.inFlightMetaID == metaID, s.inFlightPeriod == period, s.inFlightTrainingDate == trainingDate {
             s.inFlightMetaID = nil
             s.inFlightPeriod = nil
+            s.inFlightTrainingDate = nil
             s.inFlightStart = nil
         }
         // objectWillChange 手动触发（值类型 class 引用属性变化 SwiftUI 不自动 fire）
@@ -156,13 +170,15 @@ final class LinkedViewStore: ObservableObject {
     /// 登记在途查询（返回 true = 本次由调用方负责查询；返回 false = 已有相同目标在途，跳过重复查）
     @discardableResult
     func tryBeginFlight(ownerMetaID: Int, tileIndex: Int,
-                        metaID: Int, period: KlinePeriod) -> Bool {
+                        metaID: Int, period: KlinePeriod,
+                        trainingDate: Int? = nil) -> Bool {
         let s = slot(ownerMetaID: ownerMetaID, tileIndex: tileIndex)
-        if s.inFlightMetaID == metaID, s.inFlightPeriod == period {
+        if s.inFlightMetaID == metaID, s.inFlightPeriod == period, s.inFlightTrainingDate == trainingDate {
             return false  // 同目标已经在飞，跳过
         }
         s.inFlightMetaID = metaID
         s.inFlightPeriod = period
+        s.inFlightTrainingDate = trainingDate
         s.inFlightStart = Date()
         s.isLoading = true
         objectWillChange.send()

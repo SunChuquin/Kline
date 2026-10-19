@@ -401,6 +401,15 @@ struct KlineDetailView: View {
                 queryDrillInSeries(metaID: d.metaID, period: d.period)
             }
         }
+        // 训练日推进：训练态各周期序列按训练日做「时点切片」（裁到训练日 + 右缘那根按本标的日线合成），
+        // 训练日一变序列内容就变，必须重查重算——否则右缘那根会一直停留在旧训练日的形态。
+        .onChange(of: trainer.trainingDate) { _ in
+            guard trainingActive, databaseManager.isLoaded else { return }
+            loadData(showLoading: false)
+            if let d = drillIn {
+                queryDrillInSeries(metaID: d.metaID, period: d.period)
+            }
+        }
         // 弹窗聚合推送到协调对象：ContentView 的悬浮按钮 overlay 订阅 isDetailViewPopupActive 后隐藏按钮。
         // 不在 ViewBuilder 闭包里写赋值语句（之前 buggy commit 的坑），用 onChange 在渲染循环外安全推送
         .onChange(of: isAnyPopupActive) { active in
@@ -1271,7 +1280,9 @@ struct KlineDetailView: View {
                            mainLegendPortal: MainLegendPortal? = nil) -> some View {
         KlineChartView(series: series, chartStyle: $config.chartStyle, displaySettings: $config.displaySettings,
                        showCustomEditor: $showCustomEditor, showSystemEditor: $showSystemEditor,
-                       metaId: metaID ?? item.id, period: period,
+                       // 训练态传 nil：序列是按训练日切片/合成的，与库内原序列不同，
+                       // 不能从 (标的, 周期) 指标缓存恢复曲线（会恢复出未切片的曲线）。与联动 tile 同口径。
+                       metaId: trainingActive ? nil : (metaID ?? item.id), period: period,
                        isolatedSubs: isolated, linkAutoCenter: linkAutoCenter,
                        // 单视图：cursorLinkEnabled 无意义，传 false（不传也有默认值）；
                        // 联动：此处 helper 仅单图分支在使用 → 传 false；tile 分支自己传 cursorLinkEnabled
@@ -1359,6 +1370,9 @@ struct KlineDetailView: View {
             // 图表将重建，先清空信息栏按钮标题，避免短暂显示旧周期指标
             mainLegendPortal.title = ""
         }
+        // 训练日必须在主线程先取好再进后台（trainer 是主线程观察对象）：
+        // 训练态各周期序列要按训练日做「时点切片」（详见 TrainingAsOfSeries）
+        let trainingDate = trainingMaxDateValue
 
         // 后台串行加载并预计算指标（全量历史），避免阻塞主线程。
         // 月/季/年线表可能不存在，不存在时对应查询返回空、series 为 nil，仅加载日/周线
@@ -1370,14 +1384,29 @@ struct KlineDetailView: View {
             let yearly = databaseManager.fetchYearlyData(metaId: item.id)
 
             DispatchQueue.main.async {
-                self.dailySeries = daily.isEmpty ? nil : ChartSeries(data: daily)
-                self.weeklySeries = weekly.isEmpty ? nil : ChartSeries(data: weekly)
-                self.monthlySeries = monthly.isEmpty ? nil : ChartSeries(data: monthly)
-                self.quarterlySeries = quarterly.isEmpty ? nil : ChartSeries(data: quarterly)
-                self.yearlySeries = yearly.isEmpty ? nil : ChartSeries(data: yearly)
+                // 训练态：日线裁到训练日；周/月/季/年右缘那根用本标的日线从周期起点聚合到训练日
+                // （口径同非训练态多图联动复盘的「形成中K线」，WYSIWYG 的"假如时间停在训练日"）
+                self.dailySeries = self.trainingSeries(daily, period: .daily, trainingDate: trainingDate, daily: daily)
+                self.weeklySeries = self.trainingSeries(weekly, period: .weekly, trainingDate: trainingDate, daily: daily)
+                self.monthlySeries = self.trainingSeries(monthly, period: .monthly, trainingDate: trainingDate, daily: daily)
+                self.quarterlySeries = self.trainingSeries(quarterly, period: .quarterly, trainingDate: trainingDate, daily: daily)
+                self.yearlySeries = self.trainingSeries(yearly, period: .yearly, trainingDate: trainingDate, daily: daily)
                 self.isLoading = false
             }
         }
+    }
+
+    /// 组装某周期用于渲染的序列：训练态按训练日切片（`TrainingAsOfSeries`），非训练态原样。
+    /// - Parameters:
+    ///   - rows: 该周期原始 K 线（date 降序）
+    ///   - daily: 同一标的的日线（date 降序），训练态合成右缘那根时使用
+    private func trainingSeries(_ rows: [KlineItem], period: KlinePeriod,
+                                trainingDate: Int?, daily: [KlineItem]) -> ChartSeries? {
+        guard !rows.isEmpty else { return nil }
+        let sliced = trainingDate.map {
+            TrainingAsOfSeries.slice(rows: rows, period: period, trainingDate: $0, daily: daily)
+        } ?? rows
+        return sliced.isEmpty ? nil : ChartSeries(data: sliced)
     }
 
     /// 当前周期已全部算完后，在后台继续预计算其它未计算周期：
@@ -1386,6 +1415,10 @@ struct KlineDetailView: View {
     /// 注意：当前正在显示的周期由可见 K 线图自己分块预计算，后台只补「不可见」的周期，
     /// 避免后台提前把可见周期标记为完成、与可见视图的进行中计算产生竞态
     private func prefetchOtherPeriods(excluding finished: KlinePeriod) {
+        // 训练态：各周期序列是「按训练日切片」的（与非训练态库内序列不同），
+        // 预计算结果不能按 (标的, 周期) 写进全局缓存——否则非训练视图再打开同一标的时
+        // 会从缓存恢复出「裁到训练日」的错误曲线。训练态不预计算其它周期。
+        guard !trainingActive else { return }
         let metaId = item.id
         let visible = config.selectedPeriod
         for period in KlinePeriod.allCases where period != finished && period != visible {
@@ -1430,6 +1463,8 @@ struct KlineDetailView: View {
     /// 后台查询钻取目标 K 线并写回 series。
     /// 只做「查 + 写」，不触碰钻取状态机（snapshot / 光标 / 联动），供热刷新复用。
     private func queryDrillInSeries(metaID: Int, period: KlinePeriod) {
+        // 训练态：钻取视图同样按训练日切片；日线取**钻取目标自己标的**的（可能与主标的相同或不同，各用各的）
+        let trainingDate = trainingMaxDateValue
         DispatchQueue.global(qos: .userInitiated).async {
             let data: [KlineItem]
             switch period {
@@ -1439,8 +1474,12 @@ struct KlineDetailView: View {
             case .quarterly: data = self.databaseManager.fetchquarterlyData(metaId: metaID)
             case .yearly:  data = self.databaseManager.fetchYearlyData(metaId: metaID)
             }
+            let daily = trainingDate == nil || period == .daily
+                ? data
+                : self.databaseManager.fetchDailyData(metaId: metaID)
             DispatchQueue.main.async {
-                self.drillInSeries = data.isEmpty ? nil : ChartSeries(data: data)
+                self.drillInSeries = self.trainingSeries(data, period: period,
+                                                         trainingDate: trainingDate, daily: daily)
                 self.drillInLoading = false
             }
         }

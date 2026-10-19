@@ -93,6 +93,59 @@ final class LinkSourceBarCache: ObservableObject {
     }
 }
 
+// MARK: - 训练态「时点切片」：把某周期的 K 线截到训练日，并用日线合成右缘那根「形成中大周期K线」
+
+/// 训练态图表数据口径：让周/月/季/年图显示「假如时间停在训练日」的真实形态。
+///
+/// 背景：训练态原有的右缘钳制（`KlineChartView.trainingMaxDate` → `trainingEndIndex`）只保证
+/// 「训练日之后的 K 线不进可见窗口」，但库里的大周期 K 线是**整周期聚合**的（周线含当周全部交易日、
+/// 月线含整月……），于是训练日停在周中/月中时，右缘那根显示的是「整周/整月」的完整形状——
+/// 含训练日之后的数据，且训练日推进时它也不变形。
+///
+/// 本切片把该周期裁到「date ≤ 训练日」，再用**同一个标的**的日线，从该周期起点聚合到训练日，
+/// 替换右缘那一根：口径与联动复盘合成 K 线（`KlineChartView.synthesizeBar`）完全一致——
+/// 开 = 区间首根日线开、收 = 训练日（区间末根日线）收、高/低 = 包络、量/额 = 累加。
+/// 这样训练态大周期图的"形成中K线"与非训练态多图联动复盘是同一套形态来源。
+///
+/// - Important: 日线必须取**该 (标的) 自己的**日线（多图里各格标的可能不同，绝不能串数据）。
+/// - Note: 日线不可用 / 区间内无日线时退化为"只裁剪不替换"，绝不合成出错数据。
+enum TrainingAsOfSeries {
+
+    /// - Parameters:
+    ///   - rows: 该 (标的, 周期) 的库内 K 线，**date 降序**（DatabaseManager 查询约定）
+    ///   - period: 该周期；`.daily` 只裁剪（日线本身即逐日数据，最后一根就是训练日）
+    ///   - trainingDate: 训练日 YYYYMMDD（≤ 0 视为无效，原样返回）
+    ///   - daily: 该标的日线，**date 降序**
+    /// - Returns: date 降序的切片序列（可直接 `ChartSeries(data:)`）
+    static func slice(rows: [KlineItem], period: KlinePeriod,
+                      trainingDate: Int, daily: [KlineItem]) -> [KlineItem] {
+        guard trainingDate > 0 else { return rows }
+        // 训练日之后的 K 线一律不进序列（右缘那根 = 含训练日的那根；它之后属于"尚未发生"）
+        let capped = rows.filter { $0.date <= trainingDate }
+        // 日线本身就是逐日数据，最后一根即训练日；无日线可依 / 无序列可替换 → 直接返回裁剪结果
+        guard period != .daily, let last = capped.first, !daily.isEmpty else { return capped }
+        // 大周期起点（周线=周一、月/季/年=对应首日），日线段取 [起点, 训练日]
+        let (periodStart, _) = KlinePeriod.periodDateRange(period, date: last.date)
+        let seg = daily.filter { $0.date >= periodStart && $0.date <= trainingDate }
+        guard let newest = seg.first else { return capped }   // 区间内无日线（停牌/无数据）→ 回退真实 K 线
+        let oldest = seg[seg.count - 1]                       // 降序 → 末位为区间最早一根
+        var high = -Double.greatestFiniteMagnitude
+        var low = Double.greatestFiniteMagnitude
+        var volume = 0.0
+        var turnover = 0.0
+        for bar in seg {
+            if bar.high > high { high = bar.high }
+            if bar.low < low { low = bar.low }
+            volume += bar.volume
+            turnover += bar.turnover
+        }
+        // date 沿用原周期 bar 的 date（= 该周期首个交易日），保证横轴位置/周期区间聚合口径不变
+        let forming = KlineItem(date: last.date, open: oldest.open, high: high, low: low,
+                                close: newest.close, volume: volume, turnover: turnover)
+        return [forming] + capped.dropFirst()
+    }
+}
+
 // MARK: - 联动复盘：合成点指标 as-of 单点重算（后台异步 + 进程内缓存）
 
 /// 一次 as-of 结果的缓存键：同一(标的,目标周期,来源周期,光标日期,指标配置)只算一次，

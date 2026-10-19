@@ -67,8 +67,8 @@ struct LinkedKlineTile: View {
     /// 当前用于渲染的 series：共享槽最新值，无则 fallback 到本地 @State
     private var currentSeries: ChartSeries? {
         let s = currentSlot
-        if s.loadedMetaID == view.metaID, s.loadedPeriod == view.period {
-            return s.series  // 槽中是本次(metaID,period)的结果：直接采用
+        if s.matches(metaID: view.metaID, period: view.period, trainingDate: trainingMaxDate) {
+            return s.series  // 槽中是本次(metaID,period,训练日)的结果：直接采用
         }
         // 槽中目标对不上（比如刚切完还没写入，或遗留旧结果）：退回到本地 @State
         return chartSeries
@@ -76,7 +76,7 @@ struct LinkedKlineTile: View {
     /// 当前用于显示加载占位的 isLoading：共享槽值（含在途/加载中标记）OR 本地值
     private var currentLoading: Bool {
         let s = currentSlot
-        if s.loadedMetaID == view.metaID, s.loadedPeriod == view.period {
+        if s.matches(metaID: view.metaID, period: view.period, trainingDate: trainingMaxDate) {
             return s.isLoading  // 目标匹配 → 以槽为准
         }
         return s.isLoading || isLoading
@@ -144,14 +144,27 @@ struct LinkedKlineTile: View {
                                    series: nil, isLoading: false)
             loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod, initiator: "DATA_VERSION")
         }
+        // 训练日推进（训练态右缘上界变化）：本格序列口径随之变化（裁到训练日 + 右缘那根按日线合成），
+        // 必须先作废本格共享槽（否则 loadData 的槽位命中守卫会拦住重查），再用闭包参数显式触发重载。
+        // 退出训练（trainingMaxDate → nil）同理：回到未裁剪的完整序列。
+        .onChange(of: trainingMaxDate) { newValue in
+            let idx = view.index
+            let targetMetaID = view.metaID
+            let targetPeriod = view.period
+            DebugLogger.shared.log("[LinkedTile#\(idx)] TRAINING_DATE 变化 → 作废槽位并重查 训练日=\(newValue.map(String.init) ?? "-") meta=\(targetMetaID) period=\(targetPeriod.rawValue)")
+            linkedStore.commitSlot(ownerMetaID: ownerMetaID, tileIndex: idx,
+                                   metaID: targetMetaID, period: targetPeriod,
+                                   series: nil, isLoading: false)
+            loadData(targetMetaID: targetMetaID, targetPeriod: targetPeriod, initiator: "TRAINING_DATE")
+        }
     }
 
     /// onAppear 阶段的加载决策（共享槽 + 在途登记 → 绝大多数命中后根本不查 DB）
     private func tryLoadOnAppear() {
         let s = currentSlot
-        // 1) 命中已成功缓存过的同目标 → 直接用，根本不碰 DB
-        if s.loadedMetaID == view.metaID, s.loadedPeriod == view.period {
-            DebugLogger.shared.log("[LinkedTile#\(view.index)] onAppear⤵️ 命中缓存 meta=\(view.metaID) period=\(view.period.rawValue) rows=\(s.series?.sorted.count ?? 0)")
+        // 1) 命中已成功缓存过的同目标（含训练日）→ 直接用，根本不碰 DB
+        if s.matches(metaID: view.metaID, period: view.period, trainingDate: trainingMaxDate) {
+            DebugLogger.shared.log("[LinkedTile#\(view.index)] onAppear⤵️ 命中缓存 meta=\(view.metaID) period=\(view.period.rawValue) 训练日=\(trainingMaxDate.map(String.init) ?? "-") rows=\(s.series?.sorted.count ?? 0)")
             // 即便已缓存，若 DB 未就绪仍保持 loading 外观
             if !databaseManager.isLoaded {
                 linkedStore.markLoading(ownerMetaID: ownerMetaID, tileIndex: view.index)
@@ -160,7 +173,8 @@ struct LinkedKlineTile: View {
             return
         }
         // 2) 已有相同目标在飞（前一个实例 SWIPE_IMMEDIATE_LOAD 发起的）→ 直接等待结果
-        if s.inFlightMetaID == view.metaID, s.inFlightPeriod == view.period {
+        if s.inFlightMetaID == view.metaID, s.inFlightPeriod == view.period,
+           s.inFlightTrainingDate == trainingMaxDate {
             DebugLogger.shared.log("[LinkedTile#\(view.index)] onAppear⏳ 发现已在途 meta=\(view.metaID) period=\(view.period.rawValue) → 跳过重复查询")
             linkedStore.markLoading(ownerMetaID: ownerMetaID, tileIndex: view.index)
             return
@@ -192,21 +206,23 @@ struct LinkedKlineTile: View {
             linkedStore.markLoading(ownerMetaID: ownerMetaID, tileIndex: idx)
             return
         }
-        // 0.5) 槽位命中守卫：目标 (metaID, period) 已成功持有 series → 无需重复查询。
+        // 0.5) 槽位命中守卫：目标 (metaID, period, 训练日) 已成功持有 series → 无需重复查询。
         //    背景：多路触发（SWIPE_IMMEDIATE_LOAD / CONFIG_CHANGE onChange / .id 重建
         //    onAppear）可能先后到达，若前一路已完成提交，后路直接复用，避免同数据反复查库。
         //    series 为 nil（明确无数据）或在途/加载中不拦截，保证"重查拿新数据"语义不变。
         let held = linkedStore.slot(ownerMetaID: ownerMetaID, tileIndex: idx)
-        if held.loadedMetaID == targetMetaID, held.loadedPeriod == targetPeriod,
+        let trainingDate = trainingMaxDate
+        if held.matches(metaID: targetMetaID, period: targetPeriod, trainingDate: trainingDate),
            held.series != nil, !held.isLoading {
             DebugLogger.shared.log("[LinkedTile#\(idx)] loadData⏭️ [\(initiator)] SKIP(槽位已持有 \(targetPeriod.rawValue))")
             return
         }
-        // 1) 全局在途登记：同 (owner,index,metaID,period) 只允许一次在飞；已经有在飞的直接跳过。
+        // 1) 全局在途登记：同 (owner,index,metaID,period,训练日) 只允许一次在飞；已经有在飞的直接跳过。
         //    这样 SWIPE_IMMEDIATE_LOAD 在旧实例先登记 → 新实例 onAppear 随后到达时发现已在飞，
         //    根本不重复查，也就不会出现 "新实例的ticket把旧实例正确结果作废" 的反向竞态。
         let started = linkedStore.tryBeginFlight(ownerMetaID: ownerMetaID, tileIndex: idx,
-                                                 metaID: targetMetaID, period: targetPeriod)
+                                                 metaID: targetMetaID, period: targetPeriod,
+                                                 trainingDate: trainingDate)
         // 2) 本地 @State ticket：**仅在真正发起查询时递增**。
         //    ⚠️ SKIP(inFlight) 路径绝不递增——同目标在途结果本就该提交到共享槽，
         //    若此处自增 ticket 会把它判为过期丢弃（查询回来了却不写槽），tile 永远
@@ -230,7 +246,13 @@ struct LinkedKlineTile: View {
         isLoading = true
         mainLegendPortal.title = ""
         DispatchQueue.global(qos: .userInitiated).async {
-            let rows = databaseManager.fetchBars(metaId: targetMetaID, period: targetPeriod)
+            var rows = databaseManager.fetchBars(metaId: targetMetaID, period: targetPeriod)
+            // 训练态：本格序列按训练日做「时点切片」——裁到训练日，且右缘那根用**本格自己标的**的日线
+            // 从该周期起点聚合到训练日（口径同联动复盘合成K线）。多图各格标的不同 → 各取各的日线，绝不串数据。
+            if let td = trainingDate {
+                let daily = targetPeriod == .daily ? rows : databaseManager.fetchDailyData(metaId: targetMetaID)
+                rows = TrainingAsOfSeries.slice(rows: rows, period: targetPeriod, trainingDate: td, daily: daily)
+            }
             DispatchQueue.main.async {
                 // ─── 两层守卫（本地实例 ticket + 共享 inFlight 匹配）─────────────────────
                 // ① 本地 @State ticket 对不上 → 本地实例生命周期已经跑到更新一轮的 loadData，
@@ -244,8 +266,10 @@ struct LinkedKlineTile: View {
                 // ② 共享槽当前 inFlight 目标必须仍就是本次查询目标 → 快速连切两次周期时，
                 //    第一次的查询结果返回，但 inFlight 已经被第二次覆盖，此时第一次结果必须作废，
                 //    绝对不能把旧周期/旧标的的 series 写进共享槽覆盖用户最新选择。
+                //    训练日同理：训练日推进后旧切片必须作废，不能覆盖新训练日的序列。
                 let s = self.currentSlot
-                guard s.inFlightMetaID == targetMetaID, s.inFlightPeriod == targetPeriod else {
+                guard s.inFlightMetaID == targetMetaID, s.inFlightPeriod == targetPeriod,
+                      s.inFlightTrainingDate == trainingDate else {
                     DebugLogger.shared.log("[LinkedTile#\(idx)] loadData⏭️ [\(initiator)] 共享槽 inFlight 不匹配 current=\(s.inFlightMetaID.map(String.init) ?? "-")/\(s.inFlightPeriod?.rawValue ?? "-") vs target=\(targetMetaID)/\(targetPeriod.rawValue) rows=\(rows.count)")
                     return
                 }
@@ -253,6 +277,7 @@ struct LinkedKlineTile: View {
                 if rows.isEmpty {
                     self.linkedStore.commitSlot(ownerMetaID: self.ownerMetaID, tileIndex: idx,
                                                 metaID: targetMetaID, period: targetPeriod,
+                                                trainingDate: trainingDate,
                                                 series: nil, isLoading: false)
                     self.chartSeries = nil
                     self.isLoading = false
@@ -261,6 +286,7 @@ struct LinkedKlineTile: View {
                     let newSeries = ChartSeries(data: rows)
                     self.linkedStore.commitSlot(ownerMetaID: self.ownerMetaID, tileIndex: idx,
                                                 metaID: targetMetaID, period: targetPeriod,
+                                                trainingDate: trainingDate,
                                                 series: newSeries, isLoading: false)
                     // 周期签名校验（写共享槽成功后，真正唯一可靠的校验点）
                     KlineChartView.verifyPeriodSignature(series: newSeries,
@@ -398,10 +424,12 @@ struct LinkedKlineTile: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 图表身份：绑定(标的,周期)。配合 metaId=nil，周期/标的切换必定创建全新图表状态
+    /// 图表身份：绑定(标的,周期)(+训练日)。配合 metaId=nil，周期/标的切换必定创建全新图表状态
     /// （全新隔离副图 @StateObject + 前台完整重算），避免折返复用残留或共享缓存串扰。
+    /// 训练态额外把训练日纳入身份：训练日推进时本格序列整体重算（裁到训练日 + 右缘那根按日线合成），
+    /// 指标/曲线必须随新序列一起重算，不能复用旧实例的计算缓存（非训练态恒为 0，身份与原来完全一致）。
     private var chartIdentity: String {
-        "\(view.metaID)-\(view.period.rawValue)"
+        "\(view.metaID)-\(view.period.rawValue)-\(trainingMaxDate ?? 0)"
     }
 
     /// 占位（原详情页在切周期/标的时会重置 pin；本 tile 已无全局 pin，保留空实现保证类型一致）
