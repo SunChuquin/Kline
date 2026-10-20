@@ -65,8 +65,20 @@ struct ContentView: View {
             // 导航栏不保留 home indicator 安全区垫高（用户要求所有机型与 mini4 形态一致、
             // 均一行高度贴底，系统指示条绘制在按钮行上层）
             VStack(spacing: 0) {
-                mainContentView
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 防御（窄屏适配）：页面固有最小宽可能超过物理屏宽（实测行情 ~512pt、
+                // 模拟 ~1022pt，而 iPhone 11 竖屏仅 414pt），固有宽一旦向外传播会把
+                // 本 VStack 连同根 ZStack 整体撑宽，居中后整屏左移，底部 Tab 栏
+                // （maxWidth .infinity 四等分按钮）随之越出物理屏幕（实测 tab.home x=-49）。
+                // 处理：包一层 GeometryReader + 固定 frame 钳制——GeometryReader 只向外
+                // 报告提议尺寸、不透传子视图固有宽，页面溢出被隔离在页面内部；外层固定
+                // frame 钉成可用区域的精确尺寸，内层保留 maxWidth/maxHeight infinity
+                // 维持原有「撑满可用区域」语义。GeometryReader 默认 topLeading 对齐，
+                // 但内容与 geo 同尺寸、不产生位移；底部 ignoresSafeArea 行为不变。
+                GeometryReader { geo in
+                    mainContentView
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
 
                 bottomMenuBar
                     // 实测底栏高度（含 1pt 分隔线）供悬浮按钮避让；底栏高度由内容决定，
@@ -89,10 +101,19 @@ struct ContentView: View {
 
             // 全屏布局编辑器（覆盖整个屏幕，含底部栏）：
             // 挂在根 ZStack 而非首页内部——首页在 VStack 里只占底栏以上的区域，
-            // 页面内 overlay 永远盖不住底部导航栏（用户要求编辑器全屏）
+            // 页面内 overlay 永远盖不住底部导航栏（用户要求编辑器全屏）。
+            // 防御（窄屏适配）：编辑器固有宽实测 ~459pt，超过 iPhone 11 竖屏 414pt，
+            // 作为根 ZStack 直接子视图同样会撑宽根容器、拖歪 Tab 栏几何；与
+            // mainContentView 一样包 GeometryReader + 固定 frame 钳制，只向外报告
+            // 提议尺寸。编辑器内部自带 ignoresSafeArea（背景 + 底部边缘），
+            // 全屏覆盖能力不受此钳制影响。
             if layoutEditorRouter.isPresented {
-                PageLayoutEditorView {
-                    layoutEditorRouter.isPresented = false
+                GeometryReader { geo in
+                    PageLayoutEditorView {
+                        layoutEditorRouter.isPresented = false
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
