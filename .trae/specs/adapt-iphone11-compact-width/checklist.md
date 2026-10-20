@@ -27,12 +27,15 @@
 ## iPad mini 5 回归（模拟器冒烟 + 用户真机验收）
 
 - [x] 冒烟用例（模拟器）：01/02/03/93/95/96/97/100/101/102 共 10 个通过；test92 加非刘海设备 XCTSkip 守卫（iPad 无横向安全区，minX=0 是正确行为）；test98 重跑通过（首轮为双模拟器并发负载抖动）
-- [ ] test99 既有失败（**非本次回归**：基线 f7e50fa 隔离 worktree 复现同一条断言；iPad 模拟器 addBack 后 0.3s 时序不足，留后续单独修）
 - [ ] 用户真机验收：六个区域在 iPad mini 5 横屏形态与改动前一致（自适应仅紧凑宽 <600 生效，iPad 768/1024 全部走原分支）——**待用户验收**
+
+> 已知遗留（非本 spec 范围，不计入本清单完成度）：test99_Home_MarketOverviewIndicesConfigurable
+> 在 iPad 模拟器上失败——**基线 f7e50fa 隔离 worktree 复现同一条断言**，证明为既有问题
+> （addBack 点击后 0.3s 等待不足，候选禁用态未就绪），与本次设备兼容改动无关，留后续单独修。
 
 ## 脚手架与提交
 
 - [x] TEMP-DIAG 标记处置：ScreenGeometryProbe 转正常驻调试设施（-screen-probe 门控零生产开销，注释更新）
 - [x] DeviceCompatProbeUITests 断言化（tab 栏 + 白名单关键元素在屏断言，保留转储取证），作为设备兼容回归常驻
 - [x] 每个 Task 独立提交（f7e50fa 调查脚手架与 spec → 4a81e78 Task1/2 → f3d94ff Task3/4 → 89bb1ea Task5 → 3bff835 Task7 → 6daf274 Task6 → 3975192 Task8/9 → efd7d71 Task10）
-- [ ] 会话结束前推送完毕（提交后执行 git push）
+- [x] 会话结束前推送完毕（3fe4a59 已推送，HEAD == origin/main）
