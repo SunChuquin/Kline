@@ -167,31 +167,77 @@ struct SimSparkline: View {
 // MARK: - 资产总览带
 
 /// 资产总览带：六项指标（总资产 / 可用资金 / 持仓市值 / 持仓占比 / 当日盈亏 / 累计盈亏）
-/// + 近 30 日净值折线；accountID == nil 表示「全部账户汇总」
+/// + 近 30 日净值折线；accountID == nil 表示「全部账户汇总」。
+/// 指标行改用 WrappingHStack **无条件**流式换行：iPad 工作区 808 宽单行放得下自动 1 行
+/// （字号与配色令牌不变，单行总高仍 62pt；仅去掉分隔线——0.5pt 竖线无法参与干净换行）；
+/// iPhone 横屏工作区 ~632 / 竖屏 414 自动折行，指标行不再两端出屏
 struct SimSummaryBand: View {
     let accountID: UUID?
 
     @ObservedObject private var store = SimStore.shared
 
+    /// 指标项（WrappingHStack 要求 Identifiable）：label 即 id（六项标签互不重复）
+    private enum Item: Identifiable {
+        case metric(label: String, value: String, big: Bool, color: Color)
+        case netValue([Double])
+
+        var id: String {
+            switch self {
+            case .metric(let label, _, _, _): return label
+            case .netValue: return "近30日净值"
+            }
+        }
+    }
+
     var body: some View {
         let summary = store.summary(accountID: accountID)
         let series = store.netValueSeries(accountID: accountID, days: 30)
+        let items: [Item] = [
+            .metric(label: "总资产", value: SimFormat.amount0(summary.totalAssets),
+                    big: true, color: Color.primary),
+            .metric(label: "可用资金", value: SimFormat.amount0(summary.cash),
+                    big: false, color: Color.primary),
+            .metric(label: "持仓市值", value: SimFormat.amount0(summary.marketValue),
+                    big: false, color: Color.primary),
+            .metric(label: "持仓占比", value: SimFormat.pct(summary.positionPct * 100),
+                    big: false, color: Color.primary),
+            .metric(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
+                    big: false, color: simProfitColor(summary.dayProfit)),
+            .metric(label: "累计盈亏", value: SimFormat.signed0(summary.totalProfit),
+                    big: false, color: simProfitColor(summary.totalProfit)),
+            .netValue(series),
+        ]
+        return WrappingHStack(items: items, horizontalSpacing: 0, rowSpacing: 6) { item in
+            content(item)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+        }
+    }
 
-        HStack(spacing: 0) {
-            metric("总资产", SimFormat.amount0(summary.totalAssets), big: true, color: Color.primary)
-            separator
-            metric("可用资金", SimFormat.amount0(summary.cash), big: false, color: Color.primary)
-            separator
-            metric("持仓市值", SimFormat.amount0(summary.marketValue), big: false, color: Color.primary)
-            separator
-            metric("持仓占比", SimFormat.pct(summary.positionPct * 100), big: false, color: Color.primary)
-            separator
-            metric("当日盈亏", SimFormat.signed0(summary.dayProfit), big: false,
-                   color: simProfitColor(summary.dayProfit))
-            separator
-            metric("累计盈亏", SimFormat.signed0(summary.totalProfit), big: false,
-                   color: simProfitColor(summary.totalProfit))
-
+    /// 单项视觉：与既有 metric 同一令牌（label 10.5 灰 / value 14 bold、首项 16 bold），
+    /// 差别仅在不做等宽拉伸——按内容自适应宽，交给 WrappingHStack 断行
+    @ViewBuilder
+    private func content(_ item: Item) -> some View {
+        switch item {
+        case .metric(let label, let value, let big, let color):
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
+                Text(value)
+                    .font(.system(size: big ? 16 : 14, weight: .bold))
+                    .foregroundColor(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .padding(.horizontal, 9)
+        case .netValue(let series):
             VStack(alignment: .trailing, spacing: 3) {
                 Text("近 30 日净值")
                     .font(.system(size: 10.5))
@@ -200,35 +246,8 @@ struct SimSummaryBand: View {
                     .frame(width: 172)
             }
             .padding(.leading, 12)
-            .padding(.trailing, 16)
+            .padding(.trailing, 12)
         }
-        .frame(height: 62)
-        .padding(.leading, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
-        }
-    }
-
-    private func metric(_ label: String, _ value: String, big: Bool, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
-                .lineLimit(1)
-            Text(value)
-                .font(.system(size: big ? 16 : 14, weight: .bold))
-                .foregroundColor(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .padding(.horizontal, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var separator: some View {
-        Rectangle().fill(Color(.separator)).frame(width: 0.5, height: 28)
     }
 }
 

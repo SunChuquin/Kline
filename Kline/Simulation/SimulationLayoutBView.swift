@@ -7,6 +7,12 @@
 //  → 四张模块卡宫格（持仓 / 当日委托 / 当日成交 / 历史中心，卡内只放摘要与快捷动作）
 //  → 底部买卖条；点模块卡以全屏明细页呈现完整表格（表格内的买卖 / 改价在本页内处理）。
 //  复用 SimSharedViews 的共享组件；iOS 15 兼容，背景一律语义色（支持深色模式）。
+//  紧凑宽（<600，iPhone 竖屏 414）：账户卡行从 5×218pt 横排（延伸到 x=1086，形态差异大）
+//  改 WrappingHStack 两列换行，卡片宽弹性 (~(可用−边距−间距)/2)、内部内容自适应；
+//  宽屏（≥600，横屏 848 / iPad）横排形态与交互保持原样。
+//  横屏纵向不足（可用高 < ~500，iPhone 横屏 414 高可用 ~363 < 内容最小高 ~530，
+//  顶部条出上屏、买卖条出下屏不可达）：整页包纵向 ScrollView，顶部条 / 买卖条滚动可达；
+//  竖屏 / iPad 高度充足时无包裹、布局与原样完全一致。
 //
 
 import SwiftUI
@@ -34,6 +40,30 @@ struct SimulationLayoutBView: View {
     /// 轻提示（下单拦截 / 创建成功等，2 秒后自动消失）
     @State private var toast: String? = nil
 
+    /// 页面可用宽度：由顶层 WidthReader 上报。0 表示尚未上报——此时按 regular（横排卡片）
+    /// 形态渲染，保证 iPad / 横屏首帧与既有布局完全一致
+    @State private var availableWidth: CGFloat = 0
+
+    /// 紧凑宽度形态（可用宽 < 600，iPhone 竖屏 414 命中）：账户卡两列换行
+    private var isCompact: Bool {
+        availableWidth > 0 && availableWidth < CompactWidth.threshold
+    }
+
+    /// 页面可用高度：由顶层 HeightReader 上报（本页专用，与 WidthReader 同范式）
+    @State private var availableHeight: CGFloat = 0
+
+    /// 内容区是否改「纵向滚动 + 买卖条钉底」：
+    /// ① 横屏 414 高：可用高 ~363 < ~500，固定布局内容最小高 ~530 必然出屏
+    ///   （顶部条出上屏、买卖条出下屏不可达）；
+    /// ② 紧凑竖屏（414 宽）：两列账户卡行数随账户数增长，3 账户 + 模块宫格 +
+    ///    顶部条的固定布局总高已超一屏（实测买卖条被推入 tab 栏区 ~66pt）。
+    /// 两场景统一「内容滚动 + 买卖条固定底部」：主操作永远在屏、其余滚动可达；
+    /// 竖屏宽裕（≤2 账户）与 iPad 高度充足时内容不满一屏，视觉与固定布局一致
+    private var contentScrolls: Bool {
+        if isCompact { return true }
+        return availableHeight > 0 && availableHeight < 500
+    }
+
     /// 账户卡片统一尺寸（全部汇总 / 各账户 / 新建账户三态对齐）
     private let cardWidth: CGFloat = 218
     private let cardHeight: CGFloat = 104
@@ -42,37 +72,72 @@ struct SimulationLayoutBView: View {
     // MARK: - Body
 
     var body: some View {
+        // 顶层测宽测高（WidthReader / HeightReader 只允许页面顶层包裹，见其文档）
+        WidthReader(onChange: { availableWidth = $0 }) {
+            HeightReader(onChange: { availableHeight = $0 }) {
+                Group {
+                    if contentScrolls {
+                        // 纵向不足：内容区纵向滚动 + 买卖条固定底部
+                        //（顶部条 / 宫格滚动可达，买卖主操作永远在屏）
+                        VStack(spacing: 0) {
+                            ScrollView {
+                                pageBody
+                            }
+                            SimBottomActionBar(onTrade: { openBottomTicket($0) },
+                                               hint: "模块卡只放摘要与快捷动作，明细进入全屏列表")
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemBackground))
+                    } else {
+                        pageContent
+                    }
+                }
+                .overlay(alignment: .top) { toastView }
+                // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
+                // 避免被账户卡片横排 ScrollView / 模块宫格 / 纵滚裁剪；关闭走页内「返回」
+                .overlay {
+                    if showStrategyFormulas {
+                        ZStack {
+                            FormulaCenterView(initialKind: .strategy,
+                                              onClose: { showStrategyFormulas = false })
+                        }
+                        .transition(.opacity)
+                        .zIndex(1000)
+                    }
+                }
+                .simFullScreenTicket($ticketRequest)
+                .fullScreenCover(item: $detailModule) { module in
+                    SimModuleDetailSheet(module: module,
+                                         accountID: store.queryAccountID,
+                                         onClose: { detailModule = nil })
+                }
+                // 「训练记录」管理页：独立宿主，与全屏下单页 / 明细页分开挂，避免同视图多 cover 压制
+                .simTrainingRecordPresentation($showTrainingRecords)
+                .onAppear { Task { await SimStore.shared.prepareQuotes() } }
+            }
+        }
+    }
+
+    /// 页面主体（高度充足形态：内容 + 买卖条整体固定布局）
+    private var pageContent: some View {
         VStack(spacing: 0) {
-            topBar
-            accountStrip
-            moduleGrid
+            pageBody
             SimBottomActionBar(onTrade: { openBottomTicket($0) },
                                hint: "模块卡只放摘要与快捷动作，明细进入全屏列表")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
-        .overlay(alignment: .top) { toastView }
-        // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
-        // 避免被账户卡片横排 ScrollView / 模块宫格裁剪；关闭走页内「返回」
-        .overlay {
-            if showStrategyFormulas {
-                ZStack {
-                    FormulaCenterView(initialKind: .strategy,
-                                      onClose: { showStrategyFormulas = false })
-                }
-                .transition(.opacity)
-                .zIndex(1000)
-            }
+    }
+
+    /// 页面内容（顶部条 + 账户卡行 + 模块宫格）：滚动形态买卖条固定在滚动区外
+    private var pageBody: some View {
+        VStack(spacing: 0) {
+            topBar
+            accountStrip
+            moduleGrid
         }
-        .simFullScreenTicket($ticketRequest)
-        .fullScreenCover(item: $detailModule) { module in
-            SimModuleDetailSheet(module: module,
-                                 accountID: store.queryAccountID,
-                                 onClose: { detailModule = nil })
-        }
-        // 「训练记录」管理页：独立宿主，与全屏下单页 / 明细页分开挂，避免同视图多 cover 压制
-        .simTrainingRecordPresentation($showTrainingRecords)
-        .onAppear { Task { await SimStore.shared.prepareQuotes() } }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 
     /// 顶部条「条件单」入口（文字右上角叠监控中数量角标）
@@ -160,16 +225,29 @@ struct SimulationLayoutBView: View {
         """
     }
 
-    // MARK: - 账户卡片横排
+    // MARK: - 账户卡片行
 
+    /// 账户卡行：紧凑态两列换行（WrappingHStack，卡片宽弹性、内部内容自适应）；
+    /// 宽屏保持横排横滚（形态与交互原样）。两形态共用同一份卡视图与新建弹窗
     private var accountStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                allAccountsCard
-                ForEach(store.activeAccounts) { accountCard($0) }
-                newAccountCard
+        Group {
+            if isCompact {
+                WrappingHStack(items: compactCardItems,
+                               horizontalSpacing: 12,
+                               rowSpacing: 12) { item in
+                    compactCard(item)
+                }
+                .padding(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        allAccountsCard
+                        ForEach(store.activeAccounts) { accountCard($0) }
+                        newAccountCard
+                    }
+                    .padding(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                }
             }
-            .padding(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
         }
         .background(Color(.systemBackground))
         .alert("新建账户", isPresented: $showCreateAccount) {
@@ -183,8 +261,53 @@ struct SimulationLayoutBView: View {
         }
     }
 
-    /// 全部账户汇总卡（语义色背景 + 语义色文字）
+    /// 紧凑两列换行的卡片项（WrappingHStack 要求 Identifiable）
+    private enum AccountCardItem: Identifiable {
+        case all
+        case account(UUID)
+        case new
+
+        var id: String {
+            switch self {
+            case .all: return "all"
+            case .account(let id): return id.uuidString
+            case .new: return "new"
+            }
+        }
+    }
+
+    private var compactCardItems: [AccountCardItem] {
+        [.all] + store.activeAccounts.map { .account($0.id) } + [.new]
+    }
+
+    /// 紧凑态单张卡：与横排卡同一份视图，仅宽度换弹性两列宽
+    @ViewBuilder
+    private func compactCard(_ item: AccountCardItem) -> some View {
+        switch item {
+        case .all:
+            allAccountsCard(width: compactCardWidth)
+        case .account(let id):
+            if let account = store.account(id: id) {
+                accountCard(account, width: compactCardWidth)
+            }
+        case .new:
+            newAccountCard(width: compactCardWidth)
+        }
+    }
+
+    /// 两列卡片宽：(可用宽 − 两侧 16pt 边距 − 列间 12pt 间距) / 2；卡内文字自适应
+    /// （名称截断 / 金额缩放 / 净值线吃满卡内宽）
+    private var compactCardWidth: CGFloat {
+        max(0, (availableWidth - 16 * 2 - 12) / 2)
+    }
+
+    /// 全部账户汇总卡（语义色背景 + 语义色文字）：宽屏横排用固有宽 218
     private var allAccountsCard: some View {
+        allAccountsCard(width: cardWidth)
+    }
+
+    /// 全部账户汇总卡（语义色背景 + 语义色文字）；宽度由调用方给（横排 218 / 紧凑两列弹性宽）
+    private func allAccountsCard(width: CGFloat) -> some View {
         let selected = store.isAllAccountsSelected
         let summary = store.summary(accountID: nil)
         let series = store.netValueSeries(accountID: nil, days: 30)
@@ -219,7 +342,7 @@ struct SimulationLayoutBView: View {
                     .opacity(0.85)
             }
             .padding(EdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12))
-            .frame(width: cardWidth, height: cardHeight, alignment: .leading)
+            .frame(width: width, height: cardHeight, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(selected ? Color.blue : Color.clear, lineWidth: 2))
@@ -229,8 +352,14 @@ struct SimulationLayoutBView: View {
         .accessibilityIdentifier("sim.account.all")
     }
 
-    /// 单个账户卡：底色取账户 colorHex，卡内文字用白色（彩色卡面唯一允许写死白色的场景）
+    /// 单个账户卡（宽屏横排用固有宽 218）：底色取账户 colorHex，
+    /// 卡内文字用白色（彩色卡面唯一允许写死白色的场景）
     private func accountCard(_ account: SimAccount) -> some View {
+        accountCard(account, width: cardWidth)
+    }
+
+    /// 单个账户卡；宽度由调用方给（横排 218 / 紧凑两列弹性宽）
+    private func accountCard(_ account: SimAccount, width: CGFloat) -> some View {
         let selected = store.selectedAccountID == account.id
         let summary = store.summary(accountID: account.id)
         let series = store.netValueSeries(accountID: account.id, days: 30)
@@ -265,7 +394,7 @@ struct SimulationLayoutBView: View {
                 SimSparkline(values: series, tint: Color.white.opacity(0.9))
             }
             .padding(EdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12))
-            .frame(width: cardWidth, height: cardHeight, alignment: .leading)
+            .frame(width: width, height: cardHeight, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 12).fill(colorFromHex(account.colorHex)))
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(selected ? Color.blue : Color.clear, lineWidth: 2))
@@ -302,8 +431,13 @@ struct SimulationLayoutBView: View {
         .minimumScaleFactor(0.8)
     }
 
-    /// 新建账户卡（虚线边框 + 蓝色文字）
+    /// 新建账户卡（宽屏横排用固有宽 150；虚线边框 + 蓝色文字）
     private var newAccountCard: some View {
+        newAccountCard(width: newCardWidth)
+    }
+
+    /// 新建账户卡（虚线边框 + 蓝色文字）；宽度由调用方给（横排 150 / 紧凑两列弹性宽）
+    private func newAccountCard(width: CGFloat) -> some View {
         Button(action: { showCreateAccount = true }) {
             VStack(spacing: 6) {
                 Image(systemName: "plus")
@@ -312,7 +446,7 @@ struct SimulationLayoutBView: View {
                     .font(.system(size: 12.5, weight: .medium))
             }
             .foregroundColor(.blue)
-            .frame(width: newCardWidth, height: cardHeight)
+            .frame(width: width, height: cardHeight)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground)))
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
@@ -621,6 +755,31 @@ struct SimulationLayoutBView: View {
         toast = text
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             if toast == text { toast = nil }
+        }
+    }
+}
+
+// MARK: - 页面高度测量（本页专用）
+
+/// 页面可用高度测量（与 App/AdaptiveWidthKit.WidthReader 同范式，仅本页用：
+/// 横屏 414 高时整页改纵向滚动的判定输入）。⚠ 只允许页面顶层包裹。
+/// iOS 15 兼容：onChange(of:perform:) 单参回调
+private struct HeightReader<Content: View>: View {
+    /// 可用高度上报回调：首帧 onAppear 触发一次，高度变化时 onChange 跟随触发
+    let onChange: (CGFloat) -> Void
+    private let content: () -> Content
+
+    init(onChange: @escaping (CGFloat) -> Void,
+         @ViewBuilder content: @escaping () -> Content) {
+        self.onChange = onChange
+        self.content = content
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            content()
+                .onAppear { onChange(geo.size.height) }
+                .onChange(of: geo.size.height) { onChange($0) }
         }
     }
 }
