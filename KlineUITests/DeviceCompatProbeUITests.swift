@@ -2,16 +2,17 @@
 //  DeviceCompatProbeUITests.swift
 //  KlineUITests
 //
-//  TEMP-DIAG(iPhone11适配)：设备兼容性运行时探针 —— spec 调查脚手架（非功能回归用例）。
+//  设备兼容回归探针（常驻）：多设备/多方向布局防回归。
 //
-//  背景：App 此前按 iPad mini 5（1024×768，无刘海）调校，新增 iPhone 11
-//  （414×896 逻辑点、刘海屏）后疑似存在控件挤压 / 超出屏幕物理显示范围。
-//  本组用例在 iPhone 11 模拟器上逐页面采集**运行时**布局数据（不猜代码）：
+//  起源：App 此前按 iPad mini 5（1024×768，无刘海）调校，iPhone 11（414×896、刘海屏）
+//  上曾出现控件挤压/整页超出物理屏/横屏布局死循环（2026-10 修复，spec：adapt-iphone11-compact-width）。
+//  本组用例在目标设备上逐页面采集运行时布局数据（frame 转储 + 截图 + 沙盒日志 ScreenProbe）：
 //    1) 屏幕几何：竖屏 / 左横 / 右横（App 侧 -screen-probe 探针同步写沙盒日志）
 //    2) 布局编辑器 / 训练态K线（单图 + 联动多图）/ 四档自选页 / 四档行情页 / 三档模拟页
-//     + 非训练态K线（单图 + 联动）作对照基线（用户反馈非训练态无挤压）
-//  每个状态打印关键元素 frame（超出屏幕边界标 ⚠️OVERFLOW）并附截图。
-//  结论写入 .trae/specs/ 下 spec 文档；修复方案确认后本文件按 spec 处置。
+//     + 非训练态K线（单图 + 联动）作对照基线
+//  判据（断言化）：每方向断言 tab 栏 + 页面白名单关键交互元素完整在屏；
+//  表格右侧列/侧栏滚动区/卡片横滚区内的出屏属设计内行为，不做全量零溢出断言。
+//  转储数据（print OVERFLOW 标记）保留用于新增问题的人肉取证。
 //
 
 import XCTest
@@ -58,14 +59,44 @@ final class DeviceCompatProbeUITests: XCTestCase {
         add(a)
     }
 
-    /// 三个方向依次采集（竖屏 → 左横 → 右横，最后回到竖屏）
-    private func cycleOrientations(_ app: XCUIApplication, label: String) {
+    // MARK: 断言化（Task 10.1：设备兼容回归判据转正）
+    //
+    // 原则：只断言「白名单关键交互元素」完整落在屏内——表格右侧列（横滚设计）、
+    // 侧栏滚动区、卡片横滚区内的出屏元素属设计内行为，不做全量零溢出断言（会误报）。
+    // tab 栏完整性是 W1 根容器钳制的核心验收，所有页面/方向通用。
+
+    /// 断言元素存在且 frame 完整落在 App 屏幕内（±1pt 容差，覆盖旋转过渡态抖动）
+    private func assertInScreen(_ app: XCUIApplication, _ element: XCUIElement, _ what: String,
+                                file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "[\(what)] 元素不存在", file: file, line: line)
+        let screen = app.frame
+        let f = element.frame
+        XCTAssertTrue(f.minX >= screen.minX - 1 && f.maxX <= screen.maxX + 1 &&
+                      f.minY >= screen.minY - 1 && f.maxY <= screen.maxY + 1,
+                      "[\(what)] 出屏：element=\(f) screen=\(screen)",
+                      file: file, line: line)
+    }
+
+    /// tab 栏完整性断言（W1 验收：页面固有宽不再撑爆根容器）
+    private func assertTabBarInScreen(_ app: XCUIApplication, _ context: String) {
+        assertInScreen(app, app.buttons["tab.home"], "\(context) tab.home")
+        assertInScreen(app, app.buttons["tab.simulation"], "\(context) tab.simulation")
+    }
+
+    /// 三个方向依次采集（竖屏 → 左横 → 右横，最后回到竖屏）；
+    /// 每个方向转储后断言 tab 栏在屏（设备兼容回归判据），
+    /// extraAssert 供用例追加页面特定的关键元素在屏断言（同样三方向覆盖）
+    private func cycleOrientations(_ app: XCUIApplication, label: String,
+                                   extraAssert: ((XCUIApplication, String) -> Void)? = nil) {
         XCUIDevice.shared.orientation = .portrait
-        settle(); dump(app, "\(label).P"); snap(app, "\(label).P")
+        settle(); dump(app, "\(label).P"); snap(app, "\(label).P"); assertTabBarInScreen(app, "\(label).P")
+        extraAssert?(app, "\(label).P")
         XCUIDevice.shared.orientation = .landscapeLeft
-        settle(); dump(app, "\(label).LL"); snap(app, "\(label).LL")
+        settle(); dump(app, "\(label).LL"); snap(app, "\(label).LL"); assertTabBarInScreen(app, "\(label).LL")
+        extraAssert?(app, "\(label).LL")
         XCUIDevice.shared.orientation = .landscapeRight
-        settle(); dump(app, "\(label).LR"); snap(app, "\(label).LR")
+        settle(); dump(app, "\(label).LR"); snap(app, "\(label).LR"); assertTabBarInScreen(app, "\(label).LR")
+        extraAssert?(app, "\(label).LR")
         XCUIDevice.shared.orientation = .portrait
         settle(0.6)
     }
@@ -204,7 +235,11 @@ final class DeviceCompatProbeUITests: XCTestCase {
             app.buttons["tab.simulation"].tap()
             XCTAssertTrue(app.staticTexts["simulation.subtitle"].waitForExistence(timeout: 10), "模拟页未显示(\(style))")
             settle(1.2)
-            cycleOrientations(app, label: "sim\(style)")
+            // 买卖条三方向在屏（模拟 A/B 竖横曾整体出屏不可达）
+            cycleOrientations(app, label: "sim\(style)") { app, ctx in
+                self.assertInScreen(app, app.buttons["sim.bottomAction.买入"], "\(ctx) 买入")
+                self.assertInScreen(app, app.buttons["sim.bottomAction.卖出"], "\(ctx) 卖出")
+            }
             app.terminate()
         }
     }
@@ -220,7 +255,12 @@ final class DeviceCompatProbeUITests: XCTestCase {
         entry.tap()
         XCTAssertTrue(app.buttons["layoutEditor.save"].waitForExistence(timeout: 8), "布局编辑器未打开")
         settle(1.2)
-        cycleOrientations(app, label: "editor")
+        // 保存/恢复默认三方向在屏（竖屏曾被挤压出屏、全屏预览曾文字竖排）
+        let editorAssert: (XCUIApplication, String) -> Void = { app, ctx in
+            self.assertInScreen(app, app.buttons["layoutEditor.save"], "\(ctx) 保存")
+            self.assertInScreen(app, app.buttons["layoutEditor.resetDefault"], "\(ctx) 恢复默认")
+        }
+        cycleOrientations(app, label: "editor", extraAssert: editorAssert)
         // 选中一个控件节点，让右侧检查器出现参数行（挤压高发区）
         let treeRow = app.descendants(matching: .any)["layout.tree.widget.home.quickEntryRow"].firstMatch
         if !treeRow.waitForExistence(timeout: 3) {
@@ -234,7 +274,7 @@ final class DeviceCompatProbeUITests: XCTestCase {
         if treeRow.waitForExistence(timeout: 5) {
             treeRow.tap()
             settle(1.0)
-            cycleOrientations(app, label: "editor.selected")
+            cycleOrientations(app, label: "editor.selected", extraAssert: editorAssert)
         }
         app.terminate()
     }
@@ -250,13 +290,17 @@ final class DeviceCompatProbeUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.buttons["kline.backButton"].waitForExistence(timeout: 15), "K线页未打开")
         settle(2.0)
-        cycleOrientations(app, label: "klineN.single")
+        // ⚙ 三方向在屏（非训练态基线，防基线回归）
+        let gearAssert: (XCUIApplication, String) -> Void = { app, ctx in
+            self.assertInScreen(app, app.buttons["kline.settingsButton"], "\(ctx) ⚙")
+        }
+        cycleOrientations(app, label: "klineN.single", extraAssert: gearAssert)
 
         let toggle = app.buttons["进入联动模式"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 8), "未找到进入联动模式按钮")
         toggle.tap()
         settle(3.5)
-        cycleOrientations(app, label: "klineN.linked")
+        cycleOrientations(app, label: "klineN.linked", extraAssert: gearAssert)
         app.terminate()
     }
 
@@ -283,16 +327,22 @@ final class DeviceCompatProbeUITests: XCTestCase {
         let badges = app.descendants(matching: .any)["training.badges"].firstMatch
         XCTAssertTrue(badges.waitForExistence(timeout: 25), "训练态K线页未打开（徽标未出现）")
         settle(2.0)
-        cycleOrientations(app, label: "train.single")
+        // 工具栏 ⚙/联 三方向在屏（训练态竖屏曾被徽标行顶出屏、联按钮物理不可点）。
+        // 联按钮 label 随状态变化（进入联动模式 / 开启·关闭光标联动），按多 label 匹配
+        let trainGearAssert: (XCUIApplication, String) -> Void = { app, ctx in
+            self.assertInScreen(app, app.buttons["kline.settingsButton"], "\(ctx) ⚙")
+            let link = app.buttons.matching(NSPredicate(format: "label IN %@",
+                ["进入联动模式", "开启光标联动（所有视图按日期同步）", "关闭光标联动（清除所有光标）"])).firstMatch
+            self.assertInScreen(app, link, "\(ctx) 联")
+        }
+        cycleOrientations(app, label: "train.single", extraAssert: trainGearAssert)
 
-        // 联动多图。⚠️ 竖屏下「联」按钮在屏外（本探针发现的问题），先转横屏再点
-        XCUIDevice.shared.orientation = .landscapeLeft
-        settle()
+        // 联动多图（Task 4 修复后竖屏「联」已回屏可点；此步失败即回归信号）
         let toggle = app.buttons["进入联动模式"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 8), "训练态未找到进入联动模式按钮")
         toggle.tap()
         settle(3.5)
-        cycleOrientations(app, label: "train.linked")
+        cycleOrientations(app, label: "train.linked", extraAssert: trainGearAssert)
         app.terminate()
     }
 }

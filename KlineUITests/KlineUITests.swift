@@ -12,6 +12,7 @@
 //
 
 import XCTest
+import UIKit
 
 final class KlineUITests: XCTestCase {
 
@@ -397,6 +398,12 @@ final class KlineUITests: XCTestCase {
     }
 
     func test92_NotchSafeAreaLandscape() throws {
+        // 设备前提：本用例只验证刘海屏（横向安全区危险带）；iPad / Home 键机型
+        // 无横向 inset（tab.home minX=0 是正确行为，非回归），在非 iPhone 设备上跳过
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("非刘海设备（iPad/Home 键机型）不适用：无横向安全区危险带")
+        }
+
         let app = XCUIApplication()
         app.launch()
 

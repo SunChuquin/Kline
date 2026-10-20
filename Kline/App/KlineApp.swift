@@ -55,7 +55,7 @@ struct KlineApp: App {
         // 供 §9.10 降级矩阵判定交易可用性（过渡期 mode=.swift 时该闸门不生效）。
         SimRulesTrust.shared.refresh()
 
-        // TEMP-DIAG(iPhone11适配): 屏幕几何探针（spec 调查脚手架，见文件底部说明）
+        // 屏幕几何探针（设备兼容调试设施，常驻保留）：-screen-probe 门控，零生产开销
         ScreenGeometryProbe.installIfNeeded()
     }
 
@@ -66,11 +66,12 @@ struct KlineApp: App {
     }
 }
 
-// MARK: - TEMP-DIAG(iPhone11适配): 屏幕几何探针（spec 调查脚手架，确认后随修复一并处理）
+// MARK: - 屏幕几何探针（设备兼容调试设施，常驻保留）
 //
 // 带 `-screen-probe` 启动时：把窗口尺寸 + 安全区 inset（含刘海左右）写入沙盒日志
 // Documents/debug_log.txt，启动后 2s 记一次，此后每次设备方向变化（0.6s 防抖）再记一次。
-// 目的：运行时确认 iPhone 11 竖屏 / 左横 / 右横的实际可用宽度与安全区（非代码推断）。
+// 用途：设备兼容排障时运行时确认实际可用宽度与安全区（非代码推断）；不带参数时零开销。
+// 常规启动（含 Release）不注入该参数，不产生任何日志或行为差异。
 enum ScreenGeometryProbe {
     static let launchArgument = "-screen-probe"
 
