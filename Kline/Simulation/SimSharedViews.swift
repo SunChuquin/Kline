@@ -347,19 +347,44 @@ struct SimModuleTable: View {
     var keyword: String = ""
     /// 操作日志的模块筛选：nil = 全部（仅 module == .log 时生效）
     var logModuleFilter: ActionModule? = nil
+    /// 紧凑形态（页面可用宽 < 600）：整表包横向滚动。为什么：各表列宽按 iPad 宽屏
+    /// 1024pt 折算（持仓表总宽 ~806pt），414pt 竖屏下整表右溢出且不可达；横滚把
+    /// 溢出转为可滑动查看（券商 iPhone 端表格的标准交互），列宽保持与宽屏完全
+    /// 一致、零重排版风险。默认 false：宽屏与 A/B 布局行为完全不变。
+    var isCompact: Bool = false
 
     @ObservedObject private var store = SimStore.shared
     @ObservedObject private var rowCache = MarketRowCache.shared
 
     var body: some View {
+        Group {
+            if isCompact {
+                // 紧凑态：横向滚动包裹，行内各列保持固有宽（横向 ScrollView 沿滚动轴
+                // 不压缩内容），向 SwiftUI 报告的仍是内容真实宽，不产生尺寸回馈
+                ScrollView(.horizontal, showsIndicators: false) {
+                    tableContent
+                }
+            } else {
+                tableContent
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+    }
+
+    /// 表格主体（表头 + 列表/空态 + 日志页脚）：宽屏直接呈现；紧凑态由 body 包横向滚动
+    private var tableContent: some View {
         VStack(spacing: 0) {
             headerRow
             if isEmpty {
                 Spacer(minLength: 0)
+                // 空态对齐：宽屏居中（既有视觉）；紧凑态改左对齐——空表包在横向
+                // ScrollView 里，VStack 内容宽是列宽固有值（~806pt），居中会把文案
+                // 摆到首屏外（实测 x≈378 出屏），左对齐保证空态首屏可见
                 Text(emptyText)
                     .font(.system(size: 12.5))
                     .foregroundColor(Color(.tertiaryLabel))
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: isCompact ? .leading : .center)
                 Spacer(minLength: 0)
             } else {
                 listBody
@@ -374,7 +399,6 @@ struct SimModuleTable: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
     }
 
     // MARK: 数据
@@ -747,14 +771,21 @@ struct SimBottomActionBar: View {
     let onTrade: (SimOrderDirection) -> Void
     /// 左侧提示文案，默认 T+1 / 佣金 / 印花税说明
     var hint: String = "T+1：当日买入次日可卖 ｜ 佣金万 2.5、最低 5 元 ｜ 卖出印花税千一"
+    /// 紧凑形态（页面可用宽 < 600）：隐藏左侧提示文案。为什么：提示文案固有宽
+    /// ~440pt，与两个 120pt 按钮同行，在 414pt 竖屏上必然把买入/卖出按钮挤出屏
+    /// （实测右溢出 ~180pt）；买卖是交易主操作，优先保按钮完整在屏。
+    /// 默认 false：宽屏（≥600）与未适配的 A/B 布局行为完全不变，只加分支不改宽屏。
+    var isCompact: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(hint)
-                .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if !isCompact {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
             Spacer(minLength: 8)
             actionButton("买入", color: Color(.systemRed)) { onTrade(.buy) }
             actionButton("卖出", color: Color(.systemGreen)) { onTrade(.sell) }

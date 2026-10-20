@@ -7,6 +7,9 @@
 //  → 模块行（分段控件 + 搜索 + 刷新）→ 全宽大表 → 在途委托 / 当日成交两个小卡
 //  → 底部买卖条；多账户收进顶部下拉，表格宽度最大。
 //  复用 SimSharedViews 的共享组件；iOS 15 兼容，背景一律语义色（支持深色模式）。
+//  紧凑宽度适配（可用宽 < 600，如 iPhone 11 竖屏 414）：指标行改 WrappingHStack 流式
+//  换行、模块行拆两行（分段控件横滚 + 搜索框弹性宽）、底部买卖条隐藏提示文案、
+//  业务表包横向滚动；宽屏（≥600，含横屏 848）布局与交互保持原样。
 //
 
 import SwiftUI
@@ -36,6 +39,16 @@ struct SimulationLayoutCView: View {
     @State private var showRulesAlert = false
     /// 轻提示（资金概览 / 刷新结果等，2 秒后自动消失）
     @State private var toast: String? = nil
+    /// 页面可用宽度：顶层 WidthReader 上报。0 = 尚未上报，此时按宽屏形态渲染，
+    /// 保证 iPad / 横屏首帧与既有布局完全一致（与 PageLayoutEditorView 同一范式）。
+    /// 为什么测宽：本页多行固有最小宽实测 ~800pt（模块行 / 七项指标行 / 底部提示行），
+    /// iPhone 竖屏仅 414pt，行内容直接出屏；以 600 为界切紧凑形态重排这些行。
+    @State private var availableWidth: CGFloat = 0
+    /// 紧凑形态（可用宽 < 600，iPhone 竖屏命中；横屏 848 / iPad 不命中保持现状）。
+    /// 阈值统一取 CompactWidth.threshold，勿在本页另拍。
+    private var isCompact: Bool {
+        availableWidth > 0 && availableWidth < CompactWidth.threshold
+    }
 
     private static let rulesText = """
     T+1：当日买入次日可卖
@@ -48,60 +61,69 @@ struct SimulationLayoutCView: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            metricsRow
-            moduleRow
-            if module == .log {
-                SimLogModuleFilterBar(selected: $logModule)
-            }
-            SimModuleTable(module: module,
-                           accountID: store.queryAccountID,
-                           onTrade: { position, direction in
-                               openTicket(accountID: position.accountID,
-                                          metaID: position.metaID,
-                                          code: position.code,
-                                          name: position.name,
-                                          direction: direction)
-                           },
-                           onAmend: { order in beginAmend(order) },
-                           onCondition: { position in openCondEditor(for: position) },
-                           keyword: keyword,
-                           logModuleFilter: module == .log ? logModule : nil)
-                .frame(maxHeight: .infinity)
-            bottomCardsRow
-            SimBottomActionBar(onTrade: { openBottomTicket($0) },
-                               hint: "最接近通达信 / 同花顺 iPad 的经典布局，表格最宽；多账户收进顶部下拉")
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
-        .overlay(alignment: .top) { toastView }
-        // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
-        // 避免被全宽大表 ScrollView / 底部小卡裁剪；关闭走页内「返回」
-        .overlay {
-            if showStrategyFormulas {
-                ZStack {
-                    FormulaCenterView(initialKind: .strategy,
-                                      onClose: { showStrategyFormulas = false })
+        // 顶层测宽（WidthReader 只允许页面顶层包裹，见其文档）。紧凑/宽屏分支由
+        // 「容器提议宽」这一个外部输入驱动：行内容宽不回写判定条件，旋转跨 600
+        // 阈值时分支至多翻转一次即收敛——这是针对「行固有宽跨阈值震荡挂死」的
+        // 结构性防御，配合根容器钳制（ContentView GeometryReader + 固定 frame）
+        // 把页面溢出隔离在页面内部，旋转布局每趟都是宽度的纯函数。
+        WidthReader(onChange: { availableWidth = $0 }) {
+            VStack(spacing: 0) {
+                topBar
+                metricsRow
+                moduleRow
+                if module == .log {
+                    SimLogModuleFilterBar(selected: $logModule)
                 }
-                .transition(.opacity)
-                .zIndex(1000)
+                SimModuleTable(module: module,
+                               accountID: store.queryAccountID,
+                               onTrade: { position, direction in
+                                   openTicket(accountID: position.accountID,
+                                              metaID: position.metaID,
+                                              code: position.code,
+                                              name: position.name,
+                                              direction: direction)
+                               },
+                               onAmend: { order in beginAmend(order) },
+                               onCondition: { position in openCondEditor(for: position) },
+                               keyword: keyword,
+                               logModuleFilter: module == .log ? logModule : nil,
+                               isCompact: isCompact)
+                    .frame(maxHeight: .infinity)
+                bottomCardsRow
+                SimBottomActionBar(onTrade: { openBottomTicket($0) },
+                                   hint: "最接近通达信 / 同花顺 iPad 的经典布局，表格最宽；多账户收进顶部下拉",
+                                   isCompact: isCompact)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemBackground))
+            .overlay(alignment: .top) { toastView }
+            // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
+            // 避免被全宽大表 ScrollView / 底部小卡裁剪；关闭走页内「返回」
+            .overlay {
+                if showStrategyFormulas {
+                    ZStack {
+                        FormulaCenterView(initialKind: .strategy,
+                                          onClose: { showStrategyFormulas = false })
+                    }
+                    .transition(.opacity)
+                    .zIndex(1000)
+                }
+            }
+            .simFullScreenTicket($ticketRequest)
+            // 「训练记录」管理页：独立宿主，与全屏下单页分开挂，避免同视图多 cover 压制
+            .simTrainingRecordPresentation($showTrainingRecords)
+            .alert("修改委托价", isPresented: amendBinding) {
+                TextField("委托价", text: $amendPriceText)
+                    .keyboardType(.decimalPad)
+                Button("确认") { Task { await confirmAmend() } }
+                Button("取消", role: .cancel) { amendTarget = nil }
+            } message: {
+                Text(amendTarget.map {
+                    "\($0.name) \($0.code) · 当前 \($0.price.map { SimFormat.price($0) } ?? "市价")"
+                } ?? "")
+            }
+            .onAppear { Task { await SimStore.shared.prepareQuotes() } }
         }
-        .simFullScreenTicket($ticketRequest)
-        // 「训练记录」管理页：独立宿主，与全屏下单页分开挂，避免同视图多 cover 压制
-        .simTrainingRecordPresentation($showTrainingRecords)
-        .alert("修改委托价", isPresented: amendBinding) {
-            TextField("委托价", text: $amendPriceText)
-                .keyboardType(.decimalPad)
-            Button("确认") { Task { await confirmAmend() } }
-            Button("取消", role: .cancel) { amendTarget = nil }
-        } message: {
-            Text(amendTarget.map {
-                "\($0.name) \($0.code) · 当前 \($0.price.map { SimFormat.price($0) } ?? "市价")"
-            } ?? "")
-        }
-        .onAppear { Task { await SimStore.shared.prepareQuotes() } }
     }
 
     // MARK: - 顶部条
@@ -177,30 +199,85 @@ struct SimulationLayoutCView: View {
     private var metricsRow: some View {
         let summary = store.summary(accountID: store.queryAccountID)
         let pendingCount = store.activeOrders(accountID: store.queryAccountID).count
-        return HStack(spacing: 0) {
-            metricItem("总资产", SimFormat.amount0(summary.totalAssets))
-            metricSeparator
-            metricItem("可用", SimFormat.amount0(summary.cash))
-            metricSeparator
-            metricItem("市值", SimFormat.amount0(summary.marketValue))
-            metricSeparator
-            metricItem("仓位", SimFormat.pct(summary.positionPct * 100))
-            metricSeparator
-            metricItem("当日盈亏", SimFormat.signed0(summary.dayProfit),
-                       color: profitColor(summary.dayProfit))
-            metricSeparator
-            metricItem("累计盈亏", SimFormat.signed0(summary.totalProfit),
-                       color: profitColor(summary.totalProfit))
-            metricSeparator
-            metricItem("在途委托", "\(pendingCount)", color: Color.orange)
+        return Group {
+            if isCompact {
+                // 紧凑态（<600，如 iPhone 11 竖屏 414）：七项等宽行固有宽 ~500pt、
+                // 两端出屏。改 WrappingHStack 流式换行（414 下自动折成两行），
+                // 单项视觉保持 metricItem 的字号与配色。WrappingHStack 的尺寸回写
+                // 只经 onPreferenceChange（绝不在布局闭包里写状态），旋转宽变时
+                // 每趟布局仍是宽度的纯函数，不构成震荡源。
+                let pills: [SimMetricPill] = [
+                    SimMetricPill(label: "总资产", value: SimFormat.amount0(summary.totalAssets),
+                                  color: Color.primary),
+                    SimMetricPill(label: "可用", value: SimFormat.amount0(summary.cash),
+                                  color: Color.primary),
+                    SimMetricPill(label: "市值", value: SimFormat.amount0(summary.marketValue),
+                                  color: Color.primary),
+                    SimMetricPill(label: "仓位", value: SimFormat.pct(summary.positionPct * 100),
+                                  color: Color.primary),
+                    SimMetricPill(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
+                                  color: profitColor(summary.dayProfit)),
+                    SimMetricPill(label: "累计盈亏", value: SimFormat.signed0(summary.totalProfit),
+                                  color: profitColor(summary.totalProfit)),
+                    SimMetricPill(label: "在途委托", value: "\(pendingCount)", color: Color.orange),
+                ]
+                WrappingHStack(items: pills, horizontalSpacing: 8, rowSpacing: 6) { pill in
+                    metricPillContent(pill)
+                }
+                .padding(.vertical, 8)
+            } else {
+                // 宽屏保持七项等宽单行（视觉与既有布局完全一致）
+                HStack(spacing: 0) {
+                    metricItem("总资产", SimFormat.amount0(summary.totalAssets))
+                    metricSeparator
+                    metricItem("可用", SimFormat.amount0(summary.cash))
+                    metricSeparator
+                    metricItem("市值", SimFormat.amount0(summary.marketValue))
+                    metricSeparator
+                    metricItem("仓位", SimFormat.pct(summary.positionPct * 100))
+                    metricSeparator
+                    metricItem("当日盈亏", SimFormat.signed0(summary.dayProfit),
+                               color: profitColor(summary.dayProfit))
+                    metricSeparator
+                    metricItem("累计盈亏", SimFormat.signed0(summary.totalProfit),
+                               color: profitColor(summary.totalProfit))
+                    metricSeparator
+                    metricItem("在途委托", "\(pendingCount)", color: Color.orange)
+                }
+                .frame(height: 52)
+            }
         }
         .padding(.horizontal, 12)
-        .frame(height: 52)
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color(.separator)).frame(height: 0.5)
         }
+    }
+
+    /// 紧凑态指标胶囊模型：WrappingHStack 要求 Identifiable 入参，label 即 id（七项标签互不重复）
+    private struct SimMetricPill: Identifiable {
+        let label: String
+        let value: String
+        let color: Color
+        var id: String { label }
+    }
+
+    /// 紧凑态指标胶囊：视觉令牌与宽屏 metricItem 一致（label 10.5 灰 / value 14 bold），
+    /// 差别仅在不做等宽拉伸——按内容自适应宽，交给 WrappingHStack 断行
+    private func metricPillContent(_ pill: SimMetricPill) -> some View {
+        HStack(spacing: 6) {
+            Text(pill.label)
+                .font(.system(size: 10.5))
+                .foregroundColor(Color(.secondaryLabel))
+                .lineLimit(1)
+            Text(pill.value)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(pill.color)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 
     private func metricItem(_ label: String, _ value: String,
@@ -228,19 +305,48 @@ struct SimulationLayoutCView: View {
     // MARK: - 模块行
 
     private var moduleRow: some View {
-        HStack(spacing: 10) {
-            SimModuleSegmentedBar(module: $module, accountID: store.queryAccountID)
-            Spacer(minLength: 8)
-            condEntryButton
-            // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 44pt 行高
-            SimStrategyFormulaEntryButton { showStrategyFormulas = true }
-            // 「训练记录」入口：与上述入口同令牌，打开单人训练记录管理页
-            SimTrainingRecordEntryButton { showTrainingRecords = true }
-            searchBox
-            refreshButton
+        Group {
+            if isCompact {
+                // 紧凑态：单行固有宽 ~800pt（分段控件 + 三个功能入口 + 固定 148pt
+                // 搜索框 + 刷新），414pt 屏上后半段被挤出屏不可点。拆两行收敛：
+                // ① 分段控件独占一行，超宽横向滚动（券商 iPhone 端分段控件的标准
+                //    交互，五个模块全部可达），无角标 ~370pt 恰好可平铺、有角标
+                //    自动进入滚动，不挤压；
+                // ② 功能入口行：搜索框从固定 148pt 改弹性宽——固定宽与行内其他
+                //    固定元素共存必然把刷新按钮挤出屏，弹性宽吃掉剩余空间，
+                //    placeholder 超宽时由系统自动截断，整行必然收敛在屏内。
+                VStack(spacing: 0) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        SimModuleSegmentedBar(module: $module, accountID: store.queryAccountID)
+                            .frame(height: 44)
+                    }
+                    .frame(height: 44)
+                    HStack(spacing: 8) {
+                        condEntryButton
+                        // 「策略公式」/「训练记录」入口标识与宽屏同源，UITest 锚点不变
+                        SimStrategyFormulaEntryButton { showStrategyFormulas = true }
+                        SimTrainingRecordEntryButton { showTrainingRecords = true }
+                        compactSearchBox
+                        refreshButton
+                    }
+                    .frame(height: 44)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    SimModuleSegmentedBar(module: $module, accountID: store.queryAccountID)
+                    Spacer(minLength: 8)
+                    condEntryButton
+                    // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 44pt 行高
+                    SimStrategyFormulaEntryButton { showStrategyFormulas = true }
+                    // 「训练记录」入口：与上述入口同令牌，打开单人训练记录管理页
+                    SimTrainingRecordEntryButton { showTrainingRecords = true }
+                    searchBox
+                    refreshButton
+                }
+                .frame(height: 44)
+            }
         }
         .padding(.horizontal, 16)
-        .frame(height: 44)
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
         .overlay(alignment: .bottom) {
@@ -287,6 +393,25 @@ struct SimulationLayoutCView: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemBackground)))
+    }
+
+    /// 紧凑态搜索框：与 searchBox 同视觉，唯一差别是宽度——固定 148pt 改弹性
+    /// （maxWidth .infinity 吃满行内剩余空间）。为什么：414pt 屏功能入口行剩余
+    /// 仅 ~130pt，固定 148pt 必然把刷新按钮挤出屏；弹性宽使整行天然不溢出。
+    private var compactSearchBox: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundColor(Color(.secondaryLabel))
+            TextField("搜索标的名称/代码", text: $keyword)
+                .font(.system(size: 11.5))
+                .foregroundColor(Color.primary)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .frame(maxWidth: .infinity)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemBackground)))
     }
 
