@@ -306,7 +306,8 @@ struct SimulationLayoutAView: View {
     private var compactBody: some View {
         VStack(spacing: 0) {
             accountAnchorRow
-            SimSummaryBand(accountID: store.queryAccountID)
+            // 竖屏：指标带垂直堆叠（每项一行全宽，用户通用规则），不再折行挤压
+            SimSummaryBand(accountID: store.queryAccountID, isCompact: true)
             moduleRow
             if module == .log {
                 SimLogModuleFilterBar(selected: $logModule)

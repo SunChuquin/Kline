@@ -319,7 +319,8 @@ struct KlineDetailView: View {
                             .frame(height: 2)
 
                         // 第一行：工具栏（单图：含返回+名称+代码+功能按钮；联动：仅返回+功能按钮）
-                        toolbarRow
+                        // compactWidth（竖屏手机）：训练态时训练徽标独立成行挂在工具栏组内下方
+                        toolbarRow(compactWidth: geometry.size.width < CompactWidth.threshold)
                         // 工具栏与下方（信息栏或图表）之间的分界线
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
@@ -525,7 +526,9 @@ struct KlineDetailView: View {
 
     /// 顶部第一行：工具栏（返回 + 功能按钮）
     /// 联动时整体 + 内部所有按钮高度压缩到 22pt（与信息栏一致），单视图保持原 34pt 尺寸
-    private var toolbarRow: some View {
+    /// - Parameter compactWidth: 页面可用宽 < 600（手机竖屏）。训练态此时徽标**独立成行**
+    ///   （见 body 注释），不挤在工具栏行内；横屏（宽 ≥ 600）徽标仍排在名称代码右侧
+    private func toolbarRow(compactWidth: Bool) -> some View {
         let compact = effectiveDual          // 联动（非钻取）：压缩到 22pt，和信息栏等高
         let btnH:    CGFloat = compact ? 22 : 28
         let vPad:    CGFloat = compact ? 0  : 3
@@ -538,7 +541,7 @@ struct KlineDetailView: View {
         let normW:   CGFloat = compact ? 26 : 32   // 边、📌、联、⚙
         let corner:  CGFloat = compact ? 4  : 6
 
-        return HStack(spacing: gap) {
+        let bar = HStack(spacing: gap) {
             // 返回按钮三级语义：
             //   1. 联动状态（effectiveDual）= 先退联动，回到主标的单图
             //   2. 钻取单图（drillIn != nil）= 清 drillIn，恢复联动页面快照
@@ -604,16 +607,13 @@ struct KlineDetailView: View {
                     .lineLimit(1)
             }
 
-            // 训练态：徽标紧跟在标的代码右侧（单图与联动多图同一处）。
-            // 竖屏实测徽标行 fixedSize 宽 ~310pt，叠加返回/名称/代码与右侧按钮组后整行 ~555pt，
-            // 远超 414pt 屏宽，会把「联」「多/空」「⚙」顶出屏幕（hit point 落到屏外物理不可点），
-            // 并连带图表区被撑宽、右缘按钮出屏。徽标是金融训练读数（笔/高/低/振/收/盈），
-            // 换行或省略号都会打断一行读数的连续性，因此与联动指标数值栏同款处理：
-            // 内容保持 fixedSize 完整单行，交给 InfoPannerCenter 按剩余可用宽裁切，
-            // 单指左右拖拽查看完整内容。徽标段同时弹性占满剩余宽度（替换原 Spacer 的角色），
-            // 保证右侧按钮组始终右对齐、位置与顺序和非训练态完全一致。
-            // 非训练态保持原样（Spacer + 按钮组），渲染路径不受本改动影响。
-            if trainingActive {
+            // 训练态徽标（仅宽屏——横屏 848/iPad 徽标 ~310pt 与名称代码、按钮组同排放得下）：
+            // 紧跟标的代码右侧，与联动指标数值栏同款 InfoPannerCenter（fixedSize 单行读数
+            // 不换行不省略，超宽靠单指拖拽查看）；徽标段弹性占满剩余宽度（替换原 Spacer），
+            // 右侧按钮组始终右对齐、位置与顺序和非训练态一致。
+            // 竖屏（compactWidth）徽标不在此行——独立成行见下方 VStack 分支（用户指定位置：
+            // 主图指标信息栏上方），工具栏行恢复与非训练态完全一致的 Spacer 布局。
+            if trainingActive && !compactWidth {
                 InfoPannerCenter {
                     trainingBadges
                 }
@@ -733,8 +733,33 @@ struct KlineDetailView: View {
         .padding(.leading, hPad)
         .padding(.trailing, hPad)
         .padding(.vertical, vPad)
+
+        // 竖屏训练态：训练徽标独立成行（用户验收反馈 2026-10-20）——位于工具栏行下方、
+        // 信息栏/图表区上方，即**所有视图的主图指标信息栏上方**。独立全宽行（414−2×hPad
+        // ≈ 398pt）容得下徽标单行 ~310pt 的完整读数（不再被名称/按钮挤压裁切）；
+        // 仍包 InfoPannerCenter 以备徽标项未来增多超宽时可单指拖拽查看。
+        // 挂在工具栏组内（而非 body 的 VStack）的原因：TopBarHeightPreferenceKey
+        // 在本组外层测量，独立行高度自动计入 infoBarTopOffset——「边」分隔线覆盖层
+        // 与搜索栏的 y 定位随之正确下移，无需另加偏移状态。
+        return Group {
+            if trainingActive && compactWidth {
+                VStack(spacing: 0) {
+                    bar
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 0.5)
+                    InfoPannerCenter {
+                        trainingBadges
+                    }
+                    .frame(height: compact ? 20 : 26)
+                    .padding(.horizontal, hPad)
+                }
+            } else {
+                bar
+            }
+        }
         .background(Color(.systemBackground))
-        // 测量工具栏行高度（供 infoBarTopOffset 对齐）
+        // 测量工具栏行高度（供 infoBarTopOffset 对齐；竖屏训练态为含独立徽标行的整组高度）
         .background(
             GeometryReader { proxy in
                 Color.clear.preference(key: TopBarHeightPreferenceKey.self,

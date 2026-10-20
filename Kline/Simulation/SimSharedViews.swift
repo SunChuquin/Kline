@@ -168,11 +168,15 @@ struct SimSparkline: View {
 
 /// 资产总览带：六项指标（总资产 / 可用资金 / 持仓市值 / 持仓占比 / 当日盈亏 / 累计盈亏）
 /// + 近 30 日净值折线；accountID == nil 表示「全部账户汇总」。
-/// 指标行改用 WrappingHStack **无条件**流式换行：iPad 工作区 808 宽单行放得下自动 1 行
-/// （字号与配色令牌不变，单行总高仍 62pt；仅去掉分隔线——0.5pt 竖线无法参与干净换行）；
-/// iPhone 横屏工作区 ~632 / 竖屏 414 自动折行，指标行不再两端出屏
+/// 指标行两形态（用户通用规则 2026-10-20：竖屏水平堆栈→垂直堆栈，横屏恢复水平）：
+/// - 宽屏（横屏 848 / iPad 808）：WrappingHStack 单行铺开（字号与配色令牌不变，
+///   单行总高仍 62pt；0.5pt 竖线无法参与干净换行故去掉分隔线）
+/// - 紧凑宽（竖屏 414）：**VStack 垂直堆叠**，每项独占一行全宽（label 左灰 / value 右
+///   着色加粗的水平行），不再折行挤压；净值项整行（label 左 + 迷你走势右）
 struct SimSummaryBand: View {
     let accountID: UUID?
+    /// 紧凑宽（竖屏手机）：垂直堆栈形态。默认 false（宽屏），由宿主页面传入
+    var isCompact: Bool = false
 
     @ObservedObject private var store = SimStore.shared
 
@@ -207,15 +211,59 @@ struct SimSummaryBand: View {
                     big: false, color: simProfitColor(summary.totalProfit)),
             .netValue(series),
         ]
-        return WrappingHStack(items: items, horizontalSpacing: 0, rowSpacing: 6) { item in
-            content(item)
+        return Group {
+            if isCompact {
+                // 竖屏：垂直堆栈——每项一行全宽，读取纵向扫一眼即得全貌（同花顺手机版形态）
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(items) { item in
+                        compactRow(item)
+                    }
+                }
+            } else {
+                WrappingHStack(items: items, horizontalSpacing: 0, rowSpacing: 6) { item in
+                    content(item)
+                }
+            }
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, 9)
+        .padding(.vertical, isCompact ? 5 : 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color(.separator)).frame(height: 0.5)
+        }
+    }
+
+    /// 竖屏单行形态：label 左（灰小字）+ value 右（bold 着色，与按钮行右端对齐），
+    /// 行高 26 触控友好；净值项 label 左 + 迷你走势右（走势定宽不随行拉伸）
+    @ViewBuilder
+    private func compactRow(_ item: Item) -> some View {
+        switch item {
+        case .metric(let label, let value, let big, let color):
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(value)
+                    .font(.system(size: big ? 15 : 14, weight: .bold))
+                    .foregroundColor(color)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+        case .netValue(let series):
+            HStack(spacing: 8) {
+                Text("近 30 日净值")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+                Spacer(minLength: 8)
+                SimSparkline(values: series, tint: Color(.systemRed))
+                    .frame(width: 172)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
         }
     }
 

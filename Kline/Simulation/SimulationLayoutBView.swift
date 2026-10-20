@@ -167,37 +167,79 @@ struct SimulationLayoutBView: View {
 
     // MARK: - 顶部条
 
+    /// 顶部条两形态（用户通用规则 2026-10-20）：
+    /// - 宽屏：单行（标题 + 提示 + 右侧入口组），固定高 52
+    /// - 紧凑宽（竖屏 414）：**拆两行垂直堆叠**——第一行标题+提示，第二行入口组右对齐，
+    ///   不再整行水平挤压
     private var topBar: some View {
-        HStack(spacing: 10) {
-            Text("模拟交易")
-                .font(.system(size: 19, weight: .bold))
-                .foregroundColor(Color.primary)
-            Text("点账户卡进入该账户，点模块卡进入明细")
-                .font(.system(size: 11.5))
-                .foregroundColor(Color(.secondaryLabel))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Spacer(minLength: 8)
-            condEntryButton
-            // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 52pt 行高
-            SimStrategyFormulaEntryButton { showStrategyFormulas = true }
-            // 「训练记录」入口：与上述入口同令牌，打开单人训练记录管理页
-            SimTrainingRecordEntryButton { showTrainingRecords = true }
-            Button(action: { showWalletAlert = true }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "wallet.pass").font(.system(size: 11))
-                    Text("资金管理").font(.system(size: 12))
+        Group {
+            if isCompact {
+                VStack(spacing: 2) {
+                    HStack(spacing: 10) {
+                        Text("模拟交易")
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundColor(Color.primary)
+                        Text("点账户卡进入该账户，点模块卡进入明细")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(Color(.secondaryLabel))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        Spacer(minLength: 0)
+                    }
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        condEntryButton
+                        SimStrategyFormulaEntryButton { showStrategyFormulas = true }
+                        SimTrainingRecordEntryButton { showTrainingRecords = true }
+                        Button(action: { showWalletAlert = true }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "wallet.pass").font(.system(size: 11))
+                                Text("资金管理").font(.system(size: 12))
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 8)
+                            .frame(height: 26)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.5), lineWidth: 1))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .foregroundColor(.blue)
-                .padding(.horizontal, 8)
-                .frame(height: 26)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.5), lineWidth: 1))
-                .contentShape(Rectangle())
+                .padding(.horizontal, 18)
+                .padding(.vertical, 6)
+            } else {
+                HStack(spacing: 10) {
+                    Text("模拟交易")
+                        .font(.system(size: 19, weight: .bold))
+                        .foregroundColor(Color.primary)
+                    Text("点账户卡进入该账户，点模块卡进入明细")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(Color(.secondaryLabel))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: 8)
+                    condEntryButton
+                    // 「策略公式」入口：与「条件单」入口同为 44pt 命中区、同为 12.5pt 蓝字，不改变本行 52pt 行高
+                    SimStrategyFormulaEntryButton { showStrategyFormulas = true }
+                    // 「训练记录」入口：与上述入口同令牌，打开单人训练记录管理页
+                    SimTrainingRecordEntryButton { showTrainingRecords = true }
+                    Button(action: { showWalletAlert = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "wallet.pass").font(.system(size: 11))
+                            Text("资金管理").font(.system(size: 12))
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 8)
+                        .frame(height: 26)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.5), lineWidth: 1))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 18)
+                .frame(height: 52)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 18)
-        .frame(height: 52)
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
         .overlay(alignment: .bottom) {
@@ -227,15 +269,16 @@ struct SimulationLayoutBView: View {
 
     // MARK: - 账户卡片行
 
-    /// 账户卡行：紧凑态两列换行（WrappingHStack，卡片宽弹性、内部内容自适应）；
-    /// 宽屏保持横排横滚（形态与交互原样）。两形态共用同一份卡视图与新建弹窗
+    /// 账户卡行两形态（用户通用规则 2026-10-20）：
+    /// - 紧凑宽（竖屏 414）：**VStack 单列垂直堆叠**，每卡独占一行全宽（不再两列换行）
+    /// - 宽屏：保持横排横滚（形态与交互原样）。两形态共用同一份卡视图与新建弹窗
     private var accountStrip: some View {
         Group {
             if isCompact {
-                WrappingHStack(items: compactCardItems,
-                               horizontalSpacing: 12,
-                               rowSpacing: 12) { item in
-                    compactCard(item)
+                VStack(spacing: 12) {
+                    ForEach(compactCardItems) { item in
+                        compactCard(item)
+                    }
                 }
                 .padding(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
             } else {
@@ -295,10 +338,10 @@ struct SimulationLayoutBView: View {
         }
     }
 
-    /// 两列卡片宽：(可用宽 − 两侧 16pt 边距 − 列间 12pt 间距) / 2；卡内文字自适应
+    /// 全宽卡宽（竖屏单列）：可用宽 − 两侧 16pt 边距；卡内文字自适应
     /// （名称截断 / 金额缩放 / 净值线吃满卡内宽）
     private var compactCardWidth: CGFloat {
-        max(0, (availableWidth - 16 * 2 - 12) / 2)
+        max(0, availableWidth - 16 * 2)
     }
 
     /// 全部账户汇总卡（语义色背景 + 语义色文字）：宽屏横排用固有宽 218

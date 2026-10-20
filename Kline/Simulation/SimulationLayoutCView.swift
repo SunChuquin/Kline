@@ -201,30 +201,25 @@ struct SimulationLayoutCView: View {
         let pendingCount = store.activeOrders(accountID: store.queryAccountID).count
         return Group {
             if isCompact {
-                // 紧凑态（<600，如 iPhone 11 竖屏 414）：七项等宽行固有宽 ~500pt、
-                // 两端出屏。改 WrappingHStack 流式换行（414 下自动折成两行），
-                // 单项视觉保持 metricItem 的字号与配色。WrappingHStack 的尺寸回写
-                // 只经 onPreferenceChange（绝不在布局闭包里写状态），旋转宽变时
-                // 每趟布局仍是宽度的纯函数，不构成震荡源。
-                let pills: [SimMetricPill] = [
-                    SimMetricPill(label: "总资产", value: SimFormat.amount0(summary.totalAssets),
-                                  color: Color.primary),
-                    SimMetricPill(label: "可用", value: SimFormat.amount0(summary.cash),
-                                  color: Color.primary),
-                    SimMetricPill(label: "市值", value: SimFormat.amount0(summary.marketValue),
-                                  color: Color.primary),
-                    SimMetricPill(label: "仓位", value: SimFormat.pct(summary.positionPct * 100),
-                                  color: Color.primary),
-                    SimMetricPill(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
-                                  color: profitColor(summary.dayProfit)),
-                    SimMetricPill(label: "累计盈亏", value: SimFormat.signed0(summary.totalProfit),
-                                  color: profitColor(summary.totalProfit)),
-                    SimMetricPill(label: "在途委托", value: "\(pendingCount)", color: Color.orange),
-                ]
-                WrappingHStack(items: pills, horizontalSpacing: 8, rowSpacing: 6) { pill in
-                    metricPillContent(pill)
+                // 紧凑态（<600，如 iPhone 11 竖屏 414）：**VStack 垂直堆叠**（用户通用规则
+                // 2026-10-20：竖屏水平堆栈→垂直堆栈，横屏恢复水平）——每项独占一行全宽
+                // （label 左灰 / value 右着色加粗），不再折行挤压；视觉令牌与宽屏 metricItem 一致
+                VStack(alignment: .leading, spacing: 0) {
+                    metricPillContent(SimMetricPill(label: "总资产", value: SimFormat.amount0(summary.totalAssets),
+                                                    color: Color.primary))
+                    metricPillContent(SimMetricPill(label: "可用", value: SimFormat.amount0(summary.cash),
+                                                    color: Color.primary))
+                    metricPillContent(SimMetricPill(label: "市值", value: SimFormat.amount0(summary.marketValue),
+                                                    color: Color.primary))
+                    metricPillContent(SimMetricPill(label: "仓位", value: SimFormat.pct(summary.positionPct * 100),
+                                                    color: Color.primary))
+                    metricPillContent(SimMetricPill(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
+                                                    color: profitColor(summary.dayProfit)))
+                    metricPillContent(SimMetricPill(label: "累计盈亏", value: SimFormat.signed0(summary.totalProfit),
+                                                    color: profitColor(summary.totalProfit)))
+                    metricPillContent(SimMetricPill(label: "在途委托", value: "\(pendingCount)", color: Color.orange))
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
             } else {
                 // 宽屏保持七项等宽单行（视觉与既有布局完全一致）
                 HStack(spacing: 0) {
@@ -263,21 +258,23 @@ struct SimulationLayoutCView: View {
         var id: String { label }
     }
 
-    /// 紧凑态指标胶囊：视觉令牌与宽屏 metricItem 一致（label 10.5 灰 / value 14 bold），
-    /// 差别仅在不做等宽拉伸——按内容自适应宽，交给 WrappingHStack 断行
+    /// 紧凑态指标单行（垂直堆叠形态的行）：label 左灰 / value 右着色加粗，全宽行高 26；
+    /// 视觉令牌与宽屏 metricItem 一致（label 10.5 灰 / value 14 bold）
     private func metricPillContent(_ pill: SimMetricPill) -> some View {
         HStack(spacing: 6) {
             Text(pill.label)
                 .font(.system(size: 10.5))
                 .foregroundColor(Color(.secondaryLabel))
                 .lineLimit(1)
+            Spacer(minLength: 8)
             Text(pill.value)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(pill.color)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 26)
     }
 
     private func metricItem(_ label: String, _ value: String,
