@@ -48,11 +48,17 @@
   - [x] 10.3 回归：iPad mini 5 冒烟 10 通过（01/02/03/93/95/96/97/100/101/102）+ test92 加非刘海设备 XCTSkip 守卫（iPad 无横向安全区，minX=0 是正确行为）+ test98 重跑通过（首轮为双模拟器并发负载抖动）；test99 为**既有失败**（基线 f7e50fa 隔离 worktree 复现同一条断言，非本次回归；iPad 模拟器上 addBack 后 0.3s 时序不足，留后续单独修）。iPhone 11 探针 7/7 全过（testProbe03 首轮失败为并发负载抖动，单独重跑通过 218s）
   - [ ] 10.4 用户真机验收：iPad mini 5 逐页面确认形态不变（**待用户验收**）
 
-- [ ] Task 11: 竖屏垂直堆栈规则 + 训练态徽标独立行（W11+W12，2026-10-20 用户验收反馈）
+- [x] Task 11: 竖屏垂直堆栈规则 + 训练态徽标独立行（W11+W12，2026-10-20 用户验收反馈）
   - [x] 11.1 AdaptiveStack 通用组件（紧凑 VStack / 宽屏 HStack，含适用范围说明与 Preview）
   - [x] 11.2 模拟 A 指标带竖排（isCompact 参数 + 每项一行全宽）；模拟 C 指标行竖排；模拟 B 顶部条拆两行 + 账户卡单列全宽
   - [x] 11.3 训练态徽标竖屏独立成行（工具栏组内、主图指标信息栏上方；横屏保持行内）；工具栏恢复与非训练态一致布局
   - [x] 验证：testProbe04 + testProbe07 通过；frame 实测——徽标独立行 y=91.5（工具栏 53 与主图指标栏 111 之间，单图+联动同口径）、simA 指标 7 行（154.8→312.8 各 26pt）、simC 7 行（162→318）、simB 卡片单列全宽 382pt（x=16 纵排 192.5→656.5）；横屏形态不变
+  - [x] 11.4 首页竖屏垂直堆栈（用户补充反馈"首页里的水平堆栈你没有处理"）：
+    - 通用引擎：PageLayoutRenderer 的 hstack 节点竖屏（compact sizeClass）自动渲染为 VStack（AdaptiveHStackContainer），横屏/iPad 恢复 HStack——配置驱动路径全页面生效；横向 scroll 内层 HStack（横滑语义）不改
+    - 硬编码路径：HomeLayoutB/DView 双卡（我的自选/模拟账户）竖屏垂直堆叠各占全宽（横屏并排原样）
+    - widget：HomeMarketOverviewStrip 指数行竖屏垂直（每指数一行：名称左/现价+涨跌幅胶囊右，44pt 行高）；HomeSimSummaryBlock 当日盈亏/持仓占比竖屏垂直各行；四个 widget 竖屏强制紧凑视觉（effectiveCompact = compact || sizeClass==compact）、sparkline 竖屏关闭——配置写死参数被 sizeClass 覆盖，两条渲染路径行为一致
+    - 不垂直化（设计语义）：快捷入口行/涨幅榜 chips（横滑可拖拽设计，等同指标栏拖拽交互）、行情行/持仓行（列表行两端对齐语义）、HomeHeaderBar（414 放得下）
+  - [x] 验证（testProbe91 三方向 frame 决定性证据）：竖屏指数行垂直（上证指数 28,264 名称左 + 3889.44 256.5 + 胶囊 335 右）、双卡垂直全宽（自选 370.5 → 模拟账户 476.5）、指标垂直各行（当日盈亏 547.5 独立行）；横屏恢复水平（指数三行小列 x=72、双卡并排 72/484、指标同行并排 y=405.5）；横屏指标文字出底 5pt 属 ScrollView 可滚内容非缺陷；种子库指数"加载中"为数据特性（唯一标的 type=扩展行情指数，非布局问题，已用临时改库 type 验证后还原）
   - [ ] 用户模拟器复验（新截图集 testProbe90 导出）
 
 # Task Dependencies

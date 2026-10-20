@@ -29,9 +29,15 @@ struct PageLayoutRenderer<Context> {
                 }
             )
         case "hstack":
+            // 竖屏垂直堆栈规则（2026-10-20）：配置里的 hstack 在 iPhone 竖屏
+            // （horizontalSizeClass == .compact）下自动渲染为 VStack（leading 对齐，
+            // 间距沿用 spacing），横屏 / iPad（regular）保持 HStack 原样——
+            // 与硬编码布局视图（HomeLayoutB/DView 等）的 sizeClass 分支同口径，
+            // 配置驱动与硬编码两条渲染路径行为一致。
+            // 注意：横向 scroll 的内层 HStack（横滑语义，如快捷入口行）不走此分支。
             return AnyView(
-                HStack(alignment: verticalAlignment(node.alignment),
-                       spacing: CGFloat(node.spacing ?? 8)) {
+                AdaptiveHStackContainer(alignment: verticalAlignment(node.alignment),
+                                        spacing: CGFloat(node.spacing ?? 8)) {
                     childViews(children)
                 }
             )
@@ -198,6 +204,30 @@ struct PageLayoutRenderer<Context> {
         case "bottomLeading": return .bottomLeading
         case "bottomTrailing": return .bottomTrailing
         default: return .center
+        }
+    }
+}
+
+// MARK: - hstack 节点的竖屏自适应容器
+
+/// 配置 hstack 节点的渲染容器：iPhone 竖屏（compact）→ VStack（leading 对齐），
+/// 横屏 / iPad（regular）→ HStack（原对齐）。sizeClass 由系统随旋转自动切换。
+/// PageLayoutRenderer 是纯函数结构体（非 View），读不了 @Environment，
+/// 故用本 View 承载自适应逻辑。
+private struct AdaptiveHStackContainer<Content: View>: View {
+    /// HStack 形态的垂直对齐（来自节点 alignment，默认 center）
+    let alignment: VerticalAlignment
+    /// 两种形态共用的子项间距（来自节点 spacing，默认 8）
+    let spacing: CGFloat
+    @ViewBuilder let content: Content
+
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
+    var body: some View {
+        if hSizeClass == .compact {
+            VStack(alignment: .leading, spacing: spacing) { content }
+        } else {
+            HStack(alignment: alignment, spacing: spacing) { content }
         }
     }
 }

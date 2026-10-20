@@ -24,6 +24,11 @@ struct HomeLayoutDView: View {
     let onOpenPythonLab: () -> Void
     let onProfile: () -> Void
 
+    /// 尺寸类别（竖屏垂直堆栈规则 2026-10-20）：iPhone 竖屏 .compact →
+    /// 「模拟账户 + 我的自选」从各占一半宽改为垂直堆叠各占全宽；
+    /// 横屏 / iPad .regular 保持双卡并排原样
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     var body: some View {
         VStack(spacing: 0) {
             HomeHeaderBar(onProfile: onProfile)
@@ -40,20 +45,35 @@ struct HomeLayoutDView: View {
                                                 compact: false)
                     }
 
-                    // 模拟账户 + 我的自选（前 3 条）：各占一半宽、顶部对齐
-                    HStack(alignment: .top, spacing: 12) {
-                        HomeSectionCard(title: "模拟账户", compact: true) {
-                            HomeSimSummaryBlock(model: model, compact: true,
-                                                onTap: { onSelectTab(3) })
+                    // 模拟账户 + 我的自选（前 3 条）：宽屏各占一半宽并排；
+                    // 竖屏垂直堆叠各占全宽
+                    if hSizeClass == .compact {
+                        VStack(spacing: 12) {
+                            HomeSectionCard(title: "模拟账户", compact: true) {
+                                HomeSimSummaryBlock(model: model, compact: true,
+                                                    onTap: { onSelectTab(3) })
+                            }
+                            HomeSectionCard(title: "我的自选", compact: true) {
+                                HomeFavoritesBlock(rows: Array(model.favoriteRows.prefix(3)),
+                                                   compact: true, showsSparkline: false,
+                                                   onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .top)
+                    } else {
+                        HStack(alignment: .top, spacing: 12) {
+                            HomeSectionCard(title: "模拟账户", compact: true) {
+                                HomeSimSummaryBlock(model: model, compact: true,
+                                                    onTap: { onSelectTab(3) })
+                            }
+                            .frame(maxWidth: .infinity, alignment: .top)
 
-                        HomeSectionCard(title: "我的自选", compact: true) {
-                            HomeFavoritesBlock(rows: Array(model.favoriteRows.prefix(3)),
-                                               compact: true, showsSparkline: false,
-                                               onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                            HomeSectionCard(title: "我的自选", compact: true) {
+                                HomeFavoritesBlock(rows: Array(model.favoriteRows.prefix(3)),
+                                                   compact: true, showsSparkline: false,
+                                                   onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                            }
+                            .frame(maxWidth: .infinity, alignment: .top)
                         }
-                        .frame(maxWidth: .infinity, alignment: .top)
                     }
 
                     // 涨幅榜：横滑 chips

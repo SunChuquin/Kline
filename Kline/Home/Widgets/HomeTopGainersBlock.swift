@@ -24,6 +24,11 @@ struct HomeTopGainersBlock: View {
     let isReady: Bool
     let onOpen: (MetaItem, [MetaItem]) -> Void
 
+    /// 竖屏垂直堆栈规则（2026-10-20）：竖屏（compact sizeClass）视觉一律紧凑
+    /// （与 HomeFavoritesBlock 同口径，配置写死的 compact 参数被 sizeClass 覆盖）
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    private var effectiveCompact: Bool { compact || hSizeClass == .compact }
+
     /// 直接观察行缓存：bars 陆续到位时本块自行刷新
     @ObservedObject private var rowCache = MarketRowCache.shared
 
@@ -32,7 +37,7 @@ struct HomeTopGainersBlock: View {
             Text(isReady ? "暂无数据" : "数据加载中")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, minHeight: compact ? 44 : 48, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: effectiveCompact ? 44 : 48, alignment: .leading)
         } else {
             switch style {
             case .list:
@@ -47,7 +52,7 @@ struct HomeTopGainersBlock: View {
     private var listBody: some View {
         VStack(spacing: 0) {
             ForEach(rows) { row in
-                HomeQuoteRow(row: row, context: rows, compact: compact,
+                HomeQuoteRow(row: row, context: rows, compact: effectiveCompact,
                              showsSparkline: false, onOpen: onOpen)
             }
         }

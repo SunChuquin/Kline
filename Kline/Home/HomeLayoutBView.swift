@@ -24,6 +24,11 @@ struct HomeLayoutBView: View {
     let onOpenPythonLab: () -> Void
     let onProfile: () -> Void
 
+    /// 尺寸类别（竖屏垂直堆栈规则 2026-10-20）：iPhone 竖屏 .compact →
+    /// 「我的自选 + 模拟账户」从各占一半宽（每卡 ~190pt 挤压）改为垂直堆叠各占全宽；
+    /// 横屏 / iPad .regular 保持双卡并排原样。系统随旋转自动切换。
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     var body: some View {
         VStack(spacing: 0) {
             HomeHeaderBar(onProfile: onProfile)
@@ -39,20 +44,35 @@ struct HomeLayoutBView: View {
                                                 compact: false)
                     }
 
-                    // 我的自选 + 模拟账户：各占一半宽、顶部对齐（内容行数不同不强行等高）
-                    HStack(alignment: .top, spacing: 12) {
-                        HomeSectionCard(title: "我的自选") {
-                            HomeFavoritesBlock(rows: model.favoriteRows, compact: false,
-                                               showsSparkline: true,
-                                               onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                    // 我的自选 + 模拟账户：宽屏各占一半宽并排（顶部对齐）；
+                    // 竖屏垂直堆叠各占全宽（卡片内 widget 已按 sizeClass 自适应）
+                    if hSizeClass == .compact {
+                        VStack(spacing: 12) {
+                            HomeSectionCard(title: "我的自选", compact: true) {
+                                HomeFavoritesBlock(rows: model.favoriteRows, compact: true,
+                                                   showsSparkline: false,
+                                                   onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                            }
+                            HomeSectionCard(title: "模拟账户", compact: true) {
+                                HomeSimSummaryBlock(model: model, compact: true,
+                                                    onTap: { onSelectTab(3) })
+                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .top)
+                    } else {
+                        HStack(alignment: .top, spacing: 12) {
+                            HomeSectionCard(title: "我的自选") {
+                                HomeFavoritesBlock(rows: model.favoriteRows, compact: false,
+                                                   showsSparkline: true,
+                                                   onOpen: openDetail, onEmptyTap: { onSelectTab(1) })
+                            }
+                            .frame(maxWidth: .infinity, alignment: .top)
 
-                        HomeSectionCard(title: "模拟账户") {
-                            HomeSimSummaryBlock(model: model, compact: false,
-                                                onTap: { onSelectTab(3) })
+                            HomeSectionCard(title: "模拟账户") {
+                                HomeSimSummaryBlock(model: model, compact: false,
+                                                    onTap: { onSelectTab(3) })
+                            }
+                            .frame(maxWidth: .infinity, alignment: .top)
                         }
-                        .frame(maxWidth: .infinity, alignment: .top)
                     }
 
                     HomeSectionCard(title: "涨幅榜") {

@@ -356,6 +356,18 @@ final class DeviceCompatProbeUITests: XCTestCase {
     // 不必在设备上逐页手动导航。
 
     func testProbe90_GalleryScreenshots() throws {
+        // 0. 首页 B/C/D 三档（竖屏垂直堆栈规则覆盖：指数行垂直、双卡垂直全宽、
+        //    模拟账户指标行垂直；横屏恢复水平。首页默认走 JSON 配置渲染路径）
+        for style in ["B", "C", "D"] {
+            let app = launchApp(["-kline.homeLayout", style])
+            XCTAssertTrue(app.buttons["tab.home"].waitForExistence(timeout: 15))
+            app.buttons["tab.home"].tap()
+            XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10), "首页未显示(\(style))")
+            settle(2.0)
+            cycleOrientations(app, label: "gallery.home\(style)", dumpElements: false)
+            app.terminate()
+        }
+
         // 1. 行情 B（抽屉页，带数据行）
         do {
             let app = launchApp(["-kline.marketLayout", "B"])
@@ -454,5 +466,27 @@ final class DeviceCompatProbeUITests: XCTestCase {
             cycleOrientations(app, label: "gallery.train.linked", dumpElements: false)
             app.terminate()
         }
+    }
+
+    // MARK: - 用例 91：首页数据态截图（指数行垂直堆栈验证）
+    //
+    // testProbe90 首页环节 settle 2s 时 bars 预热常未完成（截图呈「指数加载中」），
+    // 本用例专门等预热完成（轮询加载文案消失，上限 25s）后截首页 B 档竖屏，
+    // 验证大盘概览指数行的垂直堆叠形态（每指数一行：名称左 / 现价+涨跌幅胶囊右）。
+
+    func testProbe91_HomeDataState() throws {
+        let app = launchApp(["-kline.homeLayout", "B"])
+        XCTAssertTrue(app.buttons["tab.home"].waitForExistence(timeout: 15))
+        app.buttons["tab.home"].tap()
+        XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10))
+        let loading = app.staticTexts["指数加载中"].firstMatch
+        let deadline = Date().addingTimeInterval(25)
+        while loading.exists && Date() < deadline {
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        settle(1.5)
+        // 三方向完整转储（frame 为决定性证据：竖屏验证垂直堆叠、横屏验证恢复水平）
+        cycleOrientations(app, label: "homeB.data", dumpElements: true)
+        app.terminate()
     }
 }
