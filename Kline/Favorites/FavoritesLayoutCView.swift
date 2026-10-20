@@ -14,18 +14,43 @@ import SwiftUI
 struct FavoritesLayoutCView: View {
     @ObservedObject var model: FavoritesPageModel
 
+    /// 页面可用宽度：由顶层 WidthReader 上报。0 表示尚未上报——
+    /// 此时按宽屏形态渲染，保证 iPad 首帧与既有布局/UITest 场景完全一致
+    @State private var availableWidth: CGFloat = 0
+
+    /// 紧凑宽度形态（可用宽 < 600，iPhone 11 竖屏 414pt）：顶栏工具组与卡片行
+    /// 固有宽 ~426pt 超出屏宽（`+` 按钮 / 卡片 `…` 按钮出右缘 2~10pt），
+    /// 紧凑态收敛：工具组用 WrappingHStack 允许换行、卡片收边距与固定列宽
+    private var isCompact: Bool {
+        availableWidth > 0 && availableWidth < CompactWidth.threshold
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            FavoritesGroupTabs(model: model)
-            Divider()
-            content
+        // 顶层测宽（WidthReader 只允许在页面顶层包裹，见其文档）
+        WidthReader(onChange: { availableWidth = $0 }) {
+            VStack(spacing: 0) {
+                topBar
+                FavoritesGroupTabs(model: model)
+                Divider()
+                content
+            }
         }
     }
 
     // MARK: - 顶部工具条
 
+    /// 顶部工具条：regular 单行（既有形态完全不变）；紧凑宽工具组改用
+    /// WrappingHStack 允许换行（trailing 对齐保持右锚点视觉），消除 `+` 出屏
+    @ViewBuilder
     private var topBar: some View {
+        if isCompact {
+            compactTopBar
+        } else {
+            regularTopBar
+        }
+    }
+
+    private var regularTopBar: some View {
         HStack(spacing: 4) {
             Text("自选")
                 .font(.system(size: 18, weight: .bold))
@@ -47,6 +72,47 @@ struct FavoritesLayoutCView: View {
         }
         .frame(height: 48)
         .background(Color(.systemBackground))
+    }
+
+    /// 紧凑态顶栏：标题不动；右侧工具组进 WrappingHStack（trailing 对齐保持右锚点视觉）。
+    /// 刷新按钮的进度文案（「刷新中...」/「d/t」）会把整组撑宽——放不下自动折到
+    /// 第二行，全部按钮恒可见可点（命中区 44pt 不缩水）
+    private var compactTopBar: some View {
+        HStack(spacing: 4) {
+            Text("自选")
+                .font(.system(size: 18, weight: .bold))
+                .accessibilityIdentifier("favorites.title")
+                .padding(.leading, 10)
+            Spacer(minLength: 4)
+            WrappingHStack(items: CompactToolItem.allCases,
+                           horizontalSpacing: 3,
+                           rowSpacing: 2,
+                           alignment: .trailing) { item in
+                compactToolItem(item)
+            }
+            .padding(.trailing, 4)
+        }
+        // 换行时高度自适应（单行 48，两行 ~90），不写死
+        .frame(minHeight: 48)
+        .background(Color(.systemBackground))
+    }
+
+    /// 紧凑态工具组条目（WrappingHStack 需 Identifiable 驱动断行；顺序 = regular 顶栏从左到右）
+    private enum CompactToolItem: Int, Identifiable, CaseIterable {
+        case refresh, search, modeSwitch, edit, columns, add
+        var id: Int { rawValue }
+    }
+
+    @ViewBuilder
+    private func compactToolItem(_ item: CompactToolItem) -> some View {
+        switch item {
+        case .refresh: refreshButton
+        case .search: iconButton("magnifyingglass") { model.homeSearchActive = true }
+        case .modeSwitch: modeSwitch
+        case .edit: FavoritesEditToggleButton(model: model)
+        case .columns: iconButton("slider.horizontal.3") { model.showColumnPanel = true }
+        case .add: iconButton("plus", color: .blue) { model.showAddSheet = true }
+        }
     }
     
     /// 刷新按钮
@@ -204,14 +270,16 @@ struct FavoritesLayoutCView: View {
         // 点击上下文取当前分组标的快照（与 A 档一致）
         let items = model.currentItems
         let pctValue = row.number(.changePct)
-        return HStack(spacing: 12) {
+        return HStack(spacing: isCompact ? 8 : 12) {
             nameBlock(meta)
             trendBlock(row)
             statBlock(meta)
             priceBlock(meta, pct: pctValue)
             moreButton(meta)
         }
-        .padding(.horizontal, 16)
+        // 紧凑态收边距：卡片固定列（名称/走势/价格/更多）合计 ~436pt 超 414，
+        // 收紧后「更多」按钮回到屏内（统计列按剩余宽自适应压缩，miniStat 自带缩放截断）
+        .padding(.horizontal, isCompact ? 12 : 16)
         .frame(height: 72)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -238,7 +306,7 @@ struct FavoritesLayoutCView: View {
                 .foregroundColor(.secondary)
                 .lineLimit(1)
         }
-        .frame(width: 104, alignment: .leading)
+        .frame(width: isCompact ? 96 : 104, alignment: .leading)
     }
 
     /// 中左：近 20 日迷你走势（无数据时该区域留空不画）
@@ -248,14 +316,14 @@ struct FavoritesLayoutCView: View {
                 .font(.system(size: 9.5))
                 .foregroundColor(Color(.tertiaryLabel))
             FavoritesMiniTrend(closes: Array(row.recentCloses.suffix(20)))
-                .frame(width: 120, height: 32)
+                .frame(width: isCompact ? 104 : 120, height: 32)
         }
-        .frame(width: 120, alignment: .leading)
+        .frame(width: isCompact ? 104 : 120, alignment: .leading)
     }
 
     /// 中右：今开 / 最高 / 最低 / 成交额（等分弹性宽，窄屏自动压缩不溢出）
     private func statBlock(_ meta: MetaItem) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: isCompact ? 8 : 10) {
             miniStat(meta, field: .open)
             miniStat(meta, field: .high)
             miniStat(meta, field: .low)
@@ -292,7 +360,7 @@ struct FavoritesLayoutCView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Self.pctColor(pct)))
                 .lineLimit(1)
         }
-        .frame(width: 88, alignment: .trailing)
+        .frame(width: isCompact ? 80 : 88, alignment: .trailing)
     }
 
     /// 涨跌幅胶囊底色：涨红 / 跌绿 / 平或无效用灰

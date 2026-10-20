@@ -41,20 +41,34 @@ struct FavoritesView: View {
         // 异形屏横屏贴边已由 ContentView 根布局统一处理，此处仅实测宿主宽度
         // （贴边后的真实可视宽），供 maxHOffset 计算横向滚动上限
         .marketTableHostWidth(to: $model.tableVisibleWidth)
-        // 布局自带的常驻横向占位（B 档分组侧栏）→ 修正表格横向滚动上限（容器实测的是整页宽度）
+        // 布局自带的常驻横向占位（B 档分组侧栏；紧凑宽下侧栏折叠为抽屉 → 0）
+        // → 修正表格横向滚动上限（容器实测的是整页宽度）
         .onAppear {
             if dbm.isLoaded { model.prefetchAllGroups() }
-            model.tableWidthInset = layoutStore.favoritesLayout == .b ? FavoritesGroupSidebar.width : 0
+            if model.tableWidthInset != sidebarInset { model.tableWidthInset = sidebarInset }
         }
-        .onChange(of: layoutStore.favoritesLayout) { style in
-            let inset: CGFloat = style == .b ? FavoritesGroupSidebar.width : 0
-            if model.tableWidthInset != inset { model.tableWidthInset = inset }
+        .onChange(of: layoutStore.favoritesLayout) { _ in
+            if model.tableWidthInset != sidebarInset { model.tableWidthInset = sidebarInset }
+        }
+        // 旋转 / 分屏让宿主宽跨过 600 阈值：B 档侧栏在「常驻 ↔ 抽屉收纳」间切换，inset 跟随重算
+        .onChange(of: model.tableVisibleWidth) { _ in
+            if model.tableWidthInset != sidebarInset { model.tableWidthInset = sidebarInset }
         }
         .onChange(of: dbm.isLoaded) { loaded in
             if loaded { model.prefetchAllGroups() }
         }
         // 5 个呈现层（列配置 / 管理分组 / 新建分组 / 公式编辑 / 加入分组）挂在容器层，四档共用
         .favoritesSheets(model: model)
+    }
+
+    /// B 档常驻侧栏的表格横向占位：仅 B 档且 regular 宽（≥600）侧栏常驻时为 216；
+    /// 其余布局、或 B 档紧凑宽（侧栏已折叠为抽屉、工作区占满整页）均为 0。
+    /// 宽度未测得（0）时先按 regular 给足——与 B 档「未测宽先按宽屏渲染」的约定一致，
+    /// 首次测得后由 onChange(of: tableVisibleWidth) 校正
+    private var sidebarInset: CGFloat {
+        guard layoutStore.favoritesLayout == .b else { return 0 }
+        let w = model.tableVisibleWidth
+        return w == 0 || w >= CompactWidth.threshold ? FavoritesGroupSidebar.width : 0
     }
 }
 
