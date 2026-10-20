@@ -85,17 +85,19 @@ final class DeviceCompatProbeUITests: XCTestCase {
 
     /// 三个方向依次采集（竖屏 → 左横 → 右横，最后回到竖屏）；
     /// 每个方向转储后断言 tab 栏在屏（设备兼容回归判据），
-    /// extraAssert 供用例追加页面特定的关键元素在屏断言（同样三方向覆盖）
+    /// extraAssert 供用例追加页面特定的关键元素在屏断言（同样三方向覆盖）；
+    /// dumpElements=false 跳过逐元素转储（纯截图快速模式，供视觉验收集生成）
     private func cycleOrientations(_ app: XCUIApplication, label: String,
-                                   extraAssert: ((XCUIApplication, String) -> Void)? = nil) {
+                                   extraAssert: ((XCUIApplication, String) -> Void)? = nil,
+                                   dumpElements: Bool = true) {
         XCUIDevice.shared.orientation = .portrait
-        settle(); dump(app, "\(label).P"); snap(app, "\(label).P"); assertTabBarInScreen(app, "\(label).P")
+        settle(); if dumpElements { dump(app, "\(label).P") }; snap(app, "\(label).P"); assertTabBarInScreen(app, "\(label).P")
         extraAssert?(app, "\(label).P")
         XCUIDevice.shared.orientation = .landscapeLeft
-        settle(); dump(app, "\(label).LL"); snap(app, "\(label).LL"); assertTabBarInScreen(app, "\(label).LL")
+        settle(); if dumpElements { dump(app, "\(label).LL") }; snap(app, "\(label).LL"); assertTabBarInScreen(app, "\(label).LL")
         extraAssert?(app, "\(label).LL")
         XCUIDevice.shared.orientation = .landscapeRight
-        settle(); dump(app, "\(label).LR"); snap(app, "\(label).LR"); assertTabBarInScreen(app, "\(label).LR")
+        settle(); if dumpElements { dump(app, "\(label).LR") }; snap(app, "\(label).LR"); assertTabBarInScreen(app, "\(label).LR")
         extraAssert?(app, "\(label).LR")
         XCUIDevice.shared.orientation = .portrait
         settle(0.6)
@@ -344,5 +346,113 @@ final class DeviceCompatProbeUITests: XCTestCase {
         settle(3.5)
         cycleOrientations(app, label: "train.linked", extraAssert: trainGearAssert)
         app.terminate()
+    }
+
+    // MARK: - 用例 90：视觉验收集（快速截图，无元素转储）
+    //
+    // 用途：为人工目检生成六区域 × 三方向的当前代码截图集（dump 每元素约 2s 是
+    // 探针耗时大头，本用例跳过转储只截图 + tab 栏断言，全程约 5 分钟）。
+    // 运行后用 xcresulttool export attachments 导出截图即可快速浏览，
+    // 不必在设备上逐页手动导航。
+
+    func testProbe90_GalleryScreenshots() throws {
+        // 1. 行情 B（抽屉页，带数据行）
+        do {
+            let app = launchApp(["-kline.marketLayout", "B"])
+            XCTAssertTrue(app.buttons["tab.market"].waitForExistence(timeout: 15))
+            openETFList(app)
+            settle(0.8)
+            cycleOrientations(app, label: "gallery.marketB", dumpElements: false)
+            app.terminate()
+        }
+
+        // 2. 模拟 A / B / C
+        for style in ["A", "B", "C"] {
+            let app = launchApp(["-kline.simulationLayout", style])
+            XCTAssertTrue(app.buttons["tab.simulation"].waitForExistence(timeout: 15))
+            app.buttons["tab.simulation"].tap()
+            XCTAssertTrue(app.staticTexts["simulation.subtitle"].waitForExistence(timeout: 10))
+            settle(1.0)
+            cycleOrientations(app, label: "gallery.sim\(style)",
+                              extraAssert: { app, _ in
+                                  self.assertInScreen(app, app.buttons["sim.bottomAction.买入"], "gallery 买入")
+                              },
+                              dumpElements: false)
+            app.terminate()
+        }
+
+        // 3. 自选 B（先加一只自选保证列表非空）
+        do {
+            let app = launchApp(["-kline.favoritesLayout", "B"])
+            XCTAssertTrue(app.buttons["tab.market"].waitForExistence(timeout: 15))
+            openETFList(app)
+            let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            row.press(forDuration: 1.2)
+            let favToggle = app.descendants(matching: .any)["rowMenu.toggleFavorite"].firstMatch
+            XCTAssertTrue(favToggle.waitForExistence(timeout: 8))
+            if app.staticTexts["加自选"].firstMatch.waitForExistence(timeout: 3) {
+                favToggle.tap()
+                settle(1.5)
+            } else {
+                app.buttons["取消"].firstMatch.tap()
+            }
+            app.buttons["tab.favorites"].tap()
+            XCTAssertTrue(app.staticTexts["favorites.title"].waitForExistence(timeout: 10))
+            settle(0.8)
+            cycleOrientations(app, label: "gallery.favB", dumpElements: false)
+            app.terminate()
+        }
+
+        // 4. 布局编辑器
+        do {
+            let app = launchApp(reset: false)
+            XCTAssertTrue(app.buttons["tab.home"].waitForExistence(timeout: 15))
+            app.buttons["tab.home"].tap()
+            XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10))
+            let entry = scrollHomeEntryIntoView(app, identifier: "home.entry.layoutEditor")
+            entry.tap()
+            XCTAssertTrue(app.buttons["layoutEditor.save"].waitForExistence(timeout: 8))
+            settle(1.0)
+            cycleOrientations(app, label: "gallery.editor", dumpElements: false)
+            app.terminate()
+        }
+
+        // 5. 非训练态 K 线（单图基线）+ 6. 训练态（单图 + 联动）
+        do {
+            let app = launchApp()
+            XCTAssertTrue(app.buttons["tab.market"].waitForExistence(timeout: 15))
+            openETFList(app)
+            let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            row.tap()
+            XCTAssertTrue(app.buttons["kline.backButton"].waitForExistence(timeout: 15))
+            settle(2.0)
+            cycleOrientations(app, label: "gallery.klineN", dumpElements: false)
+            app.terminate()
+        }
+        do {
+            let app = launchApp(reset: false)
+            XCTAssertTrue(app.buttons["tab.home"].waitForExistence(timeout: 15))
+            app.buttons["tab.home"].tap()
+            XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10))
+            let entry = scrollHomeEntryIntoView(app, identifier: "home.entry.training")
+            entry.tap()
+            let start = app.buttons["trainingSetup.start"].firstMatch
+            XCTAssertTrue(start.waitForExistence(timeout: 8))
+            app.buttons["随机抽取"].firstMatch.tap()
+            settle(1.2)
+            start.tap()
+            let badges = app.descendants(matching: .any)["training.badges"].firstMatch
+            XCTAssertTrue(badges.waitForExistence(timeout: 25), "训练态K线页未打开")
+            settle(2.0)
+            cycleOrientations(app, label: "gallery.train.single", dumpElements: false)
+            let toggle = app.buttons["进入联动模式"].firstMatch
+            XCTAssertTrue(toggle.waitForExistence(timeout: 8))
+            toggle.tap()
+            settle(3.5)
+            cycleOrientations(app, label: "gallery.train.linked", dumpElements: false)
+            app.terminate()
+        }
     }
 }
