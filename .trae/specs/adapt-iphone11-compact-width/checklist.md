@@ -20,6 +20,9 @@
 ## 共享组件
 
 - [x] 通用换行组件 WrappingHStack 交付：414/848/1024 三档宽度 Preview 换行正确，单测 6/6（414 断行/超宽独占/空集合/对齐）
+- [x] 紧凑宽度判定收口：`klineAvailableWidth` 环境 + `CompactWidth.isCompact` 单一入口；AdaptiveStack / 配置 hstack / 模拟指标带 / 首页 B/D 双卡 / 四个 widget 共用，删除 `AdaptiveHStackContainer` 与各处 sizeClass 分支
+- [x] 收口回归：iPhone 11 testProbe91/04/05 通过；iPad mini 5 testProbe91 通过（768 竖屏保持并排）
+- [x] 首页大盘概览空态收口：默认指数沪深京优先、无则回退扩展行情指数；数据库已加载且无对应数据时显示“暂无…”，testProbe91 三方向内容一致（上证指数 + 暂无涨跌数据 + 暂无数据），仅双卡排列不同
 - [x] 底部 tab 栏在所有页面 × 三方向完整可见可点（防御生效——探针断言化后 7/7 全过）
 - [x] 非训练态 K 线（单图/联动）保持无挤压（基线不回归——testProbe06 通过 + ⚙ 在屏断言）
 - [x] 侧栏类页面（行情B/自选B/模拟A）抽屉/下拉收纳交互统一同款（SidebarDrawer 组件），iPad 保持常驻侧栏

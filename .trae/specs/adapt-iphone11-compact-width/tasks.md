@@ -54,11 +54,20 @@
   - [x] 11.3 训练态徽标竖屏独立成行（工具栏组内、主图指标信息栏上方；横屏保持行内）；工具栏恢复与非训练态一致布局
   - [x] 验证：testProbe04 + testProbe07 通过；frame 实测——徽标独立行 y=91.5（工具栏 53 与主图指标栏 111 之间，单图+联动同口径）、simA 指标 7 行（154.8→312.8 各 26pt）、simC 7 行（162→318）、simB 卡片单列全宽 382pt（x=16 纵排 192.5→656.5）；横屏形态不变
   - [x] 11.4 首页竖屏垂直堆栈（用户补充反馈"首页里的水平堆栈你没有处理"）：
-    - 通用引擎：PageLayoutRenderer 的 hstack 节点竖屏（compact sizeClass）自动渲染为 VStack（AdaptiveHStackContainer），横屏/iPad 恢复 HStack——配置驱动路径全页面生效；横向 scroll 内层 HStack（横滑语义）不改
-    - 硬编码路径：HomeLayoutB/DView 双卡（我的自选/模拟账户）竖屏垂直堆叠各占全宽（横屏并排原样）
-    - widget：HomeMarketOverviewStrip 指数行竖屏垂直（每指数一行：名称左/现价+涨跌幅胶囊右，44pt 行高）；HomeSimSummaryBlock 当日盈亏/持仓占比竖屏垂直各行；四个 widget 竖屏强制紧凑视觉（effectiveCompact = compact || sizeClass==compact）、sparkline 竖屏关闭——配置写死参数被 sizeClass 覆盖，两条渲染路径行为一致
+    - 通用引擎：PageLayoutRenderer 的 hstack 节点走 AdaptiveStack（紧凑宽 < 600 渲染 VStack，否则 HStack）——配置驱动路径全页面生效；横向 scroll 内层 HStack（横滑语义）不改
+    - 硬编码路径：HomeLayoutB/DView 双卡（我的自选/模拟账户）容器统一走 AdaptiveStack（竖屏垂直全宽 / 横屏并排原样）
+    - widget：HomeMarketOverviewStrip 指数行竖屏垂直（每指数一行：名称左/现价+涨跌幅胶囊右，44pt 行高）；HomeSimSummaryBlock 当日盈亏/持仓占比竖屏垂直各行；四个 widget 竖屏强制紧凑视觉（effectiveCompact = compact || isCompactWidth）、sparkline 竖屏关闭——配置写死参数被宽度判定覆盖，两条渲染路径行为一致
     - 不垂直化（设计语义）：快捷入口行/涨幅榜 chips（横滑可拖拽设计，等同指标栏拖拽交互）、行情行/持仓行（列表行两端对齐语义）、HomeHeaderBar（414 放得下）
+  - [x] 11.5 紧凑宽度判定收口（用户验收后重构）：
+    - 单一事实来源：根容器 GeometryReader / WidthReader 把实测可用宽写入 `\.klineAvailableWidth` 环境；`CompactWidth.isCompact(_:)` 为唯一阈值判定；未注入时 `@CompactWidthValue` 回退 sizeClass（Preview/独立宿主）
+    - `AdaptiveStack` 改为环境驱动（可选 `isCompact:` 覆盖）；删除 PageLayoutRenderer 私有 `AdaptiveHStackContainer`，配置 hstack 直接复用 AdaptiveStack
+    - 模拟页 `SimSummaryBand`、首页 B/D 双卡、四个首页 widget、编辑器/自选/行情/模拟页级 isCompact 全部改读同一入口；不再各自读 `horizontalSizeClass`
+    - 验证：iPhone 11 testProbe91（竖屏双卡 370.5→476.5 / 横屏并排 72/484）、testProbe04（simA 指标竖屏 154.8→312.8 / 横屏同 y=60.5）、testProbe05 通过；iPad mini 5 testProbe91 通过（768 竖屏仍并排 28/402）
   - [x] 验证（testProbe91 三方向 frame 决定性证据）：竖屏指数行垂直（上证指数 28,264 名称左 + 3889.44 256.5 + 胶囊 335 右）、双卡垂直全宽（自选 370.5 → 模拟账户 476.5）、指标垂直各行（当日盈亏 547.5 独立行）；横屏恢复水平（指数三行小列 x=72、双卡并排 72/484、指标同行并排 y=405.5）；横屏指标文字出底 5pt 属 ScrollView 可滚内容非缺陷；种子库指数"加载中"为数据特性（唯一标的 type=扩展行情指数，非布局问题，已用临时改库 type 验证后还原）
+  - [x] 11.6 首页大盘概览数据空态收口（用户横屏复验反馈"应跟竖屏一样，只改堆栈排列"）：
+    - 默认指数沪深京优先；库内没有沪深京指数时回退扩展行情指数（种子库唯一上证指数可直接显示），显式选中也允许扩展行情 id
+    - 数据库已加载且无对应数据时显示"暂无指数数据"/"暂无涨跌数据"/"暂无数据"，不再无限显示"加载中"/"数据加载中"；无主板标的与主板数据未就绪分开判断
+    - 验证：iPhone 11 testProbe91 三方向均显示"上证指数" + "暂无涨跌数据" + 涨幅榜"暂无数据"，竖屏/横屏内容一致，仅双卡排列不同（自选/模拟账户 竖屏 370.5→476.5、横屏 72/484）
   - [ ] 用户模拟器复验（新截图集 testProbe90 导出）
 
 # Task Dependencies

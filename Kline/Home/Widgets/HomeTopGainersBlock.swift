@@ -10,7 +10,8 @@ import SwiftUI
 // MARK: - 涨幅榜
 
 /// 涨幅榜 Top5：两种呈现（列表行 / 横滑 chips），口径同一份数据（HomePageModel.topGainers）。
-/// 点任一项打开该标的 K 线详情；`rows` 为空且 `!isReady` 时显示「数据加载中」。
+/// 点任一项打开该标的 K 线详情；`rows` 为空且 `!isReady` 时显示「数据加载中」，
+/// 数据库已加载且库内无沪深主板标的时显示「暂无数据」。
 struct HomeTopGainersBlock: View {
     /// 呈现方式：列表行 / 横滑 chips
     enum Style {
@@ -24,17 +25,24 @@ struct HomeTopGainersBlock: View {
     let isReady: Bool
     let onOpen: (MetaItem, [MetaItem]) -> Void
 
-    /// 竖屏垂直堆栈规则（2026-10-20）：竖屏（compact sizeClass）视觉一律紧凑
-    /// （与 HomeFavoritesBlock 同口径，配置写死的 compact 参数被 sizeClass 覆盖）
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-    private var effectiveCompact: Bool { compact || hSizeClass == .compact }
+    /// 竖屏垂直堆栈规则（2026-10-20）：竖屏（统一宽度判定 < 600）视觉一律紧凑
+    /// （与 HomeFavoritesBlock 同口径，配置写死的 compact 参数被宽度判定覆盖）
+    @CompactWidthValue private var isCompactWidth
+    private var effectiveCompact: Bool { compact || isCompactWidth }
 
     /// 直接观察行缓存：bars 陆续到位时本块自行刷新
     @ObservedObject private var rowCache = MarketRowCache.shared
+    /// 数据库加载态：区分「还在加载」与「库内没有沪深主板标的」，避免永远显示「数据加载中」
+    @ObservedObject private var db = DatabaseManager.shared
+
+    /// 库内是否存在沪深主板标的（无主板标的时加载完应显示「暂无数据」而不是一直加载）
+    private var hasMainBoardMetas: Bool {
+        db.metaList.contains { $0.type == "沪深主板" }
+    }
 
     var body: some View {
         if rows.isEmpty {
-            Text(isReady ? "暂无数据" : "数据加载中")
+            Text(isReady || (db.isLoaded && !hasMainBoardMetas) ? "暂无数据" : "数据加载中")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, minHeight: effectiveCompact ? 44 : 48, alignment: .leading)

@@ -63,6 +63,11 @@ final class HomePageModel: ObservableObject {
 
     /// meta.type 口径（与行情页 / 启动预热一致）
     private static let indexType = "沪深京指数"
+    /// 扩展行情指数：部分数据库（如种子库）只有这一种指数口径。
+    /// 首页大盘概览优先沪深京，库内一只都没有时回退到该类型，避免概览永远停在「指数加载中」。
+    private static let extendedIndexType = "扩展行情指数"
+    /// 编辑器显式选中指数时允许的 meta.type 集合（与默认回退口径一致）
+    private static let indexTypes: Set<String> = [indexType, extendedIndexType]
     /// 板块 → meta.type 集合（与 MarketPageModel.selectedTypes 同口径）
     private static let mainBoardTypes: Set<String> = ["沪深主板"]
     private static let etfIndexTypes: Set<String> = ["沪深京指数", "扩展行情指数"]
@@ -120,11 +125,15 @@ final class HomePageModel: ObservableObject {
 
     // MARK: - 指数条
 
-    /// 前 4 只「沪深京指数」：用 `prefetch: false` 只注册行壳 ——
-    /// 指数 bars 由 App 启动预热统一负责，首页不再触发预取（避免抢占预热队列）；
-    /// 未就绪的行照常展示（行内部显示占位符），绝不伪造数值。
+    /// 默认前 4 只指数：沪深京优先；库内没有沪深京时回退扩展行情指数（种子库场景）。
+    /// 用 `prefetch: false` 只注册行壳 —— 指数 bars 由 App 启动预热统一负责，
+    /// 首页不再触发预取（避免抢占预热队列）；未就绪的行照常展示（行内部显示占位符），绝不伪造数值。
     private func refreshIndexQuotes() {
-        let metas = Array(db.metaList.lazy.filter { $0.type == Self.indexType }.prefix(4))
+        let primary = db.metaList.lazy.filter { $0.type == Self.indexType }
+        let pool = primary.isEmpty
+            ? db.metaList.lazy.filter { $0.type == Self.extendedIndexType }
+            : primary
+        let metas = Array(pool.prefix(4))
         let rows = metas.map { rowCache.row(for: $0, prefetch: false) }
         // 同值不写：按 metaID 比较，避免引用比较永远不等导致的无谓重绘
         if rows.map({ $0.meta.id }) != indexQuotes.map({ $0.meta.id }) {
@@ -198,13 +207,15 @@ final class HomePageModel: ObservableObject {
     // MARK: - 布局控件参数化取数（编辑器配置 → 数据；nil/失效一律回落默认口径）
 
     /// 大盘概览指数行：
-    /// - selectedIDs 缺省（nil）或显式空数组 = 默认前 4 只「沪深京指数」；
+    /// - selectedIDs 缺省（nil）或显式空数组 = 默认前 4 只指数（沪深京优先，无则回退扩展行情）；
     /// - 显式选择：按配置顺序返回，未知 / 非指数 id 过滤，防御性上限 4（编辑器已限）；
     /// - 有效 id 为 0 个（全部失效）时整体回落默认前 4（规格：空选不清空本控件）。
     func indexRows(selectedIDs: [String]?) -> [MarketRow] {
         guard let selectedIDs, !selectedIDs.isEmpty else { return indexQuotes }
         var lookup: [Int: MetaItem] = [:]
-        for meta in db.metaList where meta.type == Self.indexType { lookup[meta.id] = meta }
+        for meta in db.metaList where Self.indexTypes.contains(meta.type) {
+            lookup[meta.id] = meta
+        }
         var seen = Set<Int>()
         var metas: [MetaItem] = []
         for raw in selectedIDs {
