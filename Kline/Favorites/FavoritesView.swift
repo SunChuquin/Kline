@@ -68,7 +68,7 @@ struct FavoritesView: View {
     private var sidebarInset: CGFloat {
         guard layoutStore.favoritesLayout == .b else { return 0 }
         let w = model.tableVisibleWidth
-        return w == 0 || w >= CompactWidth.threshold ? FavoritesGroupSidebar.width : 0
+        return CompactWidth.isCompact(w) ? 0 : FavoritesGroupSidebar.width
     }
 }
 

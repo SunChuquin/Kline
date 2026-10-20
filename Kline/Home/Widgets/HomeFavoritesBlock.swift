@@ -12,9 +12,9 @@ import SwiftUI
 /// 我的自选：每行 = 名称 + 代码 / 现价 / 涨跌幅胶囊（可选迷你走势）；点行打开 K 线详情。
 /// 空态整块可点 → 切自选页（由容器把 `onEmptyTap` 接到 `onSelectTab(1)`）。
 ///
-/// 竖屏垂直堆栈规则（2026-10-20）：iPhone 竖屏（compact sizeClass）下视觉一律紧凑
+/// 竖屏垂直堆栈规则（2026-10-20）：页面可用宽 < 600（统一宽度判定）下视觉一律紧凑
 /// （行高 40、走势关闭——迷你走势在窄卡内挤压），配置里写死的 compact/showsSparkline
-/// 参数被 sizeClass 覆盖；横屏 / iPad 按配置参数原样。
+/// 参数被宽度判定覆盖；横屏 / iPad（≥600）按配置参数原样。
 struct HomeFavoritesBlock: View {
     let rows: [MarketRow]
     let compact: Bool
@@ -22,12 +22,12 @@ struct HomeFavoritesBlock: View {
     let onOpen: (MetaItem, [MetaItem]) -> Void
     let onEmptyTap: () -> Void
 
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @CompactWidthValue private var isCompactWidth
 
-    /// 生效的紧凑视觉：配置值或竖屏（sizeClass 覆盖）
-    private var effectiveCompact: Bool { compact || hSizeClass == .compact }
+    /// 生效的紧凑视觉：配置值或竖屏（统一宽度判定覆盖）
+    private var effectiveCompact: Bool { compact || isCompactWidth }
     /// 生效的走势开关：竖屏强制关闭（窄卡内挤压）
-    private var effectiveSparkline: Bool { showsSparkline && hSizeClass != .compact }
+    private var effectiveSparkline: Bool { showsSparkline && !isCompactWidth }
 
     /// 直接观察行缓存：bars 陆续到位时本块自行刷新
     @ObservedObject private var rowCache = MarketRowCache.shared

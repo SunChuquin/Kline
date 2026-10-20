@@ -78,6 +78,9 @@ struct ContentView: View {
                     mainContentView
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .frame(width: geo.size.width, height: geo.size.height)
+                        // 紧凑宽度单一事实来源：把根层实测可用宽注入环境，
+                        // 首页/模拟/布局编辑器预览内的 AdaptiveStack 与 widget 共用
+                        .environment(\.klineAvailableWidth, geo.size.width)
                 }
 
                 bottomMenuBar
@@ -114,6 +117,9 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .frame(width: geo.size.width, height: geo.size.height)
+                    // 编辑器盖在根 ZStack 上、不在 mainContentView 子树内，
+                    // 需单独注入实测宽：编辑器的全屏预览（PageLayoutRenderer）据此竖排
+                    .environment(\.klineAvailableWidth, geo.size.width)
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }

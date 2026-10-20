@@ -13,9 +13,9 @@ import SwiftUI
 /// 金额与百分比格式化复用 SimFormat（与模拟页 SimSummaryBand 同口径）；
 /// 整块可点 → 切模拟页（由容器把 `onTap` 接到 `onSelectTab(3)`）。
 ///
-/// 竖屏垂直堆栈规则（2026-10-20）：iPhone 竖屏（horizontalSizeClass == .compact）
+/// 竖屏垂直堆栈规则（2026-10-20）：页面可用宽 < 600（统一宽度判定）
 /// 下「当日盈亏 + 持仓占比」从两项等宽 HStack 改为 **VStack 各占一行全宽**；
-/// 横屏 / iPad（regular）保持并排原样。sizeClass 随旋转自动切换，
+/// 横屏 / iPad（≥600）保持并排原样。判定来自宿主注入的实测宽，
 /// 配置驱动与硬编码两条渲染路径共用本组件，一处改两路全生效。
 struct HomeSimSummaryBlock: View {
     @ObservedObject var model: HomePageModel
@@ -24,11 +24,11 @@ struct HomeSimSummaryBlock: View {
     let compact: Bool
     let onTap: () -> Void
 
-    /// 尺寸类别：iPhone 竖屏 .compact → 指标行垂直堆叠；横屏 / iPad .regular → 并排原样
-    @Environment(\.horizontalSizeClass) private var hSizeClass
+    /// 统一紧凑判定：宿主注入的实测可用宽 < 600 → 指标行垂直堆叠；未注入时回退 sizeClass
+    @CompactWidthValue private var isCompactWidth
 
-    /// 生效的紧凑视觉：配置值或竖屏（sizeClass 覆盖，与 HomeFavoritesBlock 同口径）
-    private var effectiveCompact: Bool { compact || hSizeClass == .compact }
+    /// 生效的紧凑视觉：配置值或竖屏（统一宽度判定覆盖，与 HomeFavoritesBlock 同口径）
+    private var effectiveCompact: Bool { compact || isCompactWidth }
 
     /// 直接观察行缓存：持仓现价 / 盈亏随 bars 到位刷新
     @ObservedObject private var rowCache = MarketRowCache.shared
@@ -49,7 +49,7 @@ struct HomeSimSummaryBlock: View {
             }
 
             // 当日盈亏 + 持仓占比：竖屏垂直堆叠（各占一行全宽），宽屏并排
-            if hSizeClass == .compact {
+            if isCompactWidth {
                 VStack(alignment: .leading, spacing: 8) {
                     metric(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
                            extra: SimFormat.pct(summary.dayProfitPct * 100),

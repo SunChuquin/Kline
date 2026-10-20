@@ -33,7 +33,7 @@ struct MarketLayoutBView: View {
 
     /// 紧凑宽度形态（可用宽 < 600，iPhone 竖屏 414 命中）：侧栏折叠为抽屉，工作区占满整页
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     /// 紧凑态分类抽屉开关（工作区标题位「分类」入口按钮 toggle）

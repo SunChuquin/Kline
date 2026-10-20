@@ -47,7 +47,7 @@ struct SimulationLayoutCView: View {
     /// 紧凑形态（可用宽 < 600，iPhone 竖屏命中；横屏 848 / iPad 不命中保持现状）。
     /// 阈值统一取 CompactWidth.threshold，勿在本页另拍。
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     private static let rulesText = """

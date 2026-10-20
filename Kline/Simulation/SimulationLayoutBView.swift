@@ -46,7 +46,7 @@ struct SimulationLayoutBView: View {
 
     /// 紧凑宽度形态（可用宽 < 600，iPhone 竖屏 414 命中）：账户卡两列换行
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     /// 页面可用高度：由顶层 HeightReader 上报（本页专用，与 WidthReader 同范式）

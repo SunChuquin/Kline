@@ -130,7 +130,7 @@ struct MarketView: View {
     private var sidebarInset: CGFloat {
         guard layoutStore.marketLayout == .b else { return 0 }
         let w = model.tableVisibleWidth
-        return w == 0 || w >= CompactWidth.threshold ? MarketCategorySidebar.width : 0
+        return CompactWidth.isCompact(w) ? 0 : MarketCategorySidebar.width
     }
 }
 

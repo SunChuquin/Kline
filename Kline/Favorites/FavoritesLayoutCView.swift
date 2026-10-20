@@ -22,7 +22,7 @@ struct FavoritesLayoutCView: View {
     /// 固有宽 ~426pt 超出屏宽（`+` 按钮 / 卡片 `…` 按钮出右缘 2~10pt），
     /// 紧凑态收敛：工具组用 WrappingHStack 允许换行、卡片收边距与固定列宽
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     var body: some View {

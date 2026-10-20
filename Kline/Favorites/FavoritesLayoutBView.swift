@@ -24,7 +24,7 @@ struct FavoritesLayoutBView: View {
 
     /// 紧凑宽度形态（可用宽 < 600）：侧栏折叠为抽屉入口，工作区占满整页
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     /// 紧凑态分组抽屉开关（header「分组」入口按钮 toggle）

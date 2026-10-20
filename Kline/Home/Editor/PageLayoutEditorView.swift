@@ -40,7 +40,7 @@ struct PageLayoutEditorView: View {
     /// 单行 header 需 ~459pt、树+检查器左右分栏需 ~618pt，均超屏宽，
     /// 故紧凑态下 header 拆两行、编辑区改上下结构；宽屏（≥600）一律保持现状。
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     var body: some View {

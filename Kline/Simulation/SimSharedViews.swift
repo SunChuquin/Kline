@@ -175,8 +175,9 @@ struct SimSparkline: View {
 ///   着色加粗的水平行），不再折行挤压；净值项整行（label 左 + 迷你走势右）
 struct SimSummaryBand: View {
     let accountID: UUID?
-    /// 紧凑宽（竖屏手机）：垂直堆栈形态。默认 false（宽屏），由宿主页面传入
-    var isCompact: Bool = false
+    /// 统一紧凑判定：宿主注入的实测可用宽 < 600 → 竖排（与首页 / 布局编辑器同口径）；
+    /// 未注入时回退 sizeClass
+    @CompactWidthValue private var isCompact
 
     @ObservedObject private var store = SimStore.shared
 

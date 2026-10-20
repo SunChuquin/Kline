@@ -320,7 +320,7 @@ struct KlineDetailView: View {
 
                         // 第一行：工具栏（单图：含返回+名称+代码+功能按钮；联动：仅返回+功能按钮）
                         // compactWidth（竖屏手机）：训练态时训练徽标独立成行挂在工具栏组内下方
-                        toolbarRow(compactWidth: geometry.size.width < CompactWidth.threshold)
+                        toolbarRow(compactWidth: CompactWidth.isCompact(geometry.size.width))
                         // 工具栏与下方（信息栏或图表）之间的分界线
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))

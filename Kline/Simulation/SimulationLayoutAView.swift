@@ -54,7 +54,7 @@ struct SimulationLayoutAView: View {
 
     /// 紧凑宽度形态（可用宽 < 600，iPhone 竖屏 414 命中）：侧栏折叠为抽屉，工作区占满整页
     private var isCompact: Bool {
-        availableWidth > 0 && availableWidth < CompactWidth.threshold
+        CompactWidth.isCompact(availableWidth)
     }
 
     /// 紧凑态账户抽屉开关（工作区顶部「账户」入口按钮 toggle）
@@ -307,7 +307,7 @@ struct SimulationLayoutAView: View {
         VStack(spacing: 0) {
             accountAnchorRow
             // 竖屏：指标带垂直堆叠（每项一行全宽，用户通用规则），不再折行挤压
-            SimSummaryBand(accountID: store.queryAccountID, isCompact: true)
+            SimSummaryBand(accountID: store.queryAccountID)
             moduleRow
             if module == .log {
                 SimLogModuleFilterBar(selected: $logModule)
