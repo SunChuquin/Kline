@@ -509,13 +509,14 @@ extension Notification.Name {
     static let klineInfoRowReset = Notification.Name("klineInfoRowResetLeft")
 }
 
-/// 信息行 / 行情行 / 时间轴覆盖中「可单指横向拖动」的内容承载区（多图联动 tile 使用）：
+/// 信息行 / 行情行 / 时间轴覆盖中「可单指横向拖动」的内容承载区（多图联动 tile 与训练态工具栏徽标行使用）：
 /// - 不论是否超宽，都能向左/向右拖动内容、松手停留
 /// - 超宽：向左拖出右侧被藏部分；未超宽：向右拖出剩余白；两侧带小段 overscroll 保证手感应有
 /// - 默认对齐（用户未拖动时的落位）：`initiallyCentered=true`（行情数据行）→ 可视范围内居中，
 ///   即内容左右两侧的留白（未超宽）或裁切（超宽）相等；`false`（指标数据栏）→ 保持左对齐
 /// - 本组件只包裹数值内容本身；左侧名称按钮、右侧操作按钮作为兄弟节点放在组件外部，拖动与点击互不干扰
-private struct InfoPannerCenter<Content: View>: View {
+/// - 非 private：训练态 K 线工具栏的徽标行（KlineDetailView.toolbarRow）同样用它承载超宽数值内容
+struct InfoPannerCenter<Content: View>: View {
     @ViewBuilder let content: Content
 
     /// 本信息行所属视图下标（对应重置按钮的视图 index；仅当收到相同 index 的复位通知时复位）

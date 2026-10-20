@@ -604,10 +604,26 @@ struct KlineDetailView: View {
                     .lineLimit(1)
             }
 
-            // 训练态：徽标紧跟在标的代码右侧（单图与联动多图同一处）
-            trainingBadges
-
-            Spacer()
+            // 训练态：徽标紧跟在标的代码右侧（单图与联动多图同一处）。
+            // 竖屏实测徽标行 fixedSize 宽 ~310pt，叠加返回/名称/代码与右侧按钮组后整行 ~555pt，
+            // 远超 414pt 屏宽，会把「联」「多/空」「⚙」顶出屏幕（hit point 落到屏外物理不可点），
+            // 并连带图表区被撑宽、右缘按钮出屏。徽标是金融训练读数（笔/高/低/振/收/盈），
+            // 换行或省略号都会打断一行读数的连续性，因此与联动指标数值栏同款处理：
+            // 内容保持 fixedSize 完整单行，交给 InfoPannerCenter 按剩余可用宽裁切，
+            // 单指左右拖拽查看完整内容。徽标段同时弹性占满剩余宽度（替换原 Spacer 的角色），
+            // 保证右侧按钮组始终右对齐、位置与顺序和非训练态完全一致。
+            // 非训练态保持原样（Spacer + 按钮组），渲染路径不受本改动影响。
+            if trainingActive {
+                InfoPannerCenter {
+                    trainingBadges
+                }
+                // 高度固定为按钮行高：内部是 GeometryReader（垂直贪婪），工具栏行高没有外部
+                // 约束（联动 tile 行有外层 frame(height:)，这里没有），不夹紧会撑大工具栏行高、
+                // 连带改变 TopBarHeightPreferenceKey 实测高度与信息栏偏移
+                .frame(maxWidth: .infinity, minHeight: btnH, maxHeight: btnH)
+            } else {
+                Spacer()
+            }
 
             // 「边」/📌 按钮：
             //   联动状态：永远显示「边」（不出图钉），限制每个视图最多一个十字光标；
