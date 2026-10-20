@@ -69,6 +69,8 @@ struct MarketView: View {
             }
             // 布局自带的常驻横向占位（B 档分类侧栏）→ 修正表格横向滚动上限（容器实测的是整页宽度）
             .onChange(of: layoutStore.marketLayout) { _ in syncTableWidthInset() }
+            // 旋转 / 分屏让宿主宽跨过 600 阈值：B 档侧栏在「常驻 ↔ 抽屉收纳」间切换，inset 跟随重算
+            .onChange(of: model.tableVisibleWidth) { _ in syncTableWidthInset() }
             // 切 Tab / 数据库加载完毕
             .onChange(of: model.selectedTab) { _ in model.scheduleRefresh() }
             .onChange(of: databaseManager.isLoaded) { _ in model.scheduleRefresh() }
@@ -118,8 +120,17 @@ struct MarketView: View {
     /// 把「当前布局自带常驻横向占位」写进 model（B 档分类侧栏 200pt，其余档 0）。
     /// 只在值变化时写入，避免 @Published 同值赋值触发无谓发布。
     private func syncTableWidthInset() {
-        let inset: CGFloat = layoutStore.marketLayout == .b ? MarketCategorySidebar.width : 0
-        if model.tableWidthInset != inset { model.tableWidthInset = inset }
+        if model.tableWidthInset != sidebarInset { model.tableWidthInset = sidebarInset }
+    }
+
+    /// B 档常驻分类侧栏的表格横向占位：仅 B 档且 regular 宽（≥600）侧栏常驻时为 200；
+    /// 其余布局、或 B 档紧凑宽（<600，侧栏已折叠为抽屉、工作区占满整页）均为 0。
+    /// 宽度未测得（0）时先按 regular 给足——与 B 档「未测宽先按宽屏渲染」的约定一致，
+    /// 首次测得后由 onChange(of: tableVisibleWidth) 校正（与自选 FavoritesView.sidebarInset 同款）
+    private var sidebarInset: CGFloat {
+        guard layoutStore.marketLayout == .b else { return 0 }
+        let w = model.tableVisibleWidth
+        return w == 0 || w >= CompactWidth.threshold ? MarketCategorySidebar.width : 0
     }
 }
 
