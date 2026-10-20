@@ -54,11 +54,49 @@ struct KlineApp: App {
         // 阶段 A5-1：交易域信任链（套件 8）——启动即校验脚本哈希 / 版本锁，
         // 供 §9.10 降级矩阵判定交易可用性（过渡期 mode=.swift 时该闸门不生效）。
         SimRulesTrust.shared.refresh()
+
+        // TEMP-DIAG(iPhone11适配): 屏幕几何探针（spec 调查脚手架，见文件底部说明）
+        ScreenGeometryProbe.installIfNeeded()
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
+    }
+}
+
+// MARK: - TEMP-DIAG(iPhone11适配): 屏幕几何探针（spec 调查脚手架，确认后随修复一并处理）
+//
+// 带 `-screen-probe` 启动时：把窗口尺寸 + 安全区 inset（含刘海左右）写入沙盒日志
+// Documents/debug_log.txt，启动后 2s 记一次，此后每次设备方向变化（0.6s 防抖）再记一次。
+// 目的：运行时确认 iPhone 11 竖屏 / 左横 / 右横的实际可用宽度与安全区（非代码推断）。
+enum ScreenGeometryProbe {
+    static let launchArgument = "-screen-probe"
+
+    static func installIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return }
+        log()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { log() }
+        NotificationCenter.default.addObserver(forName: UIDevice.orientationDidChangeNotification,
+                                               object: nil, queue: .main) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { log() }
+        }
+    }
+
+    static func log() {
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+              let window = scene.windows.first else { return }
+        let f = window.frame
+        let s = window.safeAreaInsets
+        let orientName: String
+        switch scene.interfaceOrientation {
+        case .portrait: orientName = "portrait"
+        case .portraitUpsideDown: orientName = "portraitUpsideDown"
+        case .landscapeLeft: orientName = "landscapeLeft"
+        case .landscapeRight: orientName = "landscapeRight"
+        default: orientName = "unknown(\(scene.interfaceOrientation.rawValue))"
+        }
+        DebugLogger.shared.log("[ScreenProbe] orient=\(orientName) window=\(Int(f.width))x\(Int(f.height)) safeArea top=\(String(format: "%.1f", s.top)) bottom=\(String(format: "%.1f", s.bottom)) left=\(String(format: "%.1f", s.left)) right=\(String(format: "%.1f", s.right)) scale=\(window.screen.scale)")
     }
 }
