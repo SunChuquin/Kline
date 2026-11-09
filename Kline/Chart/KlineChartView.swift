@@ -1462,13 +1462,19 @@ struct MainChartCanvas: View, Equatable {
     }
 
     private func drawCurve(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat, step: Int) {
+        // STICKLINE：双端值行 → 逐 bar 竖线（缠论中枢封口），不走折线路径
+        if let low = curve.values2 {
+            drawStickRange(ctx, curve: curve, low: low, h: h, step: step)
+            return
+        }
+        let extra = curve.keyIndices
         switch curve.style {
         case .dotline:
             strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .dotline, lineWidth: curve.lineWidth, step: step,
-                       dimFrom: dimFromIndex, dimAlpha: dimAlpha)
+                       dimFrom: dimFromIndex, dimAlpha: dimAlpha, extra: extra, breakOnNaN: curve.breakOnNaN)
         case .pointdot:
             let colors = curve.markerColors
-            for idx in decimatedIndices(count: curve.values.count, step: step) {
+            for idx in decimatedIndices(count: curve.values.count, step: step, extra: extra) {
                 let v = curve.values[idx]
                 guard !v.isNaN else { continue }
                 let x = (CGFloat(idx) + 0.5) * candleSpacing
@@ -1481,7 +1487,7 @@ struct MainChartCanvas: View, Equatable {
         case .stick:
             let barWidth = max(0.6, candleSpacing * 0.55)
             let yBase = yPos(0, h: h)
-            for i in decimatedIndices(count: curve.values.count, step: step) {
+            for i in decimatedIndices(count: curve.values.count, step: step, extra: extra) {
                 let v = curve.values[i]
                 guard !v.isNaN else { continue }
                 let x = (CGFloat(i) + 0.5) * candleSpacing
@@ -1491,18 +1497,38 @@ struct MainChartCanvas: View, Equatable {
             }
         case .solid:
             strokeLine(ctx, values: curve.values, color: curve.color, h: h, style: .solid, lineWidth: curve.lineWidth, step: step,
-                       dimFrom: dimFromIndex, dimAlpha: dimAlpha)
+                       dimFrom: dimFromIndex, dimAlpha: dimAlpha, extra: extra, breakOnNaN: curve.breakOnNaN)
         case .nodraw:
             break
         }
     }
 
+    /// STICKLINE 绘制：条件成立的 bar 上画 PRICE1↔PRICE2 竖线（宽度 0 = 1pt 细线）。
+    /// 抽样时强制保留关键 bar（中枢左右封口），避免封口竖线被跳掉。
+    private func drawStickRange(_ ctx: GraphicsContext, curve: CanvasCurve, low: [Double], h: CGFloat, step: Int) {
+        let rawW = curve.stickWidth
+        let width: CGFloat = rawW <= 0 ? 1 : max(1, candleSpacing * CGFloat(min(max(rawW, 0.08), 1.0)))
+        for i in decimatedIndices(count: curve.values.count, step: step, extra: curve.keyIndices) {
+            guard i < low.count else { break }
+            let a = curve.values[i]
+            let b = low[i]
+            guard !a.isNaN, !b.isNaN else { continue }
+            let x = (CGFloat(i) + 0.5) * candleSpacing
+            var p = Path()
+            p.move(to: CGPoint(x: x, y: yPos(a, h: h)))
+            p.addLine(to: CGPoint(x: x, y: yPos(b, h: h)))
+            ctx.stroke(p, with: .color(dimmed(curve.color, i)), lineWidth: width)
+        }
+    }
+
     /// 折线绘制，支持联动复盘的「历史原色 / 未来淡化」两段着色：
-    /// dimFrom 之前（含合成点 idx）原色，dimFrom 起（含）淡化。NaN 在各段内自然断开。
+    /// dimFrom 之前（含合成点 idx）原色，dimFrom 起（含）淡化。
+    /// 默认 NaN 跨空顺连（现有指标行为不变）；breakOnNaN=true 时在 NaN 处断开（仅缠论通道行）。
     private func strokeLine(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat, style: TDXLineStyle, lineWidth: Double, step: Int = 1,
-                            dimFrom: Int? = nil, dimAlpha: Double = 1.0 / 3.0) {
+                            dimFrom: Int? = nil, dimAlpha: Double = 1.0 / 3.0,
+                            extra: [Int]? = nil, breakOnNaN: Bool = false) {
         let s: StrokeStyle = style == .dotline ? StrokeStyle(lineWidth: lineWidth, dash: [3, 3]) : StrokeStyle(lineWidth: lineWidth)
-        let indices = decimatedIndices(count: values.count, step: step)
+        let indices = decimatedIndices(count: values.count, step: step, extra: extra)
         let boundary = dimFrom ?? values.count
         // 历史段（i < boundary）
         var hist = Path(); var histStarted = false
@@ -1510,7 +1536,10 @@ struct MainChartCanvas: View, Equatable {
         var fut = Path(); var futStarted = false
         for i in indices {
             let v = values[i]
-            guard !v.isNaN else { continue }
+            if v.isNaN {
+                if breakOnNaN { histStarted = false; futStarted = false }
+                continue
+            }
             let x = (CGFloat(i) + 0.5) * candleSpacing
             let y = yPos(v, h: h)
             if i < boundary {
@@ -1531,20 +1560,22 @@ struct MainChartCanvas: View, Equatable {
 }
 
 /// 采样索引：当数据量超过屏幕能力时按 step 抽样并保留末点；step<=1 时返回全部。
-func decimatedIndices(count: Int, step: Int) -> [Int] {
+/// extra 为必须保留的下标（缠论笔端点/中枢封口），并入抽样集合后按升序返回。
+func decimatedIndices(count: Int, step: Int, extra: [Int]? = nil) -> [Int] {
     guard count > 0 else { return [] }
     if step <= 1 { return Array(0..<count) }
-    var res: [Int] = []
-    res.reserveCapacity(count / step + 2)
+    var picked = Set<Int>()
+    picked.reserveCapacity(count / step + 2)
     var i = 0
     while i < count {
-        res.append(i)
+        picked.insert(i)
         i += step
     }
-    if let last = res.last, last != count - 1 {
-        res.append(count - 1)
+    picked.insert(count - 1)
+    if let extra {
+        for k in extra where k >= 0 && k < count { picked.insert(k) }
     }
-    return res
+    return picked.sorted()
 }
 
 /// 指标名称按钮：单击立即切换选择面板；参数编辑入口在面板内。

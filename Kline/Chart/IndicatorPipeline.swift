@@ -221,6 +221,12 @@ func mainIndicatorEntries(store: SystemIndicatorStore,
     return entries
 }
 
+/// 主图指标公式是否引用缠论通道（CHANBI/CHANSEG 系列）：是则求值必须用全量 K 线
+func referencesChanChannel(_ formula: String) -> Bool {
+    let f = formula.uppercased()
+    return f.contains("CHANBI") || f.contains("CHANSEG")
+}
+
 /// 主图指标默认颜色（未被公式 COLORXXX 覆盖时使用）
 private func mainLineDefaultColor(_ id: String, _ i: Int) -> Color {
     switch id {
@@ -247,7 +253,9 @@ private func buildMainLine(id: String, isCustom: Bool, customColor: Color?,
         color = prefetchLineColor(from: out, fallback: mainLineDefaultColor(id, i))
     }
     return IndicatorLine(name: name, values: out.values, color: color,
-                         style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue)
+                         style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue,
+                         values2: out.values2, stickWidth: out.stickWidth,
+                         breakOnNaN: out.breakOnNaN, keyIndices: out.keyIndices)
 }
 
 /// VOL/AMO 量均线固定周期（0=隐藏，公式固定值，不再支持编辑）
@@ -337,6 +345,12 @@ extension KlineChartView {
         if missing > 0 { values += Array(repeating: Double.nan, count: missing) }
         var result = line
         result.values = values
+        if let v2 = line.values2 {
+            var values2 = Array(repeating: Double.nan, count: calcStart) + v2
+            let v2Missing = sortedData.count - values2.count
+            if v2Missing > 0 { values2 += Array(repeating: Double.nan, count: v2Missing) }
+            result.values2 = values2
+        }
         if let mc = line.markerColors {
             var colors = Array(repeating: Color.clear, count: calcStart) + mc
             let colorMissing = sortedData.count - colors.count
@@ -384,7 +398,8 @@ extension KlineChartView {
             //   那是 Swift 前台求值时代的设计（全量在 Swift 毫秒级）；求值下沉 Python 后，A8 上
             //   全量前台波次要等数秒（用户实证「打开标的等全量计算才显示主图指标」）。
             //   前台只算可见+预热（快速上屏的近似值），全量正确性由后台单次全量预取随后覆盖。
-            let (calcStart, calcEnd): (Int, Int)
+            var calcStart: Int
+            var calcEnd: Int
             if bgCovered {
                 calcStart = 0
                 calcEnd = computation.bgCoverageEnd
@@ -396,6 +411,12 @@ extension KlineChartView {
             let entries = mainIndicatorEntries(store: store, customStore: customStore,
                                                config: config, customFormula: custom?.formula,
                                                period: self.period)
+            // 缠论通道是整段历史算法（笔/段/中枢依赖全量 K 线），可见窗口切片会得到不同结构：
+            // 只要启用了引用通道的主图指标，求值区间强制全量，保证与 chan.py CL-V1 逐项一致
+            if !sortedData.isEmpty, entries.contains(where: { referencesChanChannel($0.formula) }) {
+                calcStart = 0
+                calcEnd = sortedData.count - 1
+            }
             let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
             let activeIDs = Set(entries.map { $0.id })
             // ===== 【首帧引擎实验】原 Swift 前台主图求值（2026-10-12 临时注释禁用，真机体验反馈后决定去留）=====

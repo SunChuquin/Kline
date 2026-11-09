@@ -28,6 +28,16 @@ struct TDXOutputLine {
     var markerDirections: [Bool]? = nil
     /// COLORSTICK：红绿柱（按正负红绿着色）
     var colorStick: Bool = false
+    /// STICKLINE 的第二端价格（与 values 配对构成竖线区间），nil 表示普通折线
+    var values2: [Double]? = nil
+    /// STICKLINE 线宽（以 K 线宽度为单位，0 = 零宽细线）
+    var stickWidth: Double = 0
+    /// 断线语义：值为空（NaN）时断开折线而不是跨空连接（仅缠论通道输出行启用）
+    var breakOnNaN: Bool = false
+    /// 抽样时必须保留的 bar 下标（笔端点/中枢封口），防止折线拐点被抽样跳过
+    var keyIndices: [Int]? = nil
+    /// 匿名绘制语句：画出但不占图例
+    var isAnonymous: Bool = false
 }
 
 /// 单个输出行的独立求值单元：该行 + 它全部传递依赖的语句（拆分由 Python text_split 完成）。
