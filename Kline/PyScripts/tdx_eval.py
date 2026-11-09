@@ -174,7 +174,7 @@ def _ref(seq, n):
 
 
 def _rolling(seq, period, kind):
-    # HHV/LLV/SUM(N)/STD/COUNT 共用：窗口内跳过 NaN，无有效值 → NaN
+    # HHV/LLV/SUM(N)/STD 共用：窗口内跳过 NaN，无有效值 → NaN
     n = len(seq)
     out = [_NAN] * n
     if period <= 0:
@@ -205,12 +205,60 @@ def _rolling(seq, period, kind):
             out[i] = mn
         elif kind == "sum":
             out[i] = s
-        elif kind == "count":
-            out[i] = float(cnt)
         elif kind == "std":
             mean = s / cnt
             variance = max(0.0, s2 / cnt - mean * mean)
             out[i] = math.sqrt(variance)
+    return out
+
+
+def _count(seq, period):
+    """COUNT(X,N)：统计 N 周期内「条件成立」的周期数（通达信官方语义）。
+
+    条件成立 = X 非 0（官方原文：COUNT(X,N) 统计 N 周期中满足 X 条件的周期数）。
+    与本文件其它窗口函数保持一致的约定：
+      - 窗口内 NaN 视为无效值，既不计入成立数，也不计入有效根数；
+      - 窗口内全为 NaN → 输出 NaN（同 _rolling）；
+      - N<=0 → 从第一根起累计（同 SUM(X,0)/HHV(X,0) 的「N=0 从第一个有效值开始」）；
+      - N 大于已有根数 → 窗口按已有根数截断。
+    """
+    n = len(seq)
+    out = [_NAN] * n
+    for i in range(n):
+        start = 0 if period <= 0 else max(0, i - period + 1)
+        hits = 0
+        valid = 0
+        for j in range(start, i + 1):
+            v = seq[j]
+            if math.isnan(v):
+                continue
+            valid += 1
+            if v != 0:
+                hits += 1
+        if valid <= 0:
+            continue
+        out[i] = float(hits)
+    return out
+
+
+def _cumulative(seq, kind):
+    """HHV/LLV(X,0)：从第一个有效值开始累计极值（官方：N=0 则从第一个有效值开始）。
+
+    与 _total(SUM(X,0)) 同一约定：NaN 根输出 NaN 且不推进累计状态。
+    """
+    out = [_NAN] * len(seq)
+    cur = _NAN
+    for i, v in enumerate(seq):
+        if math.isnan(v):
+            continue
+        if math.isnan(cur):
+            cur = v
+        elif kind == "max":
+            if v > cur:
+                cur = v
+        elif v < cur:
+            cur = v
+        out[i] = cur
     return out
 
 
@@ -347,10 +395,16 @@ def _eval_call(fn, vals, builtins):
         return _ref(vals[0], int(_scalar(vals[1])))
     if fn == "HHV":
         need(2)
-        return _rolling(vals[0], int(_scalar(vals[1])), "max")
+        period = int(_scalar(vals[1]))
+        if period <= 0:
+            return _cumulative(vals[0], "max")
+        return _rolling(vals[0], period, "max")
     if fn == "LLV":
         need(2)
-        return _rolling(vals[0], int(_scalar(vals[1])), "min")
+        period = int(_scalar(vals[1]))
+        if period <= 0:
+            return _cumulative(vals[0], "min")
+        return _rolling(vals[0], period, "min")
     if fn == "ABS":
         need(1)
         return [abs(v) for v in vals[0]]
@@ -377,7 +431,7 @@ def _eval_call(fn, vals, builtins):
         return _rolling(vals[0], int(_scalar(vals[1])), "std")
     if fn == "COUNT":
         need(2)
-        return _rolling(vals[0], int(_scalar(vals[1])), "count")
+        return _count(vals[0], int(_scalar(vals[1])))
     if fn == "IF":
         need(3)
         return [a if c != 0 else b for c, a, b in zip(vals[0], vals[1], vals[2])]
