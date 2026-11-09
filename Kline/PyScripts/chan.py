@@ -74,6 +74,23 @@ config 白名单（未知键 / 非法值 → {"ok":false,"error":...} 结构化�
       注意 startBi/endBi 是内部笔视图下标，normal 分支可能等于末笔之后新增的
       虚笔下标（即 bi 数组长度），不会改变 bi 数组本身。
       false 时不输出该字段，其余输出与历史逐字节一致。
+  - include_centers: true（默认）| false  是否附带笔中枢。
+      中枢只在显式请求时输出：显式传 include_centers=true，或传
+      include_seg_centers=true；两个键都不传时 result 不含任何中枢字段
+      （与 P1 输出逐字节一致）。语义 = chan.py ZS/ZSList（zs_algo="normal"、
+      one_bi_zs=False、need_combine=True、zs_combine_mode="zs"）：在每条线段
+      内部取反向笔成中枢、同区间延伸、同段内合并。顶层键 "centers"，元素：
+        {"idx","beginLine","endLine","beginKlu","endKlu","zg","zd","gg","dd",
+         "lineCount","confirmed","extended","merged","ended"}
+      beginLine/endLine = 笔下标；beginKlu/endKlu = 对应原始 K 线下标；
+      zg/zd = 中枢区间（ZG/ZD）；gg/dd = 区间内最高/最低（GG/DD）；
+      lineCount = 成分笔数；confirmed = 所属线段是否确认；
+      extended = 是否被后续笔延伸（成分 > 初始 2 根）；merged = 合并吸收的
+      中枢数；ended = 是否已终结（后续已出现离开区间的笔）。
+  - include_seg_centers: false（默认）| true  是否附带段中枢（高级项）。
+      以线段为"线"、以段段（segseg）为容器，与上游 segzs_list 同构；
+      顶层键 "segCenters"，字段同上，beginLine/endLine 改为段下标。
+      为 true 时同时输出 "centers"。
 
 CL-V1 口径预设（P0 对齐用，客户端显式传入）:
   {"bi_algo":"clv1","bi_min_gap":3,"bi_fx_check":"skip",
@@ -102,6 +119,8 @@ _DEFAULT_CONFIG = {
     "bi_end_is_peak": True,
     "bi_last_unconfirmed": False,
     "include_segments": False,
+    "include_centers": True,
+    "include_seg_centers": False,
 }
 
 _CONFIG_CHOICES = {
@@ -111,6 +130,8 @@ _CONFIG_CHOICES = {
     "bi_end_is_peak": (True, False),
     "bi_last_unconfirmed": (True, False),
     "include_segments": (True, False),
+    "include_centers": (True, False),
+    "include_seg_centers": (True, False),
 }
 
 
@@ -134,7 +155,8 @@ def _parse_config(inp):
         want = _CONFIG_CHOICES[key]
         if key == "bi_min_gap":
             ok_type = isinstance(val, int) and not isinstance(val, bool)
-        elif key in ("bi_end_is_peak", "bi_last_unconfirmed", "include_segments"):
+        elif key in ("bi_end_is_peak", "bi_last_unconfirmed", "include_segments",
+                     "include_centers", "include_seg_centers"):
             ok_type = isinstance(val, bool)
         else:
             ok_type = isinstance(val, str)
@@ -536,7 +558,31 @@ def _clv1_last_unconfirmed(bars, bi_json):
     last["confirmed"] = False
 
 
-def _run_clv1(bars, cfg):
+def _structure_flags(inp, cfg):
+    """中枢输出需显式请求：include_centers 或 include_seg_centers 为 true。
+    两者都不传时保持历史输出逐字节一致（include_centers 的"默认 true"只在
+    调用方显式请求结构时生效）。返回 (笔中枢, 段中枢)。"""
+    raw = inp.get("config")
+    raw = raw if isinstance(raw, dict) else {}
+    want_seg = cfg["include_seg_centers"] is True
+    want_bi = raw.get("include_centers") is True or want_seg
+    return want_bi, want_seg
+
+
+def _fill_structure(result, seg_bis, cfg, want_bi_zs, want_seg_zs):
+    """按需补充 segments / centers / segCenters（都不请求时 result 不变）。"""
+    if not (cfg["include_segments"] or want_bi_zs or want_seg_zs):
+        return
+    segs = _build_segs(seg_bis)
+    if cfg["include_segments"]:
+        result["segments"] = _segments_json(segs)
+    if want_bi_zs:
+        result["centers"] = _centers_json(_zs_lst_of(seg_bis, segs))
+    if want_seg_zs:
+        result["segCenters"] = _seg_centers_json(segs)
+
+
+def _run_clv1(bars, cfg, want_bi_zs=False, want_seg_zs=False):
     """CL-V1 口径：合并 → 分型 → 笔（可选末笔顺延）。返回 result dict。"""
     mks = _clv1_merge(bars)
     fractals = _clv1_fractals(mks)
@@ -572,8 +618,8 @@ def _run_clv1(bars, cfg):
         "fx": fx_by_mk.get(k, _FX_UNKNOWN),
     } for k, mk in enumerate(mks)]
     result = {"klc": klc_json, "bi": bi_json}
-    if cfg["include_segments"]:
-        result["segments"] = _segments_json(_seg_bis_clv1(ends, bi_json, cfg))
+    _fill_structure(result, _seg_bis_clv1(ends, bi_json, cfg), cfg,
+                    want_bi_zs, want_seg_zs)
     return result
 
 
@@ -602,7 +648,7 @@ class _SegBi(object):
     """线段内部使用的笔视图（对应 CBi，但只保留线段需要的字段）。"""
 
     __slots__ = ("idx", "dir", "begin_klc", "end_klc",
-                 "is_sure", "used_to_be_sure", "next", "pre")
+                 "is_sure", "used_to_be_sure", "next", "pre", "seg_idx")
 
     def __init__(self, idx, begin_klc, end_klc, is_sure=True):
         if begin_klc.fx == _FX_BOTTOM:
@@ -618,6 +664,7 @@ class _SegBi(object):
         self.used_to_be_sure = is_sure
         self.next = None
         self.pre = None
+        self.seg_idx = None
 
     @property
     def is_used_to_be_sure(self):
@@ -959,7 +1006,7 @@ class _Seg(object):
     """线段（CSeg）。"""
 
     __slots__ = ("idx", "start_bi", "end_bi", "is_sure", "used_to_be_sure",
-                 "dir", "bi_list", "eigen_fx", "pre", "next", "reason")
+                 "dir", "bi_list", "eigen_fx", "pre", "next", "reason", "seg_idx")
 
     def __init__(self, idx, start_bi, end_bi, is_sure=True, seg_dir=None,
                  reason="normal"):
@@ -974,6 +1021,7 @@ class _Seg(object):
         self.eigen_fx = None
         self.pre = None
         self.next = None
+        self.seg_idx = None
         self.reason = reason
         if end_bi.idx - start_bi.idx < 2:
             self.is_sure = False
@@ -1001,6 +1049,17 @@ class _Seg(object):
 
     def get_end_val(self):
         return self.end_bi.get_end_val()
+
+    @property
+    def is_used_to_be_sure(self):
+        return self.is_sure or self.used_to_be_sure
+
+    # ---- CSeg._low/_high：段端点极值（供更高级别（段中枢的段段）复用）----
+    def _low(self):
+        return self.end_bi.get_end_val() if self.is_down() else self.start_bi.get_begin_val()
+
+    def _high(self):
+        return self.end_bi.get_end_val() if self.is_up() else self.start_bi.get_begin_val()
 
 
 def _find_peak_bi(bi_lst, is_high):
@@ -1210,9 +1269,14 @@ class _SegListChan(object):
                              reason="collect_left_0")
 
 
-def _segments_json(bi_lst):
+def _build_segs(bi_lst):
+    """对（内部）笔视图跑一遍 seg_algo="chan"，返回 _Seg 列表。"""
     sl = _SegListChan()
     sl.update(bi_lst)
+    return sl.lst
+
+
+def _segments_json(segs):
     return [{
         "idx": seg.idx,
         "dir": seg.dir,
@@ -1223,7 +1287,255 @@ def _segments_json(bi_lst):
         "confirmed": seg.is_sure,
         "reason": seg.reason,
         "biCount": seg.end_bi.idx - seg.start_bi.idx + 1,
-    } for seg in sl.lst]
+    } for seg in segs]
+
+
+# ---------------------------------------------------------------- 中枢
+# chan.py ZS/ZS.py + ZS/ZSList.py 语义移植（zs_algo="normal"、
+# one_bi_zs=False、need_combine=True、zs_combine_mode="zs"）。
+# 中枢机对"线"（笔或段）是泛型的：笔中枢 = 在每条线段内部取反向笔成中枢；
+# 段中枢 = 在线段的线段（segseg）内部取反向段成中枢——与上游
+# segzs_list = CZSList().cal_bi_zs(seg_list, segseg_list) 同构。
+
+
+def _has_overlap(l1, h1, l2, h2, equal=False):
+    return (h2 >= l1 and h1 >= l2) if equal else (h2 > l1 and h1 > l2)
+
+
+def _assign_seg_idx(items, segs):
+    """把 items（笔/段）归属到容器 segs（段/段段）的下标（cal_seg 语义）。"""
+    j = 0
+    for item in items:
+        while j < len(segs) and item.idx > segs[j].end_bi.idx:
+            j += 1
+        item.seg_idx = segs[j].idx if j < len(segs) else len(segs)
+
+
+def _line_endpoint_klu_idx(item, at_begin):
+    """线（笔/段）起点/终点对应的原始 K 线下标（CBi/CSeg get_begin_klu 语义）。"""
+    if isinstance(item, _Seg):
+        return _line_endpoint_klu_idx(
+            item.start_bi if at_begin else item.end_bi, at_begin)
+    klc = item.begin_klc if at_begin else item.end_klc
+    is_high = (not item.is_up()) if at_begin else item.is_up()
+    lst = getattr(klc, "lst", None)
+    if lst:
+        want = klc.high if is_high else klc.low
+        for k in reversed(lst):
+            if (k.high if is_high else k.low) == want:
+                return k.idx
+    return klc.idx
+
+
+class _ZS(object):
+    """中枢（CZS）：low/high = ZD/ZG，peak_low/peak_high = DD/GG。"""
+
+    __slots__ = ("begin_bi", "end_bi", "low", "high", "mid",
+                 "peak_low", "peak_high", "is_sure", "sub_zs")
+
+    def __init__(self, lst, is_sure=True):
+        self.is_sure = is_sure
+        self.sub_zs = []
+        self.begin_bi = lst[0]
+        self.update_zs_range(lst)
+        self.peak_high = float("-inf")
+        self.peak_low = float("inf")
+        for item in lst:
+            self.update_zs_end(item)
+
+    def update_zs_range(self, lst):
+        self.low = max(bi._low() for bi in lst)
+        self.high = min(bi._high() for bi in lst)
+        self.mid = (self.low + self.high) / 2
+
+    def update_zs_end(self, item):
+        self.end_bi = item
+        if item._low() < self.peak_low:
+            self.peak_low = item._low()
+        if item._high() > self.peak_high:
+            self.peak_high = item._high()
+
+    def is_one_bi_zs(self):
+        return self.begin_bi.idx == self.end_bi.idx
+
+    def in_range(self, item):
+        return _has_overlap(self.low, self.high, item._low(), item._high())
+
+    def try_add_to_end(self, item):
+        if not self.in_range(item):
+            return False
+        if self.is_one_bi_zs():
+            self.update_zs_range([self.begin_bi, item])
+        self.update_zs_end(item)
+        return True
+
+    def combine(self, zs2, combine_mode="zs"):
+        if zs2.is_one_bi_zs():
+            return False
+        if self.begin_bi.seg_idx != zs2.begin_bi.seg_idx:
+            return False
+        if combine_mode == "zs":
+            if not _has_overlap(self.low, self.high, zs2.low, zs2.high, equal=True):
+                return False
+            self.do_combine(zs2)
+            return True
+        if not _has_overlap(self.peak_low, self.peak_high,
+                            zs2.peak_low, zs2.peak_high):
+            return False
+        self.do_combine(zs2)
+        return True
+
+    def _copy(self):
+        cp = _ZS.__new__(_ZS)
+        cp.begin_bi = self.begin_bi
+        cp.end_bi = self.end_bi
+        cp.low = self.low
+        cp.high = self.high
+        cp.mid = self.mid
+        cp.peak_low = self.peak_low
+        cp.peak_high = self.peak_high
+        cp.is_sure = self.is_sure
+        cp.sub_zs = []
+        return cp
+
+    def do_combine(self, zs2):
+        if len(self.sub_zs) == 0:
+            self.sub_zs.append(self._copy())
+        self.sub_zs.append(zs2)
+        self.low = min(self.low, zs2.low)
+        self.high = max(self.high, zs2.high)
+        self.peak_low = min(self.peak_low, zs2.peak_low)
+        self.peak_high = max(self.peak_high, zs2.peak_high)
+        self.end_bi = zs2.end_bi
+
+
+class _ZSList(object):
+    """中枢列表（CZSList.cal_bi_zs 的 zs_algo="normal" 路径）。"""
+
+    __slots__ = ("zs_lst", "free_item_lst", "last_sure_pos", "last_seg_idx")
+
+    def __init__(self):
+        self.zs_lst = []
+        self.free_item_lst = []
+        self.last_sure_pos = -1
+        self.last_seg_idx = 0
+
+    def clear_free_lst(self):
+        self.free_item_lst = []
+
+    def update_last_pos(self, seg_list):
+        self.last_sure_pos = -1
+        self.last_seg_idx = 0
+        idx = len(seg_list) - 1
+        while idx >= 0:
+            seg = seg_list[idx]
+            if seg.is_sure:
+                self.last_sure_pos = seg.start_bi.idx
+                self.last_seg_idx = seg.idx
+                return
+            idx -= 1
+
+    def seg_need_cal(self, seg):
+        return seg.start_bi.idx >= self.last_sure_pos
+
+    def try_construct_zs(self, lst, is_sure):
+        if len(lst) == 1:
+            return None
+        lst = lst[-2:]
+        min_high = min(item._high() for item in lst)
+        max_low = max(item._low() for item in lst)
+        return _ZS(lst, is_sure=is_sure) if min_high > max_low else None
+
+    def add_to_free_lst(self, item, is_sure):
+        if len(self.free_item_lst) != 0 and item.idx == self.free_item_lst[-1].idx:
+            self.free_item_lst = self.free_item_lst[:-1]
+        self.free_item_lst.append(item)
+        res = self.try_construct_zs(self.free_item_lst, is_sure)
+        if res is not None and res.begin_bi.idx > 0:
+            self.zs_lst.append(res)
+            self.clear_free_lst()
+            self.try_combine()
+
+    def try_add_to_end(self, item):
+        return False if len(self.zs_lst) == 0 else self.zs_lst[-1].try_add_to_end(item)
+
+    def update(self, item, is_sure=True):
+        if len(self.free_item_lst) == 0 and self.try_add_to_end(item):
+            self.try_combine()
+            return
+        self.add_to_free_lst(item, is_sure)
+
+    def add_from_line_range(self, line_lst, seg_dir, seg_is_sure):
+        deal_cnt = 0
+        for item in line_lst:
+            if item.dir == seg_dir:
+                continue
+            if deal_cnt < 1:
+                self.add_to_free_lst(item, seg_is_sure)
+                deal_cnt += 1
+            else:
+                self.update(item, seg_is_sure)
+
+    def try_combine(self):
+        while len(self.zs_lst) >= 2 and \
+                self.zs_lst[-2].combine(self.zs_lst[-1], combine_mode="zs"):
+            self.zs_lst = self.zs_lst[:-1]
+
+    def cal(self, line_lst, seg_lst):
+        while self.zs_lst and self.zs_lst[-1].begin_bi.idx >= self.last_sure_pos:
+            self.zs_lst.pop()
+        for seg in seg_lst[self.last_seg_idx:]:
+            if not self.seg_need_cal(seg):
+                continue
+            self.clear_free_lst()
+            self.add_from_line_range(line_lst[seg.start_bi.idx:seg.end_bi.idx + 1],
+                                     seg.dir, seg.is_sure)
+        if len(seg_lst):
+            self.clear_free_lst()
+            self.add_from_line_range(line_lst[seg_lst[-1].end_bi.idx + 1:],
+                                     -seg_lst[-1].dir, False)
+        self.update_last_pos(seg_lst)
+
+
+def _zs_lst_of(lines, containers):
+    _assign_seg_idx(lines, containers)
+    zl = _ZSList()
+    zl.cal(lines, containers)
+    return zl
+
+
+def _centers_json(zl):
+    out = []
+    last = len(zl.zs_lst) - 1
+    for i, zs in enumerate(zl.zs_lst):
+        # 终结：后续已出现不在区间内的线（free_lst 非空）→ 中枢封闭；
+        # 末中枢若 free_lst 为空则仍可被延伸。
+        ended = True if i < last else len(zl.free_item_lst) > 0
+        out.append({
+            "idx": i,
+            "beginLine": zs.begin_bi.idx,
+            "endLine": zs.end_bi.idx,
+            "beginKlu": _line_endpoint_klu_idx(zs.begin_bi, True),
+            "endKlu": _line_endpoint_klu_idx(zs.end_bi, False),
+            "zg": zs.high,
+            "zd": zs.low,
+            "gg": zs.peak_high,
+            "dd": zs.peak_low,
+            "lineCount": zs.end_bi.idx - zs.begin_bi.idx + 1,
+            "confirmed": zs.is_sure,
+            "extended": zs.end_bi.idx - zs.begin_bi.idx > 1,
+            "merged": len(zs.sub_zs),
+            "ended": ended,
+        })
+    return out
+
+
+def _seg_centers_json(segs):
+    """段中枢：以线段为"线"、以段段（segseg）为容器，与上游 segzs_list 同构。"""
+    if len(segs) < 2:
+        return []
+    seg_segs = _build_segs(segs)
+    return _centers_json(_zs_lst_of(segs, seg_segs))
 
 
 class _Chan(object):
@@ -1275,8 +1587,10 @@ def _op_chan(inp):
     rows.sort(key=lambda x: (x[0], x[1]))  # date 升序（稳定，同序保持）
 
     ordered = [(d, o, h, l, c) for d, _orig, o, h, l, c in rows]
+    want_bi_zs, want_seg_zs = _structure_flags(inp, cfg)
     if cfg["bi_algo"] == "clv1":
-        return {"ok": True, "result": _run_clv1(ordered, cfg)}
+        return {"ok": True,
+                "result": _run_clv1(ordered, cfg, want_bi_zs, want_seg_zs)}
 
     chan = _Chan(cfg)
     for pos, (_d, _o, h, l, _c) in enumerate(ordered):
@@ -1308,8 +1622,8 @@ def _op_chan(inp):
             "toKlu": ek.idx if ek is not None else -1,
         })
     result = {"klc": klc_json, "bi": bi_json}
-    if cfg["include_segments"]:
-        result["segments"] = _segments_json(_seg_bis_normal(chan, cfg))
+    _fill_structure(result, _seg_bis_normal(chan, cfg), cfg,
+                    want_bi_zs, want_seg_zs)
     return {"ok": True, "result": result}
 
 
