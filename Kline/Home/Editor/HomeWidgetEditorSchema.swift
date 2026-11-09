@@ -66,6 +66,8 @@ enum WidgetParamCandidates: Equatable {
     case favoritesGroups
     /// 模拟账户（含「全部账户」）
     case simAccounts
+    /// 模拟页顶栏功能入口（SimTopBarEntry 全量；静态候选）
+    case simTopBarEntries
 }
 
 /// 一个控件的可编辑描述（与 HomeWidgetRegistry 注册的控件一一对应）

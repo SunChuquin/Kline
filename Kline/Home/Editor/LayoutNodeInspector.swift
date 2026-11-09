@@ -156,15 +156,16 @@ struct LayoutNodeInspector: View {
     private func widgetFields(_ node: PageLayoutNode, scrollProxy: ScrollViewProxy) -> some View {
         row("控件") {
             Menu {
-                ForEach(HomeWidgetEditorSchema.all, id: \.name) { descriptor in
+                ForEach(PageWidgetEditorSchema.all(for: editor.page), id: \.name) { descriptor in
                     Button(descriptor.title) { editor.setWidgetName(descriptor.name, on: node) }
                 }
             } label: {
-                menuLabel(HomeWidgetEditorSchema.descriptor(for: node.name ?? "")?.title ?? (node.name ?? "未选择"))
+                menuLabel(PageWidgetEditorSchema.descriptor(for: node.name ?? "",
+                                                            page: editor.page)?.title ?? (node.name ?? "未选择"))
             }
         }
 
-        if let descriptor = HomeWidgetEditorSchema.descriptor(for: node.name ?? ""), !descriptor.params.isEmpty {
+        if let descriptor = PageWidgetEditorSchema.descriptor(for: node.name ?? "", page: editor.page), !descriptor.params.isEmpty {
             ForEach(descriptor.params, id: \.key) { param in
                 paramRow(param, node: node, scrollProxy: scrollProxy)
             }
@@ -383,7 +384,7 @@ struct LayoutNodeInspector: View {
 
     private func primaryTitle(_ node: PageLayoutNode) -> String {
         if node.type == "widget" {
-            return HomeWidgetEditorSchema.descriptor(for: node.name ?? "")?.title ?? "控件"
+            return PageWidgetEditorSchema.descriptor(for: node.name ?? "", page: editor.page)?.title ?? "控件"
         }
         return HomeWidgetEditorSchema.nodeTypeTitles[node.type] ?? node.type
     }

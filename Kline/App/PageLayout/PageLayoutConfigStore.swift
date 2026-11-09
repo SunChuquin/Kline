@@ -10,7 +10,7 @@
 //  回退链（不变）：
 //    1) 沙盒 JSON 可读且解码成功 → 直接用；
 //    2) 沙盒缺失 / 解码失败 → 取「已注册的内置默认文本」解码，成功则原样写回沙盒并用它；
-//    3) 内置默认也未注册 / 也解码失败 → 该页配置置为 nil（首页 home = nil），由页面退硬编码布局视图。
+//    3) 内置默认也未注册 / 也解码失败 → 该页配置置为 nil，由页面退硬编码布局视图。
 //  全程 try? / do-catch 兜底，任何环节失败只降级、不崩溃。
 //  同值不写（不变）：缓存各页「上次生效的原始 JSON 文本」，文本未变时不重新赋值 @Published，避免同值发布。
 //  写接口：`save` / `resetToBuiltIn` 会写沙盒并 `apply`，且**同步 `lastModDates`**（记下写入后的文件 mtime），
@@ -25,9 +25,18 @@ import Combine
 final class PageLayoutConfigStore: ObservableObject {
     static let shared = PageLayoutConfigStore()
     static let homePage = "home"
+    static let simulationPage = "simulation"
 
-    /// 首页配置；nil 表示不可用（该页退硬编码布局视图）
-    @Published private(set) var home: PageLayoutFile?
+    /// 各页已解码的配置快照（@Published：任一页生效文本变化即发布，
+    /// 各页面容器 observe 本仓库后按 `layout(id:for:)` 取用）
+    @Published private(set) var publishedFiles: [String: PageLayoutFile] = [:]
+
+    /// 首页配置；nil 表示不可用（该页退硬编码布局视图）。
+    /// 多页面化后另有 `simulation` 等按页取用；通用取值见 `layout(id:for:)`。
+    var home: PageLayoutFile? { publishedFiles[Self.homePage] }
+
+    /// 模拟页配置；nil 表示不可用（该页退硬编码布局视图）
+    var simulation: PageLayoutFile? { publishedFiles[Self.simulationPage] }
 
     /// 各页已解码的配置（nil 不在字典里，即不可用）
     private var files: [String: PageLayoutFile] = [:]
@@ -176,8 +185,8 @@ final class PageLayoutConfigStore: ObservableObject {
         let changed = (lastTexts[page] != text)
         lastTexts[page] = text
 
-        guard page == Self.homePage, changed else { return }
-        home = file
+        guard changed else { return }
+        publishedFiles[page] = file
     }
 
     // MARK: - 沙盒读写

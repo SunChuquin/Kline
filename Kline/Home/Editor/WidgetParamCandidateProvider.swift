@@ -63,6 +63,10 @@ enum WidgetParamCandidateProvider {
                                subtitle: account.isArchived ? "已归档" : nil)
             })
             return result
+        case .simTopBarEntries:
+            return SimTopBarEntry.allCases.map {
+                ParamCandidate(id: $0.rawValue, title: $0.title, subtitle: nil, iconName: nil)
+            }
         }
     }
 
@@ -73,6 +77,7 @@ enum WidgetParamCandidateProvider {
         case .indices: return "默认（前 4 只指数）"
         case .favoritesGroups: return "全部"
         case .simAccounts: return "全部账户"
+        case .simTopBarEntries: return "全部入口"
         }
     }
 
@@ -94,6 +99,8 @@ enum WidgetParamCandidateProvider {
             return [FavoritesStore.allGroupID.uuidString]
         case .simAccounts:
             return [SimStore.allAccountID.uuidString]
+        case .simTopBarEntries:
+            return SimTopBarEntry.allCases.map(\.rawValue)
         }
     }
 }

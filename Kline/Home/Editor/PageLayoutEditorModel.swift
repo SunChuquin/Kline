@@ -32,8 +32,53 @@ struct LayoutTreeRow: Identifiable {
 @MainActor
 final class PageLayoutEditorModel: ObservableObject {
 
-    /// 编辑器覆盖的页面（本轮仅首页）
-    static let page = "home"
+    /// 编辑器覆盖的页面
+    enum EditorPage: String, CaseIterable, Identifiable {
+        case home
+        case simulation
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .home: return "首页"
+            case .simulation: return "模拟"
+            }
+        }
+
+        /// 配置仓库名（PageLayoutConfigStore 的 page 键）
+        var configPage: String {
+            switch self {
+            case .home: return PageLayoutConfigStore.homePage
+            case .simulation: return PageLayoutConfigStore.simulationPage
+            }
+        }
+
+        /// 页面当前选中的布局档位（编辑器打开时停在当前档位）
+        var currentStyleID: String {
+            switch self {
+            case .home: return PageLayoutStore.shared.homeLayout.rawValue
+            case .simulation: return TradingLayoutStore.shared.simulationLayout.rawValue
+            }
+        }
+
+        /// 页面可编辑的档位 id（与设置面板的档位集合一致）
+        var styleIDs: [String] {
+            switch self {
+            case .home: return HomeLayoutStyle.allCases.map(\.rawValue)
+            case .simulation: return SimulationLayoutStyle.allCases.map(\.rawValue)
+            }
+        }
+    }
+
+    /// 当前编辑的页面（首页 / 模拟）；切换即换草稿底本与档位集合
+    @Published var page: EditorPage {
+        didSet {
+            guard oldValue != page else { return }
+            styleID = page.currentStyleID
+            loadFromStore()
+        }
+    }
 
     /// 当前编辑的档位 id（A / B / C / D）
     @Published var styleID: String
@@ -55,11 +100,15 @@ final class PageLayoutEditorModel: ObservableObject {
     /// 进入编辑器（或上次保存）时的规范化文本：脏标记基准
     private(set) var savedText: String = ""
 
-    init() {
-        styleID = PageLayoutStore.shared.homeLayout.rawValue
+    init(page: EditorPage = .home) {
+        self.page = page
+        styleID = page.currentStyleID
     }
 
     // MARK: - 派生
+
+    /// 编辑的配置页名（PageLayoutConfigStore 的 page 键）
+    var pageID: String { page.configPage }
 
     /// 当前档位的根节点
     var layoutRoot: PageLayoutNode? {
@@ -123,7 +172,7 @@ final class PageLayoutEditorModel: ObservableObject {
             banner = "保存失败，请重试"
             return false
         }
-        guard PageLayoutConfigStore.shared.save(file, page: Self.page) else {
+        guard PageLayoutConfigStore.shared.save(file, page: pageID) else {
             banner = "保存失败，请重试"
             return false
         }
@@ -134,7 +183,7 @@ final class PageLayoutEditorModel: ObservableObject {
 
     @discardableResult
     func resetToDefault() -> Bool {
-        guard PageLayoutConfigStore.shared.resetToBuiltIn(page: Self.page) else {
+        guard PageLayoutConfigStore.shared.resetToBuiltIn(page: pageID) else {
             banner = "恢复默认失败"
             return false
         }
@@ -639,10 +688,10 @@ final class PageLayoutEditorModel: ObservableObject {
 
     /// 取草稿底本（不可用时先种回内置默认再取），并重置编辑态
     private func applyStoreFile() {
-        var loaded = PageLayoutConfigStore.shared.currentFile(page: Self.page)
+        var loaded = PageLayoutConfigStore.shared.currentFile(page: pageID)
         if loaded == nil {
-            PageLayoutConfigStore.shared.resetToBuiltIn(page: Self.page)
-            loaded = PageLayoutConfigStore.shared.currentFile(page: Self.page)
+            PageLayoutConfigStore.shared.resetToBuiltIn(page: pageID)
+            loaded = PageLayoutConfigStore.shared.currentFile(page: pageID)
         }
         file = loaded
 

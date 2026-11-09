@@ -836,9 +836,12 @@ private enum LogCol {
 
 /// 底部常驻买入 / 卖出条（左侧规则提示，右侧买入红 / 卖出绿）
 struct SimBottomActionBar: View {
+    /// 左侧提示缺省文案（A/B/C 三个布局共用同一句）
+    static let defaultHintText = "T+1：当日买入次日可卖 ｜ 佣金万 2.5、最低 5 元 ｜ 卖出印花税千一"
+
     let onTrade: (SimOrderDirection) -> Void
-    /// 左侧提示文案，默认 T+1 / 佣金 / 印花税说明
-    var hint: String = "T+1：当日买入次日可卖 ｜ 佣金万 2.5、最低 5 元 ｜ 卖出印花税千一"
+    /// 左侧提示文案，缺省 = defaultHintText
+    var hint: String = SimBottomActionBar.defaultHintText
     /// 紧凑形态（页面可用宽 < 600）：隐藏左侧提示文案。为什么：提示文案固有宽
     /// ~440pt，与两个 120pt 按钮同行，在 414pt 竖屏上必然把买入/卖出按钮挤出屏
     /// （实测右溢出 ~180pt）；买卖是交易主操作，优先保按钮完整在屏。

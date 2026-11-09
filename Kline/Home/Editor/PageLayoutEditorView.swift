@@ -17,20 +17,42 @@ import SwiftUI
 
 /// 布局编辑器呈现路由器：编辑器是全屏页面（必须盖住底部导航栏），
 /// 挂在 `ContentView` 根 ZStack 上呈现；首页入口与个人中心入口都只置位此开关。
+/// `page` 决定编辑器打开时停在哪一页（首页 / 模拟配置都可编辑）。
 final class HomeLayoutEditorRouter: ObservableObject {
     static let shared = HomeLayoutEditorRouter()
     @Published var isPresented = false
+    /// 打开时停留的页面（默认首页；由入口方在置位前点名）
+    @Published var page: PageLayoutEditorModel.EditorPage = .home
 }
 
 struct PageLayoutEditorView: View {
+    /// 进入编辑器时停在哪一页（由掛载方传入；页内可切换编辑首页 / 模拟）
+    let initialPage: PageLayoutEditorModel.EditorPage
     let onClose: () -> Void
 
-    @StateObject private var editor = PageLayoutEditorModel()
-    /// 全屏预览用真实数据
+    @StateObject private var editor: PageLayoutEditorModel
+    /// 全屏预览用真实数据（首页档）
     @StateObject private var previewModel = HomePageModel()
+    /// 全屏预览用真实数据（模拟档）
+    @StateObject private var simPreviewModel = SimulationPageModel()
     @State private var showFullPreview = false
     @State private var showResetConfirm = false
     @State private var showDirtyAlert = false
+
+    init(page: PageLayoutEditorModel.EditorPage = .home,
+         onClose: @escaping () -> Void) {
+        self.initialPage = page
+        self.onClose = onClose
+        _editor = StateObject(wrappedValue: PageLayoutEditorModel(page: page))
+    }
+
+    /// 恢复默认确认文案（页内提示吃哪一份内置默认配置）
+    private var resetConfirmMessage: String {
+        switch editor.page {
+        case .home: return "沙盒中的首页配置会被内置默认覆盖。"
+        case .simulation: return "沙盒中的模拟页配置会被内置默认覆盖。"
+        }
+    }
 
     /// 页面可用宽度：由顶层 WidthReader 上报。0 表示尚未上报——
     /// 此时按宽屏形态渲染，保证 iPad 首帧与既有布局/UITest 场景完全一致。
@@ -62,10 +84,18 @@ struct PageLayoutEditorView: View {
             .ignoresSafeArea(.container, edges: .bottom)
             .overlay {
                 if showFullPreview {
-                    HomeLayoutFullPreviewView(editor: editor,
-                                              model: previewModel,
-                                              onClose: { showFullPreview = false })
-                        .zIndex(1000)
+                    switch editor.page {
+                    case .home:
+                        HomeLayoutFullPreviewView(editor: editor,
+                                                  model: previewModel,
+                                                  onClose: { showFullPreview = false })
+                            .zIndex(1000)
+                    case .simulation:
+                        SimLayoutFullPreviewView(editor: editor,
+                                                 model: simPreviewModel,
+                                                 onClose: { showFullPreview = false })
+                            .zIndex(1000)
+                    }
                 }
             }
             .onAppear { editor.loadFromStore() }
@@ -94,8 +124,11 @@ struct PageLayoutEditorView: View {
                     Spacer(minLength: 8)
                     fullPreviewButton
                 }
-                stylePicker
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 8) {
+                    pagePicker
+                    stylePicker
+                        .frame(maxWidth: .infinity)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -104,6 +137,7 @@ struct PageLayoutEditorView: View {
             HStack(spacing: 10) {
                 backButton
                 titleText
+                pagePicker
                 stylePicker
                     .frame(width: 220)
                 Spacer(minLength: 8)
@@ -145,11 +179,24 @@ struct PageLayoutEditorView: View {
             .fixedSize()
     }
 
-    /// 四档风格切换（宽度由调用方按形态给：宽屏固定 220，紧凑态拉满）
+    /// 页面选择（首页 / 模拟）：切换即换草稿底本与档位集合
+    private var pagePicker: some View {
+        Picker("", selection: $editor.page) {
+            ForEach(PageLayoutEditorModel.EditorPage.allCases) { page in
+                Text(page.title).tag(page)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 130)
+        .accessibilityIdentifier("layoutEditor.pagePicker")
+    }
+
+    /// 档位风格切换（宽度由调用方按形态给：宽屏固定 220，紧凑态拉满）
     private var stylePicker: some View {
         Picker("", selection: $editor.styleID) {
-            ForEach(HomeLayoutStyle.allCases) { style in
-                Text(style.rawValue).tag(style.rawValue)
+            ForEach(editor.page.styleIDs, id: \.self) { id in
+                Text(id).tag(id)
             }
         }
         .pickerStyle(.segmented)
@@ -202,7 +249,7 @@ struct PageLayoutEditorView: View {
             Button("恢复默认", role: .destructive) { editor.resetToDefault() }
             Button("取消", role: .cancel) { }
         } message: {
-            Text("沙盒中的首页配置会被内置默认覆盖。")
+            Text(resetConfirmMessage)
         }
     }
 

@@ -829,10 +829,11 @@ private struct HeightReader<Content: View>: View {
 
 // MARK: - 模块明细全屏页
 
-/// 模块明细全屏页（B 布局内部使用）：顶部条（模块名 + 关闭）+ 搜索框 + 完整表格。
+/// 模块明细全屏页（模拟页配置驱动渲染的「全屏明细」与 B 布局共用）：
+/// 顶部条（模块名 + 关闭）+ 搜索框 + 完整表格。
 /// 表格内的「买 / 卖」与「改价」在本页内自行呈现全屏下单页与改价弹窗，
 /// 避免在已被覆盖的根视图上再次呈现 fullScreenCover。
-private struct SimModuleDetailSheet: View {
+struct SimModuleDetailSheet: View {
     let module: SimModuleTab
     let accountID: UUID?
     let onClose: () -> Void

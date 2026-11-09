@@ -189,7 +189,7 @@ struct LayoutNodeTreeList: View {
                 }
 
                 Menu {
-                    ForEach(HomeWidgetEditorSchema.all, id: \.name) { descriptor in
+                    ForEach(PageWidgetEditorSchema.all(for: editor.page), id: \.name) { descriptor in
                         Button(descriptor.title) {
                             editor.insertWidget(name: descriptor.name)
                         }
@@ -232,9 +232,9 @@ struct LayoutNodeTreeList: View {
 
     private func primaryTitle(_ node: PageLayoutNode) -> String {
         if node.type == "widget" {
-            return HomeWidgetEditorSchema.descriptor(for: node.name ?? "")?.title ?? "控件"
+            return PageWidgetEditorSchema.descriptor(for: node.name ?? "", page: editor.page)?.title ?? "控件"
         }
-        return HomeWidgetEditorSchema.nodeTypeTitles[node.type] ?? node.type
+        return PageWidgetEditorSchema.nodeTypeTitles[node.type] ?? node.type
     }
 
     /// 副标题摘要（无内容则返回空串）

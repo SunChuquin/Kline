@@ -112,7 +112,7 @@ struct ContentView: View {
             // 全屏覆盖能力不受此钳制影响。
             if layoutEditorRouter.isPresented {
                 GeometryReader { geo in
-                    PageLayoutEditorView {
+                    PageLayoutEditorView(page: layoutEditorRouter.page) {
                         layoutEditorRouter.isPresented = false
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
