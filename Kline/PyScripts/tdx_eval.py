@@ -368,6 +368,255 @@ def _cross(a, b):
     return out
 
 
+# ==================== 缠论通道注入（P3，2026-11-09） ====================
+# 惰性注入：仅当公式引用了下列通道符号时，才加载同目录 chan.py（CL-V1 预设）并计算；
+# 结果按 bars 指纹缓存在真 __main__（沿用 _ast_cache 的挂载范式），
+# 一次 text_eval 调用内所有单元共享，跨调用按数据指纹复用。
+#
+# 通道约定（长度 = bars 根数，无值处 NaN）：
+#   CHANBI     笔折线：每笔 [fromKlu,toKlu] 内按 beginVal→endVal 线性摊平，笔外 NaN
+#   CHANBIZG/ZD  笔中枢上下轨：仅在该中枢 [beginKlu,endKlu] 内有值，区间外 NaN
+#   CHANBISEAL   笔中枢封口：beginKlu/endKlu 两根 bar 为 1，其余 0
+#   CHANSEG / CHANSEGZG / CHANSEGZD / CHANSEGSEAL  段折线与段中枢，字段同上
+# 相邻中枢之间由 NaN 断开（引用通道的输出行才启用断线，见 _eval_unit_text 的 "brk"）。
+
+_CHAN_SYMBOLS = frozenset((
+    "CHANBI", "CHANBIZG", "CHANBIZD", "CHANBISEAL",
+    "CHANSEG", "CHANSEGZG", "CHANSEGZD", "CHANSEGSEAL",
+))
+
+# CL-V1 口径预设（与 chan.py 文档中的 P0 对齐预设逐字段一致；额外打开段与中枢输出）
+_CHAN_CLV1 = {
+    "bi_algo": "clv1",
+    "bi_min_gap": 3,
+    "bi_fx_check": "skip",
+    "bi_end_is_peak": False,
+    "bi_last_unconfirmed": True,
+    "include_segments": True,
+    "include_centers": True,
+    "include_seg_centers": True,
+}
+
+
+class _StickDraw(object):
+    """STICKLINE 绘制指令（非数值序列）：_eval_unit_text / run 中转为「双端值」输出行"""
+    __slots__ = ("cond", "p1", "p2", "width")
+
+    def __init__(self, cond, p1, p2, width):
+        self.cond = cond
+        self.p1 = p1
+        self.p2 = p2
+        self.width = width
+
+
+def _chan_module():
+    """按 __file__ 定位同目录 chan.py 并加载（桥接 exec 时未写 sys.path，按文件路径加载）"""
+    import __main__ as _km
+    mod = getattr(_km, "_ktdx_chan_module", None)
+    if mod is not None:
+        return mod
+    import importlib.util
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chan.py")
+    if not os.path.exists(path):
+        raise TDxEvalError("缠论通道不可用：缺少 chan.py（%s）" % path)
+    spec = importlib.util.spec_from_file_location("_ktdx_chan", path)
+    if spec is None or spec.loader is None:
+        raise TDxEvalError("缠论通道不可用：无法加载 chan.py")
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as exc:  # 导入期异常不得污染求值主流程
+        raise TDxEvalError("缠论通道不可用：chan.py 导入失败（%s: %s）"
+                           % (type(exc).__name__, exc))
+    _km._ktdx_chan_module = mod
+    return mod
+
+
+def _chan_cache():
+    """通道结果缓存（跨调用持久，挂真 __main__）：{fp: 指纹, data: 通道数据}"""
+    import __main__ as _km
+    try:
+        return _km._ktdx_chan_cache
+    except AttributeError:
+        c = {"fp": None, "data": None}
+        _km._ktdx_chan_cache = c
+        return c
+
+
+def _bars_fingerprint(builtins):
+    """bars 指纹：长度 + 各序列和/加权和/首末值（只算一次，缓存在 builtins["__fp__"]）"""
+    acc = []
+    for k in ("O", "H", "L", "C"):
+        seq = builtins[k]
+        s = 0.0
+        w = 0.0
+        for i, v in enumerate(seq):
+            s += v
+            w += v * (i + 1)
+        acc.append((len(seq), s, w, seq[0] if seq else 0.0, seq[-1] if seq else 0.0))
+    return tuple(acc)
+
+
+def _chan_line(n, spans):
+    """[(i0, v0, i1, v1)] → 逐 bar 折线值：区间内线性摊平，区间外 NaN"""
+    out = [_NAN] * n
+    for i0, v0, i1, v1 in spans:
+        if i0 < 0 or i1 < i0 or i0 >= n:
+            continue
+        a = max(0, i0)
+        b = min(n - 1, i1)
+        if i1 == i0:
+            out[a] = v1
+            continue
+        span = float(i1 - i0)
+        for i in range(a, b + 1):
+            out[i] = v0 + (v1 - v0) * ((i - i0) / span)
+    return out
+
+
+def _chan_rails(n, centers):
+    """中枢 → (zd 轨, zg 轨, 封口条件, 封口 bar 列表)。区间外 NaN / 0"""
+    zd = [_NAN] * n
+    zg = [_NAN] * n
+    edge = [0.0] * n
+    keys = []
+    for c in centers:
+        try:
+            i0 = int(c["beginKlu"])
+            i1 = int(c["endKlu"])
+            lo = float(c["zd"])
+            hi = float(c["zg"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if i0 < 0 or i1 < i0 or i0 >= n:
+            continue
+        i1 = min(i1, n - 1)
+        for i in range(i0, i1 + 1):
+            zd[i] = lo
+            zg[i] = hi
+        edge[i0] = 1.0
+        edge[i1] = 1.0
+        keys.append(i0)
+        keys.append(i1)
+    return zd, zg, edge, keys
+
+
+def _build_chan(res, n):
+    """chan.py result → 8 条通道序列 + 每条通道的关键 bar（端点/封口，供抽样时强制保留）"""
+    bi = res.get("bi") or []
+    segs = res.get("segments") or []
+    centers = res.get("centers") or []
+    seg_centers = res.get("segCenters") or []
+    bi_by_idx = {}
+    bi_spans = []
+    bi_keys = []
+    for b in bi:
+        try:
+            i0 = int(b["fromKlu"])
+            i1 = int(b["toKlu"])
+            v0 = float(b["beginVal"])
+            v1 = float(b["endVal"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        bi_by_idx[int(b.get("idx", -1))] = b
+        if i0 < 0 or i1 < i0:
+            continue
+        bi_spans.append((i0, v0, i1, v1))
+        bi_keys.append(i0)
+        bi_keys.append(i1)
+
+    seg_spans = []
+    seg_keys = []
+    for s in segs:
+        b0 = bi_by_idx.get(int(s.get("startBi", -1)))
+        b1 = bi_by_idx.get(int(s.get("endBi", -1)))
+        if b0 is None or b1 is None:
+            continue
+        try:
+            i0 = int(b0["fromKlu"])
+            i1 = int(b1["toKlu"])
+            v0 = float(s["beginVal"])
+            v1 = float(s["endVal"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if i0 < 0 or i1 < i0:
+            continue
+        seg_spans.append((i0, v0, i1, v1))
+        seg_keys.append(i0)
+        seg_keys.append(i1)
+
+    bi_zd, bi_zg, bi_edge, bi_edge_keys = _chan_rails(n, centers)
+    sg_zd, sg_zg, sg_edge, sg_edge_keys = _chan_rails(n, seg_centers)
+    series = {
+        "CHANBI": _chan_line(n, bi_spans),
+        "CHANBIZG": bi_zg,
+        "CHANBIZD": bi_zd,
+        "CHANBISEAL": bi_edge,
+        "CHANSEG": _chan_line(n, seg_spans),
+        "CHANSEGZG": sg_zg,
+        "CHANSEGZD": sg_zd,
+        "CHANSEGSEAL": sg_edge,
+    }
+    bi_ks = sorted(set(bi_keys))
+    bi_eks = sorted(set(bi_edge_keys))
+    seg_ks = sorted(set(seg_keys))
+    sg_eks = sorted(set(sg_edge_keys))
+    keys = {
+        "CHANBI": bi_ks,
+        "CHANBIZG": bi_eks,
+        "CHANBIZD": bi_eks,
+        "CHANBISEAL": bi_eks,
+        "CHANSEG": seg_ks,
+        "CHANSEGZG": sg_eks,
+        "CHANSEGZD": sg_eks,
+        "CHANSEGSEAL": sg_eks,
+    }
+    return {"series": series, "keys": keys}
+
+
+def _compute_chan(builtins):
+    """调用 chan.py CL-V1 计算并摊平为通道序列。
+    源数据偶发 close 越界（复权价错位），chan.py 会直接拒算 → 这里按 OHLC 归一化：
+    high = max(o,h,l,c)、low = min(o,h,l,c)，与 chan.py 的入参约束一致。"""
+    o = builtins["O"]
+    h = builtins["H"]
+    l = builtins["L"]
+    c = builtins["C"]
+    n = len(c)
+    bars = []
+    for i in range(n):
+        oi, hi, li, ci = o[i], h[i], l[i], c[i]
+        bars.append([i, oi, max(oi, hi, li, ci), min(oi, hi, li, ci), ci])
+    mod = _chan_module()
+    try:
+        out = mod._op_chan({"op": "chan", "bars": bars, "config": dict(_CHAN_CLV1)})
+    except Exception as exc:
+        raise TDxEvalError("缠论通道计算失败（%s: %s）" % (type(exc).__name__, exc))
+    if not isinstance(out, dict) or not out.get("ok"):
+        msg = out.get("error") if isinstance(out, dict) else "chan.py 返回非法"
+        raise TDxEvalError("缠论通道计算失败：%s" % (msg or "未知错误"))
+    return _build_chan(out.get("result") or {}, n)
+
+
+def _ensure_chan(builtins):
+    """惰性注册 8 条通道序列到 builtins（重复调用幂等；只算一次）"""
+    if "__chankeys__" in builtins:
+        return
+    fp = builtins.get("__fp__")
+    if fp is None:
+        fp = _bars_fingerprint(builtins)
+        builtins["__fp__"] = fp
+    cache = _chan_cache()
+    data = cache.get("data") if cache.get("fp") == fp else None
+    if data is None:
+        data = _compute_chan(builtins)
+        cache["fp"] = fp
+        cache["data"] = data
+    builtins.update(data["series"])
+    builtins["__chankeys__"] = data["keys"]
+
+
 def _eval_call(fn, vals, builtins):
     """函数求值。vals 为各参数的完整序列。镜像 Swift TDXEvaluator.evalCall"""
     def need(k):
@@ -450,6 +699,26 @@ def _eval_call(fn, vals, builtins):
     if fn == "NOT":
         need(1)
         return [0.0 if v != 0 else 1.0 for v in vals[0]]
+    if fn == "PLOYLINE":
+        # PLOYLINE(COND,PRICE)：只在条件为真的 bar 上有值，其余 NaN；
+        # 折线按「跳过 NaN 顺连」语义连接相邻条件点（不启用断线）
+        need(2)
+        cond = vals[0]
+        price = vals[1]
+        out = []
+        for i, p in enumerate(price):
+            c = cond[i] if i < len(cond) else 0.0
+            if math.isnan(c) or c == 0 or math.isnan(p):
+                out.append(_NAN)
+            else:
+                out.append(p)
+        return out
+    if fn == "STICKLINE":
+        # STICKLINE(COND,PRICE1,PRICE2,WIDTH,EMPTY)：条件为真的 bar 画 PRICE1↔PRICE2 竖线。
+        # 作为绘制指令返回（不参与数值运算），由输出行组装为「双端值」行；
+        # WIDTH 以 K 线宽度为单位（0 = 零宽细线）；EMPTY 为通达信填充开关，本工程忽略。
+        need(4)
+        return _StickDraw(vals[0], vals[1], vals[2], _scalar(vals[3]))
     raise TDxEvalError("不支持的函数：'%s'" % fn)
 
 
@@ -463,6 +732,11 @@ def _eval_expr(e, vars_map, builtins, sar_box):
         key = e["n"].upper()
         if key in vars_map:
             return vars_map[key]
+        if key == "DRAWNULL":
+            # 通达信无效数：返回无值序列；引用它的输出行按断线语义处理（见 brk）
+            return [_NAN] * n
+        if key in _CHAN_SYMBOLS:
+            _ensure_chan(builtins)
         if key in builtins:
             return builtins[key]
         raise TDxEvalError("未定义的变量或函数：'%s'" % e["n"])
@@ -682,6 +956,26 @@ def run(kline_input):
                 value = _eval_expr(st["e"], vars_map, builtins, sar_box)
                 vars_map[st["n"].upper()] = value
                 if st.get("o"):
+                    if isinstance(value, _StickDraw):
+                        p1, p2, edges = _stick_arrays(value)
+                        line = {"n": st["n"], "opts": st.get("opts", []),
+                                "w": float(value.width)}
+                        if use_bin:
+                            k1 = "r%dl%da" % (idx, len(lines))
+                            k2 = "r%dl%db" % (idx, len(lines))
+                            bin_out[k1] = p1
+                            bin_out[k2] = p2
+                            line["b"] = k1
+                            line["b2"] = k2
+                        else:
+                            line["v"] = _finite_to_null(p1)
+                            line["v2"] = _finite_to_null(p2)
+                        if edges:
+                            line["k"] = edges
+                        if st.get("anon"):
+                            line["anon"] = True
+                        lines.append(line)
+                        continue
                     if use_bin:
                         # bin 模式：输出序列走 __bin_out__（二进制一次拷贝），行内只留键。
                         # 非有限值统一映射为 NaN（与 JSON 路径 null→NaN 语义对齐，Inf 不直传）
@@ -693,7 +987,10 @@ def run(kline_input):
                         line = {"n": st["n"], "v": _finite_to_null(value)}
                     if st["e"]["t"] == "call" and st["e"]["fn"].upper() == "SAR" and sar_box[0] is not None:
                         line["d"] = [1 if d else 0 for d in sar_box[0]]
+                    if st.get("anon"):
+                        line["anon"] = True
                     lines.append(line)
+            _annotate_chan(lines, req["stmts"], builtins)
             if not lines:
                 raise TDxEvalError("公式没有输出行（至少需要一行以 ':' 输出的指标）")
             results.append({"id": idx, "ok": True, "lines": lines})
@@ -825,6 +1122,7 @@ class _Parser:
     def __init__(self, toks):
         self.toks = toks
         self.pos = 0
+        self.anon = 0
 
     def parse(self):
         stmts = []
@@ -836,6 +1134,22 @@ class _Parser:
         return stmts
 
     def parse_statement(self):
+        t = self.peek()
+        if t is not None and t[0] == "id":
+            nxt = self.toks[self.pos + 1] if self.pos + 1 < len(self.toks) else None
+            if nxt is not None and nxt[0] == "lp":
+                # 匿名绘制语句（STICKLINE(...); / PLOYLINE(...);）：画出但不占图例
+                expr = self.parse_expr()
+                opts = []
+                while self.match("comma"):
+                    if self.peek() and self.peek()[0] == "id":
+                        opts.append(self.toks[self.pos][1])
+                        self.pos += 1
+                    else:
+                        break
+                self.anon += 1
+                return {"n": "@DRAW%d" % self.anon, "o": True, "anon": True,
+                        "e": expr, "opts": opts}
         name = self.consume_identifier("期望指标名称")
         if self.match("assignout"):
             expr = self.parse_expr()
@@ -1014,6 +1328,12 @@ def _expr_text(e):
 
 
 def _stmt_text(s):
+    if s.get("anon"):
+        # 匿名绘制语句：不带名字（否则重解析会退回普通输出行）
+        t = _expr_text(s["e"])
+        if s["opts"]:
+            t += "," + ",".join(s["opts"])
+        return t + ";"
     t = s["n"] + (":" if s["o"] else ":=") + _expr_text(s["e"])
     if s["o"] and s["opts"]:
         t += "," + ",".join(s["opts"])
@@ -1097,27 +1417,95 @@ def _split_cached(text):
 
 # ---------- text op 分发 ----------
 
+def _stick_arrays(draw):
+    """STICKLINE 指令 → (p1 序列, p2 序列, 有效 bar 列表)：条件为假或端点无值处为 NaN"""
+    n = len(draw.p1)
+    p1 = [_NAN] * n
+    p2 = [_NAN] * n
+    edges = []
+    cond = draw.cond
+    for i in range(n):
+        c = cond[i] if i < len(cond) else 0.0
+        if math.isnan(c) or c == 0:
+            continue
+        a = draw.p1[i]
+        b = draw.p2[i] if i < len(draw.p2) else _NAN
+        if math.isnan(a) or math.isnan(b):
+            continue
+        p1[i] = a
+        p2[i] = b
+        edges.append(i)
+    return p1, p2, edges
+
+
+def _annotate_chan(lines, stmts, builtins):
+    """单元后处理：引用缠论通道/DRAWNULL 的输出行启用断线语义，并携带关键 bar
+    （笔端点、中枢封口），供主图抽样时强制保留。其它行完全不受影响。"""
+    used = set()
+    for st in stmts:
+        _collect_vars(st["e"], into=used)
+    if not (used & _CHAN_SYMBOLS or "DRAWNULL" in used):
+        return
+    for line in lines:
+        line["brk"] = True
+    chan_used = used & _CHAN_SYMBOLS
+    if not chan_used:
+        return
+    chankeys = builtins.get("__chankeys__") or {}
+    ks = set()
+    for sym in chan_used:
+        ks.update(chankeys.get(sym) or ())
+    if ks:
+        kk = sorted(ks)
+        for line in lines:
+            line["k"] = kk
+
+
 def _eval_unit_text(unit_stmts, builtins, bin_out=None, ridx=0, uidx=0):
     """单元语句序列求值 → 输出行（单元级错误隔离）。
     builtins 由 _run_text 每调用构造一次传入（本批所有单元共享，不再 per-unit 重建）。
-    bin_out 非 None 时大数组走 __bin_out__（行内只留键 "b"），否则 JSON 内联 "v"。"""
+    bin_out 非 None 时大数组走 __bin_out__（行内只留键 "b"），否则 JSON 内联 "v"。
+    STICKLINE 输出行：两端价格走 "b"/"b2"（或 "v"/"v2"）+ 宽度 "w"，由渲染层画竖线。"""
     vars_map = {}
     lines = []
     for st in unit_stmts:
         sar_box = [None]
         value = _eval_expr(st["e"], vars_map, builtins, sar_box)
         vars_map[st["n"].upper()] = value
-        if st.get("o"):
+        if not st.get("o"):
+            continue
+        if isinstance(value, _StickDraw):
+            p1, p2, edges = _stick_arrays(value)
+            line = {"n": st["n"], "opts": st.get("opts", []), "w": float(value.width)}
             if bin_out is not None:
-                key = "r%du%dl%d" % (ridx, uidx, len(lines))
-                bin_out[key] = [_NAN if isinstance(x, float) and not math.isfinite(x)
-                                else float(x) for x in value]
-                line = {"n": st["n"], "b": key, "opts": st.get("opts", [])}
+                k1 = "r%du%dl%da" % (ridx, uidx, len(lines))
+                k2 = "r%du%dl%db" % (ridx, uidx, len(lines))
+                bin_out[k1] = p1
+                bin_out[k2] = p2
+                line["b"] = k1
+                line["b2"] = k2
             else:
-                line = {"n": st["n"], "v": _finite_to_null(value), "opts": st.get("opts", [])}
-            if st["e"]["t"] == "call" and st["e"]["fn"].upper() == "SAR" and sar_box[0] is not None:
-                line["d"] = [1 if d else 0 for d in sar_box[0]]
+                line["v"] = _finite_to_null(p1)
+                line["v2"] = _finite_to_null(p2)
+            if edges:
+                line["k"] = edges
+            if st.get("anon"):
+                line["anon"] = True
             lines.append(line)
+            continue
+        if bin_out is not None:
+            key = "r%du%dl%d" % (ridx, uidx, len(lines))
+            bin_out[key] = [_NAN if isinstance(x, float) and not math.isfinite(x)
+                            else float(x) for x in value]
+            line = {"n": st["n"], "b": key, "opts": st.get("opts", [])}
+        else:
+            line = {"n": st["n"], "v": _finite_to_null(value), "opts": st.get("opts", [])}
+        if st["e"]["t"] == "call" and st["e"]["fn"].upper() == "SAR" and sar_box[0] is not None:
+            line["d"] = [1 if d else 0 for d in sar_box[0]]
+        if st.get("anon"):
+            line["anon"] = True
+        lines.append(line)
+    _annotate_chan(lines, unit_stmts, builtins)
     return lines
 
 

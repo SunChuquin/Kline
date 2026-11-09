@@ -103,6 +103,11 @@ enum PyTDXFormulaBridge {
                             lines[li]["v"] = vals
                             lines[li].removeValue(forKey: "b")
                         }
+                        // STICKLINE 第二端价格（bin 键 "b2" → "v2"）
+                        if let key2 = lines[li]["b2"] as? String, let vals2 = arrays[key2] {
+                            lines[li]["v2"] = vals2
+                            lines[li].removeValue(forKey: "b2")
+                        }
                     }
                     units[ui]["lines"] = lines
                 }
@@ -222,6 +227,23 @@ enum PyTDXFormulaBridge {
         line.hideValue = name.hasPrefix("NOTEXT_")
         if let dirs = decodeDirs(l["d"]) {
             line.markerDirections = dirs
+        }
+        // 绘制扩展：STICKLINE 双端值 / 断线语义 / 抽样关键 bar / 匿名绘制语句
+        if l["v2"] != nil {
+            line.values2 = decodeValues(l["v2"])
+        }
+        if let w = l["w"] as? NSNumber {
+            line.stickWidth = w.doubleValue
+        }
+        if (l["brk"] as? Bool) == true {
+            line.breakOnNaN = true
+        }
+        if let raw = l["k"] as? [Any] {
+            line.keyIndices = raw.compactMap { ($0 as? NSNumber)?.intValue }
+        }
+        if (l["anon"] as? Bool) == true {
+            line.isAnonymous = true
+            line.hideValue = true   // 匿名绘制语句不占图例
         }
         return line
     }

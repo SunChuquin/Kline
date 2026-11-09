@@ -49,6 +49,14 @@ struct IndicatorLine: Equatable {
     var barColor: BarColorMode = .fixed
     /// 逐点着色（SAR 红/绿圆点）；nil 时用 color 统一着色
     var markerColors: [Color]? = nil
+    /// STICKLINE 第二端价格（与 values 配对），nil 表示普通折线
+    var values2: [Double]? = nil
+    /// STICKLINE 线宽（K 线宽度单位，0 = 零宽细线）
+    var stickWidth: Double = 0
+    /// 断线语义：NaN 处断开折线（仅缠论通道行）
+    var breakOnNaN: Bool = false
+    /// 抽样时必须保留的 bar 下标
+    var keyIndices: [Int]? = nil
 }
 
 struct CanvasCurve: Equatable {
@@ -58,6 +66,12 @@ struct CanvasCurve: Equatable {
     var lineWidth: Double
     var barColor: BarColorMode = .fixed
     var markerColors: [Color]? = nil
+    /// STICKLINE 第二端价格（已按可见区间切片），nil 表示普通折线
+    var values2: [Double]? = nil
+    var stickWidth: Double = 0
+    var breakOnNaN: Bool = false
+    /// 已转换为可见区间局部下标的抽样关键 bar
+    var keyIndices: [Int]? = nil
 }
 
 // MARK: - 副图模型

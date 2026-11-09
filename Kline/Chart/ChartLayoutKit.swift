@@ -92,12 +92,25 @@ extension KlineChartView {
             }
             return values
         }
+        // 抽样关键 bar：全局下标 → 可见切片本地下标（缠论笔端点/中枢封口，防止抽样丢拐点）
+        func mainKeyIndices(_ keys: [Int]?) -> [Int]? {
+            guard let keys else { return nil }
+            let local = keys.compactMap { g -> Int? in
+                let l = g - startIndex
+                return (l >= 0 && l < localCount) ? l : nil
+            }
+            return local.isEmpty ? nil : local
+        }
         return MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
                         curves: isBareK ? [] : computation.mainCurves.enumerated().map { li, line in
                             CanvasCurve(color: line.color, values: mainCurveValues(line, lineIndex: li),
                                         style: line.style, lineWidth: line.lineWidth, barColor: line.barColor,
-                                        markerColors: sliceColors(line.markerColors))
+                                        markerColors: sliceColors(line.markerColors),
+                                        values2: line.values2.map { mirroredSliceArr($0) },
+                                        stickWidth: line.stickWidth,
+                                        breakOnNaN: line.breakOnNaN,
+                                        keyIndices: mainKeyIndices(line.keyIndices))
                         },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
