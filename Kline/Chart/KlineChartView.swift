@@ -23,6 +23,35 @@ func klineDebug(_ message: @autoclosure () -> String) {
     #endif
 }
 
+/// 绘制层探针：记录「缠论通道行实际送入 stroke 的点数/游程/坐标/颜色」，
+/// 落盘 Documents/chan_stroke_probe.jsonl（同窗口同通道只写一次）。
+/// 用于区分「数据层没值」「绘制层丢点」「坐标层错位」「画了但不可见（alpha/越界）」。
+final class ChanStrokeProbe {
+    static let shared = ChanStrokeProbe()
+    private var seen = Set<String>()
+    private let url: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("chan_stroke_probe.jsonl")
+    private init() {}
+
+    func record(key: String, row: [String: Any]) {
+        guard !seen.contains(key) else { return }
+        if seen.count > 400 { seen.removeAll() }   // 防无限增长：清空后允许重写同窗口
+        seen.insert(key)
+        guard let url,
+              let data = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
+        else { return }
+        var line = data
+        line.append(0x0A)
+        if let fh = try? FileHandle(forWritingTo: url) {
+            fh.seekToEndOfFile()
+            fh.write(line)
+            try? fh.close()
+        } else {
+            try? line.write(to: url, options: .atomic)
+        }
+    }
+}
+
 
 /// 行情 K 线图。
 struct KlineChartView: View {
@@ -1492,6 +1521,14 @@ struct MainChartCanvas: View, Equatable {
             drawRailRuns(ctx, curve: curve, h: h, dimFrom: dimFromIndex, dimAlpha: dimAlpha)
             return
         }
+        // 缠论笔/段折线：**不做抽样**，窗口内每一段有值区间逐点绘制。
+        // 笔/段是全历史一条超长游程，游程起点通常在窗口之外；任何"按 step 抽样 + 依赖游程起点"
+        // 的写法都可能把窗口内这一段整条跳过。这里直接按窗口切片逐点描边，
+        // 保证「窗口内存在有效值 ⇒ 该段必然画出」，且外形与分段直线完全一致。
+        if curve.chanKind != nil {
+            drawPolyRuns(ctx, curve: curve, h: h, dimFrom: dimFromIndex, dimAlpha: dimAlpha)
+            return
+        }
         let extra = curve.keyIndices
         switch curve.style {
         case .dotline:
@@ -1536,6 +1573,8 @@ struct MainChartCanvas: View, Equatable {
                               dimFrom: Int?, dimAlpha: Double) {
         let values = curve.values
         let boundary = dimFrom ?? values.count
+        var runs = 0, clamped = 0
+        var yMin = CGFloat.greatestFiniteMagnitude, yMax = -CGFloat.greatestFiniteMagnitude
         var i = 0
         while i < values.count {
             if values[i].isNaN { i += 1; continue }
@@ -1546,6 +1585,9 @@ struct MainChartCanvas: View, Equatable {
             let below = v < priceMin
             let outOfBand = above || below
             let y = outOfBand ? (above ? 0 : h) : yPos(v, h: h)
+            runs += 1
+            if outOfBand { clamped += 1 }
+            yMin = min(yMin, y); yMax = max(yMax, y)
             // 与折线同口径：段首/段尾各向外扩半根 K 线（单 bar 段即一根等宽横线）
             func stroke(_ a: Int, _ b: Int, dim: Bool) {
                 guard a <= b else { return }
@@ -1569,6 +1611,91 @@ struct MainChartCanvas: View, Equatable {
             if j >= boundary { stroke(max(i, boundary), j, dim: true) }
             i = j + 1
         }
+        recordStrokeProbe(kind: curve.chanKind ?? "RAIL", extra: [
+            "path": "rail", "runs": runs, "points": runs * 2, "style": curve.style.rawValue,
+            "clampedRuns": clamped, "yMin": Double(yMin), "yMax": Double(yMax),
+            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+        ])
+    }
+
+    /// 缠论笔/段折线绘制（**不做抽样**）：窗口切片里的每一段有值区间逐点描边。
+    /// 笔/段是一条贯穿历史的超长游程，游程起点几乎总在窗口左侧之外；这里只按窗口内
+    /// 的数组下标画，绝不因为"游程起点不在窗口内"而跳过，只要窗口内有值就必然画出那一段。
+    private func drawPolyRuns(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat,
+                              dimFrom: Int?, dimAlpha: Double) {
+        let values = curve.values
+        let boundary = dimFrom ?? values.count
+        let s: StrokeStyle = curve.style == .dotline
+            ? StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3])
+            : StrokeStyle(lineWidth: curve.lineWidth)
+        var hist = Path()
+        var fut = Path()
+        var runs = 0, points = 0
+        var yMin = CGFloat.greatestFiniteMagnitude, yMax = -CGFloat.greatestFiniteMagnitude
+        var xFirst = CGFloat.nan, yFirst = CGFloat.nan, xLast = CGFloat.nan, yLast = CGFloat.nan
+        var i = 0
+        while i < values.count {
+            if values[i].isNaN { i += 1; continue }
+            var j = i
+            while j + 1 < values.count, !values[j + 1].isNaN { j += 1 }
+            runs += 1
+            var histInRun = false, futInRun = false
+            for k in i...j {
+                let x = (CGFloat(k) + 0.5) * candleSpacing
+                let y = yPos(values[k], h: h)
+                points += 1
+                yMin = min(yMin, y); yMax = max(yMax, y)
+                if xFirst.isNaN { xFirst = x; yFirst = y }
+                xLast = x; yLast = y
+                if k < boundary {
+                    if histInRun { hist.addLine(to: CGPoint(x: x, y: y)) }
+                    else { hist.move(to: CGPoint(x: x, y: y)); histInRun = true }
+                } else {
+                    if futInRun { fut.addLine(to: CGPoint(x: x, y: y)) }
+                    else { fut.move(to: CGPoint(x: x, y: y)); futInRun = true }
+                }
+            }
+            i = j + 1
+        }
+        if points > 1 { ctx.stroke(hist, with: .color(curve.color), style: s) }
+        if points > 1 { ctx.stroke(fut, with: .color(curve.color.opacity(dimAlpha)), style: s) }
+        recordStrokeProbe(kind: curve.chanKind ?? "POLY", extra: [
+            "path": "poly", "runs": runs, "points": points,
+            "style": curve.style.rawValue, "valuesCount": values.count,
+            "firstX": Double(xFirst), "firstY": Double(yFirst),
+            "lastX": Double(xLast), "lastY": Double(yLast),
+            "yMin": yMin.isFinite ? Double(yMin) : -1, "yMax": yMax.isFinite ? Double(yMax) : -1,
+            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+            "canvasW": Double(canvasWidthForProbe),
+        ])
+    }
+
+    /// 画布宽度（探针用）：坐标轴上的 x 超出它就意味着绘制在画布外
+    private var canvasWidthForProbe: CGFloat { CGFloat(slice.count) * candleSpacing }
+
+    /// 绘制层探针落盘：键 = 通道种类 + 窗口首末日期 + 点数 + 间距，同窗口同通道只写一次。
+    /// 用于区分「数据层没值」「绘制层丢点」「坐标层错位」——PC 侧经 KlineHTTP 读取，不截图。
+    private func recordStrokeProbe(kind: String, extra: [String: Any]) {
+        var row: [String: Any] = [
+            "kind": kind,
+            "windowFirst": slice.first?.date ?? 0,
+            "windowLast": slice.last?.date ?? 0,
+            "sliceCount": slice.count,
+            "candleSpacing": Double(candleSpacing),
+            "height": Double(height),
+            "priceMin": priceMin, "priceMax": priceMax,
+            "at": Int(Date().timeIntervalSince1970),
+        ]
+        for (k, v) in extra { row[k] = v }
+        let key = "\(kind)|\(slice.first?.date ?? 0)|\(slice.last?.date ?? 0)|\(slice.count)|\(Int(candleSpacing * 100))"
+        ChanStrokeProbe.shared.record(key: key, row: row)
+    }
+
+    /// SwiftUI Color → RGBA（探针用：alpha=0 表示"画了也看不见"）
+    static func rgba(_ c: Color) -> [Double] {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(c).resolvedColor(with: UITraitCollection.current).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return [Double(r), Double(g), Double(b), Double(a)]
     }
 
     /// STICKLINE 绘制：条件成立的 bar 上画 PRICE1↔PRICE2 竖线（宽度 0 = 1pt 细线）。
