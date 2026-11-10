@@ -80,7 +80,8 @@ final class IndicatorComputationStore: ObservableObject {
         if let metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             let fingerprint = KlineChartView.currentConfigFingerprint(period: period)
-            if entry.configFingerprint == fingerprint {
+            if entry.configFingerprint == fingerprint,
+               entry.mainCurves.allSatisfy({ $0.values.count == all.count }) {
                 mainCurves = entry.mainCurves
                 mainCache = entry.mainCache
                 indicatorCoverageStart = entry.coverageStart
@@ -377,6 +378,10 @@ extension KlineChartView {
 
         /// 绘制坐标系：局部下标 -> 画布 x（与蜡烛同一口径）
         func x(_ local: Int) -> Double { (Double(local) + 0.5) * Double(candleSpacing) }
+        // 与 MainChartCanvas 同口径的抽样参数（cols/step），供修复前后对照
+        let cols = max(Int(canvasWidth / 2), 1)
+        let sliceCount = ei - si + 1
+        let step = max(1, (sliceCount + cols - 1) / cols)
 
         var curveObjs: [[String: Any]] = []
         for line in chanLines {
@@ -389,6 +394,8 @@ extension KlineChartView {
                 "keyCount": line.keyIndices?.count ?? -1,
                 "keyFirstGlobal": line.keyIndices?.first ?? -1,
                 "keyLastGlobal": line.keyIndices?.last ?? -1,
+                // 曲线数组是否与数据等长：false 表示曲线是旧长度的陈旧结果
+                "aligned": line.values.count == sortedData.count,
             ]
             // k 关键下标：全局 -> mainKeyIndices 之后的局部（只留窗口内）
             if let keys = line.keyIndices {
@@ -401,11 +408,25 @@ extension KlineChartView {
             // 摊平值在窗口内的连续有值段（全局/局部/取值/绘制 x 范围）
             var runs: [[String: Any]] = []
             let upper = min(ei, line.values.count - 1)
+            var runCount = 0, singleBarRuns = 0, outOfBandRuns = 0
+            // 抽样集合对照：修复前 = step 采样 ∪ 末根 ∪ 关键下标；修复后 = 再把每段首末与段后 NaN 断点并入
+            var pickedBefore = Set(Array(stride(from: 0, to: sliceCount, by: step)))
+            pickedBefore.insert(sliceCount - 1)
+            if let keys = line.keyIndices {
+                for g in keys where g >= si && g <= ei { pickedBefore.insert(g - si) }
+            }
+            var pickedAfter = pickedBefore
             var i = si
             while i <= upper {
                 guard line.values[i].isFinite else { i += 1; continue }
                 let s = i
                 while i + 1 <= upper, line.values[i + 1].isFinite { i += 1 }
+                runCount += 1
+                if s == i { singleBarRuns += 1 }
+                if line.values[s] < priceMin || line.values[s] > priceMax { outOfBandRuns += 1 }
+                pickedAfter.insert(s - si)
+                pickedAfter.insert(i - si)
+                if i + 1 <= upper { pickedAfter.insert(i + 1 - si) }
                 if runs.count < 24 {
                     runs.append(["gStart": s, "gEnd": i, "lStart": s - si, "lEnd": i - si,
                                  "xStart": x(s - si), "xEnd": x(i - si), "v": line.values[i]])
@@ -413,6 +434,24 @@ extension KlineChartView {
                 i += 1
             }
             o["valueRunsInWindow"] = runs
+            o["runsInWindowCount"] = runCount
+            o["singleBarRuns"] = singleBarRuns
+            o["outOfBandRuns"] = outOfBandRuns
+            o["pickedBeforeCount"] = pickedBefore.count
+            o["pickedAfterCount"] = pickedAfter.count
+            o["pickedBeforeSample"] = pickedBefore.sorted().prefix(8).map { $0 + si }
+            o["pickedAfterSample"] = pickedAfter.sorted().prefix(8).map { $0 + si }
+            // 每段是否真的还有绘制点：修复前后各算一次（>=2 点才能画线，单 bar 段由补画横线兜底）
+            o["runsDrawableBefore"] = runs.prefix(24).filter { r in
+                let a = r["gStart"] as? Int ?? 0, b = r["gEnd"] as? Int ?? 0
+                let cnt = (a...b).filter { pickedBefore.contains($0 - si) }.count
+                return cnt >= 2 || (cnt == 1 && a == b)
+            }.count
+            o["runsDrawableAfter"] = runs.prefix(24).filter { r in
+                let a = r["gStart"] as? Int ?? 0, b = r["gEnd"] as? Int ?? 0
+                let cnt = (a...b).filter { pickedAfter.contains($0 - si) }.count
+                return cnt >= 2 || (cnt == 1 && a == b)
+            }.count
             curveObjs.append(o)
         }
 
@@ -463,6 +502,9 @@ extension KlineChartView {
             "metaId": metaId ?? -1,
             "period": period.rawValue,
             "eval": ["calcStart": calc?.start ?? -1, "calcEnd": calc?.end ?? -1, "calcCount": calc?.count ?? -1],
+            // 主图抽样口径：cols = Int(宽度/2)，step = ceil(可见根数/cols)
+            "draw": ["cols": cols, "step": step, "sliceCount": sliceCount],
+            "aligned": chanLines.allSatisfy { $0.values.count == sortedData.count },
             "visible": [
                 "startIndex": si, "endIndex": ei, "barCount": sortedData.count, "count": count,
                 "canvasSliceCount": canvasSliceCount,
@@ -494,7 +536,8 @@ extension KlineChartView {
         let calcText = calc.map { "\($0.start)...\($0.end)(\($0.count))" } ?? "?"
         let spacingText = String(format: "%.3f", Double(candleSpacing))
         DebugLogger.shared.log("[ChanProbe] 可见=\(si)...\(ei)(\(ei - si + 1)) 求值=\(calcText) "
-            + "曲线=\(chanLines.count) 中枢g=\(centerSample["globalStart"] ?? "?") "
+            + "曲线=\(chanLines.count) step=\(step)/cols=\(cols) "
+            + "中枢g=\(centerSample["globalStart"] ?? "?") "
             + "l=\(centerSample["localStart"] ?? "?") x=\(centerSample["xStart"] ?? "?") "
             + "宽度=\(Int(canvasWidth)) 间距=\(spacingText)")
     }
@@ -611,8 +654,9 @@ extension KlineChartView {
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
         if computation.bgCoverageEnd >= endIndex, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
+            let aligned = entry.mainCurves.allSatisfy { $0.values.count == sortedData.count }
             if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
-               entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty {
+               entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty, aligned {
                 computation.mainCurves = entry.mainCurves
                 computation.mainCache = entry.mainCache
                 return
@@ -621,11 +665,13 @@ extension KlineChartView {
         // 后台正确计算已覆盖整个可见窗口（从数据开头起算，数值最正确）：
         // 未强制重算时直接复用后台结果；指标配置变化（force）时用正确覆盖区间重算，避免退化为近似
         let bgCovered = computation.bgCoverageEnd >= endIndex
-        if bgCovered, !force, !computation.mainCurves.isEmpty { return }
+        // 数据追加后旧曲线长度会短于数据：此时即使"已覆盖"也不能复用，否则可见窗口右移即整行消失
+        let aligned = computation.mainCurves.allSatisfy { $0.values.count == sortedData.count }
+        if bgCovered, !force, !computation.mainCurves.isEmpty, aligned { return }
         // 后台尚未覆盖可见窗口（如缩放到全部 / 滑到未算区域）：不在此同步计算近似指标，
         // 同步计算量随可见 K 数线性增长，显示全部时会阻塞主线程卡顿；保持当前已覆盖曲线，
         // 未覆盖部分渲染时因 NaN 自然显示裸K，由后台 prefetch 继续推进覆盖后替换
-        if !force, !bgCovered, !computation.mainCurves.isEmpty { return }
+        if !force, !bgCovered, !computation.mainCurves.isEmpty, aligned { return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
             let store = SystemIndicatorStore.shared
@@ -1156,7 +1202,11 @@ extension KlineChartView {
         // 联动态（metaId=nil）没有 ChartCacheStore 短路，靠这条内存指纹保证「同一配置只跑一次全量」；
         // 配置变化后指纹不一致 → 放行重跑一次。单图模式下与下面缓存短路互为双保险。
         let fingerprint = Self.currentConfigFingerprint(period: period)
-        if computation.prefetchDoneFingerprint == fingerprint { return }
+        // 除配置指纹一致外，还要求已覆盖到**当前**数据末端：数据追加（启动日更/补缺口）后
+        // bgCoverageEnd 仍是旧末根，若不重算，mainCurves 会停留在旧长度的数组上，
+        // 可见窗口一旦越过旧末根，所有通道都会被切片失败整行丢弃（"整个缠论指标都不显示"）。
+        if computation.prefetchDoneFingerprint == fingerprint,
+           computation.bgCoverageEnd >= sortedData.count - 1 { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
         // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
         // 防止「完成标记」与「实际覆盖/配置」不一致时进度条卡住或指标不更新
