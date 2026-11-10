@@ -633,15 +633,20 @@ _KUP, _KDOWN, _KCOMBINE, _KINCLUDED = 1, -1, 0, 2
 
 
 class _SegKlc(object):
-    """线段内部使用的端点K线视图（只有 high/low/idx/fx）。"""
+    """线段内部使用的端点K线视图（high/low/idx/fx + 原始bar下标 klu）。
 
-    __slots__ = ("idx", "high", "low", "fx")
+    注意：idx 是合并K线下标（与 _Klc.idx 同空间），klu 才是原始 bar 下标。
+    中枢导出（beginKlu/endKlu）必须用 klu，否则会把合并下标当原始下标绘制。
+    """
 
-    def __init__(self, idx, high, low, fx):
+    __slots__ = ("idx", "high", "low", "fx", "klu")
+
+    def __init__(self, idx, high, low, fx, klu=None):
         self.idx = idx
         self.high = high
         self.low = low
         self.fx = fx
+        self.klu = klu
 
 
 class _SegBi(object):
@@ -738,11 +743,15 @@ def _seg_bis_clv1(ends, bi_json, cfg):
     for i, (a, b) in enumerate(zip(ends, ends[1:])):
         up = b[0] == _FX_TOP
         if up:
-            b_klc = _SegKlc(a[1], bi_json[i]["beginVal"], bi_json[i]["beginVal"], _FX_BOTTOM)
-            e_klc = _SegKlc(b[1], bi_json[i]["endVal"], bi_json[i]["endVal"], _FX_TOP)
+            b_klc = _SegKlc(a[1], bi_json[i]["beginVal"], bi_json[i]["beginVal"],
+                            _FX_BOTTOM, bi_json[i]["fromKlu"])
+            e_klc = _SegKlc(b[1], bi_json[i]["endVal"], bi_json[i]["endVal"],
+                            _FX_TOP, bi_json[i]["toKlu"])
         else:
-            b_klc = _SegKlc(a[1], bi_json[i]["beginVal"], bi_json[i]["beginVal"], _FX_TOP)
-            e_klc = _SegKlc(b[1], bi_json[i]["endVal"], bi_json[i]["endVal"], _FX_BOTTOM)
+            b_klc = _SegKlc(a[1], bi_json[i]["beginVal"], bi_json[i]["beginVal"],
+                            _FX_TOP, bi_json[i]["fromKlu"])
+            e_klc = _SegKlc(b[1], bi_json[i]["endVal"], bi_json[i]["endVal"],
+                            _FX_BOTTOM, bi_json[i]["toKlu"])
         bis.append(_SegBi(i, b_klc, e_klc))
     _link_seg_bis(bis)
     if bis and cfg["bi_last_unconfirmed"]:
@@ -1312,11 +1321,19 @@ def _assign_seg_idx(items, segs):
 
 
 def _line_endpoint_klu_idx(item, at_begin):
-    """线（笔/段）起点/终点对应的原始 K 线下标（CBi/CSeg get_begin_klu 语义）。"""
+    """线（笔/段）起点/终点对应的原始 K 线下标（CBi/CSeg get_begin_klu 语义）。
+
+    返回值始终是原始 bar 下标：CL-V1 分支的端点 _SegKlc 直接携带 klu；
+    normal 分支的 _Klc.lst 内是 _Klu（idx 即原始下标），按合并极值反查；
+    两者之外一律退回合并区间首根原始 K 线，绝不返回 _Klc/_SegKlc 的合并下标。
+    """
     if isinstance(item, _Seg):
         return _line_endpoint_klu_idx(
             item.start_bi if at_begin else item.end_bi, at_begin)
     klc = item.begin_klc if at_begin else item.end_klc
+    raw = getattr(klc, "klu", None)
+    if raw is not None:
+        return raw
     is_high = (not item.is_up()) if at_begin else item.is_up()
     lst = getattr(klc, "lst", None)
     if lst:
@@ -1324,6 +1341,7 @@ def _line_endpoint_klu_idx(item, at_begin):
         for k in reversed(lst):
             if (k.high if is_high else k.low) == want:
                 return k.idx
+        return lst[0].idx
     return klc.idx
 
 
