@@ -497,7 +497,7 @@ struct KlineChartView: View {
         return arr
     }
 
-    /// 缠论中枢轨道通道（区间内常值、区间外 NaN）：这些行的取值必须保证不被 y 轴裁掉
+    /// 缠论中枢轨道通道（区间内常值、区间外 NaN）：绘制时对超出 y 轴范围的轨道削顶钳边
     static func isChanRail(_ kind: String?) -> Bool {
         switch kind {
         case "CHANBIZG", "CHANBIZD", "CHANSEGZG", "CHANSEGZD": return true
@@ -513,6 +513,8 @@ struct KlineChartView: View {
         var minLow = ranged.map(\.low).min() ?? 0
         var maxHigh = ranged.map(\.high).max() ?? 100
         // 默认打开"指标不挤压K线"：范围只按K线自身计算；关闭时才纳入指标线范围（K线被挤压）
+        // 缠论中枢轨道**不并入** y 轴范围（K 线优先）：越界轨道由绘制层钳到画布边缘 + 虚线提示，
+        // 避免「把 K 线压扁」与「轨道被裁掉看不见」两种糟糕结果同时出现。
         if !displaySettings.indicatorNotSqueezeKline {
             let offsets = Array(startIndex...endIndex).filter { $0 < closes.count }
             var all: [Double] = []
@@ -524,25 +526,6 @@ struct KlineChartView: View {
             }
             if let minV = all.min() { minLow = min(minLow, minV) }
             if let maxV = all.max() { maxHigh = max(maxHigh, maxV) }
-        } else {
-            // 缠论中枢上下轨（常值横线）：中枢只要有一个 bar 落在窗口内，其 ZG/ZD 就必须在 y 轴范围内，
-            // 否则整条轨道被画到画布外裁掉（放大后"部分中枢横线消失"）。这里只并入中枢轨道，
-            // 不并入笔/段折线，尽量少挤压 K 线；未启用缠论时行为与原来完全一致。
-            var railMin = Double.nan
-            var railMax = Double.nan
-            for line in computation.mainCurves where Self.isChanRail(line.chanKind) {
-                let lo = max(0, startIndex)
-                let hi = min(endIndex, line.values.count - 1)
-                guard lo <= hi else { continue }
-                for idx in lo...hi {
-                    let v = line.values[idx]
-                    if v.isNaN { continue }
-                    railMin = railMin.isNaN ? v : min(railMin, v)
-                    railMax = railMax.isNaN ? v : max(railMax, v)
-                }
-            }
-            if !railMin.isNaN { minLow = min(minLow, railMin) }
-            if !railMax.isNaN { maxHigh = max(maxHigh, railMax) }
         }
         let padding = (maxHigh - minLow) * 0.05
         let range = (minLow - padding)...(maxHigh + padding)
@@ -1503,6 +1486,12 @@ struct MainChartCanvas: View, Equatable {
             drawStickRange(ctx, curve: curve, low: low, h: h, step: step)
             return
         }
+        // 缠论中枢轨道（区间内常值横线）：K 线优先的 y 轴下，越界轨道钳到画布边缘并以虚线/降透明度
+        // 提示"真实值在屏幕外"，既不压扁 K 线，也不会整条轨道消失
+        if KlineChartView.isChanRail(curve.chanKind) {
+            drawRailRuns(ctx, curve: curve, h: h, dimFrom: dimFromIndex, dimAlpha: dimAlpha)
+            return
+        }
         let extra = curve.keyIndices
         switch curve.style {
         case .dotline:
@@ -1539,6 +1528,49 @@ struct MainChartCanvas: View, Equatable {
         }
     }
 
+    /// 缠论中枢轨道绘制：区间内常值 → 逐段等宽横线。
+    /// y 轴采用 K 线优先（不并入轨道范围），故轨道值可能落在 [priceMin, priceMax] 之外：
+    /// 越界段**钳到画布上/下边缘**并改用虚线 + 降透明度，明确表示"真实值在屏幕外"，
+    /// 既不会把 K 线压扁，也不会让整条轨道被裁掉看不见。
+    private func drawRailRuns(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat,
+                              dimFrom: Int?, dimAlpha: Double) {
+        let values = curve.values
+        let boundary = dimFrom ?? values.count
+        var i = 0
+        while i < values.count {
+            if values[i].isNaN { i += 1; continue }
+            var j = i
+            while j + 1 < values.count, !values[j + 1].isNaN { j += 1 }
+            let v = values[i]   // 轨道在区间内恒为常值
+            let above = v > priceMax
+            let below = v < priceMin
+            let outOfBand = above || below
+            let y = outOfBand ? (above ? 0 : h) : yPos(v, h: h)
+            // 与折线同口径：段首/段尾各向外扩半根 K 线（单 bar 段即一根等宽横线）
+            func stroke(_ a: Int, _ b: Int, dim: Bool) {
+                guard a <= b else { return }
+                var x0 = (CGFloat(a) + 0.5) * candleSpacing
+                var x1 = (CGFloat(b) + 0.5) * candleSpacing
+                if a == i { x0 -= candleSpacing * 0.5 }
+                if b == j { x1 += candleSpacing * 0.5 }
+                var p = Path()
+                p.move(to: CGPoint(x: x0, y: y))
+                p.addLine(to: CGPoint(x: x1, y: y))
+                var color = dim ? curve.color.opacity(dimAlpha) : curve.color
+                var style = StrokeStyle(lineWidth: curve.lineWidth)
+                if outOfBand {
+                    color = color.opacity(0.55)
+                    style = StrokeStyle(lineWidth: curve.lineWidth, dash: [4, 3])
+                }
+                ctx.stroke(p, with: .color(color), style: style)
+            }
+            // 联动复盘：历史段原色、未来段淡化
+            if i < boundary { stroke(i, min(j, boundary - 1), dim: false) }
+            if j >= boundary { stroke(max(i, boundary), j, dim: true) }
+            i = j + 1
+        }
+    }
+
     /// STICKLINE 绘制：条件成立的 bar 上画 PRICE1↔PRICE2 竖线（宽度 0 = 1pt 细线）。
     /// 抽样时强制保留关键 bar（中枢左右封口），避免封口竖线被跳掉。
     private func drawStickRange(_ ctx: GraphicsContext, curve: CanvasCurve, low: [Double], h: CGFloat, step: Int) {
@@ -1554,10 +1586,26 @@ struct MainChartCanvas: View, Equatable {
             let b = low[i]
             guard !a.isNaN, !b.isNaN else { continue }
             let x = (CGFloat(i) + 0.5) * candleSpacing
+            var ya = yPos(a, h: h)
+            var yb = yPos(b, h: h)
+            var color = dimmed(curve.color, i)
+            var style = StrokeStyle(lineWidth: width)
+            // 缠论中枢封口：y 轴按 K 线优先，端点可能在屏幕外——钳到画布边缘并用虚线/降透明度提示越界
+            if curve.breakOnNaN {
+                let outOfBand = a < priceMin || a > priceMax || b < priceMin || b > priceMax
+                ya = min(max(ya, 0), h)
+                yb = min(max(yb, 0), h)
+                // 两端都钳到同一边缘（整个中枢完全在屏幕外）→ 竖线长度为 0，不画
+                guard abs(ya - yb) >= 0.5 else { continue }
+                if outOfBand {
+                    color = color.opacity(0.55)
+                    style = StrokeStyle(lineWidth: width, dash: [3, 3])
+                }
+            }
             var p = Path()
-            p.move(to: CGPoint(x: x, y: yPos(a, h: h)))
-            p.addLine(to: CGPoint(x: x, y: yPos(b, h: h)))
-            ctx.stroke(p, with: .color(dimmed(curve.color, i)), lineWidth: width)
+            p.move(to: CGPoint(x: x, y: ya))
+            p.addLine(to: CGPoint(x: x, y: yb))
+            ctx.stroke(p, with: .color(color), style: style)
         }
     }
 

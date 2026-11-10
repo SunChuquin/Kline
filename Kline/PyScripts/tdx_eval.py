@@ -31,6 +31,7 @@
 import json
 import math
 import sqlite3
+import time
 import traceback
 
 _NAN = float("nan")
@@ -575,6 +576,30 @@ def _build_chan(res, n):
     return {"series": series, "keys": keys}
 
 
+def _chan_log_write(builtins, fp, n, elapsed_ms):
+    """缠论计算审计日志：每次**实际执行**一次 chan 计算追加一行
+    （序号 / bars 指纹 / 输入区间起止与根数 / 耗时）。
+    落点由 Swift 经 kline_input["chan_log"] 传入（Documents/chan_calc_log.txt），缺失则跳过。
+    序号挂在真 __main__（跨调用持久），用于 PC 侧"滑动前后各取一次日志比增量"。"""
+    path = builtins.get("__chan_log__")
+    if not path:
+        return
+    try:
+        import __main__ as _km
+        seq = getattr(_km, "_ktdx_chan_calc_seq", 0) + 1
+        _km._ktdx_chan_calc_seq = seq
+        span = builtins.get("__bars_span__") or []
+        span_desc = "%s..%s" % (span[0], span[1]) if len(span) >= 2 else "?"
+        fp_desc = ("nC=%d,sumO=%.3f,sumC=%.3f,firstC=%.4f,lastC=%.4f,wC=%.1f"
+                   % (fp[3][0], fp[0][1], fp[3][1], fp[3][3], fp[3][4], fp[3][2])) if fp else "-"
+        line = ("[ChanCalc] seq=%d ts=%.3f bars=%d span=%s %s elapsed=%.1fms\n"
+                % (seq, time.time(), n, span_desc, fp_desc, elapsed_ms))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:  # 审计日志不得影响求值
+        pass
+
+
 def _compute_chan(builtins):
     """调用 chan.py CL-V1 计算并摊平为通道序列。
     源数据偶发 close 越界（复权价错位），chan.py 会直接拒算 → 这里按 OHLC 归一化：
@@ -589,6 +614,7 @@ def _compute_chan(builtins):
         oi, hi, li, ci = o[i], h[i], l[i], c[i]
         bars.append([i, oi, max(oi, hi, li, ci), min(oi, hi, li, ci), ci])
     mod = _chan_module()
+    t0 = time.perf_counter()
     try:
         out = mod._op_chan({"op": "chan", "bars": bars, "config": dict(_CHAN_CLV1)})
     except Exception as exc:
@@ -596,7 +622,10 @@ def _compute_chan(builtins):
     if not isinstance(out, dict) or not out.get("ok"):
         msg = out.get("error") if isinstance(out, dict) else "chan.py 返回非法"
         raise TDxEvalError("缠论通道计算失败：%s" % (msg or "未知错误"))
-    return _build_chan(out.get("result") or {}, n)
+    built = _build_chan(out.get("result") or {}, n)
+    _chan_log_write(builtins, builtins.get("__fp__"), n,
+                    (time.perf_counter() - t0) * 1000.0)
+    return built
 
 
 def _ensure_chan(builtins):
@@ -911,6 +940,9 @@ def run(kline_input):
     requests 与 results 按下标对齐；db 存在时附带读库对拍 audit（不影响求值输入）"""
     bars = kline_input["bars"]
     builtins = _make_builtins(bars)
+    # 缠论计算审计通道（可选）：Swift 传入落点与输入区间摘要
+    builtins["__chan_log__"] = kline_input.get("chan_log")
+    builtins["__bars_span__"] = kline_input.get("bars_span")
     audit = None
     db_cfg = kline_input.get("db")
     if db_cfg:
@@ -1530,6 +1562,10 @@ def _run_text(kline_input):
     mode = kline_input.get("mode", "eval")
     use_bin = bool(kline_input.get("__bin__")) and mode != "split"
     builtins = _make_builtins(bars) if mode != "split" else None
+    if builtins is not None:
+        # 缠论计算审计通道（可选）：Swift 传入落点与输入区间摘要
+        builtins["__chan_log__"] = kline_input.get("chan_log")
+        builtins["__bars_span__"] = kline_input.get("bars_span")
     bin_out = {} if use_bin else None
     results = []
     for req in kline_input["texts"]:

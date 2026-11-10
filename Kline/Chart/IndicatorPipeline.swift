@@ -243,10 +243,17 @@ private func mainLineDefaultColor(_ id: String, _ i: Int) -> Color {
     }
 }
 
+/// 缠论通道行（8 通道）：整行无值时也**保留行**，保证"屏幕里还有 K 线"时指标不整体隐藏
+/// （结构尚未形成只会让该行画不出东西，不应导致整条指标消失）。
+/// 普通指标行不受影响：31 个内置指标的整行 NaN 丢弃行为保持逐字节不变。
+private func isChanRow(_ out: TDXOutputLine) -> Bool {
+    out.chanKind != nil || out.breakOnNaN
+}
+
 /// 主图输出行组装为 IndicatorLine：方向性标记（如 SAR）画红绿点，其余按公式样式/颜色
 private func buildMainLine(id: String, isCustom: Bool, customColor: Color?,
                            i: Int, out: TDXOutputLine) -> IndicatorLine? {
-    guard !tdxAllNaN(out.values) else { return nil }
+    if tdxAllNaN(out.values), !isChanRow(out) { return nil }
     let name = prefetchDisplayName(out.name)
     if out.markerDirections != nil {
         return IndicatorLine(name: name, values: out.values, color: prefetchUpColor,
@@ -437,6 +444,14 @@ extension KlineChartView {
             o["runsInWindowCount"] = runCount
             o["singleBarRuns"] = singleBarRuns
             o["outOfBandRuns"] = outOfBandRuns
+            // 中枢轨道行：越界段在绘制层被钳到画布边缘（虚线 + 降透明度），此处记录钳制计数作为证据
+            let rail = KlineChartView.isChanRail(line.chanKind)
+            o["isRail"] = rail
+            if rail {
+                o["railRunsInWindow"] = runCount
+                o["railClampedRuns"] = outOfBandRuns
+                o["railInBandRuns"] = runCount - outOfBandRuns
+            }
             o["pickedBeforeCount"] = pickedBefore.count
             o["pickedAfterCount"] = pickedAfter.count
             o["pickedBeforeSample"] = pickedBefore.sorted().prefix(8).map { $0 + si }
@@ -497,6 +512,10 @@ extension KlineChartView {
         }
 
         let calc = computation.lastMainCalc
+        // y 轴挤压证据：可见窗口内 K 线自身价格带 vs 实际 y 轴范围（K 线占比 = kBand / yBand）
+        let winHigh = (si...ei).map { sortedData[$0].high }.max() ?? 0
+        let winLow = (si...ei).map { sortedData[$0].low }.min() ?? 0
+        let yBand = priceMax - priceMin
         let obj: [String: Any] = [
             "generatedAt": Int(Date().timeIntervalSince1970),
             "metaId": metaId ?? -1,
@@ -511,6 +530,8 @@ extension KlineChartView {
                 "firstDate": sortedData[si].date, "lastDate": sortedData[ei].date,
                 "candleSpacing": Double(candleSpacing), "canvasWidth": Double(canvasWidth),
                 "priceMin": priceMin, "priceMax": priceMax,
+                "kLow": winLow, "kHigh": winHigh, "kBand": winHigh - winLow, "yBand": yBand,
+                "kRatio": (winHigh - winLow) / max(yBand, 0.000001),
                 "xFirstCandle": x(0), "xLastCandle": x(ei - si),
             ],
             "curves": curveObjs,
@@ -667,6 +688,8 @@ extension KlineChartView {
         let bgCovered = computation.bgCoverageEnd >= endIndex
         // 数据追加后旧曲线长度会短于数据：此时即使"已覆盖"也不能复用，否则可见窗口右移即整行消失
         let aligned = computation.mainCurves.allSatisfy { $0.values.count == sortedData.count }
+        // 滑动复核审计：每次重算入口记录一次决策依据（滑动期间应命中下面的复用分支，不触发 chan 计算）
+        DebugLogger.shared.log("[ChanCalc] 求值复核 si=\(startIndex) ei=\(endIndex) bgEnd=\(computation.bgCoverageEnd) force=\(force) curves=\(computation.mainCurves.count) aligned=\(aligned) covered=\(bgCovered)")
         if bgCovered, !force, !computation.mainCurves.isEmpty, aligned { return }
         // 后台尚未覆盖可见窗口（如缩放到全部 / 滑到未算区域）：不在此同步计算近似指标，
         // 同步计算量随可见 K 数线性增长，显示全部时会阻塞主线程卡顿；保持当前已覆盖曲线，
@@ -838,7 +861,7 @@ extension KlineChartView {
                        let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
                                                  customColor: entry.isCustom ? customColor : nil,
                                                  i: i, out: out),
-                       !self.allNaN(built.values) {
+                       !self.allNaN(built.values) || isChanRow(out) {
                         row.key = unit.text
                         row.line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
                     }
@@ -905,7 +928,7 @@ extension KlineChartView {
                    let built = buildMainLine(id: entry.id, isCustom: entry.isCustom,
                                              customColor: entry.isCustom ? customColor : nil,
                                              i: p.unitIndex, out: out),
-                   !self.allNaN(built.values) {
+                   !self.allNaN(built.values) || isChanRow(out) {
                     cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
                 } else {
                     let nanCount = outs.last.map { $0.values.filter { !$0.isNaN }.count } ?? -1
@@ -1338,7 +1361,7 @@ extension KlineChartView {
             guard idx < result.main.count else { continue }
             let isCustom = id == MainIndicatorCache.customKey
             for (i, out) in result.main[idx].enumerated() {
-                guard !allNaN(out.values) else { continue }
+                guard !allNaN(out.values) || isChanRow(out) else { continue }
                 if let built = buildMainLine(id: id, isCustom: isCustom,
                                              customColor: isCustom ? customColor : nil, i: i, out: out) {
                     curves.append(padToFull(built, calcStart: cs, calcEnd: ce))
@@ -1527,7 +1550,7 @@ extension KlineChartView {
             guard idx < result.main.count else { continue }
             let isCustom = id == MainIndicatorCache.customKey
             for (i, out) in result.main[idx].enumerated() {
-                guard !tdxAllNaN(out.values) else { continue }
+                guard !tdxAllNaN(out.values) || isChanRow(out) else { continue }
                 if let built = buildMainLine(id: id, isCustom: isCustom,
                                              customColor: isCustom ? customColor : nil, i: i, out: out) {
                     curves.append(built)

@@ -114,7 +114,8 @@ extension KlineChartView {
                                         values2: line.values2.map { mirroredSliceArr($0) },
                                         stickWidth: line.stickWidth,
                                         breakOnNaN: line.breakOnNaN,
-                                        keyIndices: mainKeyIndices(line.keyIndices))
+                                        keyIndices: mainKeyIndices(line.keyIndices),
+                                        chanKind: line.chanKind)
                         },
                         upColor: upColor, downColor: downColor, gridColor: gridColor,
                         showGap: displaySettings.showGap, showLatestPriceLine: displaySettings.showLatestPriceLine,
