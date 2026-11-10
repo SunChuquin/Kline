@@ -1451,6 +1451,17 @@ def _annotate_chan(lines, stmts, builtins):
     chan_used = used & _CHAN_SYMBOLS
     if not chan_used:
         return
+    # 每行标注通道种类（仅当该输出语句只引用一个通道符号）：供设备侧结构 dump 定位
+    # 笔折线/中枢上下轨，不改变任何求值结果
+    out_stmts = [st for st in stmts if st.get("o")]
+    for idx, line in enumerate(lines):
+        if idx >= len(out_stmts):
+            break
+        vs = set()
+        _collect_vars(out_stmts[idx]["e"], into=vs)
+        cs = vs & _CHAN_SYMBOLS
+        if len(cs) == 1:
+            line["ck"] = next(iter(cs))
     chankeys = builtins.get("__chankeys__") or {}
     ks = set()
     for sym in chan_used:

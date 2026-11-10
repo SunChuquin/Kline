@@ -38,6 +38,8 @@ struct TDXOutputLine {
     var keyIndices: [Int]? = nil
     /// 匿名绘制语句：画出但不占图例
     var isAnonymous: Bool = false
+    /// 引用缠论通道时标注的通道符号（CHANBI/CHANBIZG/...）：设备侧结构 dump 定位用
+    var chanKind: String? = nil
 }
 
 /// 单个输出行的独立求值单元：该行 + 它全部传递依赖的语句（拆分由 Python text_split 完成）。

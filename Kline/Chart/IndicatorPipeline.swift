@@ -35,6 +35,8 @@ final class IndicatorComputationStore: ObservableObject {
     /// 主图各指标结果缓存（class 引用，原地改 units 本就不触发重绘——原设计保留；
     /// 引用替换仅发生在缓存恢复路径，必伴随 mainCurves @Published 写）
     var mainCache = MainIndicatorCache()
+    /// 缠论结构 dump 的最近一次结构指纹（空 = 尚未写盘）：结构未变不重复落盘
+    var chanDumpKey = ""
 
     // MARK: 【首帧引擎实验】引擎异步求值代数 token
     // 引擎求值为主线程收集请求 → 后台 Python → 主线程回填；配置/区间变化再次触发时递增代数，
@@ -255,11 +257,101 @@ private func buildMainLine(id: String, isCustom: Bool, customColor: Color?,
     return IndicatorLine(name: name, values: out.values, color: color,
                          style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue,
                          values2: out.values2, stickWidth: out.stickWidth,
-                         breakOnNaN: out.breakOnNaN, keyIndices: out.keyIndices)
+                         breakOnNaN: out.breakOnNaN, keyIndices: out.keyIndices,
+                         chanKind: out.chanKind)
 }
 
 /// VOL/AMO 量均线固定周期（0=隐藏，公式固定值，不再支持编辑）
 private let volMAFixedPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
+
+// MARK: - 缠论结构 dump（设备侧可读：Documents/chan_dump.json）
+
+/// 通道折线端点：keyIndices（笔/段端点 bar）+ 该 bar 的曲线值
+private func chanPoints(_ line: IndicatorLine?, data: [KlineItem]) -> [[String: Any]] {
+    guard let line, let keys = line.keyIndices else { return [] }
+    var out: [[String: Any]] = []
+    out.reserveCapacity(keys.count)
+    for k in keys {
+        guard k >= 0, k < line.values.count, k < data.count else { continue }
+        let v = line.values[k]
+        guard v.isFinite else { continue }
+        out.append(["idx": k, "date": data[k].date, "price": v])
+    }
+    return out
+}
+
+/// 中枢区间：ZG/ZD 轨**连续同时有值**的一段 = 一个中枢（与绘制出来的水平轨完全同源）
+private func chanCenters(_ zg: IndicatorLine?, _ zd: IndicatorLine?,
+                         data: [KlineItem]) -> [[String: Any]] {
+    guard let zg, let zd else { return [] }
+    let n = min(min(zg.values.count, zd.values.count), data.count)
+    var out: [[String: Any]] = []
+    var i = 0
+    while i < n {
+        guard zg.values[i].isFinite, zd.values[i].isFinite else { i += 1; continue }
+        let start = i
+        var hi = zg.values[i]
+        var lo = zd.values[i]
+        while i + 1 < n, zg.values[i + 1].isFinite, zd.values[i + 1].isFinite {
+            i += 1
+            hi = zg.values[i]
+            lo = zd.values[i]
+        }
+        let end = i
+        out.append(["startIdx": start, "endIdx": end,
+                    "startDate": data[start].date, "endDate": data[end].date,
+                    "zg": hi, "zd": lo])
+        i += 1
+    }
+    return out
+}
+
+/// 缠论结构导出：主图提交时若存在通道曲线，写 Documents/chan_dump.json（PC 侧用
+/// sandbox_cli.py get chan_dump.json <本地路径> 读取）。导出的数值全部派生自最终提交的曲线，
+/// 与主图实际绘制逐点同源；笔数 = 端点数 − 1、段数 = 段端点数 − 1（相邻两笔/两段共用端点 bar）。
+/// 结构未变（同标的/周期/根数/端点与中枢数）不重复写盘，避免拖拽缩放期间反复落盘。
+extension KlineChartView {
+    func writeChanDumpIfNeeded(_ curves: [IndicatorLine]) {
+        guard !sortedData.isEmpty else { return }
+        let biLine = curves.first { $0.chanKind == "CHANBI" }
+        let segLine = curves.first { $0.chanKind == "CHANSEG" }
+        guard biLine != nil || segLine != nil else { return }
+        let biPts = chanPoints(biLine, data: sortedData)
+        let segPts = chanPoints(segLine, data: sortedData)
+        let biCenters = chanCenters(curves.first { $0.chanKind == "CHANBIZG" },
+                                    curves.first { $0.chanKind == "CHANBIZD" }, data: sortedData)
+        let segCenters = chanCenters(curves.first { $0.chanKind == "CHANSEGZG" },
+                                     curves.first { $0.chanKind == "CHANSEGZD" }, data: sortedData)
+        let key = "\(metaId ?? -1)|\(period.rawValue)|\(sortedData.count)"
+            + "|\(sortedData[0].date)|\(sortedData[sortedData.count - 1].date)"
+            + "|\(biPts.count)|\(segPts.count)|\(biCenters.count)|\(segCenters.count)"
+        guard key != computation.chanDumpKey else { return }
+        computation.chanDumpKey = key
+        let symbol = metaId.flatMap { id in
+            DatabaseManager.shared.metaList.first { $0.id == id }?.code
+        } ?? "?"
+        let obj: [String: Any] = [
+            "symbol": symbol,
+            "metaId": metaId ?? -1,
+            "period": period.rawValue,
+            "barCount": sortedData.count,
+            "firstDate": sortedData[0].date,
+            "lastDate": sortedData[sortedData.count - 1].date,
+            "biCount": max(0, biPts.count - 1),
+            "segCount": max(0, segPts.count - 1),
+            "biCenterCount": biCenters.count,
+            "segCenterCount": segCenters.count,
+            "bi": biPts,
+            "seg": segPts,
+            "biCenters": biCenters,
+            "segCenters": segCenters,
+            "generatedAt": Int(Date().timeIntervalSince1970),
+        ]
+        guard let json = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try? json.write(to: docs.appendingPathComponent("chan_dump.json"), options: .atomic)
+    }
+}
 
 /// 主图各指标按「输出行」缓存计算结果：每个输出行（如一条 MA）独立缓存，
 /// 只重算公式文本（含参数）变化的行，其余输出行直接复用缓存结果。
@@ -458,6 +550,8 @@ extension KlineChartView {
     /// 内容与原实现逐行一致（原位置已注释见 recomputeMainCurves 末行）
     func commitMainCurves(_ curves: [IndicatorLine]) {
         computation.mainCurves = curves
+        // 缠论结构 dump（无通道曲线时内部直接返回；结构未变不重复写盘）
+        writeChanDumpIfNeeded(curves)
         // 写回 (标的, 周期) 缓存：切走再回来时恢复主图曲线与覆盖状态，不重复计算
         if let metaId = metaId {
             let store = ChartCacheStore.shared

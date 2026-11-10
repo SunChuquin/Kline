@@ -57,6 +57,8 @@ struct IndicatorLine: Equatable {
     var breakOnNaN: Bool = false
     /// 抽样时必须保留的 bar 下标
     var keyIndices: [Int]? = nil
+    /// 缠论通道种类（CHANBI/CHANBIZG/...；普通指标行 nil）：结构 dump 定位用
+    var chanKind: String? = nil
 }
 
 struct CanvasCurve: Equatable {

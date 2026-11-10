@@ -245,6 +245,9 @@ enum PyTDXFormulaBridge {
             line.isAnonymous = true
             line.hideValue = true   // 匿名绘制语句不占图例
         }
+        if let ck = l["ck"] as? String {
+            line.chanKind = ck
+        }
         return line
     }
 
