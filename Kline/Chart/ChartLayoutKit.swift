@@ -101,6 +101,10 @@ extension KlineChartView {
             }
             return local.isEmpty ? nil : local
         }
+        // 绘制探针：记录通道数组全局下标 -> 局部下标 -> 画布 x 的映射（仅窗口/间距变化时落盘）
+        recordChanDrawProbe(candleSpacing: candleSpacing, canvasWidth: width,
+                            priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
+                            canvasSliceCount: (mainMirrored ? mirroredSlice : slice).count)
         return MainChartCanvas(slice: mainMirrored ? mirroredSlice : slice, chartStyle: config.chartStyle, candleSpacing: candleSpacing, height: height,
                         priceMin: priceRange.lowerBound, priceMax: priceRange.upperBound,
                         curves: isBareK ? [] : computation.mainCurves.enumerated().map { li, line in

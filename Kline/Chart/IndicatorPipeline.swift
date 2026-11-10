@@ -37,6 +37,10 @@ final class IndicatorComputationStore: ObservableObject {
     var mainCache = MainIndicatorCache()
     /// 缠论结构 dump 的最近一次结构指纹（空 = 尚未写盘）：结构未变不重复落盘
     var chanDumpKey = ""
+    /// 主图最近一次求值区间（绝对下标 + 根数）：绘制探针用，定位通道数组与可见窗口的对齐关系
+    var lastMainCalc: (start: Int, end: Int, count: Int)? = nil
+    /// 主图绘制探针的最近一次键（同可见窗口不重复落盘）
+    var drawProbeKey = ""
 
     // MARK: 【首帧引擎实验】引擎异步求值代数 token
     // 引擎求值为主线程收集请求 → 后台 Python → 主线程回填；配置/区间变化再次触发时递增代数，
@@ -353,8 +357,150 @@ extension KlineChartView {
     }
 }
 
+// MARK: - 主图绘制探针（设备侧可读：Documents/chan_draw_probe.json / .jsonl）
+
+/// 记录「通道数组全局下标 -> 可见窗口局部下标 -> 画布 x」的映射，用于核对中枢矩形、
+/// 封口竖线、笔折线拐点是否与 K 线柱落在同一根 bar 上（PC 侧经 KlineHTTP 读取）。
+/// 只在可见窗口（或布局宽度）变化时落盘一次；同窗口不重复写。
+extension KlineChartView {
+    func recordChanDrawProbe(candleSpacing: CGFloat, canvasWidth: CGFloat,
+                             priceMin: Double, priceMax: Double, canvasSliceCount: Int) {
+        guard !sortedData.isEmpty else { return }
+        let chanLines = computation.mainCurves.filter { $0.chanKind != nil }
+        guard !chanLines.isEmpty else { return }
+        let si = startIndex, ei = endIndex
+        guard si >= 0, si <= ei, ei < sortedData.count else { return }
+        let key = "\(metaId ?? -1)|\(period.rawValue)|\(si)|\(ei)|\(sortedData.count)"
+            + "|\(Int((candleSpacing * 100).rounded()))"
+        guard key != computation.drawProbeKey else { return }
+        computation.drawProbeKey = key
+
+        /// 绘制坐标系：局部下标 -> 画布 x（与蜡烛同一口径）
+        func x(_ local: Int) -> Double { (Double(local) + 0.5) * Double(candleSpacing) }
+
+        var curveObjs: [[String: Any]] = []
+        for line in chanLines {
+            var o: [String: Any] = [
+                "name": line.name,
+                "chanKind": line.chanKind ?? "?",
+                "valuesCount": line.values.count,
+                "values2Count": line.values2?.count ?? -1,
+                "breakOnNaN": line.breakOnNaN,
+                "keyCount": line.keyIndices?.count ?? -1,
+                "keyFirstGlobal": line.keyIndices?.first ?? -1,
+                "keyLastGlobal": line.keyIndices?.last ?? -1,
+            ]
+            // k 关键下标：全局 -> mainKeyIndices 之后的局部（只留窗口内）
+            if let keys = line.keyIndices {
+                let inside = keys.filter { $0 >= si && $0 <= ei }
+                o["keysInWindow"] = inside.count
+                o["keysSample"] = inside.prefix(6).map {
+                    ["g": $0, "l": $0 - si, "x": x($0 - si)] as [String: Any]
+                }
+            }
+            // 摊平值在窗口内的连续有值段（全局/局部/取值/绘制 x 范围）
+            var runs: [[String: Any]] = []
+            let upper = min(ei, line.values.count - 1)
+            var i = si
+            while i <= upper {
+                guard line.values[i].isFinite else { i += 1; continue }
+                let s = i
+                while i + 1 <= upper, line.values[i + 1].isFinite { i += 1 }
+                if runs.count < 24 {
+                    runs.append(["gStart": s, "gEnd": i, "lStart": s - si, "lEnd": i - si,
+                                 "xStart": x(s - si), "xEnd": x(i - si), "v": line.values[i]])
+                }
+                i += 1
+            }
+            o["valueRunsInWindow"] = runs
+            curveObjs.append(o)
+        }
+
+        // 已知中枢样例：距可见窗口最近的笔中枢（全数组扫描，与 chan_dump.json 同源同序）
+        var centerSample: [String: Any] = [:]
+        if let zg = chanLines.first(where: { $0.chanKind == "CHANBIZG" }),
+           let zd = chanLines.first(where: { $0.chanKind == "CHANBIZD" }) {
+            let n = min(min(zg.values.count, zd.values.count), sortedData.count)
+            var best: (g0: Int, g1: Int)? = nil
+            var i = 0
+            while i < n {
+                guard zg.values[i].isFinite, zd.values[i].isFinite else { i += 1; continue }
+                let s = i
+                while i + 1 < n, zg.values[i + 1].isFinite, zd.values[i + 1].isFinite { i += 1 }
+                let e = i
+                if best == nil || abs(s - si) < abs(best!.g0 - si) { best = (s, e) }
+                i += 1
+            }
+            if let b = best {
+                // K 线价格带：中枢 [zd, zg] 必须落在该 bar 区间内，否则说明通道值与 bar 未对齐
+                var barHigh = -Double.infinity
+                var barLow = Double.infinity
+                for k in b.g0...b.g1 {
+                    barHigh = max(barHigh, sortedData[k].high)
+                    barLow = min(barLow, sortedData[k].low)
+                }
+                let zgV = zg.values[b.g0], zdV = zd.values[b.g0]
+                centerSample = [
+                    "kind": "CHANBI",
+                    "globalStart": b.g0, "globalEnd": b.g1,
+                    "localStart": b.g0 - si, "localEnd": b.g1 - si,
+                    "inWindow": b.g0 <= ei && b.g1 >= si,
+                    "xStart": x(b.g0 - si), "xEnd": x(b.g1 - si),
+                    "startDate": sortedData[b.g0].date, "endDate": sortedData[b.g1].date,
+                    "zg": zgV, "zd": zdV,
+                    "barHigh": barHigh, "barLow": barLow,
+                    "zgInBand": zgV >= barLow && zgV <= barHigh,
+                    "zdInBand": zdV >= barLow && zdV <= barHigh,
+                    // 映射口径：绘制下标 = 全局下标 - startIndex，故映射差 = -startIndex
+                    "mappingDelta": -si,
+                ]
+            }
+        }
+
+        let calc = computation.lastMainCalc
+        let obj: [String: Any] = [
+            "generatedAt": Int(Date().timeIntervalSince1970),
+            "metaId": metaId ?? -1,
+            "period": period.rawValue,
+            "eval": ["calcStart": calc?.start ?? -1, "calcEnd": calc?.end ?? -1, "calcCount": calc?.count ?? -1],
+            "visible": [
+                "startIndex": si, "endIndex": ei, "barCount": sortedData.count, "count": count,
+                "canvasSliceCount": canvasSliceCount,
+                "firstDate": sortedData[si].date, "lastDate": sortedData[ei].date,
+                "candleSpacing": Double(candleSpacing), "canvasWidth": Double(canvasWidth),
+                "priceMin": priceMin, "priceMax": priceMax,
+                "xFirstCandle": x(0), "xLastCandle": x(ei - si),
+            ],
+            "curves": curveObjs,
+            "centerSample": centerSample,
+        ]
+        guard let json = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try? json.write(to: docs.appendingPathComponent("chan_draw_probe.json"), options: .atomic)
+        // 追加到 jsonl：保留最近若干次可见窗口，便于对照不同区间（超 400KB 从头写）
+        var record = json
+        record.append(0x0A)
+        let jsonl = docs.appendingPathComponent("chan_draw_probe.jsonl")
+        let existing = ((try? FileManager.default.attributesOfItem(atPath: jsonl.path))?[.size] as? Int) ?? 0
+        if existing > 400_000 {
+            try? record.write(to: jsonl, options: .atomic)
+        } else if let handle = try? FileHandle(forWritingTo: jsonl) {
+            handle.seekToEndOfFile()
+            handle.write(record)
+            try? handle.close()
+        } else {
+            try? record.write(to: jsonl, options: .atomic)
+        }
+        let calcText = calc.map { "\($0.start)...\($0.end)(\($0.count))" } ?? "?"
+        let spacingText = String(format: "%.3f", Double(candleSpacing))
+        DebugLogger.shared.log("[ChanProbe] 可见=\(si)...\(ei)(\(ei - si + 1)) 求值=\(calcText) "
+            + "曲线=\(chanLines.count) 中枢g=\(centerSample["globalStart"] ?? "?") "
+            + "l=\(centerSample["localStart"] ?? "?") x=\(centerSample["xStart"] ?? "?") "
+            + "宽度=\(Int(canvasWidth)) 间距=\(spacingText)")
+    }
+}
+
 /// 主图各指标按「输出行」缓存计算结果：每个输出行（如一条 MA）独立缓存，
-/// 只重算公式文本（含参数）变化的行，其余输出行直接复用缓存结果。
 /// 例如 MA 组加一根 MA120，只有那一行的单元文本变化，其余 9 条均线复用缓存。
 /// 数据变化（切换周期/标的）会重建 K 线页并重置此缓存，天然全量重算。
 final class MainIndicatorCache {
@@ -509,6 +655,8 @@ extension KlineChartView {
                 calcStart = 0
                 calcEnd = sortedData.count - 1
             }
+            // 绘制探针：记录本次主图求值区间（绝对下标 + 根数）
+            computation.lastMainCalc = (calcStart, calcEnd, calcEnd - calcStart + 1)
             let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
             let activeIDs = Set(entries.map { $0.id })
             // ===== 【首帧引擎实验】原 Swift 前台主图求值（2026-10-12 临时注释禁用，真机体验反馈后决定去留）=====
@@ -1131,6 +1279,8 @@ extension KlineChartView {
         // ===== 进入commit时的副图快照（任何修改前，诊断用）=====
         klineDebug("[KlineDebug] commit进入快照 | [\(subTop.kind):\(subTop.curves.count), \(subBottom.kind):\(subBottom.curves.count), \(subThird.kind):\(subThird.curves.count)] cursor=\(selectedIndex == nil ? "无" : "有") bgEnd=\(computation.bgCoverageEnd)")
         let cs = req.calcStart, ce = req.calcEnd
+        // 绘制探针：记录本次主图求值区间（绝对下标 + 根数）
+        computation.lastMainCalc = (cs, ce, ce - cs + 1)
         // ---- 主图（数据驱动，与 makeFullRequest 的 mainFormulas/mainIDs 一一对应）----
         var curves: [IndicatorLine] = []
         let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
