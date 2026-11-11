@@ -51,12 +51,20 @@ enum PyTDXFormulaBridge {
             ["c": d.map(\.close), "h": d.map(\.high), "l": d.map(\.low),
              "o": d.map(\.open), "v": d.map(\.volume), "a": d.map(\.turnover)]
         } ?? ["c": dummy, "h": dummy, "l": dummy, "o": dummy, "v": dummy, "a": dummy]
-        let input: [String: Any] = [
+        var input: [String: Any] = [
             "__text__": 1,
             "__bin__": 1,   // eval 大数组走 __bin_out__ 二进制回传（split 分支内部忽略该位）
             "mode": mode,
             "texts": texts.enumerated().map { ["id": $0.offset, "text": $0.element] },
         ]
+        // 缠论计算审计日志：Python 侧每**实际执行一次** chan 计算，就往这个文件追加一行
+        // （序号 / bars 指纹 / 输入区间起止与根数 / 耗时），供 PC 侧经 KlineHTTP 取回比对
+        // 「滑动是否触发重算」。split 模式不读 bars，不需要。
+        if let data, let first = data.first, let last = data.last {
+            input["bars_span"] = [first.date, last.date, data.count]
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            input["chan_log"] = docs.appendingPathComponent("chan_calc_log.txt").path
+        }
         let errText: (PyBridgeError) -> String = { err in
             switch err {
             case .engineNotReady(let m): return "引擎未就绪：\(m)"
@@ -244,6 +252,9 @@ enum PyTDXFormulaBridge {
         if (l["anon"] as? Bool) == true {
             line.isAnonymous = true
             line.hideValue = true   // 匿名绘制语句不占图例
+        }
+        if let ck = l["ck"] as? String {
+            line.chanKind = ck
         }
         return line
     }

@@ -31,6 +31,7 @@
 import json
 import math
 import sqlite3
+import time
 import traceback
 
 _NAN = float("nan")
@@ -374,15 +375,18 @@ def _cross(a, b):
 # 一次 text_eval 调用内所有单元共享，跨调用按数据指纹复用。
 #
 # 通道约定（长度 = bars 根数，无值处 NaN）：
-#   CHANBI     笔折线：每笔 [fromKlu,toKlu] 内按 beginVal→endVal 线性摊平，笔外 NaN
+#   CHANBI     笔折线：**已确认**的每笔 [fromKlu,toKlu] 内按 beginVal→endVal 线性摊平，笔外 NaN
+#   CHANBIUC   末笔未确认段：仅当 CL-V1 标记最后一笔 confirmed=false 时，该笔区间内有值，其余 NaN
 #   CHANBIZG/ZD  笔中枢上下轨：仅在该中枢 [beginKlu,endKlu] 内有值，区间外 NaN
 #   CHANBISEAL   笔中枢封口：beginKlu/endKlu 两根 bar 为 1，其余 0
-#   CHANSEG / CHANSEGZG / CHANSEGZD / CHANSEGSEAL  段折线与段中枢，字段同上
+#   CHANSEG / CHANSEGUC / CHANSEGZG / CHANSEGZD / CHANSEGSEAL  段折线（末段未确认）与段中枢，字段同上
 # 相邻中枢之间由 NaN 断开（引用通道的输出行才启用断线，见 _eval_unit_text 的 "brk"）。
+# 末笔/末段拆到独立通道，是为了让绘制层能用浅色虚线画"未确认"的一段，
+# 同时不改变已确认笔/段的历史形态（已确认部分仍是原来的实线通道）。
 
 _CHAN_SYMBOLS = frozenset((
-    "CHANBI", "CHANBIZG", "CHANBIZD", "CHANBISEAL",
-    "CHANSEG", "CHANSEGZG", "CHANSEGZD", "CHANSEGSEAL",
+    "CHANBI", "CHANBIUC", "CHANBIZG", "CHANBIZD", "CHANBISEAL",
+    "CHANSEG", "CHANSEGUC", "CHANSEGZG", "CHANSEGZD", "CHANSEGSEAL",
 ))
 
 # CL-V1 口径预设（与 chan.py 文档中的 P0 对齐预设逐字段一致；额外打开段与中枢输出）
@@ -503,15 +507,19 @@ def _chan_rails(n, centers):
 
 
 def _build_chan(res, n):
-    """chan.py result → 8 条通道序列 + 每条通道的关键 bar（端点/封口，供抽样时强制保留）"""
+    """chan.py result → 10 条通道序列 + 每条通道的关键 bar（端点/封口，供抽样时强制保留）。
+    末笔 / 末段若被 CL-V1 标记 confirmed=false，则从主通道拆到 *UC 通道：
+    主通道只保留已确认部分（历史形态不变），*UC 通道只含未确认的那一段。"""
     bi = res.get("bi") or []
     segs = res.get("segments") or []
     centers = res.get("centers") or []
     seg_centers = res.get("segCenters") or []
     bi_by_idx = {}
     bi_spans = []
+    bi_uc_spans = []
     bi_keys = []
-    for b in bi:
+    bi_uc_keys = []
+    for pos, b in enumerate(bi):
         try:
             i0 = int(b["fromKlu"])
             i1 = int(b["toKlu"])
@@ -522,13 +530,16 @@ def _build_chan(res, n):
         bi_by_idx[int(b.get("idx", -1))] = b
         if i0 < 0 or i1 < i0:
             continue
-        bi_spans.append((i0, v0, i1, v1))
-        bi_keys.append(i0)
-        bi_keys.append(i1)
+        # 只认"最后一笔且被判未确认"：更早的笔即便 confirmed=false 也保持实线（不改历史形态）
+        uc = pos == len(bi) - 1 and b.get("confirmed") is False
+        (bi_uc_spans if uc else bi_spans).append((i0, v0, i1, v1))
+        (bi_uc_keys if uc else bi_keys).extend((i0, i1))
 
     seg_spans = []
+    seg_uc_spans = []
     seg_keys = []
-    for s in segs:
+    seg_uc_keys = []
+    for pos, s in enumerate(segs):
         b0 = bi_by_idx.get(int(s.get("startBi", -1)))
         b1 = bi_by_idx.get(int(s.get("endBi", -1)))
         if b0 is None or b1 is None:
@@ -542,37 +553,67 @@ def _build_chan(res, n):
             continue
         if i0 < 0 or i1 < i0:
             continue
-        seg_spans.append((i0, v0, i1, v1))
-        seg_keys.append(i0)
-        seg_keys.append(i1)
+        uc = pos == len(segs) - 1 and s.get("confirmed") is False
+        (seg_uc_spans if uc else seg_spans).append((i0, v0, i1, v1))
+        (seg_uc_keys if uc else seg_keys).extend((i0, i1))
 
     bi_zd, bi_zg, bi_edge, bi_edge_keys = _chan_rails(n, centers)
     sg_zd, sg_zg, sg_edge, sg_edge_keys = _chan_rails(n, seg_centers)
     series = {
         "CHANBI": _chan_line(n, bi_spans),
+        "CHANBIUC": _chan_line(n, bi_uc_spans),
         "CHANBIZG": bi_zg,
         "CHANBIZD": bi_zd,
         "CHANBISEAL": bi_edge,
         "CHANSEG": _chan_line(n, seg_spans),
+        "CHANSEGUC": _chan_line(n, seg_uc_spans),
         "CHANSEGZG": sg_zg,
         "CHANSEGZD": sg_zd,
         "CHANSEGSEAL": sg_edge,
     }
     bi_ks = sorted(set(bi_keys))
+    bi_uc_ks = sorted(set(bi_uc_keys))
     bi_eks = sorted(set(bi_edge_keys))
     seg_ks = sorted(set(seg_keys))
+    seg_uc_ks = sorted(set(seg_uc_keys))
     sg_eks = sorted(set(sg_edge_keys))
     keys = {
         "CHANBI": bi_ks,
+        "CHANBIUC": bi_uc_ks,
         "CHANBIZG": bi_eks,
         "CHANBIZD": bi_eks,
         "CHANBISEAL": bi_eks,
         "CHANSEG": seg_ks,
+        "CHANSEGUC": seg_uc_ks,
         "CHANSEGZG": sg_eks,
         "CHANSEGZD": sg_eks,
         "CHANSEGSEAL": sg_eks,
     }
     return {"series": series, "keys": keys}
+
+
+def _chan_log_write(builtins, fp, n, elapsed_ms):
+    """缠论计算审计日志：每次**实际执行**一次 chan 计算追加一行
+    （序号 / bars 指纹 / 输入区间起止与根数 / 耗时）。
+    落点由 Swift 经 kline_input["chan_log"] 传入（Documents/chan_calc_log.txt），缺失则跳过。
+    序号挂在真 __main__（跨调用持久），用于 PC 侧"滑动前后各取一次日志比增量"。"""
+    path = builtins.get("__chan_log__")
+    if not path:
+        return
+    try:
+        import __main__ as _km
+        seq = getattr(_km, "_ktdx_chan_calc_seq", 0) + 1
+        _km._ktdx_chan_calc_seq = seq
+        span = builtins.get("__bars_span__") or []
+        span_desc = "%s..%s" % (span[0], span[1]) if len(span) >= 2 else "?"
+        fp_desc = ("nC=%d,sumO=%.3f,sumC=%.3f,firstC=%.4f,lastC=%.4f,wC=%.1f"
+                   % (fp[3][0], fp[0][1], fp[3][1], fp[3][3], fp[3][4], fp[3][2])) if fp else "-"
+        line = ("[ChanCalc] seq=%d ts=%.3f bars=%d span=%s %s elapsed=%.1fms\n"
+                % (seq, time.time(), n, span_desc, fp_desc, elapsed_ms))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:  # 审计日志不得影响求值
+        pass
 
 
 def _compute_chan(builtins):
@@ -589,6 +630,7 @@ def _compute_chan(builtins):
         oi, hi, li, ci = o[i], h[i], l[i], c[i]
         bars.append([i, oi, max(oi, hi, li, ci), min(oi, hi, li, ci), ci])
     mod = _chan_module()
+    t0 = time.perf_counter()
     try:
         out = mod._op_chan({"op": "chan", "bars": bars, "config": dict(_CHAN_CLV1)})
     except Exception as exc:
@@ -596,7 +638,10 @@ def _compute_chan(builtins):
     if not isinstance(out, dict) or not out.get("ok"):
         msg = out.get("error") if isinstance(out, dict) else "chan.py 返回非法"
         raise TDxEvalError("缠论通道计算失败：%s" % (msg or "未知错误"))
-    return _build_chan(out.get("result") or {}, n)
+    built = _build_chan(out.get("result") or {}, n)
+    _chan_log_write(builtins, builtins.get("__fp__"), n,
+                    (time.perf_counter() - t0) * 1000.0)
+    return built
 
 
 def _ensure_chan(builtins):
@@ -911,6 +956,9 @@ def run(kline_input):
     requests 与 results 按下标对齐；db 存在时附带读库对拍 audit（不影响求值输入）"""
     bars = kline_input["bars"]
     builtins = _make_builtins(bars)
+    # 缠论计算审计通道（可选）：Swift 传入落点与输入区间摘要
+    builtins["__chan_log__"] = kline_input.get("chan_log")
+    builtins["__bars_span__"] = kline_input.get("bars_span")
     audit = None
     db_cfg = kline_input.get("db")
     if db_cfg:
@@ -1451,6 +1499,23 @@ def _annotate_chan(lines, stmts, builtins):
     chan_used = used & _CHAN_SYMBOLS
     if not chan_used:
         return
+    # 每行标注通道种类（仅当该输出语句只引用一个通道符号）：供设备侧结构 dump 定位
+    # 笔折线/中枢上下轨，不改变任何求值结果
+    out_stmts = [st for st in stmts if st.get("o")]
+    for idx, line in enumerate(lines):
+        if idx >= len(out_stmts):
+            break
+        vs = set()
+        _collect_vars(out_stmts[idx]["e"], into=vs)
+        cs = vs & _CHAN_SYMBOLS
+        if len(cs) == 1:
+            line["ck"] = next(iter(cs))
+        elif "CHANBISEAL" in cs:
+            # STICKLINE 封口行（引用封口条件 + 上下轨三通道）：单独标成封口种类，
+            # 使封口竖线也进 chant 探针（chan_draw_probe / stroke 探针）可观测
+            line["ck"] = "CHANBISEAL"
+        elif "CHANSEGSEAL" in cs:
+            line["ck"] = "CHANSEGSEAL"
     chankeys = builtins.get("__chankeys__") or {}
     ks = set()
     for sym in chan_used:
@@ -1519,6 +1584,10 @@ def _run_text(kline_input):
     mode = kline_input.get("mode", "eval")
     use_bin = bool(kline_input.get("__bin__")) and mode != "split"
     builtins = _make_builtins(bars) if mode != "split" else None
+    if builtins is not None:
+        # 缠论计算审计通道（可选）：Swift 传入落点与输入区间摘要
+        builtins["__chan_log__"] = kline_input.get("chan_log")
+        builtins["__bars_span__"] = kline_input.get("bars_span")
     bin_out = {} if use_bin else None
     results = []
     for req in kline_input["texts"]:

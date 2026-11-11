@@ -23,6 +23,35 @@ func klineDebug(_ message: @autoclosure () -> String) {
     #endif
 }
 
+/// 绘制层探针：记录「缠论通道行实际送入 stroke 的点数/游程/坐标/颜色」，
+/// 落盘 Documents/chan_stroke_probe.jsonl（同窗口同通道只写一次）。
+/// 用于区分「数据层没值」「绘制层丢点」「坐标层错位」「画了但不可见（alpha/越界）」。
+final class ChanStrokeProbe {
+    static let shared = ChanStrokeProbe()
+    private var seen = Set<String>()
+    private let url: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("chan_stroke_probe.jsonl")
+    private init() {}
+
+    func record(key: String, row: [String: Any]) {
+        guard !seen.contains(key) else { return }
+        if seen.count > 400 { seen.removeAll() }   // 防无限增长：清空后允许重写同窗口
+        seen.insert(key)
+        guard let url,
+              let data = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
+        else { return }
+        var line = data
+        line.append(0x0A)
+        if let fh = try? FileHandle(forWritingTo: url) {
+            fh.seekToEndOfFile()
+            fh.write(line)
+            try? fh.close()
+        } else {
+            try? line.write(to: url, options: .atomic)
+        }
+    }
+}
+
 
 /// 行情 K 线图。
 struct KlineChartView: View {
@@ -389,9 +418,18 @@ struct KlineChartView: View {
         guard startIndex <= endIndex, startIndex >= 0, endIndex < sortedData.count else { return [] }
         return Array(sortedData[startIndex...endIndex])
     }
+    /// 曲线数组按可见窗口切片：长度不足（数据追加后曲线仍为旧长度）时钳位并用 NaN 补齐，
+    /// 绝不整条返回空数组——否则一旦窗口末端越过旧数组长度，整条指标（含所有通道）会瞬间消失。
     private func sliceArr(_ arr: [Double]) -> [Double] {
-        guard !arr.isEmpty, startIndex <= endIndex, endIndex < arr.count else { return [] }
-        return Array(arr[startIndex...endIndex])
+        let n = max(0, endIndex - startIndex + 1)
+        guard n > 0, startIndex < arr.count else { return [] }
+        var out = [Double](repeating: .nan, count: n)
+        let lo = max(0, startIndex)
+        let hi = min(endIndex, arr.count - 1)
+        if lo <= hi {
+            for i in lo...hi { out[i - startIndex] = arr[i] }
+        }
+        return out
     }
     func sliceColors(_ arr: [Color]?) -> [Color]? {
         guard let arr, !arr.isEmpty, startIndex <= endIndex, endIndex < arr.count else { return arr }
@@ -488,6 +526,14 @@ struct KlineChartView: View {
         return arr
     }
 
+    /// 缠论中枢轨道通道（区间内常值、区间外 NaN）：绘制时对超出 y 轴范围的轨道削顶钳边
+    static func isChanRail(_ kind: String?) -> Bool {
+        switch kind {
+        case "CHANBIZG", "CHANBIZD", "CHANSEGZG", "CHANSEGZD": return true
+        default: return false
+        }
+    }
+
     var priceRange: ClosedRange<Double> {
         guard !slice.isEmpty else { return 0...100 }
         // 训练态：右缘那根（含训练日）替换为「形成中」合成形态后参与范围计算——
@@ -496,6 +542,8 @@ struct KlineChartView: View {
         var minLow = ranged.map(\.low).min() ?? 0
         var maxHigh = ranged.map(\.high).max() ?? 100
         // 默认打开"指标不挤压K线"：范围只按K线自身计算；关闭时才纳入指标线范围（K线被挤压）
+        // 缠论中枢轨道**不并入** y 轴范围（K 线优先）：越界轨道由绘制层钳到画布边缘 + 虚线提示，
+        // 避免「把 K 线压扁」与「轨道被裁掉看不见」两种糟糕结果同时出现。
         if !displaySettings.indicatorNotSqueezeKline {
             let offsets = Array(startIndex...endIndex).filter { $0 < closes.count }
             var all: [Double] = []
@@ -1467,6 +1515,20 @@ struct MainChartCanvas: View, Equatable {
             drawStickRange(ctx, curve: curve, low: low, h: h, step: step)
             return
         }
+        // 缠论中枢轨道（区间内常值横线）：K 线优先的 y 轴下，越界轨道钳到画布边缘并以虚线/降透明度
+        // 提示"真实值在屏幕外"，既不压扁 K 线，也不会整条轨道消失
+        if KlineChartView.isChanRail(curve.chanKind) {
+            drawRailRuns(ctx, curve: curve, h: h, dimFrom: dimFromIndex, dimAlpha: dimAlpha)
+            return
+        }
+        // 缠论笔/段折线：**不做抽样**，窗口内每一段有值区间逐点绘制。
+        // 笔/段是全历史一条超长游程，游程起点通常在窗口之外；任何"按 step 抽样 + 依赖游程起点"
+        // 的写法都可能把窗口内这一段整条跳过。这里直接按窗口切片逐点描边，
+        // 保证「窗口内存在有效值 ⇒ 该段必然画出」，且外形与分段直线完全一致。
+        if curve.chanKind != nil {
+            drawPolyRuns(ctx, curve: curve, h: h, dimFrom: dimFromIndex, dimAlpha: dimAlpha)
+            return
+        }
         let extra = curve.keyIndices
         switch curve.style {
         case .dotline:
@@ -1503,22 +1565,195 @@ struct MainChartCanvas: View, Equatable {
         }
     }
 
+    /// 缠论中枢轨道绘制：区间内常值 → 逐段等宽横线。
+    /// y 轴采用 K 线优先（不并入轨道范围），故轨道值可能落在 [priceMin, priceMax] 之外：
+    /// 越界段**钳到画布上/下边缘**并改用虚线 + 降透明度，明确表示"真实值在屏幕外"，
+    /// 既不会把 K 线压扁，也不会让整条轨道被裁掉看不见。
+    private func drawRailRuns(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat,
+                              dimFrom: Int?, dimAlpha: Double) {
+        let values = curve.values
+        let boundary = dimFrom ?? values.count
+        var runs = 0, clamped = 0
+        var yMin = CGFloat.greatestFiniteMagnitude, yMax = -CGFloat.greatestFiniteMagnitude
+        var i = 0
+        while i < values.count {
+            if values[i].isNaN { i += 1; continue }
+            var j = i
+            while j + 1 < values.count, !values[j + 1].isNaN { j += 1 }
+            let v = values[i]   // 轨道在区间内恒为常值
+            let above = v > priceMax
+            let below = v < priceMin
+            let outOfBand = above || below
+            let y = outOfBand ? (above ? 0 : h) : yPos(v, h: h)
+            runs += 1
+            if outOfBand { clamped += 1 }
+            yMin = min(yMin, y); yMax = max(yMax, y)
+            // 与折线同口径：段首/段尾各向外扩半根 K 线（单 bar 段即一根等宽横线）
+            func stroke(_ a: Int, _ b: Int, dim: Bool) {
+                guard a <= b else { return }
+                var x0 = (CGFloat(a) + 0.5) * candleSpacing
+                var x1 = (CGFloat(b) + 0.5) * candleSpacing
+                if a == i { x0 -= candleSpacing * 0.5 }
+                if b == j { x1 += candleSpacing * 0.5 }
+                var p = Path()
+                p.move(to: CGPoint(x: x0, y: y))
+                p.addLine(to: CGPoint(x: x1, y: y))
+                var color = dim ? curve.color.opacity(dimAlpha) : curve.color
+                var style = StrokeStyle(lineWidth: curve.lineWidth)
+                if outOfBand {
+                    color = color.opacity(0.55)
+                    style = StrokeStyle(lineWidth: curve.lineWidth, dash: [4, 3])
+                }
+                ctx.stroke(p, with: .color(color), style: style)
+            }
+            // 联动复盘：历史段原色、未来段淡化
+            if i < boundary { stroke(i, min(j, boundary - 1), dim: false) }
+            if j >= boundary { stroke(max(i, boundary), j, dim: true) }
+            i = j + 1
+        }
+        recordStrokeProbe(kind: curve.chanKind ?? "RAIL", extra: [
+            "path": "rail", "runs": runs, "points": runs * 2, "style": curve.style.rawValue,
+            "clampedRuns": clamped, "yMin": Double(yMin), "yMax": Double(yMax),
+            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+        ])
+    }
+
+    /// 缠论笔/段折线绘制（**不做抽样**）：窗口切片里的每一段有值区间逐点描边。
+    /// 笔/段是一条贯穿历史的超长游程，游程起点几乎总在窗口左侧之外；这里只按窗口内
+    /// 的数组下标画，绝不因为"游程起点不在窗口内"而跳过，只要窗口内有值就必然画出那一段。
+    private func drawPolyRuns(_ ctx: GraphicsContext, curve: CanvasCurve, h: CGFloat,
+                              dimFrom: Int?, dimAlpha: Double) {
+        let values = curve.values
+        let boundary = dimFrom ?? values.count
+        let s: StrokeStyle = curve.style == .dotline
+            ? StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3])
+            : StrokeStyle(lineWidth: curve.lineWidth)
+        var hist = Path()
+        var fut = Path()
+        var runs = 0, points = 0
+        var yMin = CGFloat.greatestFiniteMagnitude, yMax = -CGFloat.greatestFiniteMagnitude
+        var xFirst = CGFloat.nan, yFirst = CGFloat.nan, xLast = CGFloat.nan, yLast = CGFloat.nan
+        var i = 0
+        while i < values.count {
+            if values[i].isNaN { i += 1; continue }
+            var j = i
+            while j + 1 < values.count, !values[j + 1].isNaN { j += 1 }
+            runs += 1
+            var histInRun = false, futInRun = false
+            for k in i...j {
+                let x = (CGFloat(k) + 0.5) * candleSpacing
+                let y = yPos(values[k], h: h)
+                points += 1
+                yMin = min(yMin, y); yMax = max(yMax, y)
+                if xFirst.isNaN { xFirst = x; yFirst = y }
+                xLast = x; yLast = y
+                if k < boundary {
+                    if histInRun { hist.addLine(to: CGPoint(x: x, y: y)) }
+                    else { hist.move(to: CGPoint(x: x, y: y)); histInRun = true }
+                } else {
+                    if futInRun { fut.addLine(to: CGPoint(x: x, y: y)) }
+                    else { fut.move(to: CGPoint(x: x, y: y)); futInRun = true }
+                }
+            }
+            i = j + 1
+        }
+        if points > 1 { ctx.stroke(hist, with: .color(curve.color), style: s) }
+        if points > 1 { ctx.stroke(fut, with: .color(curve.color.opacity(dimAlpha)), style: s) }
+        recordStrokeProbe(kind: curve.chanKind ?? "POLY", extra: [
+            "path": "poly", "runs": runs, "points": points,
+            "style": curve.style.rawValue, "valuesCount": values.count,
+            "firstX": Double(xFirst), "firstY": Double(yFirst),
+            "lastX": Double(xLast), "lastY": Double(yLast),
+            "yMin": yMin.isFinite ? Double(yMin) : -1, "yMax": yMax.isFinite ? Double(yMax) : -1,
+            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+            "canvasW": Double(canvasWidthForProbe),
+        ])
+    }
+
+    /// 画布宽度（探针用）：坐标轴上的 x 超出它就意味着绘制在画布外
+    private var canvasWidthForProbe: CGFloat { CGFloat(slice.count) * candleSpacing }
+
+    /// 绘制层探针落盘：键 = 通道种类 + 窗口首末日期 + 点数 + 间距，同窗口同通道只写一次。
+    /// 用于区分「数据层没值」「绘制层丢点」「坐标层错位」——PC 侧经 KlineHTTP 读取，不截图。
+    private func recordStrokeProbe(kind: String, extra: [String: Any]) {
+        var row: [String: Any] = [
+            "kind": kind,
+            "windowFirst": slice.first?.date ?? 0,
+            "windowLast": slice.last?.date ?? 0,
+            "sliceCount": slice.count,
+            "candleSpacing": Double(candleSpacing),
+            "height": Double(height),
+            "priceMin": priceMin, "priceMax": priceMax,
+            "at": Int(Date().timeIntervalSince1970),
+        ]
+        for (k, v) in extra { row[k] = v }
+        let key = "\(kind)|\(slice.first?.date ?? 0)|\(slice.last?.date ?? 0)|\(slice.count)|\(Int(candleSpacing * 100))"
+        ChanStrokeProbe.shared.record(key: key, row: row)
+    }
+
+    /// SwiftUI Color → RGBA（探针用：alpha=0 表示"画了也看不见"）
+    static func rgba(_ c: Color) -> [Double] {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(c).resolvedColor(with: UITraitCollection.current).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return [Double(r), Double(g), Double(b), Double(a)]
+    }
+
     /// STICKLINE 绘制：条件成立的 bar 上画 PRICE1↔PRICE2 竖线（宽度 0 = 1pt 细线）。
     /// 抽样时强制保留关键 bar（中枢左右封口），避免封口竖线被跳掉。
     private func drawStickRange(_ ctx: GraphicsContext, curve: CanvasCurve, low: [Double], h: CGFloat, step: Int) {
         let rawW = curve.stickWidth
         let width: CGFloat = rawW <= 0 ? 1 : max(1, candleSpacing * CGFloat(min(max(rawW, 0.08), 1.0)))
-        for i in decimatedIndices(count: curve.values.count, step: step, extra: curve.keyIndices) {
+        // 缠论中枢封口（breakOnNaN 行）：封口只落在中枢端点 bar 上、总数极少，直接全量绘制，
+        // 不按 step 抽样，避免缩小时封口竖线被抽掉（"中枢四条边全部消失"）。
+        let indices = curve.breakOnNaN ? Array(0..<curve.values.count)
+                                       : decimatedIndices(count: curve.values.count, step: step, extra: curve.keyIndices)
+        // 绘制探针统计（封口竖线同样要可观测）：实际描边根数 / 因两端同边被跳过 / 越界钳边 / y 范围
+        var drawn = 0, flatSkipped = 0, clamped = 0
+        var yMin: CGFloat = .nan, yMax: CGFloat = .nan
+        var xFirst: CGFloat = .nan, xLast: CGFloat = .nan
+        for i in indices {
             guard i < low.count else { break }
             let a = curve.values[i]
             let b = low[i]
             guard !a.isNaN, !b.isNaN else { continue }
             let x = (CGFloat(i) + 0.5) * candleSpacing
+            var ya = yPos(a, h: h)
+            var yb = yPos(b, h: h)
+            var color = dimmed(curve.color, i)
+            var style = StrokeStyle(lineWidth: width)
+            // 缠论中枢封口：y 轴按 K 线优先，端点可能在屏幕外——钳到画布边缘并用虚线/降透明度提示越界
+            if curve.breakOnNaN {
+                let outOfBand = a < priceMin || a > priceMax || b < priceMin || b > priceMax
+                ya = min(max(ya, 0), h)
+                yb = min(max(yb, 0), h)
+                // 两端都钳到同一边缘（整个中枢完全在屏幕外）→ 竖线长度为 0，不画
+                guard abs(ya - yb) >= 0.5 else { flatSkipped += 1; continue }
+                if outOfBand {
+                    clamped += 1
+                    color = color.opacity(0.55)
+                    style = StrokeStyle(lineWidth: width, dash: [3, 3])
+                }
+            }
             var p = Path()
-            p.move(to: CGPoint(x: x, y: yPos(a, h: h)))
-            p.addLine(to: CGPoint(x: x, y: yPos(b, h: h)))
-            ctx.stroke(p, with: .color(dimmed(curve.color, i)), lineWidth: width)
+            p.move(to: CGPoint(x: x, y: ya))
+            p.addLine(to: CGPoint(x: x, y: yb))
+            ctx.stroke(p, with: .color(color), style: style)
+            drawn += 1
+            yMin = yMin.isNaN ? min(ya, yb) : min(yMin, min(ya, yb))
+            yMax = yMax.isNaN ? max(ya, yb) : max(yMax, max(ya, yb))
+            if xFirst.isNaN { xFirst = x }
+            xLast = x
         }
+        recordStrokeProbe(kind: curve.chanKind ?? "STICK", extra: [
+            "path": "stick", "runs": drawn, "points": drawn, "bars": drawn,
+            "flatSkipped": flatSkipped, "clampedRuns": clamped,
+            "style": curve.style.rawValue, "valuesCount": curve.values.count,
+            "firstX": xFirst.isNaN ? -1 : Double(xFirst), "lastX": xLast.isNaN ? -1 : Double(xLast),
+            "yMin": yMin.isNaN ? -1 : Double(yMin), "yMax": yMax.isNaN ? -1 : Double(yMax),
+            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+            "stickWidth": curve.stickWidth, "dashWhenOutOfBand": curve.breakOnNaN ? 1 : 0,
+            "canvasW": Double(canvasWidthForProbe),
+        ])
     }
 
     /// 折线绘制，支持联动复盘的「历史原色 / 未来淡化」两段着色：
@@ -1528,7 +1763,21 @@ struct MainChartCanvas: View, Equatable {
                             dimFrom: Int? = nil, dimAlpha: Double = 1.0 / 3.0,
                             extra: [Int]? = nil, breakOnNaN: Bool = false) {
         let s: StrokeStyle = style == .dotline ? StrokeStyle(lineWidth: lineWidth, dash: [3, 3]) : StrokeStyle(lineWidth: lineWidth)
-        let indices = decimatedIndices(count: values.count, step: step, extra: extra)
+        var indices = decimatedIndices(count: values.count, step: step, extra: extra)
+        if breakOnNaN, step > 1 {
+            // 缠论通道按 step 抽样时，必须保留每段有值区间（中枢轨道/笔段折线）的首末 bar 与段后第一个 NaN：
+            // 否则长度 < step 的中枢区间会被整段抽没（放大/缩小时"部分中枢上下横线消失"），
+            // 段间也可能因缺少 NaN 断点被错误连成斜线。
+            var picked = Set(indices)
+            for i in 0..<values.count where !values[i].isNaN {
+                if i == 0 || values[i - 1].isNaN { picked.insert(i) }
+                if i == values.count - 1 || values[i + 1].isNaN {
+                    picked.insert(i)
+                    if i + 1 < values.count { picked.insert(i + 1) }
+                }
+            }
+            indices = picked.sorted()
+        }
         let boundary = dimFrom ?? values.count
         // 历史段（i < boundary）
         var hist = Path(); var histStarted = false
@@ -1550,6 +1799,33 @@ struct MainChartCanvas: View, Equatable {
         }
         if histStarted { ctx.stroke(hist, with: .color(color), style: s) }
         if futStarted { ctx.stroke(fut, with: .color(color.opacity(dimAlpha)), style: s) }
+        if breakOnNaN {
+            // 只有 1 根 bar 落在可见窗口内的中枢轨道：折线只有一个点画不出线，补一根等宽横线
+            drawSingleBarRuns(ctx, values: values, color: color, h: h, lineWidth: lineWidth,
+                              dimFrom: dimFrom, dimAlpha: dimAlpha)
+        }
+    }
+
+    /// 缠论轨道单 bar 游程补画：区间只有一根可见 bar 时以该 bar 为中心画一根等宽横线
+    private func drawSingleBarRuns(_ ctx: GraphicsContext, values: [Double], color: Color, h: CGFloat,
+                                   lineWidth: Double, dimFrom: Int?, dimAlpha: Double) {
+        let boundary = dimFrom ?? values.count
+        var i = 0
+        while i < values.count {
+            if values[i].isNaN { i += 1; continue }
+            var j = i
+            while j + 1 < values.count, !values[j + 1].isNaN { j += 1 }
+            if i == j {
+                let x = (CGFloat(i) + 0.5) * candleSpacing
+                let y = yPos(values[i], h: h)
+                var p = Path()
+                p.move(to: CGPoint(x: x - candleSpacing * 0.5, y: y))
+                p.addLine(to: CGPoint(x: x + candleSpacing * 0.5, y: y))
+                let c = i < boundary ? color : color.opacity(dimAlpha)
+                ctx.stroke(p, with: .color(c), lineWidth: lineWidth)
+            }
+            i = j + 1
+        }
     }
 
     private func yPos(_ v: Double, h: CGFloat) -> CGFloat {
