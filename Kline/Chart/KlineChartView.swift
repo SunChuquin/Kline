@@ -1707,6 +1707,10 @@ struct MainChartCanvas: View, Equatable {
         // 不按 step 抽样，避免缩小时封口竖线被抽掉（"中枢四条边全部消失"）。
         let indices = curve.breakOnNaN ? Array(0..<curve.values.count)
                                        : decimatedIndices(count: curve.values.count, step: step, extra: curve.keyIndices)
+        // 绘制探针统计（封口竖线同样要可观测）：实际描边根数 / 因两端同边被跳过 / 越界钳边 / y 范围
+        var drawn = 0, flatSkipped = 0, clamped = 0
+        var yMin: CGFloat = .nan, yMax: CGFloat = .nan
+        var xFirst: CGFloat = .nan, xLast: CGFloat = .nan
         for i in indices {
             guard i < low.count else { break }
             let a = curve.values[i]
@@ -1723,8 +1727,9 @@ struct MainChartCanvas: View, Equatable {
                 ya = min(max(ya, 0), h)
                 yb = min(max(yb, 0), h)
                 // 两端都钳到同一边缘（整个中枢完全在屏幕外）→ 竖线长度为 0，不画
-                guard abs(ya - yb) >= 0.5 else { continue }
+                guard abs(ya - yb) >= 0.5 else { flatSkipped += 1; continue }
                 if outOfBand {
+                    clamped += 1
                     color = color.opacity(0.55)
                     style = StrokeStyle(lineWidth: width, dash: [3, 3])
                 }
@@ -1733,7 +1738,22 @@ struct MainChartCanvas: View, Equatable {
             p.move(to: CGPoint(x: x, y: ya))
             p.addLine(to: CGPoint(x: x, y: yb))
             ctx.stroke(p, with: .color(color), style: style)
+            drawn += 1
+            yMin = yMin.isNaN ? min(ya, yb) : min(yMin, min(ya, yb))
+            yMax = yMax.isNaN ? max(ya, yb) : max(yMax, max(ya, yb))
+            if xFirst.isNaN { xFirst = x }
+            xLast = x
         }
+        recordStrokeProbe(kind: curve.chanKind ?? "STICK", extra: [
+            "path": "stick", "runs": drawn, "points": drawn, "bars": drawn,
+            "flatSkipped": flatSkipped, "clampedRuns": clamped,
+            "style": curve.style.rawValue, "valuesCount": curve.values.count,
+            "firstX": xFirst.isNaN ? -1 : Double(xFirst), "lastX": xLast.isNaN ? -1 : Double(xLast),
+            "yMin": yMin.isNaN ? -1 : Double(yMin), "yMax": yMax.isNaN ? -1 : Double(yMax),
+            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+            "stickWidth": curve.stickWidth, "dashWhenOutOfBand": curve.breakOnNaN ? 1 : 0,
+            "canvasW": Double(canvasWidthForProbe),
+        ])
     }
 
     /// 折线绘制，支持联动复盘的「历史原色 / 未来淡化」两段着色：

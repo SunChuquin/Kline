@@ -375,15 +375,18 @@ def _cross(a, b):
 # 一次 text_eval 调用内所有单元共享，跨调用按数据指纹复用。
 #
 # 通道约定（长度 = bars 根数，无值处 NaN）：
-#   CHANBI     笔折线：每笔 [fromKlu,toKlu] 内按 beginVal→endVal 线性摊平，笔外 NaN
+#   CHANBI     笔折线：**已确认**的每笔 [fromKlu,toKlu] 内按 beginVal→endVal 线性摊平，笔外 NaN
+#   CHANBIUC   末笔未确认段：仅当 CL-V1 标记最后一笔 confirmed=false 时，该笔区间内有值，其余 NaN
 #   CHANBIZG/ZD  笔中枢上下轨：仅在该中枢 [beginKlu,endKlu] 内有值，区间外 NaN
 #   CHANBISEAL   笔中枢封口：beginKlu/endKlu 两根 bar 为 1，其余 0
-#   CHANSEG / CHANSEGZG / CHANSEGZD / CHANSEGSEAL  段折线与段中枢，字段同上
+#   CHANSEG / CHANSEGUC / CHANSEGZG / CHANSEGZD / CHANSEGSEAL  段折线（末段未确认）与段中枢，字段同上
 # 相邻中枢之间由 NaN 断开（引用通道的输出行才启用断线，见 _eval_unit_text 的 "brk"）。
+# 末笔/末段拆到独立通道，是为了让绘制层能用浅色虚线画"未确认"的一段，
+# 同时不改变已确认笔/段的历史形态（已确认部分仍是原来的实线通道）。
 
 _CHAN_SYMBOLS = frozenset((
-    "CHANBI", "CHANBIZG", "CHANBIZD", "CHANBISEAL",
-    "CHANSEG", "CHANSEGZG", "CHANSEGZD", "CHANSEGSEAL",
+    "CHANBI", "CHANBIUC", "CHANBIZG", "CHANBIZD", "CHANBISEAL",
+    "CHANSEG", "CHANSEGUC", "CHANSEGZG", "CHANSEGZD", "CHANSEGSEAL",
 ))
 
 # CL-V1 口径预设（与 chan.py 文档中的 P0 对齐预设逐字段一致；额外打开段与中枢输出）
@@ -504,15 +507,19 @@ def _chan_rails(n, centers):
 
 
 def _build_chan(res, n):
-    """chan.py result → 8 条通道序列 + 每条通道的关键 bar（端点/封口，供抽样时强制保留）"""
+    """chan.py result → 10 条通道序列 + 每条通道的关键 bar（端点/封口，供抽样时强制保留）。
+    末笔 / 末段若被 CL-V1 标记 confirmed=false，则从主通道拆到 *UC 通道：
+    主通道只保留已确认部分（历史形态不变），*UC 通道只含未确认的那一段。"""
     bi = res.get("bi") or []
     segs = res.get("segments") or []
     centers = res.get("centers") or []
     seg_centers = res.get("segCenters") or []
     bi_by_idx = {}
     bi_spans = []
+    bi_uc_spans = []
     bi_keys = []
-    for b in bi:
+    bi_uc_keys = []
+    for pos, b in enumerate(bi):
         try:
             i0 = int(b["fromKlu"])
             i1 = int(b["toKlu"])
@@ -523,13 +530,16 @@ def _build_chan(res, n):
         bi_by_idx[int(b.get("idx", -1))] = b
         if i0 < 0 or i1 < i0:
             continue
-        bi_spans.append((i0, v0, i1, v1))
-        bi_keys.append(i0)
-        bi_keys.append(i1)
+        # 只认"最后一笔且被判未确认"：更早的笔即便 confirmed=false 也保持实线（不改历史形态）
+        uc = pos == len(bi) - 1 and b.get("confirmed") is False
+        (bi_uc_spans if uc else bi_spans).append((i0, v0, i1, v1))
+        (bi_uc_keys if uc else bi_keys).extend((i0, i1))
 
     seg_spans = []
+    seg_uc_spans = []
     seg_keys = []
-    for s in segs:
+    seg_uc_keys = []
+    for pos, s in enumerate(segs):
         b0 = bi_by_idx.get(int(s.get("startBi", -1)))
         b1 = bi_by_idx.get(int(s.get("endBi", -1)))
         if b0 is None or b1 is None:
@@ -543,32 +553,38 @@ def _build_chan(res, n):
             continue
         if i0 < 0 or i1 < i0:
             continue
-        seg_spans.append((i0, v0, i1, v1))
-        seg_keys.append(i0)
-        seg_keys.append(i1)
+        uc = pos == len(segs) - 1 and s.get("confirmed") is False
+        (seg_uc_spans if uc else seg_spans).append((i0, v0, i1, v1))
+        (seg_uc_keys if uc else seg_keys).extend((i0, i1))
 
     bi_zd, bi_zg, bi_edge, bi_edge_keys = _chan_rails(n, centers)
     sg_zd, sg_zg, sg_edge, sg_edge_keys = _chan_rails(n, seg_centers)
     series = {
         "CHANBI": _chan_line(n, bi_spans),
+        "CHANBIUC": _chan_line(n, bi_uc_spans),
         "CHANBIZG": bi_zg,
         "CHANBIZD": bi_zd,
         "CHANBISEAL": bi_edge,
         "CHANSEG": _chan_line(n, seg_spans),
+        "CHANSEGUC": _chan_line(n, seg_uc_spans),
         "CHANSEGZG": sg_zg,
         "CHANSEGZD": sg_zd,
         "CHANSEGSEAL": sg_edge,
     }
     bi_ks = sorted(set(bi_keys))
+    bi_uc_ks = sorted(set(bi_uc_keys))
     bi_eks = sorted(set(bi_edge_keys))
     seg_ks = sorted(set(seg_keys))
+    seg_uc_ks = sorted(set(seg_uc_keys))
     sg_eks = sorted(set(sg_edge_keys))
     keys = {
         "CHANBI": bi_ks,
+        "CHANBIUC": bi_uc_ks,
         "CHANBIZG": bi_eks,
         "CHANBIZD": bi_eks,
         "CHANBISEAL": bi_eks,
         "CHANSEG": seg_ks,
+        "CHANSEGUC": seg_uc_ks,
         "CHANSEGZG": sg_eks,
         "CHANSEGZD": sg_eks,
         "CHANSEGSEAL": sg_eks,
@@ -1494,6 +1510,12 @@ def _annotate_chan(lines, stmts, builtins):
         cs = vs & _CHAN_SYMBOLS
         if len(cs) == 1:
             line["ck"] = next(iter(cs))
+        elif "CHANBISEAL" in cs:
+            # STICKLINE 封口行（引用封口条件 + 上下轨三通道）：单独标成封口种类，
+            # 使封口竖线也进 chant 探针（chan_draw_probe / stroke 探针）可观测
+            line["ck"] = "CHANBISEAL"
+        elif "CHANSEGSEAL" in cs:
+            line["ck"] = "CHANSEGSEAL"
     chankeys = builtins.get("__chankeys__") or {}
     ks = set()
     for sym in chan_used:

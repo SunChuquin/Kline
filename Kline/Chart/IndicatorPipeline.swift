@@ -292,6 +292,23 @@ private func chanPoints(_ line: IndicatorLine?, data: [KlineItem]) -> [[String: 
     return out
 }
 
+/// 合并「已确认端点」与「末笔/末段未确认端点」：同一 idx 只保留一条（共用顶点归已确认），
+/// 未确认末端追加并打 `unconfirmed: true` 标记。这样 dump 的笔数/段数与拆分通道前完全一致，
+/// 同时能看出哪一段按 CL-V1 顺延成了未确认。
+private func mergeChanPoints(_ confirmed: [[String: Any]],
+                             _ unconfirmed: [[String: Any]]) -> [[String: Any]] {
+    guard !unconfirmed.isEmpty else { return confirmed }
+    var out = confirmed
+    let known = Set(confirmed.compactMap { $0["idx"] as? Int })
+    for p in unconfirmed {
+        guard let idx = p["idx"] as? Int, !known.contains(idx) else { continue }
+        var q = p
+        q["unconfirmed"] = true
+        out.append(q)
+    }
+    return out.sorted { (($0["idx"] as? Int) ?? 0) < (($1["idx"] as? Int) ?? 0) }
+}
+
 /// 中枢区间：ZG/ZD 轨**连续同时有值**的一段 = 一个中枢（与绘制出来的水平轨完全同源）
 private func chanCenters(_ zg: IndicatorLine?, _ zd: IndicatorLine?,
                          data: [KlineItem]) -> [[String: Any]] {
@@ -328,8 +345,10 @@ extension KlineChartView {
         let biLine = curves.first { $0.chanKind == "CHANBI" }
         let segLine = curves.first { $0.chanKind == "CHANSEG" }
         guard biLine != nil || segLine != nil else { return }
-        let biPts = chanPoints(biLine, data: sortedData)
-        let segPts = chanPoints(segLine, data: sortedData)
+        let biPts = mergeChanPoints(chanPoints(biLine, data: sortedData),
+                                    chanPoints(curves.first { $0.chanKind == "CHANBIUC" }, data: sortedData))
+        let segPts = mergeChanPoints(chanPoints(segLine, data: sortedData),
+                                     chanPoints(curves.first { $0.chanKind == "CHANSEGUC" }, data: sortedData))
         let biCenters = chanCenters(curves.first { $0.chanKind == "CHANBIZG" },
                                     curves.first { $0.chanKind == "CHANBIZD" }, data: sortedData)
         let segCenters = chanCenters(curves.first { $0.chanKind == "CHANSEGZG" },
