@@ -37,8 +37,13 @@ final class ChanStrokeProbe {
         guard !seen.contains(key) else { return }
         if seen.count > 400 { seen.removeAll() }   // 防无限增长：清空后允许重写同窗口
         seen.insert(key)
+        // JSONSerialization 遇到 NaN/±Inf 会抛 ObjC 异常（NSInvalidArgumentException
+        // "Invalid number value (NaN) in JSON write"），try? 接不住，直接 abort 闪退。
+        // 探针里「窗口内无有效点」时坐标初值就是 .nan（如 drawPolyRuns 的 firstX），
+        // 故序列化前统一把非有限数值替换成 -1（与 yMin/yMax 的"无值哨兵"口径一致）。
+        let safeRow = row.mapValues { Self.sanitized($0) }
         guard let url,
-              let data = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
+              let data = try? JSONSerialization.data(withJSONObject: safeRow, options: [.sortedKeys])
         else { return }
         var line = data
         line.append(0x0A)
@@ -48,6 +53,18 @@ final class ChanStrokeProbe {
             try? fh.close()
         } else {
             try? line.write(to: url, options: .atomic)
+        }
+    }
+
+    /// 探针行数值兜底：NaN/±Inf 统一替换为哨兵 -1。
+    /// 非有限值只可能来自「该通道在当前窗口内没有有效点」（如 drawPolyRuns 的 firstX 初值 .nan），
+    /// 配合行内 points 字段即可判读为"本窗口无值"，不会与真实坐标混淆。
+    private static func sanitized(_ value: Any) -> Any {
+        switch value {
+        case let d as Double: return d.isFinite ? d : -1.0
+        case let f as Float: return f.isFinite ? Double(f) : -1.0
+        case let c as CGFloat: return c.isFinite ? Double(c) : -1.0
+        default: return value
         }
     }
 }
