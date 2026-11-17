@@ -65,6 +65,24 @@
       "swiftExpected": "accepted"
     },
     {
+      "fileName": "CHANBI.tdx",
+      "kind": null,
+      "name": "缠论笔中枢",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "NOTEXT_BI:CHANBI,LINETHICK2;\nNOTEXT_BIUC:CHANBIUC,COLORLIGRAY,DOTLINE;\nNOTEXT_ZG:CHANBIZG,COLORBLUE;\nNOTEXT_ZD:CHANBIZD,COLORBLUE;\nSTICKLINE(CHANBISEAL,CHANBIZG,CHANBIZD,0,0),COLORBLUE;",
+      "swiftExpected": "accepted"
+    },
+    {
+      "fileName": "CHANSEG.tdx",
+      "kind": null,
+      "name": "缠论段中枢",
+      "scope": "main",
+      "group": "",
+      "formulaTemplate": "NOTEXT_SEG:CHANSEG,LINETHICK2,COLORORANGE;\nNOTEXT_SUC:CHANSEGUC,COLORLIGRAY,DOTLINE;\nNOTEXT_SZG:CHANSEGZG,COLORRED;\nNOTEXT_SZD:CHANSEGZD,COLORRED;\nSTICKLINE(CHANSEGSEAL,CHANSEGZG,CHANSEGZD,0,0),COLORRED;",
+      "swiftExpected": "accepted"
+    },
+    {
       "fileName": "CMK.tdx",
       "kind": null,
       "name": "CMK",
