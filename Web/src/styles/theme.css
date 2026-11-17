@@ -1,0 +1,43 @@
+/*
+  主题 CSS variables：与 KlineTheme（个人中心主题设置）建立的单一映射表。
+  色值对齐 UIKit 语义色（systemBackground / secondarySystemBackground / separator /
+  label / secondaryLabel / systemBlue）的日间与夜间值，保证与原生页面观感一致。
+*/
+
+:root {
+  --k-bg: #ffffff;
+  --k-bg-secondary: #f2f2f7;
+  --k-text: #000000;
+  --k-text-secondary: #6c6c70;
+  --k-divider: #c6c6c8;
+  --k-accent: #007aff;
+  --k-ok: #34c759;
+}
+
+[data-theme='dark'] {
+  --k-bg: #000000;
+  --k-bg-secondary: #1c1c1e;
+  --k-text: #ffffff;
+  --k-text-secondary: #9d9da1;
+  --k-divider: #38383a;
+  --k-accent: #0a84ff;
+  --k-ok: #30d158;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--k-bg);
+  color: var(--k-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* 防双击缩放/长按选中（管理页不需要文本选择） */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}

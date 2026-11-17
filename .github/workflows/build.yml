@@ -31,6 +31,14 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      # 混合架构 P0：Web 视图层 dist 必须先于 xcodebuild 生成，
+      # "Copy PyScripts" 脚本阶段会把 Web/dist 拷入 bundle 根的 WebUI/
+      - name: Build Web UI (Vue dist)
+        run: |
+          cd Web
+          npm ci
+          npm run build
+
       - name: Build .app (unsigned)
         run: |
           xcodebuild -project Kline.xcodeproj \

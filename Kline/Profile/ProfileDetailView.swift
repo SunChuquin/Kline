@@ -29,6 +29,8 @@ struct ProfileDetailView: View {
     @State private var showPythonLab = false
     /// 联机同步（局域网设备间同步，全屏 overlay）
     @State private var showLANSync = false
+    /// Web UI 试点（P0 混合架构桥接骨架，全屏 overlay）
+    @State private var showWebPilot = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @ObservedObject private var tradingLayoutStore = TradingLayoutStore.shared
     @ObservedObject private var pageLayoutStore = PageLayoutStore.shared
@@ -167,6 +169,27 @@ struct ProfileDetailView: View {
                     .buttonStyle(.plain)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(12)
+
+                    // Web UI 试点（P0 混合架构桥接骨架：Vue3 只读快照页 + 桥接探针，
+                    // 详见 .trae/documents/Kline-混合架构改造方案.md）
+                    Button(action: { showWebPilot = true }) {
+                        HStack(spacing: 10) {
+                            Text("Web 试点（P0）")
+                                .font(.system(size: 16))
+                                .foregroundColor(Color.primary)
+                            Spacer(minLength: 12)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(.tertiaryLabel))
+                        }
+                        .padding(16)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .accessibilityIdentifier("profile.webpilot.entry")
                 }
                 .padding()
             }
@@ -288,6 +311,13 @@ struct ProfileDetailView: View {
             // 联机同步：全屏页面（铺满，无遮罩），关闭走页内「返回」
             if showLANSync {
                 ZStack { LANSyncView(onClose: { showLANSync = false }) }
+                    .transition(.opacity)
+                    .zIndex(1000)
+            }
+            // Web UI 试点：全屏页面（铺满，无遮罩），关闭走页内「返回」。
+            // 全屏页打开时下方行不可点、天然互斥，故不加入 onChange 互斥链
+            if showWebPilot {
+                ZStack { WebHostView(onClose: { showWebPilot = false }) }
                     .transition(.opacity)
                     .zIndex(1000)
             }

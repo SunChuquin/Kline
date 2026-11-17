@@ -314,7 +314,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# 业务 Python 脚本 → bundle 根的 PyScripts/（同步组把资源平铺进 bundle 根，无法靠 Resources 阶段保目录结构）\nDEST=\"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/PyScripts\"\nrm -rf \"$DEST\"\ncp -R \"${SRCROOT}/Kline/PyScripts\" \"$DEST\"\necho \"PyScripts: 已拷贝 → $DEST\"\n";
+			shellScript = "# 业务 Python 脚本 → bundle 根的 PyScripts/（同步组把资源平铺进 bundle 根，无法靠 Resources 阶段保目录结构）\nDEST=\"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/PyScripts\"\nrm -rf \"$DEST\"\ncp -R \"${SRCROOT}/Kline/PyScripts\" \"$DEST\"\necho \"PyScripts: 已拷贝 → $DEST\"\n# Web UI dist → bundle 根的 WebUI/（混合架构 P0；CI 先于 xcodebuild 执行 npm build，本机构建需先在 Web/ 下 npm run build）\nWEB_DEST=\"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/WebUI\"\nrm -rf \"$WEB_DEST\"\nif [ -d \"${SRCROOT}/Web/dist\" ]; then\ncp -R \"${SRCROOT}/Web/dist\" \"$WEB_DEST\"\necho \"WebUI: 已拷贝 → $WEB_DEST\"\nelse\necho \"警告: Web/dist 缺失，本包不含 Web UI（宿主页会显示明确错误）\"\nfi\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

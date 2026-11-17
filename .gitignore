@@ -34,3 +34,7 @@ Kline/tdx.db
 
 # Python 引擎缓存（prepare_engine_cache.sh 产物，不入库）
 EngineCache/
+
+# Web UI（混合架构）：依赖与构建产物不入库，dist 由 CI 现场构建
+Web/node_modules/
+Web/dist/
