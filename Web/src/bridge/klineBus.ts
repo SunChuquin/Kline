@@ -72,8 +72,18 @@ export const klineBus = {
     listeners.set(event, list)
   },
 
-  /// Swift 注入入口：响应（含 id/ok）与事件（含 event）共用同一分发
+  /// Swift 注入入口：响应（含 id/ok）与事件（含 event）共用同一分发。
+  /// 防御：桥接边界兼容字符串入参（JSON 文本自动 parse），
+  /// 但 Swift 侧标准形态是 JSON.parse 后的对象。
   dispatch(raw: unknown): void {
+    if (!raw) return
+    if (typeof raw === 'string') {
+      try {
+        raw = JSON.parse(raw)
+      } catch {
+        return
+      }
+    }
     if (!raw || typeof raw !== 'object') return
     const obj = raw as Record<string, unknown>
     if (typeof obj.id === 'string' && typeof obj.ok === 'boolean') {

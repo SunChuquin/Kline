@@ -64,14 +64,16 @@ enum WebBridgeEvent {
 
 /// JSON 消息 → evaluateJavaScript 注入调用串。
 /// 注入安全性：把 JSON 文本整体再做一次 JSON 字符串编码得到合法字面量
-/// （JSON 字符串转义与 JS 字符串字面量兼容），避免手工转义出错。
+/// （JSON 字符串转义与 JS 字符串字面量兼容），避免手工转义出错；
+/// 页面侧以 JSON.parse 还原对象 —— 必须传对象给 dispatch（传字符串会被忽略，
+/// 2026-11-18 真机实证：双重编码直接注入字符串导致页面 6s 超时、响应全丢）。
 enum WebBridgeJS {
-    /// 生成 `window.klineBus.dispatch(<literal>);` 调用串；消息不可序列化时返回 nil
+    /// 生成 `window.klineBus.dispatch(JSON.parse(<literal>));` 调用串；消息不可序列化时返回 nil
     static func dispatchCall(_ message: [String: Any]) -> String? {
         guard let json = WebBridgeJSON.string(from: message),
               let literal = WebBridgeJSON.string(from: json)
         else { return nil }
-        return "window.klineBus.dispatch(\(literal));"
+        return "window.klineBus.dispatch(JSON.parse(\(literal)));"
     }
 }
 
