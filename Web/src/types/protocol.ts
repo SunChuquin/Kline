@@ -30,12 +30,14 @@
 //   theme.get         {} → {preference, mode}                主题读取（mode = 解析后实际外观）
 //   theme.set         {preference} → {preference}            主题写回（v2 首个写回动作，幂等）
 //   profile.snapshot  {} → ProfileSnapshot                   个人中心只读快照
+//   nav.switchTab     {index} → {}                           Web 请求切 Tab（原生底栏 selectedTab；P2-0 stub、P2-1 接实装）
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
 //   app.memory        {footprintMB}        页面就绪后一次
 //
 // ## 预留（P2 扩展，本版未实现；schema 见方案文档 §12.2 / fixtures reserved 区块）
+//   nav.tab            {index} → 事件：原生底栏切换时推 Web 切路由（监听方已就位 main.ts）
 //   favorites.snapshot  → {tabs, groups:[{id, kind:"manual"|"formula", name, rows:[…]}]}
 //                         rows 最小集：file/code/name/latestPrice/change/changePct/volume/turnover/lastDate/pinned/note
 //   favorites.refresh   {group?} → {}            下拉刷新触发重拉（手动分组 rowCache / 公式分组 refreshFormulaGroup）
@@ -83,6 +85,7 @@ export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
   theme: ['get', 'set'],
   profile: ['snapshot'],
+  nav: ['switchTab'],
 } as const
 
 // 已约定的 event 清单（协议 v2）

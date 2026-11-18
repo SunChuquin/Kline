@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import router from './router'
 import { klineBus } from './bridge/klineBus'
 import './styles/theme.css'
 // Vant 函数式 API（Toast/Dialog）样式需手动引入（组件样式由 VantResolver 按需注入）
@@ -21,4 +22,13 @@ if (typeof window.addEventListener === 'function') {
   })
 }
 
-createApp(App).mount('#app')
+createApp(App).use(router).mount('#app')
+
+// Tab 切换事件（协议 nav.tab）：原生底栏切换时由此切路由（P2-1 接入发送方）
+klineBus.on('nav.tab', (e) => {
+  const index = Number((e.payload ?? {})['index'])
+  const pathByTab = ['/home', '/favorites', '/market', '/simulation']
+  if (index >= 0 && index < pathByTab.length) {
+    router.push(pathByTab[index])
+  }
+})

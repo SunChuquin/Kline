@@ -8,7 +8,8 @@
       "payload": { "message": "TypeError: x is undefined", "source": "assets/index.js", "line": 42 } },
     { "id": "req_theme_get", "module": "theme", "action": "get", "payload": {} },
     { "id": "req_theme_set", "module": "theme", "action": "set", "payload": { "preference": "dark" } },
-    { "id": "req_profile_snapshot", "module": "profile", "action": "snapshot", "payload": {} }
+    { "id": "req_profile_snapshot", "module": "profile", "action": "snapshot", "payload": {} },
+    { "id": "req_nav_switch_tab", "module": "nav", "action": "switchTab", "payload": { "index": 1 } }
   ],
   "responses": [
     { "id": "req_app_ping", "ok": true, "data": { "clientTs": 123.0, "serverMs": 1763361600000 } },
@@ -32,6 +33,7 @@
   ],
   "reserved": {
     "comment": "P2 预留 schema（未实现，形状锁定防漂移）：Favorites 快照骨架见方案文档 §12.2",
+    "nav.tab": { "index": 1 },
     "favorites.snapshot": {
       "tabs": ["全部", "自选1"],
       "groups": [

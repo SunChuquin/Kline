@@ -76,8 +76,22 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "app":     return handleApp(request)
         case "theme":   return handleTheme(request)
         case "profile": return handleProfile(request)
+        case "nav":     return handleNav(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_module", message: "未知模块 \(request.module)")
+        }
+    }
+
+    /// nav 模块：Tab 导航桥接。switchTab 当前为 stub（P2-0 骨架），
+    /// P2-1 Favorites 接入时由 WebTabHost 注入 selectedTab 绑定实现真实切换。
+    private func handleNav(_ request: WebBridgeRequest) -> [String: Any] {
+        switch request.action {
+        case "switchTab":
+            let index = (request.payload["index"] as? Int) ?? -1
+            DebugLogger.shared.log("[WebBridge] nav.switchTab index=\(index)（stub：Tab 桥接 P2-1 实装）")
+            return WebBridgeResponse.ok(request.id, data: ["index": index])
+        default:
+            return WebBridgeResponse.fail(request.id, code: "unknown_action", message: "nav.\(request.action) 未实现")
         }
     }
 

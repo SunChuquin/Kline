@@ -13,6 +13,26 @@
   --k-divider: #c6c6c8;
   --k-accent: #007aff;
   --k-ok: #34c759;
+
+  /* Vant 主题桥：--van-* 指向 --k-* tokens（日间组），
+     Vant 组件随 data-theme 切换自动跟随，不引 ConfigProvider */
+  --van-primary-color: var(--k-accent);
+  --van-success-color: var(--k-ok);
+  --van-text-color: var(--k-text);
+  --van-text-color-2: var(--k-text-secondary);
+  --van-text-color-3: var(--k-text-tertiary);
+  --van-border-color: var(--k-divider);
+  --van-gray-1: #f7f8fa;
+  --van-gray-2: #f2f3f5;
+  --van-gray-3: #ebedf0;
+  --van-gray-4: #dcdee0;
+  --van-gray-5: #c8c9cc;
+  --van-gray-6: #a7a7a9;
+  --van-gray-7: #969799;
+  --van-gray-8: #646566;
+  --van-background: var(--k-bg);
+  --van-background-2: var(--k-bg-secondary);
+  --van-background-3: var(--k-bg);
 }
 
 [data-theme='dark'] {
@@ -24,6 +44,16 @@
   --k-divider: #38383a;
   --k-accent: #0a84ff;
   --k-ok: #30d158;
+
+  /* Vant 深色组（对齐 Vant 官方 dark 主题色板） */
+  --van-gray-1: #1a1a1c;
+  --van-gray-2: #222224;
+  --van-gray-3: #3a3a3c;
+  --van-gray-4: #4c4c4e;
+  --van-gray-5: #636365;
+  --van-gray-6: #949496;
+  --van-gray-7: #a9a9ad;
+  --van-gray-8: #d5d5d7;
 }
 
 * {
