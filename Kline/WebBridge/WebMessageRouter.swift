@@ -154,21 +154,13 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
 
     // MARK: - 回传与事件推送
 
-    /// 注入完成回调采样（排障期）：前 3 次无条件记录 evaluateJavaScript 的 error 形态，
-    /// 用于判明注入是否真的成功执行（2026-11-18：响应全丢但零错误日志的矛盾取证）
-    private var injectionSampleRemaining = 3
-
     private func respond(_ message: [String: Any], to webView: WKWebView) {
         guard let js = WebBridgeJS.dispatchCall(message) else {
             DebugLogger.shared.log("[WebBridge] 注入串构造失败（消息不可序列化）")
             return
         }
-        webView.evaluateJavaScript(js, completionHandler: { [weak self] _, error in
-            guard let self = self else { return }
-            if self.injectionSampleRemaining > 0 {
-                self.injectionSampleRemaining -= 1
-                DebugLogger.shared.log("[WebBridge] 注入采样: error=\(error?.localizedDescription ?? "nil")")
-            } else if let error = error {
+        webView.evaluateJavaScript(js, completionHandler: { _, error in
+            if let error = error {
                 DebugLogger.shared.log("[WebBridge] 响应回传失败: \(error.localizedDescription)")
             }
         })
