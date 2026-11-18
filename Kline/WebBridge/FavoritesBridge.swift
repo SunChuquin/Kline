@@ -70,7 +70,7 @@ enum FavoritesBridge {
         let group = resolveGroup(model, request.payload["group"] as? String)
         let current = fav.pinnedIDs(groupID: group.id).contains(metaID)
         if current != pinned {
-            if group.id == fav.allGroupID {
+            if group.id == FavoritesStore.allGroupID {
                 fav.togglePin(metaID)
             } else {
                 fav.togglePin(groupID: group.id, metaID: metaID)
