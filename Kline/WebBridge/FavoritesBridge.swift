@@ -69,7 +69,7 @@ enum FavoritesBridge {
         let fav = FavoritesStore.shared
         let group = resolveGroup(model, request.payload["group"] as? String)
         // 「全部」虚拟分组固顶为原生 no-op 语义（固顶是分组级功能）——显式报错而非静默无效
-        guard group.id != fav.allGroupID else {
+        guard group.id != FavoritesStore.allGroupID else {
             return WebBridgeResponse.fail(request.id, code: "invalid_payload",
                                           message: "「全部」为虚拟分组，请进入具体分组后固顶")
         }
@@ -173,7 +173,7 @@ enum FavoritesBridge {
             ])
         }
         return ["groups": outGroups, "loaded": DatabaseManager.shared.isLoaded,
-                "allGroupId": FavoritesStore.shared.allGroupID.uuidString]
+                "allGroupId": FavoritesStore.allGroupID.uuidString]
     }
 
     /// favorites.refresh {group?}：手动分组 → rowCache.refresh(metas:)；
