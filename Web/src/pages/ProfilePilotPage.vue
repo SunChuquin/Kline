@@ -1,47 +1,66 @@
 <template>
   <div class="page">
-    <div class="banner">Web 试点（P0）：只读快照 · 写操作桥接属 P1</div>
+    <div class="banner">Web 试点：只读快照 + 组件库验收（P1）</div>
 
-    <div v-if="!bridgeAvailable" class="card warn">
+    <div v-if="!bridgeAvailable" class="card-warn">
       非桥接环境（PC 浏览器开发调试）：以下为占位数据，桥接探针不可用
     </div>
 
-    <div class="card">
-      <div class="card-title">版本信息</div>
-      <div class="row"><span>App 版本</span><b>{{ snap.version }} ({{ snap.build }})</b></div>
-      <div class="row"><span>Web 构建</span><b>{{ buildTs }}</b></div>
-    </div>
+    <KCard title="版本信息">
+      <KCell label="App 版本" :value="snap.version + ' (' + snap.build + ')'" />
+      <KCell label="Web 构建" :value="buildTs" />
+    </KCard>
 
-    <div class="card">
-      <div class="card-title">显示主题</div>
-      <div class="row"><span>主题偏好</span><b>{{ themePreferenceTitle }}</b></div>
-      <div class="row"><span>实际外观</span><b>{{ themeMode === 'dark' ? '夜间' : '日间' }}</b></div>
-    </div>
+    <KCard title="显示主题">
+      <KCell label="主题偏好" :value="themePreferenceTitle" />
+      <KCell label="实际外观" :value="themeMode === 'dark' ? '夜间' : '日间'" />
+    </KCard>
 
-    <div class="card">
-      <div class="card-title">行情自动更新</div>
-      <div class="row"><span>状态</span><b>{{ snap.syncEnabled ? '开启' : '关闭' }}</b></div>
-      <div class="row"><span>时刻表</span><b>{{ scheduleText }}</b></div>
-      <div class="row"><span>仅交易日</span><b>{{ snap.tradingDaysOnly ? '是' : '否' }}</b></div>
-    </div>
+    <KCard title="行情自动更新">
+      <KCell label="状态" :value="snap.syncEnabled ? '开启' : '关闭'" />
+      <KCell label="时刻表" :value="scheduleText" />
+      <KCell label="仅交易日" :value="snap.tradingDaysOnly ? '是' : '否'" />
+    </KCard>
 
-    <div class="card">
-      <div class="card-title">数据库</div>
-      <div class="row"><span>主库状态</span><b :class="{ ok: snap.dbLoaded }">{{ snap.dbLoaded ? '已加载' : '未加载' }}</b></div>
-    </div>
+    <KCard title="数据库">
+      <KCell label="主库状态">
+        <template #value>
+          <b :class="{ ok: snap.dbLoaded }">{{ snap.dbLoaded ? '已加载' : '未加载' }}</b>
+        </template>
+      </KCell>
+    </KCard>
 
-    <div class="card">
-      <div class="card-title">桥接探针</div>
-      <div class="row"><span>桥接通道</span><b>{{ bridgeAvailable ? 'kline ✓' : '不可用' }}</b></div>
-      <div class="row">
-        <span>往返延迟</span>
-        <b>{{ rttMs >= 0 ? rttMs.toFixed(1) + ' ms' : '—' }}</b>
-      </div>
-      <div class="row">
-        <span>内存足迹</span>
-        <b>{{ memMB >= 0 ? memMB.toFixed(1) + ' MB' : '—' }}</b>
-      </div>
-    </div>
+    <KCard title="桥接探针">
+      <KCell label="桥接通道" :value="bridgeAvailable ? 'kline ✓' : '不可用'" />
+      <KCell label="往返延迟">
+        <template #value><b>{{ rttMs >= 0 ? rttMs.toFixed(1) + ' ms' : '—' }}</b></template>
+      </KCell>
+      <KCell label="内存足迹">
+        <template #value><b>{{ memMB >= 0 ? memMB.toFixed(1) + ' MB' : '—' }}</b></template>
+      </KCell>
+    </KCard>
+
+    <!-- 组件库验收演示：纯本地 state，不落 Store、不走桥接 -->
+    <KCard title="组件演示（不落 Store）">
+      <KCell label="KSwitch 开关">
+        <template #value><KSwitch v-model="demoSwitch" /></template>
+      </KCell>
+      <KCell label="KSelect 下拉">
+        <template #value>
+          <KSelect v-model="demoSelect" :options="demoOptions" />
+        </template>
+      </KCell>
+      <KCell label="KDialog 弹窗">
+        <template #value>
+          <KButton type="text" @click="demoDialogOpen = true">打开</KButton>
+        </template>
+      </KCell>
+    </KCard>
+
+    <KDialog v-model:open="demoDialogOpen" title="组件演示" width="280">
+      <p class="demo-dialog-text">KDialog 居中弹窗：遮罩 black 25%、圆角 12、点遮罩关闭。</p>
+      <KButton type="primary" block @click="demoDialogOpen = false">知道了</KButton>
+    </KDialog>
 
     <div class="footer">Kline 混合架构 · Swift 原生宿主 + Vue3 视图层 · 协议 v1</div>
   </div>
@@ -51,6 +70,12 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { klineBus } from '../bridge/klineBus'
 import { KnownEvents } from '../types/protocol'
+import KCard from '../components/kline/KCard.vue'
+import KCell from '../components/kline/KCell.vue'
+import KSwitch from '../components/kline/KSwitch.vue'
+import KSelect from '../components/kline/KSelect.vue'
+import KButton from '../components/kline/KButton.vue'
+import KDialog from '../components/kline/KDialog.vue'
 
 const buildTs = __BUILD_TS__
 const bridgeAvailable = ref(true)
@@ -66,6 +91,16 @@ const snap = reactive({
   tradingDaysOnly: true,
   dbLoaded: false,
 })
+
+// 组件演示（纯本地 state，不落 Store）
+const demoSwitch = ref(false)
+const demoSelect = ref('system')
+const demoDialogOpen = ref(false)
+const demoOptions = [
+  { label: '跟随系统', value: 'system' },
+  { label: '日间模式', value: 'light' },
+  { label: '夜间模式', value: 'dark' },
+]
 
 const themePreferenceTitle = computed(
   () => ({ system: '跟随系统', light: '日间模式', dark: '夜间模式' }[themePreference.value] ?? themePreference.value),
@@ -98,15 +133,6 @@ onMounted(async () => {
     bridgeAvailable.value = false
     return
   }
-
-  // 环境自报（桥接排障）：window.klineBus 挂载形态 + 通道可用性，落 Swift debug_log
-  void klineBus
-    .request('app', 'jsdiag', {
-      hasWindowBus: typeof (window as any).klineBus,
-      hasWebkitHandler: klineBus.isAvailable(),
-      buildTs,
-    })
-    .catch(() => {})
 
   klineBus.on(KnownEvents.themeChanged, (e) => applyTheme((e.payload ?? {}) as Record<string, unknown>))
   klineBus.on(KnownEvents.appMemory, (e) => {
@@ -154,46 +180,33 @@ onUnmounted(() => {
   padding: 8px 0 14px;
 }
 
-.card {
+.card-warn {
   background: var(--k-bg-secondary);
   border-radius: 12px;
   padding: 14px 16px;
   margin-bottom: 14px;
-}
-
-.card.warn {
   font-size: 13px;
   color: #b25000;
 }
 
-.card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--k-text-secondary);
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--k-divider);
-  margin-bottom: 4px;
+/* 卡片纵向间距 */
+.page > :deep(.k-card) {
+  margin-bottom: 14px;
 }
 
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 40px;
-  font-size: 15px;
+b {
+  font-weight: 500;
   color: var(--k-text);
 }
 
-.row span {
-  color: var(--k-text-secondary);
-}
-
-.row b {
-  font-weight: 500;
-}
-
-.row b.ok {
+b.ok {
   color: var(--k-ok);
+}
+
+.demo-dialog-text {
+  font-size: 14px;
+  color: var(--k-text-secondary);
+  margin: 0 0 14px;
 }
 
 .footer {
