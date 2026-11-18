@@ -46,7 +46,8 @@ function toggle(): void {
 }
 
 .k-switch__track {
-  display: block;
+  display: flex;
+  align-items: center; /* 垂直居中强制生效：真机 Safari 下 button 内 margin 布局有亚像素偏差 */
   width: 51px;
   height: 31px;
   border-radius: 15.5px;
@@ -60,9 +61,10 @@ function toggle(): void {
 
 .k-switch__thumb {
   display: block;
+  flex-shrink: 0;
   width: 27px;
   height: 27px;
-  margin: 2px;
+  margin-left: 2px;
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
