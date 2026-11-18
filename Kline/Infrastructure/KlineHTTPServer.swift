@@ -538,6 +538,12 @@ final class KlineHTTPServer {
                 //（/download/<file> 公共下载保持开放，供 PC 脚本取 IPA/导出，不含敏感配置）
                 guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
                 serveSandboxPath(String(path.dropFirst("/sandbox/".count)), connection: connection)
+            } else if method == "GET", path == "/web" {
+                // Web UI 调试通道（混合架构 P1）：PC 浏览器直开真机页面，对着真数据调样式布局。
+                // 纯静态 dist 资源（不含沙盒/用户数据），与 /download/<file> 同级免门禁。
+                serveWebUI("index.html", connection: connection)
+            } else if method == "GET", path.hasPrefix("/web/") {
+                serveWebUI(String(path.dropFirst("/web/".count)), connection: connection)
             } else if method == "GET", path.hasPrefix("/download/") {
                 let filename = String(path.dropFirst("/download/".count))
                 serveFile(filename, connection: connection)
@@ -1081,6 +1087,25 @@ final class KlineHTTPServer {
             .replacingOccurrences(of: "\"", with: "'")
         respond(connection, status: 200, contentType: "text/plain",
                 body: safe)
+    }
+
+    /// GET /web/<rel>：托管 bundle 根 WebUI/ dist（PC 浏览器直开真机页面的调试通道）。
+    /// 与 kline:// scheme handler 共用 WebUIFiles（同一份 MIME 映射与路径防御）。
+    private func serveWebUI(_ rel: String, connection: NWConnection) {
+        guard let file = WebUIFiles.read(rel) else {
+            respond(connection, status: 404, body: "not found: \(rel)")
+            return
+        }
+        let head = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: \(file.mime)\r\n"
+            + "Content-Length: \(file.data.count)\r\n"
+            + "Cache-Control: no-store\r\n"
+            + "Connection: close\r\n\r\n"
+        var payload = Data(head.utf8)
+        payload.append(file.data)
+        connection.send(content: payload, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
     }
 
     /// GET /download/<file>：返回 Downloads 目录下的文件
