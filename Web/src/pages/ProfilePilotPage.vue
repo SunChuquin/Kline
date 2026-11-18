@@ -44,6 +44,23 @@
       </KCell>
     </KCard>
 
+    <!-- Vant 引入验收：真机 Safari 15 渲染/交互/兼容性载体（不落 Store） -->
+    <KCard title="Vant 组件验收（不落 Store）">
+      <KCell label="van-switch">
+        <template #value><van-switch v-model="vSwitch" size="22px" /></template>
+      </KCell>
+      <KCell label="van-button + Toast">
+        <template #value>
+          <van-button size="small" type="primary" @click="onVantToast">轻提示</van-button>
+        </template>
+      </KCell>
+      <KCell label="van-dialog">
+        <template #value>
+          <van-button size="small" type="default" @click="onVantDialog">确认框</van-button>
+        </template>
+      </KCell>
+    </KCard>
+
     <div class="footer">Kline 混合架构 · Swift 原生宿主 + Vue3 视图层 · 协议 v2</div>
   </div>
 </template>
@@ -77,6 +94,18 @@ const themeOptions = [
   { label: '日间模式', value: 'light' },
   { label: '夜间模式', value: 'dark' },
 ]
+
+// Vant 引入验收（纯本地 state，不落 Store）
+import { showToast, showDialog } from 'vant'
+const vSwitch = ref(true)
+
+function onVantToast(): void {
+  showToast({ message: 'Vant Toast 轻提示', duration: 1500 })
+}
+
+function onVantDialog(): void {
+  showDialog({ title: 'Vant Dialog', message: '确认框演示：真机验证 Safari 15 渲染与交互。' })
+}
 
 const scheduleText = computed(() => (snap.scheduleTimes.length ? snap.scheduleTimes.join(' / ') : '—'))
 
