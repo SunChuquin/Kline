@@ -99,6 +99,15 @@ onMounted(async () => {
     return
   }
 
+  // 环境自报（桥接排障）：window.klineBus 挂载形态 + 通道可用性，落 Swift debug_log
+  void klineBus
+    .request('app', 'jsdiag', {
+      hasWindowBus: typeof (window as any).klineBus,
+      hasWebkitHandler: klineBus.isAvailable(),
+      buildTs,
+    })
+    .catch(() => {})
+
   klineBus.on(KnownEvents.themeChanged, (e) => applyTheme((e.payload ?? {}) as Record<string, unknown>))
   klineBus.on(KnownEvents.appMemory, (e) => {
     const mb = Number((e.payload ?? {})['footprintMB'])

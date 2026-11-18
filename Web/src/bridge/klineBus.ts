@@ -100,3 +100,8 @@ export const klineBus = {
     }
   },
 }
+
+// 挂载到 window：Swift 经 evaluateJavaScript 调 window.klineBus.dispatch(...)。
+// ES module 顶层导出不会自动出现在 window 上——缺失时每次注入都抛
+// ReferenceError/TypeError（2026-11-18 真机排障）。
+;(window as any).klineBus = klineBus

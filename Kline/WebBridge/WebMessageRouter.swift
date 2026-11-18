@@ -92,6 +92,18 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
             let rtt = (request.payload["rttMs"] as? Double) ?? 0
             DebugLogger.shared.log("[WebBridge] 页面实测桥接往返 \(String(format: "%.1f", rtt))ms")
             return WebBridgeResponse.ok(request.id)
+        case "jsdiag":
+            // 页面环境自报（桥接排障）：只落日志并回 ok
+            let hasWindowBus = (request.payload["hasWindowBus"] as? String) ?? "?"
+            let hasWebkit = (request.payload["hasWebkitHandler"] as? Bool) ?? false
+            DebugLogger.shared.log("[WebBridge][jsdiag] window.klineBus=\(hasWindowBus) webkitHandler=\(hasWebkit)")
+            return WebBridgeResponse.ok(request.id)
+        case "jsError":
+            // 页面全局 JS 异常回报（window.onerror / unhandledrejection）
+            let message = (request.payload["message"] as? String) ?? "?"
+            let line = (request.payload["line"] as? Int) ?? 0
+            DebugLogger.shared.log("[WebBridge][页面JS异常] \(message) @line \(line)")
+            return WebBridgeResponse.ok(request.id)
         case "memory":
             return WebBridgeResponse.ok(request.id, data: ["footprintMB": MemoryFootprint.physFootprintMB()])
         case "info":
@@ -142,10 +154,21 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
 
     // MARK: - 回传与事件推送
 
+    /// 注入完成回调采样（排障期）：前 3 次无条件记录 evaluateJavaScript 的 error 形态，
+    /// 用于判明注入是否真的成功执行（2026-11-18：响应全丢但零错误日志的矛盾取证）
+    private var injectionSampleRemaining = 3
+
     private func respond(_ message: [String: Any], to webView: WKWebView) {
-        guard let js = WebBridgeJS.dispatchCall(message) else { return }
-        webView.evaluateJavaScript(js, completionHandler: { _, error in
-            if let error = error {
+        guard let js = WebBridgeJS.dispatchCall(message) else {
+            DebugLogger.shared.log("[WebBridge] 注入串构造失败（消息不可序列化）")
+            return
+        }
+        webView.evaluateJavaScript(js, completionHandler: { [weak self] _, error in
+            guard let self = self else { return }
+            if self.injectionSampleRemaining > 0 {
+                self.injectionSampleRemaining -= 1
+                DebugLogger.shared.log("[WebBridge] 注入采样: error=\(error?.localizedDescription ?? "nil")")
+            } else if let error = error {
                 DebugLogger.shared.log("[WebBridge] 响应回传失败: \(error.localizedDescription)")
             }
         })
@@ -156,7 +179,11 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         guard isPageReady, let webView = webView else { return }
         let event = WebBridgeEvent.make("theme.changed", payload: ["preference": preference, "mode": resolvedMode])
         guard let js = WebBridgeJS.dispatchCall(event) else { return }
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        webView.evaluateJavaScript(js, completionHandler: { _, error in
+            if let error = error {
+                DebugLogger.shared.log("[WebBridge] 事件推送失败(theme): \(error.localizedDescription)")
+            }
+        })
     }
 
     /// 内存足迹推送（页面就绪后一次；探针数据仅落日志与页面探针卡片）
@@ -164,6 +191,10 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         guard isPageReady, let webView = webView else { return }
         let event = WebBridgeEvent.make("app.memory", payload: ["footprintMB": MemoryFootprint.physFootprintMB()])
         guard let js = WebBridgeJS.dispatchCall(event) else { return }
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        webView.evaluateJavaScript(js, completionHandler: { _, error in
+            if let error = error {
+                DebugLogger.shared.log("[WebBridge] 事件推送失败(memory): \(error.localizedDescription)")
+            }
+        })
     }
 }
