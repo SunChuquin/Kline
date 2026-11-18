@@ -63,22 +63,43 @@ enum WebBridgeEvent {
 }
 
 /// JSON 消息 → evaluateJavaScript 注入调用串。
-/// 注入安全性：把 JSON 文本整体再做一次 JSON 字符串编码得到合法字面量
-/// （JSON 字符串转义与 JS 字符串字面量兼容），避免手工转义出错；
-/// 页面侧以 JSON.parse 还原对象 —— 必须传对象给 dispatch（传字符串会被忽略，
-/// 2026-11-18 真机实证：双重编码直接注入字符串导致页面 6s 超时、响应全丢）。
+/// 注入安全性：JSON 文本 → JS 字符串字面量采用**手工转义**（\、"、控制字符），
+/// 不依赖 JSONSerialization 编码 top-level String —— iOS 真机实测其对字符串顶层
+/// 返回失败（2026-11-18 Build #613-615 根因：dispatchCall 恒 nil，响应从未注入，
+/// 表现为页面 6s 超时且无任何错误日志）。页面侧 JSON.parse 还原对象。
 enum WebBridgeJS {
     /// 生成 `window.klineBus.dispatch(JSON.parse(<literal>));` 调用串；消息不可序列化时返回 nil
     static func dispatchCall(_ message: [String: Any]) -> String? {
-        guard let json = WebBridgeJSON.string(from: message),
-              let literal = WebBridgeJSON.string(from: json)
-        else { return nil }
-        return "window.klineBus.dispatch(JSON.parse(\(literal)));"
+        guard let json = WebBridgeJSON.string(from: message) else { return nil }
+        return "window.klineBus.dispatch(JSON.parse(\(Self.jsStringLiteral(json))));"
+    }
+
+    /// Swift String → 合法 JS 字符串字面量（含两侧引号）
+    private static func jsStringLiteral(_ s: String) -> String {
+        var out = "\""
+        for scalar in s.unicodeScalars {
+            switch scalar {
+            case "\\": out.append("\\\\")
+            case "\"": out.append("\\\"")
+            case "\n": out.append("\\n")
+            case "\r": out.append("\\r")
+            case "\t": out.append("\\t")
+            default:
+                if scalar.value < 0x20 {
+                    out.append(String(format: "\\u%04x", scalar.value))
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        out.append("\"")
+        return out
     }
 }
 
 enum WebBridgeJSON {
-    /// Any → JSON 文本（sortedKeys 保证日志/注入内容确定性）；非合法对象返回 nil
+    /// dict/array → JSON 文本（sortedKeys 保证日志/注入内容确定性）；非合法对象返回 nil。
+    /// 注意：仅用于 **dict/array 顶层**——iOS 真机实测 JSONSerialization 拒绝 String 顶层。
     static func string(from object: Any) -> String? {
         guard JSONSerialization.isValidJSONObject(object) else { return nil }
         let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])

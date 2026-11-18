@@ -178,7 +178,10 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     func pushTheme(preference: String) {
         guard isPageReady, let webView = webView else { return }
         let event = WebBridgeEvent.make("theme.changed", payload: ["preference": preference, "mode": resolvedMode])
-        guard let js = WebBridgeJS.dispatchCall(event) else { return }
+        guard let js = WebBridgeJS.dispatchCall(event) else {
+            DebugLogger.shared.log("[WebBridge] 事件推送串构造失败(theme)")
+            return
+        }
         webView.evaluateJavaScript(js, completionHandler: { _, error in
             if let error = error {
                 DebugLogger.shared.log("[WebBridge] 事件推送失败(theme): \(error.localizedDescription)")
@@ -190,7 +193,10 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     func pushMemoryFootprint() {
         guard isPageReady, let webView = webView else { return }
         let event = WebBridgeEvent.make("app.memory", payload: ["footprintMB": MemoryFootprint.physFootprintMB()])
-        guard let js = WebBridgeJS.dispatchCall(event) else { return }
+        guard let js = WebBridgeJS.dispatchCall(event) else {
+            DebugLogger.shared.log("[WebBridge] 事件推送串构造失败(memory)")
+            return
+        }
         webView.evaluateJavaScript(js, completionHandler: { _, error in
             if let error = error {
                 DebugLogger.shared.log("[WebBridge] 事件推送失败(memory): \(error.localizedDescription)")
