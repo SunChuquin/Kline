@@ -11,6 +11,8 @@
         :key="g.id"
         class="tab-chip"
         :class="{ active: i === activeIdx }"
+        role="button"
+        :aria-selected="i === activeIdx"
         @click="activeIdx = i"
       >
         {{ g.name }}<span v-if="g.count > 0" class="tab-count">{{ g.count }}</span>
