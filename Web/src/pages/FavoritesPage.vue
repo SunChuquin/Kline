@@ -19,24 +19,54 @@
 
     <van-pull-refresh v-model="refreshing" success-text="已刷新" @refresh="onRefresh">
       <div class="rows">
-        <div v-for="row in currentRows" :key="row.file" class="fav-row" @click="openDetail(row)">
-          <div class="row-left">
-            <div class="row-name">
-              {{ row.name }}
-              <span v-if="row.pinned" class="pin-tag">顶</span>
+        <van-swipe-cell v-for="row in currentRows" :key="row.file" :disabled="!canEdit">
+          <div class="fav-row" @click="openDetail(row)">
+            <div class="row-left">
+              <div class="row-name">
+                {{ row.name }}
+                <span v-if="row.pinned" class="pin-tag">顶</span>
+              </div>
+              <div class="row-code">{{ row.code }}</div>
             </div>
-            <div class="row-code">{{ row.code }}</div>
+            <div class="row-right">
+              <div class="row-price" :class="tintClass(row)">{{ fmtPrice(row) }}</div>
+              <div class="row-pct" :class="tintClass(row)">{{ fmtPct(row) }}</div>
+            </div>
+            <button v-if="canEdit" class="row-more" @click.stop="openMenu(row)">⋯</button>
           </div>
-          <div class="row-right">
-            <div class="row-price" :class="tintClass(row)">{{ fmtPrice(row) }}</div>
-            <div class="row-pct" :class="tintClass(row)">{{ fmtPct(row) }}</div>
-          </div>
-        </div>
+          <template #right>
+            <van-button class="swipe-btn pin" type="primary" size="small" @click="togglePin(row)">
+              {{ row.pinned ? '取消固顶' : '固顶' }}
+            </van-button>
+            <van-button v-if="canEdit" class="swipe-btn remove" type="danger" size="small" @click="removeRow(row)">
+              移除
+            </van-button>
+          </template>
+        </van-swipe-cell>
         <div v-if="currentRows.length === 0" class="empty">
           {{ loaded ? '该分组暂无自选' : '主库加载中，稍后自动重试…' }}
         </div>
       </div>
     </van-pull-refresh>
+
+    <!-- 长按菜单的等价交互：行内「⋯」按钮 → 动作面板（Vant） -->
+    <van-action-sheet
+      v-model:show="menuOpen"
+      :actions="menuActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onMenuSelect"
+    />
+
+    <!-- 备注编辑（写回 setNote） -->
+    <van-dialog
+      v-model:show="noteOpen"
+      :title="noteTarget ? `备注 · ${noteTarget.name}` : '备注'"
+      show-cancel-button
+      @confirm="saveNote"
+    >
+      <van-field v-model="noteDraft" type="textarea" rows="2" maxlength="100" placeholder="备注内容（空 = 删除）" />
+    </van-dialog>
   </div>
 </template>
 
@@ -44,6 +74,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { klineBus } from '../bridge/klineBus'
 import { KnownEvents } from '../types/protocol'
+import { showToast } from 'vant'
 
 interface FavRow {
   file: string
@@ -145,6 +176,84 @@ function openDetail(row: FavRow): void {
   klineBus.request('favorites', 'openDetail', { file: row.file }).catch((e) => console.error(e))
 }
 
+// MARK: - 写回交互（P2-1b）：固顶/移除/排序/备注
+
+const menuOpen = ref(false)
+const noteOpen = ref(false)
+const noteDraft = ref('')
+const menuTarget = ref<FavRow | null>(null)
+const noteTarget = ref<FavRow | null>(null)
+
+/** 当前分组是否支持写回（manual / 全部虚拟分组）；公式分组只读 */
+const canEdit = computed(() => groups.value[activeIdx.value]?.kind !== 'formula')
+
+const menuActions = computed(() => {
+  const row = menuTarget.value
+  if (!row) return []
+  const actions: { name: string; value: string; color?: string }[] = [
+    { name: row.pinned ? '取消固顶' : '固顶', value: 'togglePin' },
+    { name: '移到最前', value: 'first' },
+    { name: '移到最后', value: 'last' },
+    { name: '备注', value: 'note' },
+  ]
+  if (canEdit.value && groups.value[activeIdx.value]?.kind === 'manual') {
+    actions.push({ name: '从分组移除', value: 'remove', color: '#ee0a24' })
+  }
+  return actions
+})
+
+function openMenu(row: FavRow): void {
+  menuTarget.value = row
+  menuOpen.value = true
+}
+
+function onMenuSelect(action: { value: string }): void {
+  const row = menuTarget.value
+  if (!row) return
+  switch (action.value) {
+    case 'togglePin':
+      void writeBack('setPinned', { file: row.file, pinned: !row.pinned, group: currentGroupId.value })
+      break
+    case 'first':
+    case 'last':
+      void writeBack('moveTo', { file: row.file, where: action.value, group: currentGroupId.value })
+      break
+    case 'note':
+      noteTarget.value = row
+      noteDraft.value = row.note
+      noteOpen.value = true
+      break
+    case 'remove':
+      void writeBack('removeFromGroup', { file: row.file, group: currentGroupId.value })
+      break
+  }
+}
+
+function togglePin(row: FavRow): void {
+  void writeBack('setPinned', { file: row.file, pinned: !row.pinned, group: currentGroupId.value })
+}
+
+function removeRow(row: FavRow): void {
+  void writeBack('removeFromGroup', { file: row.file, group: currentGroupId.value })
+}
+
+function saveNote(): void {
+  const row = noteTarget.value
+  if (!row) return
+  void writeBack('setNote', { file: row.file, note: noteDraft.value })
+}
+
+/** 写回公共路径：动作成功即回读快照（写回模式 v2：状态以回读为准） */
+async function writeBack(action: string, payload: Record<string, unknown>): Promise<void> {
+  try {
+    await klineBus.request('favorites', action, payload)
+    await pullSnapshot()
+  } catch (e) {
+    showToast({ message: String(e instanceof Error ? e.message : e).slice(0, 40), duration: 1800 })
+    console.error(action, e)
+  }
+}
+
 onMounted(async () => {
   const t = await klineBus.detect()
   bridgeOk.value = t !== 'none'
@@ -218,11 +327,12 @@ onMounted(async () => {
 }
 
 .fav-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-height: 52px;
-  padding: 6px 12px;
+  padding: 6px 34px 6px 12px;
   margin-bottom: 8px;
   background: var(--k-bg-secondary);
   border-radius: 10px;
@@ -231,6 +341,35 @@ onMounted(async () => {
 
 .fav-row:active {
   opacity: 0.6;
+}
+
+.row-more {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  color: var(--k-text-tertiary);
+  font-size: 18px;
+  font-weight: 700;
+  padding: 0;
+  cursor: pointer;
+}
+
+.swipe-btn {
+  height: 100%;
+  border-radius: 0;
+}
+
+.swipe-btn.pin {
+  width: 72px;
+}
+
+.swipe-btn.remove {
+  width: 60px;
 }
 
 .row-left {

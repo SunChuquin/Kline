@@ -22,17 +22,118 @@ enum FavoritesBridge {
             return refresh(groupIDString: request.payload["group"] as? String, id: request.id)
         case "openDetail":
             return openDetail(file: (request.payload["file"] as? String) ?? "", id: request.id)
-        case "setNote":
-            // P2-1b 实装（写回）
-            return WebBridgeResponse.fail(request.id, code: "unknown_action",
-                                          message: "favorites.setNote 属 P2-1b")
         case "setPinned":
-            return WebBridgeResponse.fail(request.id, code: "unknown_action",
-                                          message: "favorites.setPinned 属 P2-1b")
+            return setPinned(request)
+        case "setNote":
+            return setNote(request)
+        case "moveTo":
+            return moveTo(request)
+        case "removeFromGroup":
+            return removeFromGroup(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "favorites.\(request.action) 未实现")
         }
+    }
+
+    // MARK: - 写回（P2-1b）：file → metaID 反查，全部幂等/目标态语义，完成即推 changed
+
+    /// 编辑类写回完成 → 推 changed（页面回读权威快照）
+    private static func notifyEdit() {
+        WebMessageRouter.shared.pushEvent("favorites.changed", payload: ["reason": "edit"])
+    }
+
+    /// file → 当前主库 metaID
+    private static func metaID(forFile file: String) -> Int? {
+        DatabaseManager.shared.metaList.first(where: { $0.file == file })?.id
+    }
+
+    /// group 参数解析：UUID 匹配 tabs；不匹配回退当前分组
+    private static func resolveGroup(_ model: FavoritesPageModel, _ groupIDString: String?) -> FavoritesGroup {
+        if let s = groupIDString, let u = UUID(uuidString: s), let g = model.tabs.first(where: { $0.id == u }) {
+            return g
+        }
+        return model.currentGroup
+    }
+
+    /// favorites.setPinned {file, pinned, group?}：目标态语义（当前态 == 目标则无操作）
+    /// 「全部」虚拟分组走全局固顶（togglePin(metaID:)），真实分组走组内固顶
+    private static func setPinned(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let file = request.payload["file"] as? String,
+              let metaID = metaID(forFile: file),
+              let pinned = request.payload["pinned"] as? Bool else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "需要 file 与 pinned")
+        }
+        let model = FavoritesPageModel()
+        let fav = FavoritesStore.shared
+        let group = resolveGroup(model, request.payload["group"] as? String)
+        let current = fav.pinnedIDs(groupID: group.id).contains(metaID)
+        if current != pinned {
+            if group.id == fav.allGroupID {
+                fav.togglePin(metaID)
+            } else {
+                fav.togglePin(groupID: group.id, metaID: metaID)
+            }
+        }
+        notifyEdit()
+        return WebBridgeResponse.ok(request.id, data: ["pinned": pinned])
+    }
+
+    /// favorites.setNote {file, note}：空串 = 删除备注（FavoritesStore 同语义）
+    private static func setNote(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let file = request.payload["file"] as? String,
+              let metaID = metaID(forFile: file),
+              let note = request.payload["note"] as? String else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "需要 file 与 note")
+        }
+        FavoritesStore.shared.setNote(metaID: metaID, text: note)
+        notifyEdit()
+        return WebBridgeResponse.ok(request.id, data: ["note": note])
+    }
+
+    /// favorites.moveTo {file, where: "first"|"last", group?}：仅手动分组（组内顺序）
+    private static func moveTo(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let file = request.payload["file"] as? String,
+              let metaID = metaID(forFile: file),
+              let whereStr = request.payload["where"] as? String else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "需要 file 与 where")
+        }
+        let model = FavoritesPageModel()
+        let fav = FavoritesStore.shared
+        let group = resolveGroup(model, request.payload["group"] as? String)
+        guard group.kind == .manual else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "公式分组标的顺序跟随选股结果，不可手动调整")
+        }
+        switch whereStr {
+        case "first": fav.moveToFirst(groupID: group.id, metaID: metaID)
+        case "last": fav.moveToLast(groupID: group.id, metaID: metaID)
+        default:
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "where 必须为 first / last")
+        }
+        notifyEdit()
+        return WebBridgeResponse.ok(request.id, data: ["where": whereStr])
+    }
+
+    /// favorites.removeFromGroup {file, group?}：仅手动分组
+    private static func removeFromGroup(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let file = request.payload["file"] as? String,
+              let metaID = metaID(forFile: file) else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "需要 file")
+        }
+        let model = FavoritesPageModel()
+        let group = resolveGroup(model, request.payload["group"] as? String)
+        guard group.kind == .manual else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "公式分组标的不可手动移除")
+        }
+        FavoritesStore.shared.removeFromGroup(id: group.id, metaID: metaID)
+        notifyEdit()
+        return WebBridgeResponse.ok(request.id)
     }
 
     /// favorites.snapshot：分组结构 + 行情行最小字段集
