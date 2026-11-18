@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>缠论逐根回放核对器</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#161b22; --panel2:#1c232c; --line:#2a333f;
+    --fg:#d7dee8; --dim:#7d8a99; --accent:#5b8ff9;
+    --up:#ef5350; --down:#26a69a;
+    --bi:#5b8ff9; --seg:#f6bd16; --cen:#b37feb;
+    --uc:#5f6b7a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #app{display:flex;height:100vh;overflow:hidden}
+  aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  #syms{width:150px;flex:0 0 150px}
+  #side{width:340px;flex:0 0 340px;border-right:none;border-left:1px solid var(--line)}
+  .hd{padding:10px 12px;border-bottom:1px solid var(--line);font-size:11px;
+    letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+  .sym{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;
+    display:flex;flex-direction:column;gap:2px}
+  .sym:hover{background:var(--panel2)}
+  .sym.on{background:#1e2a3d;box-shadow:inset 3px 0 0 var(--accent)}
+  .sym b{font-weight:600;font-size:13px}
+  .sym span{font-size:11px;color:var(--dim)}
+  main{flex:1;display:flex;flex-direction:column;min-width:0}
+  #top{padding:8px 14px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:14px;flex-wrap:wrap}
+  #ttl{font-size:15px;font-weight:600}
+  #nowdate{font-family:ui-monospace,Menlo,monospace;font-size:16px;
+    color:#fff;background:#22303f;padding:2px 8px;border-radius:4px}
+  .badge{font-size:11px;padding:2px 7px;border-radius:3px;background:#222c38;
+    color:var(--dim);border:1px solid var(--line)}
+  .badge b{color:var(--fg);font-weight:600}
+  #chartwrap{flex:1;position:relative;min-height:0}
+  canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+  canvas.dragging{cursor:grabbing}
+  #legend{display:flex;gap:10px;font-size:11px;color:var(--dim);flex-wrap:wrap;align-items:center}
+  #legend span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  #legend svg{display:block}
+  #legend .note{color:#5d6875}
+  #barinfo{position:absolute;right:12px;top:10px;font-size:11px;
+    color:var(--dim);font-family:ui-monospace,Menlo,monospace;text-align:right;
+    pointer-events:none;line-height:1.7;background:rgba(15,18,22,.72);
+    padding:4px 8px;border-radius:4px}
+  #timeline{border-top:1px solid var(--line);padding:8px 14px 10px;background:var(--panel)}
+  #tlrow{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+  button{background:#22303f;color:var(--fg);border:1px solid var(--line);
+    border-radius:4px;padding:4px 9px;cursor:pointer;font-size:12px}
+  button:hover{background:#2b3b4d}
+  button.on{background:#2f4b70;border-color:#3d6ea8}
+  input[type=range]{flex:1;min-width:120px;accent-color:#5b8ff9}
+  #klab{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--dim);min-width:150px;text-align:right}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tab{flex:1;text-align:center;padding:8px 4px;font-size:12px;cursor:pointer;
+    color:var(--dim);border-bottom:2px solid transparent}
+  .tab.on{color:var(--fg);border-bottom-color:var(--accent);background:var(--panel2)}
+  .tab em{font-style:normal;font-size:10px;color:var(--dim);margin-left:3px}
+  #list{flex:1;overflow:auto}
+  .row{padding:6px 10px;border-bottom:1px solid #1e252e;font-size:12px;
+    font-family:ui-monospace,Menlo,monospace;cursor:pointer}
+  .row:hover{background:var(--panel2)}
+  .row .l1{display:flex;justify-content:space-between;gap:8px}
+  .row .l2{color:var(--dim);font-size:11px;margin-top:1px;
+    display:flex;justify-content:space-between;gap:8px}
+  .row.uc{background:#151a20;border-left:3px solid var(--uc);color:#8e9aa8}
+  .row.uc .l2{color:#66717e}
+  .row.sel{background:#1c3550;border-left:3px solid var(--accent);color:#fff;
+    box-shadow:inset 0 0 0 1px rgba(91,143,249,.45)}
+  .row.sel.uc{border-left-color:#9aa7b8;box-shadow:inset 0 0 0 1px rgba(154,167,184,.4)}
+  .row.sel .l2{color:#9fb4cc}
+  .tag{font-size:10px;padding:0 5px;border-radius:2px;border:1px solid}
+  .tag.ok{color:#4caf93;border-color:#2c5f52}
+  .tag.no{color:#8b95a3;border-color:#39424e;border-style:dashed}
+  .up{color:var(--up)} .down{color:var(--down)}
+  #verify{border-top:1px solid var(--line);padding:8px 12px;font-size:11px;
+    color:var(--dim);background:var(--panel2)}
+  #verify div{margin-bottom:3px;display:flex;justify-content:space-between;gap:8px}
+  #verify b{color:var(--fg);font-weight:500;font-family:ui-monospace,Menlo,monospace}
+  #hint{padding:6px 12px;font-size:11px;color:#5d6875;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="syms">
+    <div class="hd">标的</div>
+    <div id="symlist"></div>
+    <div id="hint">← → 逐根<br>Shift+← → 十根<br>Home/End 首末</div>
+  </aside>
+
+  <main>
+    <div id="top">
+      <span id="ttl">—</span>
+      <span id="nowdate">—</span>
+      <span class="badge">k <b id="knum">—</b></span>
+      <span class="badge">已截断 <b id="trunc">—</b> 根</span>
+      <span class="badge">笔 <b id="cntb">—</b></span>
+      <span class="badge">段 <b id="cnts">—</b></span>
+      <span class="badge">中枢 <b id="cntc">—</b></span>
+      <div id="legend">
+        <span><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#5b8ff9" stroke-width="1.4"/></svg>笔</span>
+        <span><svg width="30" height="12"><line x1="3" y1="6" x2="27" y2="6" stroke="#6f8fb8" stroke-width="1.2" stroke-dasharray="2 3"/><circle cx="3" cy="6" r="2" fill="#6f8fb8"/><circle cx="27" cy="6" r="2" fill="#6f8fb8"/></svg>笔·未确认</span>
+        <span><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#f6bd16" stroke-width="2.6"/></svg>段</span>
+        <span><svg width="30" height="12"><line x1="3" y1="6" x2="27" y2="6" stroke="#c9b27a" stroke-width="2.6" stroke-dasharray="9 4"/><rect x="1" y="4" width="4" height="4" fill="none" stroke="#c9b27a" stroke-width="1.4"/><rect x="25" y="4" width="4" height="4" fill="none" stroke="#c9b27a" stroke-width="1.4"/></svg>段·未确认</span>
+        <span><svg width="30" height="12"><rect x="1.5" y="1.5" width="27" height="9" fill="rgba(179,127,235,0.15)" stroke="#b37feb" stroke-width="1.4"/></svg>中枢</span>
+        <span><svg width="30" height="12"><rect x="1.5" y="1.5" width="27" height="9" fill="rgba(140,150,165,0.08)" stroke="#8b93a0" stroke-width="1.2" stroke-dasharray="6 3 1.5 3"/></svg>中枢·未确认</span>
+        <span class="note">实线=已确认</span>
+      </div>
+    </div>
+    <div id="chartwrap">
+      <canvas id="chart"></canvas>
+      <div id="barinfo"></div>
+    </div>
+    <div id="timeline">
+      <div id="tlrow">
+        <button id="b_first" title="首">⏮</button>
+        <button id="b_m10">−10</button>
+        <button id="b_m1">−1</button>
+        <button id="b_play">▶ 播放</button>
+        <button id="b_p1">+1</button>
+        <button id="b_p10">+10</button>
+        <button id="b_last" title="末">⏭</button>
+        <input id="slider" type="range" min="0" max="0" value="0" step="1">
+        <span id="klab">—</span>
+        <button id="z120">120</button>
+        <button id="z240" class="on">240</button>
+        <button id="z480">480</button>
+      </div>
+    </div>
+  </main>
+
+  <aside id="side">
+    <div class="tabs">
+      <div class="tab on" data-tab="b">笔<em id="tb">0</em></div>
+      <div class="tab" data-tab="s">段<em id="ts">0</em></div>
+      <div class="tab" data-tab="c">中枢<em id="tc">0</em></div>
+    </div>
+    <div id="list"></div>
+    <div id="verify"></div>
+  </aside>
+</div>
+
+<script id="DATA" type="application/json">__DATA__</script>
+<script>
+(function(){
+"use strict";
+const RAW = JSON.parse(document.getElementById('DATA').textContent);
+// 显式顺序：JS 会把 "399001"/"600010"/"999999" 这类整数键按数值重排，这里固定展示顺序
+const CODES = ["600010","999999","399001","000002","HSI","002613"].filter(c=>RAW[c]);
+
+/* ---------------- 状态还原：关键帧 + 增量 ---------------- */
+function toMaps(kf){
+  const b=new Map(), s=new Map(), c=new Map();
+  for(const r of kf[0]) b.set(r[0], r);
+  for(const r of kf[1]) s.set(r[0], r);
+  for(const r of kf[2]) c.set(r[0], r);
+  return {b:b, s:s, c:c};
+}
+function applyOps(m, ops){
+  for(const op of ops){
+    const t=op[0];
+    if(t===0) m.b.set(op[1], op.slice(1));
+    else if(t===1) m.b.delete(op[1]);
+    else if(t===2) m.s.set(op[1], op.slice(1));
+    else if(t===3) m.s.delete(op[1]);
+    else if(t===4) m.c.set(op[1], op.slice(1));
+    else if(t===5) m.c.delete(op[1]);
+  }
+}
+function snapshotAt(code, k){
+  const d=RAW[code];
+  const i=k-d.k0;
+  const j=Math.floor(i/d.kf);
+  const m=toMaps(d.key[j]);
+  const from=j*d.kf;
+  for(let t=from;t<i;t++){ applyOps(m, d.d[t]); }
+  return m;
+}
+
+/* ---------------- 视图状态 ---------------- */
+const V={code:CODES[0], k:0, tab:'b', zoom:240, play:null, hover:null, sel:null};
+const cache={};   // code -> {k, m}
+
+function data(){ return RAW[V.code]; }
+
+function ensureState(){
+  if(!cache[V.code]){
+    cache[V.code]=snapshotAt(V.code, V.k);
+  }
+}
+
+function seek(k, keepSel){
+  const d=data();
+  const lo=d.k0, hi=d.n-1;
+  k=Math.max(lo, Math.min(hi, k));
+  if(!keepSel) V.sel=null;          // 手动改时点（拖拽/滑块/步进/播放）清除选中态
+  if(k===V.k && cache[V.code]) return render();
+  const c=cache[V.code];
+  if(c && k===V.k+1){
+    applyOps(c, d.d[k-d.k0-1]);
+  }else if(c && k>V.k){
+    for(let t=V.k-d.k0; t<k-d.k0; t++){ applyOps(c, d.d[t]); }
+  }else{
+    cache[V.code]=snapshotAt(V.code,k);
+  }
+  V.k=k;
+  render();
+}
+
+/* 点击右栏结构：把它放进可见窗口，并保证该时点仍存在 */
+function jumpTo(t, key){
+  const d=data(), m=cache[V.code];
+  let anchorK, exists, fallback, minTarget=d.k0;
+  const mp = t==='b'?m.b : t==='s'?m.s : m.c;
+  const rec=mp.get(key);
+  if(!rec) return;
+  anchorK=rec[1];
+  exists=k=>{
+    const st=snapshotAt(V.code,k);
+    return (t==='b'?st.b:t==='s'?st.s:st.c).has(key);
+  };
+  fallback=anchorK;
+  const half=Math.floor(Math.min(V.zoom, d.n-d.k0)/2);
+  let target=Math.min(d.n-1, Math.max(anchorK+half, minTarget));
+  if(!exists(target)){
+    let found=null;
+    for(let step=1; step<=240 && found===null; step++){
+      const a=target-step, b=target+step;
+      if(a>=d.k0 && exists(a)) found=a;
+      else if(b<=d.n-1 && exists(b)) found=b;
+    }
+    target = found!==null ? found : Math.max(d.k0, Math.min(fallback, d.n-1));
+  }
+  V.sel={t:t, k:key};
+  V.hover=null;
+  seek(target, true);
+  const el=document.querySelector('.row.sel');
+  if(el) el.scrollIntoView({block:'nearest'});
+}
+
+function sorted(m, key){
+  return [...m.values()].sort((a,b)=>a[0]-b[0]);
+}
+
+/* ---------------- 渲染 ---------------- */
+const cv=document.getElementById('chart');
+const ctx=cv.getContext('2d');
+let CW=0, CH=0;
+
+function resize(){
+  const r=cv.parentElement.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  CW=r.width; CH=r.height;
+  cv.width=Math.round(CW*dpr); cv.height=Math.round(CH*dpr);
+  cv.style.width=CW+'px'; cv.style.height=CH+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  render();
+}
+window.addEventListener('resize', resize);
+
+const PAD={l:8,r:64,t:26,b:22};
+
+function fmtP(v){
+  const a=Math.abs(v);
+  if(a>=10000) return v.toFixed(0);
+  if(a>=100) return v.toFixed(2);
+  if(a>=1) return v.toFixed(2);
+  return v.toFixed(3);
+}
+function fmtDate(n){
+  const s=String(n);
+  return s.length===8 ? s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6) : s;
+}
+
+function render(){
+  ensureState();
+  const d=data();
+  const m=cache[V.code];
+  const bars=d.bars;
+  const k=V.k;
+  const Vn=Math.min(V.zoom, k+1);
+  const x0=Math.max(0, k-Vn+1), x1=k;
+
+  ctx.clearRect(0,0,CW,CH);
+  const pw=CW-PAD.l-PAD.r, ph=CH-PAD.t-PAD.b;
+  if(pw<=0||ph<=0) return;
+
+  // y 范围只取可见 bar（绝不用 k 之后的数据）
+  let lo=Infinity, hi=-Infinity;
+  for(let i=x0;i<=x1;i++){
+    if(bars[i][3]<lo) lo=bars[i][3];
+    if(bars[i][2]>hi) hi=bars[i][2];
+  }
+  if(!isFinite(lo)||!isFinite(hi)) return;
+  const pad=(hi-lo)*0.06 || Math.abs(hi)*0.01 || 1;
+  lo-=pad; hi+=pad;
+  const n=x1-x0+1;
+  const bw=pw/n;
+  const xOf=i=>PAD.l+(i-x0+0.5)*bw;
+  const yOf=p=>PAD.t+(hi-p)/(hi-lo)*ph;
+  const clip=(fn)=>{ctx.save();ctx.beginPath();ctx.rect(PAD.l,PAD.t,pw,ph);ctx.clip();fn();ctx.restore();};
+
+  // 网格 + 价格刻度
+  ctx.font='10px ui-monospace,Menlo,monospace';
+  ctx.textBaseline='middle';
+  for(let g=0;g<=4;g++){
+    const y=PAD.t+ph*g/4;
+    ctx.strokeStyle='#1e252e'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PAD.l,y); ctx.lineTo(PAD.l+pw,y); ctx.stroke();
+    const p=hi-(hi-lo)*g/4;
+    ctx.fillStyle='#5d6875'; ctx.textAlign='left';
+    ctx.fillText(fmtP(p), PAD.l+pw+6, y);
+  }
+  // 日期刻度
+  const ticks=Math.min(6,n);
+  ctx.textAlign='center'; ctx.fillStyle='#5d6875';
+  for(let g=0;g<ticks;g++){
+    const i=x0+Math.round((n-1)*g/(ticks-1||1));
+    const x=xOf(i);
+    ctx.strokeStyle='#1e252e';
+    ctx.beginPath(); ctx.moveTo(x,PAD.t+ph); ctx.lineTo(x,PAD.t+ph+4); ctx.stroke();
+    const lab=fmtDate(bars[i][0]);
+    const w=ctx.measureText(lab).width;
+    let tx=Math.max(PAD.l+w/2, Math.min(PAD.l+pw-w/2, x));
+    ctx.fillText(lab, tx, PAD.t+ph+12);
+  }
+
+  clip(()=>{
+    // 中枢：先画填充再画边框
+    const cens=sorted(m.c,'c');
+    for(const c of cens){
+      const [beginKlu,endKlu,zg,zd,lineCount,conf,ended,reason]=c;
+      if(beginKlu>x1 || endKlu<x0) continue;
+      const sel = V.sel && V.sel.t==='c' && V.sel.k===beginKlu;
+      const xa=xOf(Math.max(beginKlu,x0-1)), xb=xOf(Math.min(endKlu,x1));
+      const ya=yOf(zg), yb=yOf(zd);
+      const y1=Math.min(ya,yb), h=Math.abs(yb-ya)||1;
+      ctx.fillStyle=sel? (conf?'rgba(91,143,249,0.24)':'rgba(154,167,184,0.18)')
+                       : (conf?'rgba(179,127,235,0.10)':'rgba(140,150,165,0.07)');
+      ctx.fillRect(xa,y1,Math.max(xb-xa,1),h);
+      ctx.setLineDash(conf?[]:[9,4,2,4]);   // 未确认中枢：点划线框
+      ctx.strokeStyle=sel?'rgba(255,255,255,0.95)':(conf?'rgba(179,127,235,0.95)':'rgba(139,147,160,0.9)');
+      ctx.lineWidth=sel?2.4:(conf?1.4:1.3);
+      ctx.shadowColor=sel?'rgba(91,143,249,0.9)':'transparent';
+      ctx.shadowBlur=sel?10:0;
+      ctx.strokeRect(xa+0.5,y1+0.5,Math.max(xb-xa-1,1),Math.max(h-1,1));
+      ctx.shadowBlur=0;
+      ctx.setLineDash([]);
+    }
+    // 段
+    for(const s of sorted(m.s,'s')){
+      const [startKlu,endKlu,dir,bv,ev,conf,reason]=s;
+      if(startKlu>x1 || endKlu<x0) continue;
+      const sel = V.sel && V.sel.t==='s' && V.sel.k===startKlu;
+      ctx.beginPath();
+      ctx.moveTo(xOf(startKlu),yOf(bv));
+      ctx.lineTo(xOf(endKlu),yOf(ev));
+      // 未确认段：长划线 + 粗线 + 两端空心方框（与笔的「短点线 + 圆点」明确区分）
+      ctx.setLineDash(conf?[]:[14,6]);
+      ctx.strokeStyle=sel?'rgba(255,255,255,0.95)':(conf?'rgba(246,189,22,0.95)':'rgba(201,178,122,0.95)');
+      ctx.lineWidth=sel?4:(conf?2.4:2.6);
+      ctx.shadowColor=sel?'rgba(246,189,22,0.9)':'transparent';
+      ctx.shadowBlur=sel?10:0;
+      ctx.stroke();
+      ctx.shadowBlur=0;
+      ctx.setLineDash([]);
+      if(!conf && !sel){
+        const sq=3.2;
+        ctx.strokeStyle='rgba(201,178,122,0.95)'; ctx.lineWidth=1.4;
+        for(const [px,py] of [[xOf(startKlu),yOf(bv)],[xOf(endKlu),yOf(ev)]]){
+          ctx.strokeRect(px-sq/2,py-sq/2,sq,sq);
+        }
+      }
+    }
+    // 笔
+    for(const b of sorted(m.b,'b')){
+      const [fromKlu,toKlu,dir,bv,ev,conf]=b;
+      if(fromKlu>x1 || toKlu<x0) continue;
+      const sel = V.sel && V.sel.t==='b' && V.sel.k===fromKlu;
+      ctx.beginPath();
+      ctx.moveTo(xOf(fromKlu),yOf(bv));
+      ctx.lineTo(xOf(toKlu),yOf(ev));
+      // 未确认笔：细点线 + 两端实心圆点（与段的长划线/方框区分）
+      ctx.setLineDash(conf?[]:[2,3]);
+      ctx.strokeStyle=sel?'rgba(255,255,255,0.95)':(conf?'rgba(91,143,249,0.95)':'rgba(111,143,184,0.95)');
+      ctx.lineWidth=sel?3.2:(conf?1.35:1.15);
+      ctx.shadowColor=sel?'rgba(91,143,249,0.95)':'transparent';
+      ctx.shadowBlur=sel?9:0;
+      ctx.stroke();
+      ctx.shadowBlur=0;
+      ctx.setLineDash([]);
+      if(!conf && !sel){
+        ctx.fillStyle='rgba(111,143,184,0.95)';
+        for(const [px,py] of [[xOf(fromKlu),yOf(bv)],[xOf(toKlu),yOf(ev)]]){
+          ctx.beginPath(); ctx.arc(px,py,2,0,Math.PI*2); ctx.fill();
+        }
+      }
+    }
+    // K 线
+    const cwid=Math.max(1, Math.min(9, bw*0.62));
+    for(let i=x0;i<=x1;i++){
+      const b=bars[i], o=b[1], hh=b[2], ll=b[3], c=b[4];
+      const up=c>=o;
+      const x=xOf(i);
+      ctx.strokeStyle=up?'#ef5350':'#26a69a';
+      ctx.fillStyle=up?'#ef5350':'#26a69a';
+      ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(x,yOf(hh)); ctx.lineTo(x,yOf(ll)); ctx.stroke();
+      const yo=yOf(o), yc=yOf(c);
+      const top=Math.min(yo,yc), hgt=Math.max(Math.abs(yo-yc),1);
+      ctx.fillRect(x-cwid/2, top, cwid, hgt);
+    }
+    // 当前时点竖线
+    const xk=xOf(k);
+    ctx.strokeStyle='rgba(255,255,255,0.28)';
+    ctx.setLineDash([2,3]); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(xk,PAD.t); ctx.lineTo(xk,PAD.t+ph); ctx.stroke();
+    ctx.setLineDash([]);
+    // 鼠标十字线
+    if(V.hover!==null && V.hover>=x0 && V.hover<=x1){
+      const xh=xOf(V.hover);
+      ctx.strokeStyle='rgba(255,255,255,0.18)';
+      ctx.beginPath(); ctx.moveTo(xh,PAD.t); ctx.lineTo(xh,PAD.t+ph); ctx.stroke();
+    }
+  });
+
+  renderHover();
+  renderSide(m);
+  renderTop(m);
+}
+
+function renderTop(m){
+  const d=data(), k=V.k;
+  const lastB=sorted(m.b,'b'), lastS=sorted(m.s,'s'), lastC=sorted(m.c,'c');
+  document.getElementById('ttl').textContent=d.name+'  '+d.code;
+  document.getElementById('nowdate').textContent=fmtDate(d.bars[k][0]);
+  document.getElementById('knum').textContent=k;
+  document.getElementById('trunc').textContent=k+1;
+  document.getElementById('cntb').textContent=lastB.length;
+  document.getElementById('cnts').textContent=lastS.length;
+  document.getElementById('cntc').textContent=lastC.length;
+  document.getElementById('tb').textContent=lastB.length;
+  document.getElementById('ts').textContent=lastS.length;
+  document.getElementById('tc').textContent=lastC.length;
+  document.getElementById('klab').textContent='k='+k+'  '+fmtDate(d.bars[k][0]);
+  const sl=document.getElementById('slider');
+  sl.value=String(k-d.k0);
+  sl.max=String(d.n-1-d.k0);
+}
+
+function renderHover(){
+  const el=document.getElementById('barinfo');
+  const d=data();
+  const i=V.hover!==null?V.hover:V.k;
+  if(i<0||i>=d.bars.length){el.textContent='';return;}
+  const b=d.bars[i];
+  const chg=i>0?(b[4]-d.bars[i-1][4])/d.bars[i-1][4]*100:0;
+  el.innerHTML=fmtDate(b[0])+'　k='+i+
+    '<br>开 '+fmtP(b[1])+'　高 '+fmtP(b[2])+
+    '<br>低 '+fmtP(b[3])+'　收 '+fmtP(b[4])+
+    '<br><span style="color:'+(chg>=0?'#ef5350':'#26a69a')+'">'+(chg>=0?'+':'')+chg.toFixed(2)+'%</span>';
+}
+
+function renderSide(m){
+  const d=data(), k=V.k;
+  const list=document.getElementById('list');
+  const rows=[];
+  const ucTag='<span class="tag no">未确认</span>';
+  const okTag='<span class="tag ok">已确认</span>';
+
+  if(V.tab==='b'){
+    const arr=sorted(m.b,'b').slice().reverse();
+    for(const b of arr){
+      const [fk,tk,dir,bv,ev,conf]=b;
+      const chg=bv?((ev-bv)/Math.abs(bv)*100):0;
+      const sel=V.sel&&V.sel.t==='b'&&V.sel.k===fk;
+      rows.push('<div class="row'+(conf?'':' uc')+(sel?' sel':'')+'" data-t="b" data-k="'+fk+'">'+
+        '<div class="l1"><span>'+(dir>0?'<span class="up">▲ 上</span>':'<span class="down">▼ 下</span>')+
+        ' '+fmtDate(d.bars[fk][0])+' → '+fmtDate(d.bars[tk][0])+'</span><span>'+(conf?okTag:ucTag)+'</span></div>'+
+        '<div class="l2"><span>'+fmtP(bv)+' → '+fmtP(ev)+'</span><span class="'+(chg>=0?'up':'down')+'">'+
+        (chg>=0?'+':'')+chg.toFixed(2)+'%　'+(tk-fk)+'根</span></div></div>');
+    }
+  }else if(V.tab==='s'){
+    const arr=sorted(m.s,'s').slice().reverse();
+    for(const s of arr){
+      const [sk,ek,dir,bv,ev,conf,reason]=s;
+      const chg=bv?((ev-bv)/Math.abs(bv)*100):0;
+      const sel=V.sel&&V.sel.t==='s'&&V.sel.k===sk;
+      rows.push('<div class="row'+(conf?'':' uc')+(sel?' sel':'')+'" data-t="s" data-k="'+sk+'">'+
+        '<div class="l1"><span>'+(dir>0?'<span class="up">▲ 上</span>':'<span class="down">▼ 下</span>')+
+        ' '+fmtDate(d.bars[sk][0])+' → '+fmtDate(d.bars[ek][0])+'</span><span>'+(conf?okTag:ucTag)+'</span></div>'+
+        '<div class="l2"><span>'+fmtP(bv)+' → '+fmtP(ev)+'　'+reason+'</span><span class="'+(chg>=0?'up':'down')+'">'+
+        (chg>=0?'+':'')+chg.toFixed(2)+'%</span></div></div>');
+    }
+  }else if(V.tab==='c'){
+    const arr=sorted(m.c,'c').slice().reverse();
+    for(const c of arr){
+      const [bk,ek,zg,zd,lc,conf,ended,reason]=c;
+      const sel=V.sel&&V.sel.t==='c'&&V.sel.k===bk;
+      rows.push('<div class="row'+(conf?'':' uc')+(sel?' sel':'')+'" data-t="c" data-k="'+bk+'">'+
+        '<div class="l1"><span>'+fmtDate(d.bars[bk][0])+' → '+fmtDate(d.bars[ek][0])+'</span>'+
+        '<span>'+(conf?okTag:ucTag)+'</span></div>'+
+        '<div class="l2"><span>['+fmtP(zd)+', '+fmtP(zg)+']　'+lc+'笔　'+reason+'</span>'+
+        '<span>'+(ended?'已终结':'延伸中')+'</span></div></div>');
+    }
+  }
+  const sc=list.scrollTop;
+  list.innerHTML=rows.length?rows.join(''):'<div style="padding:16px;color:#5d6875">当前时点无结构</div>';
+  list.scrollTop=sc;
+
+  // 校验信息
+  const lastOK=(arr,idx)=>arr.filter(x=>x[idx]===1).pop();
+  const bs=sorted(m.b,'b'), ss=sorted(m.s,'s'), cs=sorted(m.c,'c');
+  const lb=lastOK(bs,5), ls=lastOK(ss,5), lc=lastOK(cs,5);
+  const ucB=bs.filter(x=>x[5]===0).length;
+  const ucS=ss.filter(x=>x[5]===0).length;
+  const ucC=cs.filter(x=>x[5]===0).length;
+  document.getElementById('verify').innerHTML=
+    '<div><span>最后已确认笔</span><b>'+(lb?fmtDate(d.bars[lb[0]][0])+'→'+fmtDate(d.bars[lb[1]][0]):'无')+'</b></div>'+
+    '<div><span>最后已确认段</span><b>'+(ls?fmtDate(d.bars[ls[0]][0])+'→'+fmtDate(d.bars[ls[1]][0])+' '+ls[6]:'无')+'</b></div>'+
+    '<div><span>最后已确认中枢</span><b>'+(lc?fmtDate(d.bars[lc[0]][0])+'→'+fmtDate(d.bars[lc[1]][0]):'无')+'</b></div>'+
+    '<div><span>未确认 笔/段/中枢</span><b>'+ucB+' / '+ucS+' / '+ucC+'</b></div>';
+}
+
+/* ---------------- 交互 ---------------- */
+function buildSyms(){
+  const box=document.getElementById('symlist');
+  box.innerHTML=CODES.map(c=>{
+    const d=RAW[c];
+    return '<div class="sym'+(c===V.code?' on':'')+'" data-c="'+c+'">'+
+      '<b>'+d.name+'</b><span>'+d.code+' · '+d.n+' 根 · '+d.n0+'</span></div>';
+  }).join('');
+  box.querySelectorAll('.sym').forEach(el=>{
+    el.onclick=()=>{
+      const c=el.dataset.c;
+      if(c===V.code) return;
+      cancelDrag();
+      V.hover=null;
+      V.wheelAcc=0;
+      V.sel=null;
+      V.code=c;
+      V.k=RAW[c].n-1;
+      cache[c]=null;
+      box.querySelectorAll('.sym').forEach(x=>x.classList.toggle('on',x.dataset.c===c));
+      V.k=RAW[c].n-1;
+      cache[c]=snapshotAt(c,V.k);
+      render();
+    };
+  });
+}
+
+document.getElementById('slider').oninput=e=>{
+  seek(data().k0+Number(e.target.value));
+};
+document.getElementById('b_first').onclick=()=>seek(data().k0);
+document.getElementById('b_last').onclick=()=>seek(data().n-1);
+document.getElementById('b_m1').onclick=()=>seek(V.k-1);
+document.getElementById('b_p1').onclick=()=>seek(V.k+1);
+document.getElementById('b_m10').onclick=()=>seek(V.k-10);
+document.getElementById('b_p10').onclick=()=>seek(V.k+10);
+document.getElementById('b_play').onclick=()=>{
+  if(V.play){clearInterval(V.play);V.play=null;document.getElementById('b_play').textContent='▶ 播放';document.getElementById('b_play').classList.remove('on');}
+  else{
+    document.getElementById('b_play').textContent='⏸ 暂停';
+    document.getElementById('b_play').classList.add('on');
+    V.play=setInterval(()=>{
+      if(V.k>=data().n-1){clearInterval(V.play);V.play=null;
+        document.getElementById('b_play').textContent='▶ 播放';
+        document.getElementById('b_play').classList.remove('on');return;}
+      seek(V.k+1);
+    },90);
+  }
+};
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick=()=>{
+    V.tab=t.dataset.tab;
+    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+    render();
+  };
+});
+document.getElementById('list').addEventListener('click',e=>{
+  const row=e.target.closest?e.target.closest('.row'):null;
+  if(!row||!row.dataset.t) return;
+  jumpTo(row.dataset.t, Number(row.dataset.k));
+});
+[120,240,480].forEach(z=>{
+  document.getElementById('z'+z).onclick=()=>{
+    V.zoom=z;
+    [120,240,480].forEach(y=>document.getElementById('z'+y).classList.toggle('on',y===z));
+    render();
+  };
+});
+window.addEventListener('keydown',e=>{
+  const tag=(e.target.tagName||'').toLowerCase();
+  if(tag==='input') return;
+  if(e.key==='ArrowLeft'){seek(V.k+(e.shiftKey?-10:-1));e.preventDefault();}
+  else if(e.key==='ArrowRight'){seek(V.k+(e.shiftKey?10:1));e.preventDefault();}
+  else if(e.key==='Home'){seek(data().k0);e.preventDefault();}
+  else if(e.key==='End'){seek(data().n-1);e.preventDefault();}
+});
+function barAtPixel(x){
+  const k=V.k;
+  const Vn=Math.min(V.zoom,k+1);
+  const x0=Math.max(0,k-Vn+1), x1=k;
+  const n=x1-x0+1, pw=CW-PAD.l-PAD.r;
+  if(pw<=0) return null;
+  const bw=pw/n;
+  const i=x0+Math.floor((x-PAD.l)/bw);
+  return (i<x0||i>x1)?null:i;
+}
+
+let drag=null, pendingK=null, rafId=0;
+function flushSeek(){
+  rafId=0;
+  if(pendingK===null) return;
+  const t=pendingK; pendingK=null;
+  if(t!==V.k) seek(t);
+}
+function scheduleSeek(k){
+  pendingK=k;
+  if(!rafId) rafId=requestAnimationFrame(flushSeek);
+}
+function cancelDrag(){
+  drag=null; pendingK=null;
+  if(rafId){cancelAnimationFrame(rafId);rafId=0;}
+  cv.classList.remove('dragging');
+}
+
+cv.addEventListener('pointerdown',e=>{
+  if(e.button!==0) return;
+  const pw=CW-PAD.l-PAD.r;
+  if(pw<=0) return;
+  const Vn0=Math.min(V.zoom,V.k+1);
+  drag={x0:e.clientX, k0:V.k, bw:pw/Vn0};
+  cv.classList.add('dragging');
+  try{cv.setPointerCapture(e.pointerId);}catch(_){}
+  V.hover=null;
+  V.sel=null;              // 开始拖拽即清除选中态
+  render();
+  e.preventDefault();
+});
+cv.addEventListener('pointermove',e=>{
+  if(drag){
+    const dx=e.clientX-drag.x0;
+    const target=drag.k0+Math.round(-dx/drag.bw);
+    const d=data();
+    scheduleSeek(Math.max(d.k0, Math.min(d.n-1, target)));
+    return;
+  }
+  const r=cv.getBoundingClientRect();
+  const i=barAtPixel(e.clientX-r.left);
+  if(i!==V.hover){V.hover=i;render();}
+});
+function endDrag(e){
+  if(!drag) return;
+  drag=null;
+  cv.classList.remove('dragging');
+  try{cv.releasePointerCapture(e.pointerId);}catch(_){}
+  if(pendingK!==null) flushSeek();
+}
+cv.addEventListener('pointerup',endDrag);
+cv.addEventListener('pointercancel',endDrag);
+cv.addEventListener('mouseleave',()=>{ if(!drag){V.hover=null;render();} });
+cv.addEventListener('wheel',e=>{
+  if(Math.abs(e.deltaX)<=Math.abs(e.deltaY)) return;
+  e.preventDefault();
+  const d=data();
+  V.wheelAcc=(V.wheelAcc||0)+e.deltaX;
+  const step=Math.trunc(V.wheelAcc/40);
+  if(step!==0){
+    V.wheelAcc-=step*40;
+    seek(Math.max(d.k0, Math.min(d.n-1, V.k+step)));
+  }
+},{passive:false});
+
+/* ---------------- 启动 ---------------- */
+CODES.forEach(c=>{RAW[c].n0=fmtDate(RAW[c].bars[0][0]);});
+buildSyms();
+V.k=RAW[V.code].n-1;
+cache[V.code]=snapshotAt(V.code,V.k);
+resize();
+})();
+</script>
+</body>
+</html>

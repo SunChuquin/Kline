@@ -151,7 +151,8 @@ extension KlineChartView {
                 // 图内不重复渲染；若 portal 未提供或 hideInChart=false（单图）：按钮保持在图内指标栏
                 let shouldHideButtonInChart = (mainLegendPortal?.hideInChart ?? false)
                 if !shouldHideButtonInChart {
-                    IndicatorNameButton(title: mainLegendTitle, onTap: {
+                    IndicatorNameButton(title: mainLegendTitle,
+                                        identifier: "chart.mainIndicatorButton", onTap: {
                         editorUI.showSubSheet = false
                         withAnimation { editorUI.showMainSheet = !editorUI.showMainSheet }
                     })

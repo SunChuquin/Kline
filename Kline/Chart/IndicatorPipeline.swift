@@ -39,6 +39,16 @@ final class IndicatorComputationStore: ObservableObject {
     var chanDumpKey = ""
     /// 主图最近一次求值区间（绝对下标 + 根数）：绘制探针用，定位通道数组与可见窗口的对齐关系
     var lastMainCalc: (start: Int, end: Int, count: Int)? = nil
+    /// 缠论（引用 CHANBI/CHANSEG 的主图行）最近一次求值右缘（绝对索引）：
+    /// 缠论必须截到可见窗口右缘，右缘变化即视为过期并重算（不穿越未来）；-1 = 未按截断口径算过
+    var chanCalcEnd = -1
+    /// 缠论行按「右缘键」缓存的计算结果（键 = entry.id|start|end）：来回拖动回退到算过的右缘时直接命中，
+    /// 零重算。只存缠论行（其余主图行不随右缘变化，本来就能命中 mainCache）
+    var chanUnitCache: [String: MainIndicatorCache.UnitSet] = [:]
+    /// chanUnitCache 的 LRU 顺序（队首为最久未用）：超容量时淘汰队首
+    var chanUnitCacheOrder: [String] = []
+    /// chanUnitCache 容量：每份约 (行数 × 全量根数 × 8B)，8 份足以覆盖一次来回拖动的常见右缘集合
+    let chanUnitCacheCapacity = 8
     /// 主图绘制探针的最近一次键（同可见窗口不重复落盘）
     var drawProbeKey = ""
 
@@ -87,6 +97,7 @@ final class IndicatorComputationStore: ObservableObject {
                 indicatorCoverageStart = entry.coverageStart
                 indicatorCoverageEnd = entry.coverageEnd
                 bgCoverageEnd = entry.bgCoverageEnd
+                chanCalcEnd = entry.chanCalcEnd
             }
         }
     }
@@ -228,10 +239,19 @@ func mainIndicatorEntries(store: SystemIndicatorStore,
     return entries
 }
 
-/// 主图指标公式是否引用缠论通道（CHANBI/CHANSEG 系列）：是则求值必须用全量 K 线
+/// 主图指标公式是否引用缠论通道（CHANBI/CHANSEG 系列）：是则求值区间必须按可见右缘截断
 func referencesChanChannel(_ formula: String) -> Bool {
     let f = formula.uppercased()
     return f.contains("CHANBI") || f.contains("CHANSEG")
+}
+
+/// 缠论右缘截断契约：计算区间止于**可见窗口右缘**（min(endIndex, 末根)），
+/// 绝不越过它去用「未来」K 线推导笔/段/中枢。抽成纯函数便于单测锁定（ChanTruncationTests）。
+enum IndicatorPipeline {
+    static func chanCalcEnd(endIndex: Int, count: Int) -> Int {
+        guard count > 0 else { return -1 }
+        return min(endIndex, count - 1)
+    }
 }
 
 /// 主图指标默认颜色（未被公式 COLORXXX 覆盖时使用）
@@ -243,7 +263,8 @@ private func mainLineDefaultColor(_ id: String, _ i: Int) -> Color {
     }
 }
 
-/// 缠论通道行（8 通道）：整行无值时也**保留行**，保证"屏幕里还有 K 线"时指标不整体隐藏
+/// 缠论通道行（笔/段折线 + 中枢轨道/封口，含未确认 *UC 通道）：整行无值时也**保留行**，
+/// 保证"屏幕里还有 K 线"时指标不整体隐藏
 /// （结构尚未形成只会让该行画不出东西，不应导致整条指标消失）。
 /// 普通指标行不受影响：31 个内置指标的整行 NaN 丢弃行为保持逐字节不变。
 private func isChanRow(_ out: TDXOutputLine) -> Bool {
@@ -335,6 +356,26 @@ private func chanCenters(_ zg: IndicatorLine?, _ zd: IndicatorLine?,
     return out
 }
 
+/// 合并「已确认中枢」与「未封闭中枢（*UC 轨道）」：同一区间只保留已确认那条，
+/// 未确认的追加并打 `unconfirmed: true`。这样 dump 的中枢数与拆分通道前完全一致。
+private func mergeChanCenters(_ confirmed: [[String: Any]],
+                              _ unconfirmed: [[String: Any]]) -> [[String: Any]] {
+    guard !unconfirmed.isEmpty else { return confirmed }
+    var out = confirmed
+    let known = Set(confirmed.compactMap { c -> String? in
+        guard let a = c["startIdx"] as? Int, let b = c["endIdx"] as? Int else { return nil }
+        return "\(a)-\(b)"
+    })
+    for c in unconfirmed {
+        guard let a = c["startIdx"] as? Int, let b = c["endIdx"] as? Int,
+              !known.contains("\(a)-\(b)") else { continue }
+        var q = c
+        q["unconfirmed"] = true
+        out.append(q)
+    }
+    return out.sorted { (($0["startIdx"] as? Int) ?? 0) < (($1["startIdx"] as? Int) ?? 0) }
+}
+
 /// 缠论结构导出：主图提交时若存在通道曲线，写 Documents/chan_dump.json（PC 侧用
 /// sandbox_cli.py get chan_dump.json <本地路径> 读取）。导出的数值全部派生自最终提交的曲线，
 /// 与主图实际绘制逐点同源；笔数 = 端点数 − 1、段数 = 段端点数 − 1（相邻两笔/两段共用端点 bar）。
@@ -349,10 +390,16 @@ extension KlineChartView {
                                     chanPoints(curves.first { $0.chanKind == "CHANBIUC" }, data: sortedData))
         let segPts = mergeChanPoints(chanPoints(segLine, data: sortedData),
                                      chanPoints(curves.first { $0.chanKind == "CHANSEGUC" }, data: sortedData))
-        let biCenters = chanCenters(curves.first { $0.chanKind == "CHANBIZG" },
-                                    curves.first { $0.chanKind == "CHANBIZD" }, data: sortedData)
-        let segCenters = chanCenters(curves.first { $0.chanKind == "CHANSEGZG" },
-                                     curves.first { $0.chanKind == "CHANSEGZD" }, data: sortedData)
+        let biCenters = mergeChanCenters(
+            chanCenters(curves.first { $0.chanKind == "CHANBIZG" },
+                        curves.first { $0.chanKind == "CHANBIZD" }, data: sortedData),
+            chanCenters(curves.first { $0.chanKind == "CHANBIZGUC" },
+                        curves.first { $0.chanKind == "CHANBIZDUC" }, data: sortedData))
+        let segCenters = mergeChanCenters(
+            chanCenters(curves.first { $0.chanKind == "CHANSEGZG" },
+                        curves.first { $0.chanKind == "CHANSEGZD" }, data: sortedData),
+            chanCenters(curves.first { $0.chanKind == "CHANSEGZGUC" },
+                        curves.first { $0.chanKind == "CHANSEGZDUC" }, data: sortedData))
         let key = "\(metaId ?? -1)|\(period.rawValue)|\(sortedData.count)"
             + "|\(sortedData[0].date)|\(sortedData[sortedData.count - 1].date)"
             + "|\(biPts.count)|\(segPts.count)|\(biCenters.count)|\(segCenters.count)"
@@ -689,16 +736,28 @@ extension KlineChartView {
         if !force, drag.isDragging { drag.needsRefreshAfterDrag = true; return }
         // 主图放大（全屏裸K）：不计算任何主图指标
         if mainFullscreen { computation.mainCurves = []; return }
+        // 主图条目提前求：缠论行依赖「可见窗口右缘」决定截断点，
+        // 下面所有缓存复用分支都必须把「右缘已变」视为过期，否则会复用由未来数据推导的结构
+        let mainEntries = mainIndicatorEntries(store: SystemIndicatorStore.shared,
+                                               customStore: customStore,
+                                               config: config, customFormula: activeCustomIndicator?.formula,
+                                               period: self.period)
+        let hasChan = mainEntries.contains { referencesChanChannel($0.formula) }
+        // 缠论计算右缘：可见窗口最右一根（训练态 = 训练日），绝不允许越界到未来
+        let chanEnd = IndicatorPipeline.chanCalcEnd(endIndex: endIndex, count: sortedData.count)
+        let chanStale = hasChan && computation.chanCalcEnd != chanEnd
         // 后台正确计算已覆盖整个可见窗口且指标配置未变（如退出放大恢复显示）：
         // 直接从缓存恢复完整曲线，避免在主线程全量重算所有主图指标造成明显卡顿。
         // 配置真正变化时指纹不一致，不会命中恢复，照常走下方 force 重算
-        if computation.bgCoverageEnd >= endIndex, let metaId = metaId {
+        if computation.bgCoverageEnd >= endIndex, !chanStale, let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             let aligned = entry.mainCurves.allSatisfy { $0.values.count == sortedData.count }
             if entry.configFingerprint == Self.currentConfigFingerprint(period: self.period),
-               entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty, aligned {
+               entry.bgCoverageEnd >= endIndex, !entry.mainCurves.isEmpty, aligned,
+               !hasChan || entry.chanCalcEnd == chanEnd {
                 computation.mainCurves = entry.mainCurves
                 computation.mainCache = entry.mainCache
+                computation.chanCalcEnd = entry.chanCalcEnd
                 return
             }
         }
@@ -708,16 +767,14 @@ extension KlineChartView {
         // 数据追加后旧曲线长度会短于数据：此时即使"已覆盖"也不能复用，否则可见窗口右移即整行消失
         let aligned = computation.mainCurves.allSatisfy { $0.values.count == sortedData.count }
         // 滑动复核审计：每次重算入口记录一次决策依据（滑动期间应命中下面的复用分支，不触发 chan 计算）
-        DebugLogger.shared.log("[ChanCalc] 求值复核 si=\(startIndex) ei=\(endIndex) bgEnd=\(computation.bgCoverageEnd) force=\(force) curves=\(computation.mainCurves.count) aligned=\(aligned) covered=\(bgCovered)")
-        if bgCovered, !force, !computation.mainCurves.isEmpty, aligned { return }
+        DebugLogger.shared.log("[ChanCalc] 求值复核 si=\(startIndex) ei=\(endIndex) bgEnd=\(computation.bgCoverageEnd) force=\(force) curves=\(computation.mainCurves.count) aligned=\(aligned) covered=\(bgCovered) chanEnd=\(chanEnd) chanCalcEnd=\(computation.chanCalcEnd) chanStale=\(chanStale)")
+        if bgCovered, !force, !chanStale, !computation.mainCurves.isEmpty, aligned { return }
         // 后台尚未覆盖可见窗口（如缩放到全部 / 滑到未算区域）：不在此同步计算近似指标，
         // 同步计算量随可见 K 数线性增长，显示全部时会阻塞主线程卡顿；保持当前已覆盖曲线，
         // 未覆盖部分渲染时因 NaN 自然显示裸K，由后台 prefetch 继续推进覆盖后替换
-        if !force, !bgCovered, !computation.mainCurves.isEmpty, aligned { return }
+        if !force, !bgCovered, !chanStale, !computation.mainCurves.isEmpty, aligned { return }
         var curves: [IndicatorLine] = []
         if !config.showBareK {
-            let store = SystemIndicatorStore.shared
-            let custom = activeCustomIndicator
             // 计算区间选择（同 recomputeSub）：
             // - 正确覆盖（bgCovered）用全量已覆盖区间；否则 mergedCalcRange 近似前台（可见+预热）。
             // - 【2026-10-16 修正】原「联动隔离+force 首开用全量 [0..<count]」例外已删除：
@@ -734,17 +791,23 @@ extension KlineChartView {
             }
 
             // 数据驱动：主图指标集合来自 .tdx（SCOPE=main），只计算已启用的，按输出行缓存
-            let entries = mainIndicatorEntries(store: store, customStore: customStore,
-                                               config: config, customFormula: custom?.formula,
-                                               period: self.period)
-            // 缠论通道是整段历史算法（笔/段/中枢依赖全量 K 线），可见窗口切片会得到不同结构：
-            // 只要启用了引用通道的主图指标，求值区间强制全量，保证与 chan.py CL-V1 逐项一致
-            if !sortedData.isEmpty, entries.contains(where: { referencesChanChannel($0.formula) }) {
-                calcStart = 0
-                calcEnd = sortedData.count - 1
+            let entries = mainEntries
+            // 缠论行单独用 [0, chanEnd]：笔/段/中枢是整段历史算法，起点必须 0，
+            // 但**不得使用可见窗口右缘之后的数据**（训练态即训练日），与回放页口径一致。
+            // 关键：只有缠论行按右缘截断，其余主图行（MA/CMK…）保持自己的区间不变——
+            // 否则每次平移都会把全部主图指标按全量重算一遍（实测占 300~390ms 的主要开销）。
+            if !sortedData.isEmpty, hasChan { computation.chanCalcEnd = chanEnd }
+            let normalRange = (start: calcStart, end: calcEnd)
+            let chanRange = (start: 0, end: chanEnd)
+            func entryRange(_ e: MainIndicatorEntry) -> (start: Int, end: Int) {
+                (hasChan && !sortedData.isEmpty && referencesChanChannel(e.formula)) ? chanRange : normalRange
             }
-            // 绘制探针：记录本次主图求值区间（绝对下标 + 根数）
-            computation.lastMainCalc = (calcStart, calcEnd, calcEnd - calcStart + 1)
+            // 绘制探针：有缠论行时记录缠论截断区间（绝对下标 + 根数）
+            if hasChan, !sortedData.isEmpty {
+                computation.lastMainCalc = (chanRange.start, chanRange.end, chanRange.end - chanRange.start + 1)
+            } else {
+                computation.lastMainCalc = (normalRange.start, normalRange.end, normalRange.end - normalRange.start + 1)
+            }
             let customColor = customStore.indicators.first { $0.id == config.activeCustomIndicatorID(for: self.period) }?.color
             let activeIDs = Set(entries.map { $0.id })
             // ===== 【首帧引擎实验】原 Swift 前台主图求值（2026-10-12 临时注释禁用，真机体验反馈后决定去留）=====
@@ -760,15 +823,15 @@ extension KlineChartView {
             // ===== 引擎路径：缓存有单元的条目按单元粒度提交；formulaKey 变化（首开/改指标）的
             //       条目按公式文本直接进波次（text_eval 内部拆分，免独立 split 轮次）——
             //       两条路同帧合并为一次 Python call，完成后回填单元缓存并提交 =====
-            let (pending, formulaLevel) = collectMainPendingUnits(entries: entries, calcStart: calcStart, calcEnd: calcEnd)
+            let (pending, formulaLevel) = collectMainPendingUnits(entries: entries, rangeFor: entryRange)
             assembleMainCurvesFromCache(into: &curves, entries: entries)
             if !formulaLevel.isEmpty {
                 evaluateMainFormulasViaEngine(formulaLevel, entries: entries, customColor: customColor,
-                                              calcStart: calcStart, calcEnd: calcEnd)
+                                              rangeFor: entryRange)
             }
             if !pending.isEmpty {
                 evaluateMainPendingViaEngine(pending, entries: entries, customColor: customColor,
-                                             calcStart: calcStart, calcEnd: calcEnd)
+                                             rangeFor: entryRange)
             }
             // 清理已禁用/不再使用的指标缓存，避免残留占用
             for key in computation.mainCache.units.keys where !activeIDs.contains(key) {
@@ -809,6 +872,7 @@ extension KlineChartView {
             e.coverageEnd = computation.indicatorCoverageEnd
             // 覆盖末端只增不减，避免后台/旧任务已算得更远时被本次写回往回推
             e.bgCoverageEnd = max(e.bgCoverageEnd, computation.bgCoverageEnd)
+            e.chanCalcEnd = computation.chanCalcEnd
             e.configFingerprint = fp
         }
     }
@@ -827,14 +891,29 @@ extension KlineChartView {
     /// - formulaLevel：formulaKey 变化（首开/改指标）的条目——缓存先标新 key、units 置空，
     ///   按公式文本整体进波次（text_eval 内部拆分），完成后由回填写回单元缓存。
     private func collectMainPendingUnits(entries: [MainIndicatorEntry],
-                                         calcStart: Int, calcEnd: Int)
+                                         rangeFor: (MainIndicatorEntry) -> (start: Int, end: Int))
         -> (pending: [MainPendingUnit], formulaLevel: [(entryIndex: Int, entry: MainIndicatorEntry)]) {
         var pending: [MainPendingUnit] = []
         var formulaLevel: [(entryIndex: Int, entry: MainIndicatorEntry)] = []
         for (ei, entry) in entries.enumerated() {
-            let formulaKey = "\(entry.formula)|\(calcStart)|\(calcEnd)"
+            let r = rangeFor(entry)
+            let formulaKey = "\(entry.formula)|\(r.start)|\(r.end)"
             var cache = computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
             if cache.formulaKey != formulaKey {
+                // 缠论行：先查「右缘键」结果缓存（同一右缘来回拖动时零重算）。
+                // 命中要求行数/长度与当前数据一致，避免数据被替换后复用错位结果
+                let lruKey = "\(entry.id)|\(r.start)|\(r.end)"
+                if referencesChanChannel(entry.formula),
+                   let hit = computation.chanUnitCache[lruKey], hit.formulaKey == formulaKey,
+                   hit.rows.allSatisfy({ row in
+                       row.line.map { $0.values.count == sortedData.count } ?? true
+                   }) {
+                    computation.mainCache.units[entry.id] = hit
+                    computation.chanUnitCacheOrder.removeAll { $0 == lruKey }
+                    computation.chanUnitCacheOrder.append(lruKey)
+                    DebugLogger.shared.log("[ChanTiming] lru-hit entry=\(entry.id) range=\(r.start)..\(r.end)")
+                    continue
+                }
                 cache.formulaKey = formulaKey
                 cache.units = []
                 cache.rows = []
@@ -850,28 +929,59 @@ extension KlineChartView {
         return (pending, formulaLevel)
     }
 
+    /// 写入缠论行结果 LRU（超出容量淘汰最久未用）。只由 formula 级求值完成回调调用：
+    /// 此时该指标的全部输出行都已按同一右缘算完，缓存可直接整体复用
+    private func storeChanUnitCache(entryID: String, start: Int, end: Int,
+                                    cache: MainIndicatorCache.UnitSet) {
+        let key = "\(entryID)|\(start)|\(end)"
+        computation.chanUnitCache[key] = cache
+        computation.chanUnitCacheOrder.removeAll { $0 == key }
+        computation.chanUnitCacheOrder.append(key)
+        let capacity = computation.chanUnitCacheCapacity
+        while computation.chanUnitCacheOrder.count > capacity {
+            let evicted = computation.chanUnitCacheOrder.removeFirst()
+            computation.chanUnitCache[evicted] = nil
+        }
+    }
+
     /// 主图 formula 级引擎求值（首开/改指标路径）：公式文本直接进波次（免独立 split 轮次，
     /// text_eval 内部拆分），完成回调把单元文本+各行结果写回单元缓存并统一提交。
     private func evaluateMainFormulasViaEngine(_ formulas: [(entryIndex: Int, entry: MainIndicatorEntry)],
                                                entries: [MainIndicatorEntry],
                                                customColor: Color?,
-                                               calcStart: Int, calcEnd: Int) {
-        let calcData = calcData(from: calcStart, to: calcEnd)
-        guard !calcData.isEmpty, !formulas.isEmpty else { return }
+                                               rangeFor: (MainIndicatorEntry) -> (start: Int, end: Int)) {
+        guard !formulas.isEmpty else { return }
         guard KlinePythonBridge.shared.isReady else {
             engineReadyRetry { self.recomputeMainCurves() }
             return
         }
+        // 按求值区间分组：缠论行 [0..chanEnd] 与其余主图行各自独立提交，
+        // 平移只重算缠论组，不再把 MA/CMK 等一起按全量重算
+        var groups: [(start: Int, end: Int, items: [(entryIndex: Int, entry: MainIndicatorEntry)])] = []
+        for f in formulas {
+            let r = rangeFor(f.entry)
+            if let gi = groups.firstIndex(where: { $0.start == r.start && $0.end == r.end }) {
+                groups[gi].items.append(f)
+            } else {
+                groups.append((r.start, r.end, [f]))
+            }
+        }
         computation.engineMainGen += 1
         let gen = computation.engineMainGen
-        let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
-        for f in formulas {
-            PyTDXWave.shared.submitFormula(barsKey: barsKey, data: calcData, formulaText: f.entry.formula) { units in
+        for g in groups {
+            let calcData = calcData(from: g.start, to: g.end)
+            guard !calcData.isEmpty else { continue }
+            let barsKey = "wave|\(calcData.count)|\(g.start)|\(g.end)"
+            // 缠论截断耗时探针：从提交波次到曲线回填的墙钟时间（含 Python 求值 + 主线程提交）
+            let timingT0 = CFAbsoluteTimeGetCurrent()
+            let timingChan = g.items.contains { referencesChanChannel($0.entry.formula) }
+            for f in g.items {
+                PyTDXWave.shared.submitFormula(barsKey: barsKey, data: calcData, formulaText: f.entry.formula) { units in
                 // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
                 guard self.computation.engineMainGen == gen else { return }
                 let entry = entries[f.entryIndex]
                 var cache = self.computation.mainCache.units[entry.id] ?? MainIndicatorCache.UnitSet()
-                guard cache.formulaKey == "\(entry.formula)|\(calcStart)|\(calcEnd)" else { return }
+                guard cache.formulaKey == "\(entry.formula)|\(g.start)|\(g.end)" else { return }
                 // 回填单元缓存：文本（后续改参数走单元粒度增量）+ 各行结果（成功且非全 NaN 才写 line）
                 cache.units = units.map { TDXOutputLineUnit(name: $0.name, text: $0.text) }
                 cache.rows = units.enumerated().map { i, unit in
@@ -882,12 +992,22 @@ extension KlineChartView {
                                                  i: i, out: out),
                        !self.allNaN(built.values) || isChanRow(out) {
                         row.key = unit.text
-                        row.line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
+                        row.line = self.padToFull(built, calcStart: g.start, calcEnd: g.end)
                     }
                     return row
                 }
                 self.computation.mainCache.units[entry.id] = cache
+                // 缠论行按右缘键入 LRU：拖回同一右缘直接命中，零重算
+                if referencesChanChannel(entry.formula) {
+                    self.storeChanUnitCache(entryID: entry.id, start: g.start, end: g.end, cache: cache)
+                }
+                if timingChan {
+                    DebugLogger.shared.log(String(format: "[ChanTiming] foreground bars=%d range=%d..%d ms=%.1f",
+                                                  calcData.count, g.start, g.end,
+                                                  (CFAbsoluteTimeGetCurrent() - timingT0) * 1000))
+                }
                 self.scheduleMainCommit(entries: entries)
+                }
             }
         }
     }
@@ -907,20 +1027,32 @@ extension KlineChartView {
     private func evaluateMainPendingViaEngine(_ pending: [MainPendingUnit],
                                               entries: [MainIndicatorEntry],
                                               customColor: Color?,
-                                              calcStart: Int, calcEnd: Int) {
-        let calcData = calcData(from: calcStart, to: calcEnd)
-        guard !calcData.isEmpty, !pending.isEmpty else { return }
+                                              rangeFor: (MainIndicatorEntry) -> (start: Int, end: Int)) {
+        guard !pending.isEmpty else { return }
         guard KlinePythonBridge.shared.isReady else {
             engineReadyRetry { self.recomputeMainCurves() }
             return
         }
+        // 按区间分组（与 formula 级路径同构）：不同区间的单元不能共用同一份 bars
+        var groups: [(start: Int, end: Int, items: [MainPendingUnit])] = []
+        for p in pending {
+            let r = rangeFor(entries[p.entryIndex])
+            if let gi = groups.firstIndex(where: { $0.start == r.start && $0.end == r.end }) {
+                groups[gi].items.append(p)
+            } else {
+                groups.append((r.start, r.end, [p]))
+            }
+        }
         computation.engineMainGen += 1
         let gen = computation.engineMainGen
-        // 与前台同构的一次求值波次：主图全部过期单元 + 同帧副图请求由 PyTDXWave
-        // 合并为**一次** Python call（bars 只零拷贝一份），结果按下标发回各请求方
-        let barsKey = "wave|\(calcData.count)|\(calcStart)|\(calcEnd)"
-        for p in pending {
-            PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, unitText: p.text) { r in
+        for g in groups {
+            let calcData = calcData(from: g.start, to: g.end)
+            guard !calcData.isEmpty else { continue }
+            // 与前台同构的一次求值波次：主图全部过期单元 + 同帧副图请求由 PyTDXWave
+            // 合并为**一次** Python call（bars 只零拷贝一份），结果按下标发回各请求方
+            let barsKey = "wave|\(calcData.count)|\(g.start)|\(g.end)"
+            for p in g.items {
+                PyTDXWave.shared.submit(barsKey: barsKey, data: calcData, unitText: p.text) { r in
                 // 代数不一致 = 求值期间配置/区间已变化再触发，丢弃本批结果
                 guard self.computation.engineMainGen == gen else {
                     DebugLogger.shared.log("[PyTDXBridge] 诊断 主图completion丢弃 gen=\(gen) cur=\(self.computation.engineMainGen) unit=\(p.unitIndex)")
@@ -948,7 +1080,7 @@ extension KlineChartView {
                                              customColor: entry.isCustom ? customColor : nil,
                                              i: p.unitIndex, out: out),
                    !self.allNaN(built.values) || isChanRow(out) {
-                    cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: calcStart, calcEnd: calcEnd)
+                    cache.rows[p.unitIndex].line = self.padToFull(built, calcStart: g.start, calcEnd: g.end)
                 } else {
                     let nanCount = outs.last.map { $0.values.filter { !$0.isNaN }.count } ?? -1
                     DebugLogger.shared.log("[PyTDXBridge] 诊断 主图回填line=nil entry=\(entry.id) unit=\(p.unitIndex) outs=\(outs.count) 有效值=\(nanCount)")
@@ -956,6 +1088,7 @@ extension KlineChartView {
                 }
                 self.computation.mainCache.units[entry.id] = cache
                 self.scheduleMainCommit(entries: entries)
+                }
             }
         }
     }
@@ -1244,17 +1377,27 @@ extension KlineChartView {
         // 联动态（metaId=nil）没有 ChartCacheStore 短路，靠这条内存指纹保证「同一配置只跑一次全量」；
         // 配置变化后指纹不一致 → 放行重跑一次。单图模式下与下面缓存短路互为双保险。
         let fingerprint = Self.currentConfigFingerprint(period: period)
+        // 启用缠论通道时，后台全量计算同样必须截到**可见窗口右缘**（训练态 = 训练日）：
+        // 笔/段/中枢不允许使用右缘之后的数据，否则后台结果会把「未来结构」覆盖回前台
+        let prefEntries = mainIndicatorEntries(store: SystemIndicatorStore.shared,
+                                               customStore: customStore, config: config,
+                                               customFormula: activeCustomIndicator?.formula,
+                                               period: period)
+        let hasChanRows = prefEntries.contains { referencesChanChannel($0.formula) }
+        let targetEnd = hasChanRows
+            ? max(0, IndicatorPipeline.chanCalcEnd(endIndex: endIndex, count: sortedData.count))
+            : sortedData.count - 1
         // 除配置指纹一致外，还要求已覆盖到**当前**数据末端：数据追加（启动日更/补缺口）后
         // bgCoverageEnd 仍是旧末根，若不重算，mainCurves 会停留在旧长度的数组上，
         // 可见窗口一旦越过旧末根，所有通道都会被切片失败整行丢弃（"整个缠论指标都不显示"）。
         if computation.prefetchDoneFingerprint == fingerprint,
-           computation.bgCoverageEnd >= sortedData.count - 1 { return }
+           computation.bgCoverageEnd >= targetEnd { return }
         // 该周期已完成全量正确预计算（可能由上次会话/后台链式预计算完成）：无需再算。
         // 仅当缓存确实已覆盖到数据末尾、且所用指标配置与当前一致才跳过，
         // 防止「完成标记」与「实际覆盖/配置」不一致时进度条卡住或指标不更新
         if let metaId = metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
-            if entry.prefetchDone, entry.bgCoverageEnd >= sortedData.count - 1,
+            if entry.prefetchDone, entry.bgCoverageEnd >= targetEnd,
                entry.configFingerprint == Self.currentConfigFingerprint(period: self.period) { return }
         }
         // 标记缓存条目正在预计算，避免后台「其它周期预计算」对该周期重复启动
@@ -1263,8 +1406,9 @@ extension KlineChartView {
         }
         let token = UUID()
         computation.prefetchToken = token
-        // 单次全量调用：引擎就绪 → 一次 bin 调用算完整段 [0..count-1]
-        let dataFull = sortedData
+        // 单次全量调用：引擎就绪 → 一次 bin 调用算整段 [0..targetEnd]
+        // （启用缠论时 targetEnd = 可见右缘，非全量）
+        let dataFull = hasChanRows ? Array(sortedData[0...targetEnd]) : sortedData
         guard let req = Self.makeFullRequest(data: dataFull, period: period) else {
             computation.prefetchToken = nil
             if let metaId = metaId {
@@ -1273,9 +1417,15 @@ extension KlineChartView {
             return
         }
         Task { @MainActor in
+            let prefetchT0 = CFAbsoluteTimeGetCurrent()
             let r = await Task.detached(priority: .utility) {
                 Self.evaluatePrefetchViaPython(req)
             }.value
+            if hasChanRows {
+                DebugLogger.shared.log(String(format: "[ChanTiming] prefetch bars=%d chanEnd=%d ms=%.1f",
+                                              dataFull.count, targetEnd,
+                                              (CFAbsoluteTimeGetCurrent() - prefetchT0) * 1000))
+            }
             guard self.computation.prefetchToken == token else { return }
             // 无论成败先复位任务标记（成功走 finishPrefetch 再标 done；失败仅记录，指标保持前台近似）
             defer {
@@ -1292,12 +1442,17 @@ extension KlineChartView {
             }
             // 指标配置在计算期间变化：丢弃旧配置结果（新配置会重新触发预取）
             guard Self.currentConfigFingerprint(period: self.period) == fingerprint else { return }
+            // 缠论：计算期间可见右缘变化（用户拖动）→ 结果已按旧右缘截断，丢弃，
+            // 由下一次抬手后的 recomputeMainCurves 按新右缘重算
+            if hasChanRows, targetEnd != max(0, IndicatorPipeline.chanCalcEnd(endIndex: self.endIndex, count: self.sortedData.count)) { return }
             self.commitPrefetch(req, r, updateCurves: true)
             self.computation.bgCoverageEnd = dataFull.count - 1
+            if hasChanRows { self.computation.chanCalcEnd = targetEnd }
             self.computation.prefetchDoneFingerprint = fingerprint
             if let metaId = self.metaId {
                 let entry = ChartCacheStore.shared.entry(for: metaId, period: self.period)
                 entry.bgCoverageEnd = max(entry.bgCoverageEnd, dataFull.count - 1)
+                if hasChanRows { entry.chanCalcEnd = targetEnd }
             }
             self.finishPrefetch()
         }
@@ -1456,6 +1611,7 @@ extension KlineChartView {
             e.coverageEnd = computation.indicatorCoverageEnd
             // 覆盖末端只增不减
             e.bgCoverageEnd = max(e.bgCoverageEnd, computation.bgCoverageEnd)
+            e.chanCalcEnd = computation.chanCalcEnd
             e.configFingerprint = fp
             for (i, m) in [subTop, subBottom, subThird].enumerated() {
                 e.subCurves[i] = m.curves
@@ -1500,6 +1656,16 @@ extension KlineChartView {
     /// 幂等：该周期已标记完成或正在预计算时直接返回。
     static func prefetchOtherPeriod(metaId: Int, period: KlinePeriod, data: [KlineItem]) {
         guard !data.isEmpty else { return }
+        // 该周期启用缠论通道时不做后台全量预取：此处没有「可见右缘」上下文，
+        // 全量推导会把右缘之后的笔/段/中枢写进缓存，切到该周期会闪出穿越结构。
+        // 切过去后由可见视图按自己的 endIndex 重算（startPrefetch 已按右缘截断）。
+        let cfg = ChartConfigStore.shared
+        let cstore = CustomIndicatorStore.shared
+        let customID = cfg.activeCustomIndicatorID(for: period)
+        let custom = cstore.indicators.first { $0.id == customID }
+        let entries = mainIndicatorEntries(store: SystemIndicatorStore.shared, customStore: cstore,
+                                           config: cfg, customFormula: custom?.formula, period: period)
+        guard !entries.contains(where: { referencesChanChannel($0.formula) }) else { return }
         let cache = ChartCacheStore.shared
         let currentFP = currentConfigFingerprint(period: period)
         // 配置已变化：先使旧缓存失效，避免旧配置的「已完成」被误判为无需计算

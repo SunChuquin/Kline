@@ -1,0 +1,818 @@
+[
+ {
+  "code": "HSI",
+  "name": "恒生指数",
+  "n": 9099,
+  "acc": {
+   "full": {
+    "tot": {
+     "4": 1
+    },
+    "tail": {
+     "2": 1
+    },
+    "max_tail": 2,
+    "mid_bad": 0,
+    "head_max": 2,
+    "tail3_ex": []
+   },
+   "seq": {
+    "tot": {
+     "4": 458,
+     "3": 111,
+     "5": 34
+    },
+    "tail": {
+     "2": 458,
+     "1": 111,
+     "3": 34
+    },
+    "max_tail": 3,
+    "mid_bad": 0,
+    "head_max": 2,
+    "tail3_ex": [
+     {
+      "tag": "seq n0=1819 +155",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       5,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1819 +156",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       5,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1819 +157",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       5,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1819 +158",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       5,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1819 +159",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_1"
+      ],
+      "bi_counts": [
+       5,
+       5,
+       1
+      ]
+     }
+    ]
+   },
+   "batch": {
+    "tot": {
+     "4": 21,
+     "5": 19,
+     "3": 7,
+     "6": 2
+    },
+    "tail": {
+     "2": 21,
+     "3": 19,
+     "1": 7,
+     "4": 2
+    },
+    "max_tail": 4,
+    "mid_bad": 0,
+    "head_max": 2,
+    "tail3_ex": [
+     {
+      "tag": "batch n0=909 +200",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_1"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=1819 +200",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_1"
+      ],
+      "bi_counts": [
+       3,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=3184 +1",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       11,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=3184 +2",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       11,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=3184 +5",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       11,
+       3,
+       1
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "code": "999999",
+  "name": "上证指数",
+  "n": 8763,
+  "acc": {
+   "full": {
+    "tot": {
+     "2": 1
+    },
+    "tail": {
+     "2": 1
+    },
+    "max_tail": 2,
+    "mid_bad": 0,
+    "head_max": 0,
+    "tail3_ex": []
+   },
+   "seq": {
+    "tot": {
+     "2": 416,
+     "1": 110,
+     "3": 73,
+     "4": 4
+    },
+    "tail": {
+     "2": 416,
+     "1": 110,
+     "3": 73,
+     "4": 4
+    },
+    "max_tail": 4,
+    "mid_bad": 0,
+    "head_max": 0,
+    "tail3_ex": [
+     {
+      "tag": "seq n0=1752 +143",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       9,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1752 +144",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       9,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1752 +145",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       9,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1752 +146",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       9,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1752 +147",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       9,
+       3,
+       1
+      ]
+     }
+    ]
+   },
+   "batch": {
+    "tot": {
+     "2": 35,
+     "1": 5,
+     "3": 3,
+     "4": 1,
+     "5": 4,
+     "6": 1
+    },
+    "tail": {
+     "2": 35,
+     "1": 5,
+     "3": 3,
+     "4": 1,
+     "5": 4,
+     "6": 1
+    },
+    "max_tail": 6,
+    "mid_bad": 0,
+    "head_max": 0,
+    "tail3_ex": [
+     {
+      "tag": "batch n0=876 +500",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low_force",
+       "collect_left_1"
+      ],
+      "bi_counts": [
+       3,
+       3,
+       3
+      ]
+     },
+     {
+      "tag": "batch n0=1752 +200",
+      "tail": 4,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       9,
+       7,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=3067 +1",
+      "tail": 5,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collectleft_find_high",
+       "collect_left_1"
+      ],
+      "bi_counts": [
+       3,
+       9,
+       13,
+       5,
+       3
+      ]
+     },
+     {
+      "tag": "batch n0=3067 +2",
+      "tail": 5,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collectleft_find_high",
+       "collect_left_1"
+      ],
+      "bi_counts": [
+       3,
+       9,
+       13,
+       5,
+       3
+      ]
+     },
+     {
+      "tag": "batch n0=3067 +5",
+      "tail": 5,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       9,
+       13,
+       5,
+       5
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "code": "000002",
+  "name": "万 科Ａ",
+  "n": 8517,
+  "acc": {
+   "full": {
+    "tot": {
+     "4": 1
+    },
+    "tail": {
+     "2": 1
+    },
+    "max_tail": 2,
+    "mid_bad": 0,
+    "head_max": 2,
+    "tail3_ex": []
+   },
+   "seq": {
+    "tot": {
+     "5": 89,
+     "4": 446,
+     "3": 68
+    },
+    "tail": {
+     "3": 89,
+     "2": 446,
+     "1": 68
+    },
+    "max_tail": 3,
+    "mid_bad": 0,
+    "head_max": 2,
+    "tail3_ex": [
+     {
+      "tag": "seq n0=1703 +0",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "seq n0=1703 +1",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "seq n0=1703 +2",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "seq n0=1703 +3",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "seq n0=1703 +4",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     }
+    ]
+   },
+   "batch": {
+    "tot": {
+     "4": 27,
+     "3": 7,
+     "5": 14,
+     "6": 1
+    },
+    "tail": {
+     "2": 27,
+     "1": 7,
+     "3": 14,
+     "4": 1
+    },
+    "max_tail": 4,
+    "mid_bad": 0,
+    "head_max": 2,
+    "tail3_ex": [
+     {
+      "tag": "batch n0=1703 +1",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "batch n0=1703 +2",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "batch n0=1703 +5",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "normal",
+       "collectleft_find_high"
+      ],
+      "bi_counts": [
+       15,
+       7,
+       3
+      ]
+     },
+     {
+      "tag": "batch n0=2980 +50",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       17,
+       9,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=4258 +1",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       15,
+       25,
+       1
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "code": "399001",
+  "name": "深证成指",
+  "n": 8718,
+  "acc": {
+   "full": {
+    "tot": {
+     "2": 1
+    },
+    "tail": {
+     "2": 1
+    },
+    "max_tail": 2,
+    "mid_bad": 0,
+    "head_max": 0,
+    "tail3_ex": []
+   },
+   "seq": {
+    "tot": {
+     "2": 415,
+     "3": 129,
+     "1": 59
+    },
+    "tail": {
+     "2": 415,
+     "3": 129,
+     "1": 59
+    },
+    "max_tail": 3,
+    "mid_bad": 0,
+    "head_max": 0,
+    "tail3_ex": [
+     {
+      "tag": "seq n0=1743 +78",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1743 +79",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1743 +80",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1743 +81",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       5,
+       1
+      ]
+     },
+     {
+      "tag": "seq n0=1743 +82",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       5,
+       1
+      ]
+     }
+    ]
+   },
+   "batch": {
+    "tot": {
+     "1": 4,
+     "2": 23,
+     "3": 12,
+     "6": 4,
+     "5": 5,
+     "4": 1
+    },
+    "tail": {
+     "1": 4,
+     "2": 23,
+     "3": 12,
+     "6": 4,
+     "5": 5,
+     "4": 1
+    },
+    "max_tail": 6,
+    "mid_bad": 0,
+    "head_max": 0,
+    "tail3_ex": [
+     {
+      "tag": "batch n0=871 +50",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       13,
+       3,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=871 +200",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collectleft_find_low"
+      ],
+      "bi_counts": [
+       13,
+       3,
+       15
+      ]
+     },
+     {
+      "tag": "batch n0=1743 +200",
+      "tail": 3,
+      "reasons": [
+       "normal",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       11,
+       5
+      ]
+     },
+     {
+      "tag": "batch n0=3051 +1",
+      "tail": 6,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       13,
+       11,
+       5,
+       7,
+       1
+      ]
+     },
+     {
+      "tag": "batch n0=3051 +2",
+      "tail": 6,
+      "reasons": [
+       "normal",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collectleft_find_high",
+       "collectleft_find_low",
+       "collect_left_0"
+      ],
+      "bi_counts": [
+       3,
+       13,
+       11,
+       5,
+       7,
+       1
+      ]
+     }
+    ]
+   }
+  }
+ }
+]

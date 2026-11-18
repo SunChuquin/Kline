@@ -1,0 +1,102 @@
+[
+ {
+  "code": "HSI",
+  "name": "恒生指数",
+  "samples": 653,
+  "tail_dist": {
+   "1": 118,
+   "2": 480,
+   "3": 53,
+   "4": 2
+  },
+  "max_extra_solid": 3,
+  "sum": {
+   "gap": 0,
+   "overlap": 0,
+   "same_dir": 0,
+   "approx_uncovered": 180,
+   "eigen_none_total": 1047,
+   "seg_total": 1245
+  },
+  "lt3_dist": {
+   "0": 303,
+   "1": 350
+  }
+ },
+ {
+  "code": "999999",
+  "name": "上证指数",
+  "samples": 653,
+  "tail_dist": {
+   "1": 115,
+   "2": 452,
+   "3": 76,
+   "4": 5,
+   "5": 4,
+   "6": 1
+  },
+  "max_extra_solid": 5,
+  "sum": {
+   "gap": 0,
+   "overlap": 0,
+   "same_dir": 0,
+   "approx_uncovered": 142,
+   "eigen_none_total": 1091,
+   "seg_total": 1293
+  },
+  "lt3_dist": {
+   "0": 309,
+   "1": 344
+  }
+ },
+ {
+  "code": "000002",
+  "name": "万 科Ａ",
+  "samples": 653,
+  "tail_dist": {
+   "1": 75,
+   "2": 474,
+   "3": 103,
+   "4": 1
+  },
+  "max_extra_solid": 3,
+  "sum": {
+   "gap": 0,
+   "overlap": 0,
+   "same_dir": 0,
+   "approx_uncovered": 202,
+   "eigen_none_total": 1082,
+   "seg_total": 1336
+  },
+  "lt3_dist": {
+   "0": 322,
+   "1": 331
+  }
+ },
+ {
+  "code": "399001",
+  "name": "深证成指",
+  "samples": 653,
+  "tail_dist": {
+   "1": 63,
+   "2": 439,
+   "3": 141,
+   "4": 1,
+   "5": 5,
+   "6": 4
+  },
+  "max_extra_solid": 5,
+  "sum": {
+   "gap": 0,
+   "overlap": 0,
+   "same_dir": 0,
+   "approx_uncovered": 164,
+   "eigen_none_total": 1068,
+   "seg_total": 1417
+  },
+  "lt3_dist": {
+   "0": 361,
+   "1": 292
+  }
+ }
+]

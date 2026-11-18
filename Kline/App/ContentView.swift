@@ -314,7 +314,13 @@ struct ContentView: View {
         case 0:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
         case 1:
-            WebTabHostView(route: "favorites")
+            if WebUIFiles.isBundleReady {
+                WebTabHostView(route: "favorites")
+            } else {
+                // Web UI 未构建（bundle 根 WebUI/index.html 缺失）→ 回退原生自选页。
+                // 正常发布会先 npm run build；本机构建可随时再 build 一次即自动切回 Web 化。
+                FavoritesView()
+            }
         case 2:
             MarketView()
         case 3:

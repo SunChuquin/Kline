@@ -1,0 +1,146 @@
+{
+ "n0=4094": {
+  "label": "HSI bars[:4094]",
+  "n_seg": 67,
+  "tail6": [
+   {
+    "idx": 61,
+    "dir": 1,
+    "startBi": 393,
+    "endBi": 401,
+    "biCount": 9,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 13320.53,
+    "endVal": 15508.57
+   },
+   {
+    "idx": 62,
+    "dir": -1,
+    "startBi": 402,
+    "endBi": 406,
+    "biCount": 5,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 15508.57,
+    "endVal": 14308.61
+   },
+   {
+    "idx": 63,
+    "dir": 1,
+    "startBi": 407,
+    "endBi": 411,
+    "biCount": 5,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 14308.61,
+    "endVal": 15816.54
+   },
+   {
+    "idx": 64,
+    "dir": -1,
+    "startBi": 412,
+    "endBi": 414,
+    "biCount": 3,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 15816.54,
+    "endVal": 15240.95
+   },
+   {
+    "idx": 65,
+    "dir": 1,
+    "startBi": 415,
+    "endBi": 421,
+    "biCount": 7,
+    "confirmed": false,
+    "reason": "normal",
+    "beginVal": 15240.95,
+    "endVal": 17328.43
+   },
+   {
+    "idx": 66,
+    "dir": -1,
+    "startBi": 422,
+    "endBi": 424,
+    "biCount": 3,
+    "confirmed": false,
+    "reason": "collect_left_0",
+    "beginVal": 17328.43,
+    "endVal": 15948.76
+   }
+  ]
+ },
+ "n0=4144": {
+  "label": "HSI bars[:4144]",
+  "n_seg": 66,
+  "tail6": [
+   {
+    "idx": 60,
+    "dir": -1,
+    "startBi": 388,
+    "endBi": 392,
+    "biCount": 5,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 14339.06,
+    "endVal": 13320.53
+   },
+   {
+    "idx": 61,
+    "dir": 1,
+    "startBi": 393,
+    "endBi": 401,
+    "biCount": 9,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 13320.53,
+    "endVal": 15508.57
+   },
+   {
+    "idx": 62,
+    "dir": -1,
+    "startBi": 402,
+    "endBi": 406,
+    "biCount": 5,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 15508.57,
+    "endVal": 14308.61
+   },
+   {
+    "idx": 63,
+    "dir": 1,
+    "startBi": 407,
+    "endBi": 411,
+    "biCount": 5,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 14308.61,
+    "endVal": 15816.54
+   },
+   {
+    "idx": 64,
+    "dir": -1,
+    "startBi": 412,
+    "endBi": 414,
+    "biCount": 3,
+    "confirmed": true,
+    "reason": "normal",
+    "beginVal": 15816.54,
+    "endVal": 15240.95
+   },
+   {
+    "idx": 65,
+    "dir": 1,
+    "startBi": 415,
+    "endBi": 431,
+    "biCount": 17,
+    "confirmed": false,
+    "reason": "collectleft_find_high",
+    "beginVal": 15240.95,
+    "endVal": 17683.45
+   }
+  ]
+ }
+}

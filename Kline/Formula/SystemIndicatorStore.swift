@@ -139,12 +139,12 @@ final class SystemIndicatorStore: ObservableObject {
     }
 
     /// 内置模板的"结构升级标记"：**磁盘上的旧副本**缺少该标记时，用 bundle 新版覆盖一次。
-    /// copyBuiltin 默认只补齐缺失文件（保留用户改动），但缠论笔/段模板新增了"末笔/末段未确认"
-    /// 虚线通道（CHANBIUC / CHANSEGUC），已有安装必须能升级到新模板，否则通道算出来也没人引用。
-    /// 只对表内这两个内置指标生效，其余模板与用户自建模板一律不动。
+    /// copyBuiltin 默认只补齐缺失文件（保留用户改动），但缠论笔/段模板新增了"未确认结构"
+    /// 虚线通道（*UC：笔/段折线 + 中枢上下轨/封口），已有安装必须能升级到新模板，
+    /// 否则通道算出来也没人引用。只对表内这两个内置指标生效，其余模板与用户自建模板一律不动。
     private let builtinUpgradeMarks: [String: String] = [
-        "CHANBI": "CHANBIUC",
-        "CHANSEG": "CHANSEGUC",
+        "CHANBI": "CHANBIZGUC",
+        "CHANSEG": "CHANSEGZGUC",
     ]
 
     /// 复制内置模板到指定周期目录（缺失则补齐；缠论笔/段旧模板按升级标记覆盖一次）

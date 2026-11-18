@@ -1,0 +1,1119 @@
+{
+ "code": "HSI",
+ "name": "恒生指数",
+ "n": 9099,
+ "range": [
+  19900102,
+  20261113
+ ],
+ "truncation_equivalence": [
+  {
+   "bi": {
+    "full_in": 442,
+    "trunc_total": 443,
+    "compared": 442,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 67,
+    "trunc_in": 68,
+    "compared": 67,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 46,
+    "trunc_in": 46,
+    "compared": 46,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 4284,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": false,
+    "end_val_ok": false,
+    "uc": {
+     "idx": 442,
+     "dir": -1,
+     "fromKlc": 3493,
+     "toKlc": 3496,
+     "beginVal": 20868.07,
+     "endVal": 20396.37,
+     "fromKlu": 4277,
+     "toKlu": 4281,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 4278,
+     "endVal": 20232.81
+    },
+    "full_same_start": {
+     "idx": 442,
+     "dir": -1,
+     "fromKlc": 3493,
+     "toKlc": 3500,
+     "beginVal": 20868.07,
+     "endVal": 20130.11,
+     "fromKlu": 4277,
+     "toKlu": 4285,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  },
+  {
+   "bi": {
+    "full_in": 553,
+    "trunc_total": 554,
+    "compared": 553,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 83,
+    "trunc_in": 84,
+    "compared": 83,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 58,
+    "trunc_in": 58,
+    "compared": 58,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 5459,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 553,
+     "dir": 1,
+     "fromKlc": 4434,
+     "toKlc": 4454,
+     "beginVal": 17821.52,
+     "endVal": 20590.8,
+     "fromKlu": 5433,
+     "toKlu": 5456,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 5456,
+     "endVal": 20590.8
+    },
+    "full_same_start": {
+     "idx": 553,
+     "dir": 1,
+     "fromKlc": 4434,
+     "toKlc": 4465,
+     "beginVal": 17821.52,
+     "endVal": 21760.34,
+     "fromKlu": 5433,
+     "toKlu": 5472,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  },
+  {
+   "bi": {
+    "full_in": 650,
+    "trunc_total": 650,
+    "compared": 650,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 94,
+    "trunc_in": 96,
+    "compared": 94,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 70,
+    "trunc_in": 71,
+    "compared": 70,
+    "mismatch": 1,
+    "max_dev": 753.739999999998,
+    "samples": [
+     {
+      "i": 69,
+      "full": {
+       "idx": 69,
+       "beginLine": 639,
+       "endLine": 649,
+       "beginKlu": 6338,
+       "endKlu": 6421,
+       "zg": 22203.36,
+       "zd": 20865.26,
+       "gg": 23178.14,
+       "dd": 20368.12,
+       "lineCount": 11,
+       "confirmed": true,
+       "extended": true,
+       "merged": 0,
+       "ended": true
+      },
+      "trunc": {
+       "idx": 69,
+       "beginLine": 639,
+       "endLine": 641,
+       "beginKlu": 6338,
+       "endKlu": 6354,
+       "zg": 22203.36,
+       "zd": 20865.26,
+       "gg": 22424.4,
+       "dd": 20524.88,
+       "lineCount": 3,
+       "confirmed": false,
+       "extended": true,
+       "merged": 0,
+       "ended": true
+      },
+      "diff": [
+       [
+        "endLine",
+        649,
+        641
+       ],
+       [
+        "endKlu",
+        6421,
+        6354
+       ],
+       [
+        "gg",
+        23178.14,
+        22424.4
+       ],
+       [
+        "dd",
+        20368.12,
+        20524.88
+       ],
+       [
+        "lineCount",
+        11,
+        3
+       ]
+      ]
+     }
+    ]
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 6430,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 649,
+     "dir": 1,
+     "fromKlc": 5220,
+     "toKlc": 5226,
+     "beginVal": 21010.26,
+     "endVal": 22217.45,
+     "fromKlu": 6413,
+     "toKlu": 6421,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 6421,
+     "endVal": 22217.45
+    },
+    "full_same_start": {
+     "idx": 649,
+     "dir": 1,
+     "fromKlc": 5220,
+     "toKlc": 5226,
+     "beginVal": 21010.26,
+     "endVal": 22217.45,
+     "fromKlu": 6413,
+     "toKlu": 6421,
+     "confirmed": true
+    },
+    "full_differs": false
+   }
+  },
+  {
+   "bi": {
+    "full_in": 650,
+    "trunc_total": 651,
+    "compared": 650,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 94,
+    "trunc_in": 95,
+    "compared": 94,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 70,
+    "trunc_in": 70,
+    "compared": 70,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 6434,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 650,
+     "dir": -1,
+     "fromKlc": 5226,
+     "toKlc": 5233,
+     "beginVal": 22217.45,
+     "endVal": 19509.08,
+     "fromKlu": 6421,
+     "toKlu": 6434,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 6434,
+     "endVal": 19509.08
+    },
+    "full_same_start": {
+     "idx": 650,
+     "dir": -1,
+     "fromKlc": 5226,
+     "toKlc": 5240,
+     "beginVal": 22217.45,
+     "endVal": 18534.3,
+     "fromKlu": 6421,
+     "toKlu": 6439,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  },
+  {
+   "bi": {
+    "full_in": 661,
+    "trunc_total": 662,
+    "compared": 661,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 95,
+    "trunc_in": 97,
+    "compared": 95,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 70,
+    "trunc_in": 70,
+    "compared": 70,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 6543,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 661,
+     "dir": 1,
+     "fromKlc": 5326,
+     "toKlc": 5329,
+     "beginVal": 19964.37,
+     "endVal": 21034.18,
+     "fromKlu": 6536,
+     "toKlu": 6542,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 6542,
+     "endVal": 21034.18
+    },
+    "full_same_start": {
+     "idx": 661,
+     "dir": 1,
+     "fromKlc": 5326,
+     "toKlc": 5334,
+     "beginVal": 19964.37,
+     "endVal": 21166.02,
+     "fromKlu": 6536,
+     "toKlu": 6547,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  },
+  {
+   "bi": {
+    "full_in": 693,
+    "trunc_total": 694,
+    "compared": 693,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 99,
+    "trunc_in": 100,
+    "compared": 99,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 74,
+    "trunc_in": 74,
+    "compared": 74,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 6889,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 693,
+     "dir": 1,
+     "fromKlc": 5589,
+     "toKlc": 5606,
+     "beginVal": 28098.83,
+     "endVal": 29341.92,
+     "fromKlu": 6870,
+     "toKlu": 6888,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 6888,
+     "endVal": 29341.92
+    },
+    "full_same_start": {
+     "idx": 693,
+     "dir": 1,
+     "fromKlc": 5589,
+     "toKlc": 5609,
+     "beginVal": 28098.83,
+     "endVal": 30199.69,
+     "fromKlu": 6870,
+     "toKlu": 6891,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  },
+  {
+   "bi": {
+    "full_in": 733,
+    "trunc_total": 734,
+    "compared": 733,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 106,
+    "trunc_in": 108,
+    "compared": 106,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 79,
+    "trunc_in": 79,
+    "compared": 79,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 7279,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 733,
+     "dir": 1,
+     "fromKlc": 5916,
+     "toKlc": 5925,
+     "beginVal": 26671.9,
+     "endVal": 28634.48,
+     "fromKlu": 7264,
+     "toKlu": 7277,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 7277,
+     "endVal": 28634.48
+    },
+    "full_same_start": {
+     "idx": 733,
+     "dir": 1,
+     "fromKlc": 5916,
+     "toKlc": 5932,
+     "beginVal": 26671.9,
+     "endVal": 29007.98,
+     "fromKlu": 7264,
+     "toKlu": 7284,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  },
+  {
+   "bi": {
+    "full_in": 737,
+    "trunc_total": 737,
+    "compared": 737,
+    "mismatch": 1,
+    "max_dev": 5.0,
+    "samples": [
+     {
+      "i": 736,
+      "full": {
+       "idx": 736,
+       "dir": -1,
+       "fromKlc": 5942,
+       "toKlc": 5956,
+       "beginVal": 28809.59,
+       "endVal": 24899.93,
+       "fromKlu": 7295,
+       "toKlu": 7314,
+       "confirmed": true
+      },
+      "trunc": {
+       "idx": 736,
+       "dir": -1,
+       "fromKlc": 5942,
+       "toKlc": 5951,
+       "beginVal": 28809.59,
+       "endVal": 24899.93,
+       "fromKlu": 7295,
+       "toKlu": 7314,
+       "confirmed": false
+      },
+      "diff": [
+       [
+        "toKlc",
+        5956,
+        5951
+       ]
+      ]
+     }
+    ],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 107,
+    "trunc_in": 107,
+    "compared": 107,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 80,
+    "trunc_in": 80,
+    "compared": 80,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 7314,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 736,
+     "dir": -1,
+     "fromKlc": 5942,
+     "toKlc": 5951,
+     "beginVal": 28809.59,
+     "endVal": 24899.93,
+     "fromKlu": 7295,
+     "toKlu": 7314,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 7314,
+     "endVal": 24899.93
+    },
+    "full_same_start": {
+     "idx": 736,
+     "dir": -1,
+     "fromKlc": 5942,
+     "toKlc": 5956,
+     "beginVal": 28809.59,
+     "endVal": 24899.93,
+     "fromKlu": 7295,
+     "toKlu": 7314,
+     "confirmed": true
+    },
+    "full_differs": false
+   }
+  },
+  {
+   "bi": {
+    "full_in": 762,
+    "trunc_total": 763,
+    "compared": 762,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": [],
+    "idx_equal": true
+   },
+   "segments": {
+    "full_in": 112,
+    "trunc_in": 113,
+    "compared": 112,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "centers": {
+    "full_in": 83,
+    "trunc_in": 83,
+    "compared": 83,
+    "mismatch": 0,
+    "max_dev": 0.0,
+    "samples": []
+   },
+   "full_counts": {
+    "bi": 936,
+    "segments": 142,
+    "centers": 103,
+    "segCenters": 15
+   },
+   "k": 7540,
+   "tail": {
+    "checked": true,
+    "start_ok": true,
+    "end_idx_ok": true,
+    "end_val_ok": true,
+    "uc": {
+     "idx": 762,
+     "dir": -1,
+     "fromKlc": 6135,
+     "toKlc": 6139,
+     "beginVal": 26782.62,
+     "endVal": 25254.32,
+     "fromKlu": 7534,
+     "toKlu": 7539,
+     "confirmed": false
+    },
+    "predicted": {
+     "toKlu": 7539,
+     "endVal": 25254.32
+    },
+    "full_same_start": {
+     "idx": 762,
+     "dir": -1,
+     "fromKlc": 6135,
+     "toKlc": 6152,
+     "beginVal": 26782.62,
+     "endVal": 24167.79,
+     "fromKlu": 7534,
+     "toKlu": 7557,
+     "confirmed": true
+    },
+    "full_differs": true
+   }
+  }
+ ],
+ "append_revision": [
+  {
+   "bi": {
+    "old_count": 157,
+    "new_count": 157,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "segments": {
+    "old_count": 23,
+    "new_count": 23,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "centers": {
+    "old_count": 17,
+    "new_count": 17,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "append": 1,
+   "n0": 1500
+  },
+  {
+   "bi": {
+    "old_count": 157,
+    "new_count": 157,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "segments": {
+    "old_count": 23,
+    "new_count": 23,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "centers": {
+    "old_count": 17,
+    "new_count": 17,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "append": 2,
+   "n0": 1500
+  },
+  {
+   "bi": {
+    "old_count": 157,
+    "new_count": 158,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [
+     157
+    ],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "segments": {
+    "old_count": 23,
+    "new_count": 22,
+    "changed": 2,
+    "changed_idx": [
+     21,
+     22
+    ],
+    "added_idx": [],
+    "non_last_changed": [
+     22
+    ],
+    "samples": [
+     {
+      "idx": 21,
+      "state": "changed",
+      "fields": [
+       [
+        "endBi",
+        155,
+        157
+       ],
+       [
+        "endVal",
+        10654.78,
+        10955.33
+       ],
+       [
+        "biCount",
+        9,
+        11
+       ]
+      ],
+      "old": {
+       "idx": 21,
+       "dir": 1,
+       "startBi": 147,
+       "endBi": 155,
+       "beginVal": 8774.97,
+       "endVal": 10654.78,
+       "confirmed": false,
+       "reason": "collectleft_find_high",
+       "biCount": 9
+      },
+      "new": {
+       "idx": 21,
+       "dir": 1,
+       "startBi": 147,
+       "endBi": 157,
+       "beginVal": 8774.97,
+       "endVal": 10955.33,
+       "confirmed": false,
+       "reason": "collectleft_find_high",
+       "biCount": 11
+      }
+     }
+    ]
+   },
+   "centers": {
+    "old_count": 17,
+    "new_count": 17,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "append": 5,
+   "n0": 1500
+  },
+  {
+   "bi": {
+    "old_count": 157,
+    "new_count": 159,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [
+     157,
+     158
+    ],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "segments": {
+    "old_count": 23,
+    "new_count": 23,
+    "changed": 2,
+    "changed_idx": [
+     21,
+     22
+    ],
+    "added_idx": [],
+    "non_last_changed": [
+     21
+    ],
+    "samples": [
+     {
+      "idx": 21,
+      "state": "changed",
+      "fields": [
+       [
+        "endBi",
+        155,
+        157
+       ],
+       [
+        "endVal",
+        10654.78,
+        11521.06
+       ],
+       [
+        "biCount",
+        9,
+        11
+       ]
+      ],
+      "old": {
+       "idx": 21,
+       "dir": 1,
+       "startBi": 147,
+       "endBi": 155,
+       "beginVal": 8774.97,
+       "endVal": 10654.78,
+       "confirmed": false,
+       "reason": "collectleft_find_high",
+       "biCount": 9
+      },
+      "new": {
+       "idx": 21,
+       "dir": 1,
+       "startBi": 147,
+       "endBi": 157,
+       "beginVal": 8774.97,
+       "endVal": 11521.06,
+       "confirmed": false,
+       "reason": "collectleft_find_high",
+       "biCount": 11
+      }
+     },
+     {
+      "idx": 22,
+      "state": "changed",
+      "fields": [
+       [
+        "startBi",
+        156,
+        158
+       ],
+       [
+        "endBi",
+        156,
+        158
+       ],
+       [
+        "beginVal",
+        10654.78,
+        11521.06
+       ],
+       [
+        "endVal",
+        10196.0,
+        11232.84
+       ]
+      ],
+      "old": {
+       "idx": 22,
+       "dir": -1,
+       "startBi": 156,
+       "endBi": 156,
+       "beginVal": 10654.78,
+       "endVal": 10196.0,
+       "confirmed": false,
+       "reason": "collect_left_0",
+       "biCount": 1
+      },
+      "new": {
+       "idx": 22,
+       "dir": -1,
+       "startBi": 158,
+       "endBi": 158,
+       "beginVal": 11521.06,
+       "endVal": 11232.84,
+       "confirmed": false,
+       "reason": "collect_left_0",
+       "biCount": 1
+      }
+     }
+    ]
+   },
+   "centers": {
+    "old_count": 17,
+    "new_count": 17,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "append": 20,
+   "n0": 1500
+  },
+  {
+   "bi": {
+    "old_count": 157,
+    "new_count": 160,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [
+     157,
+     158,
+     159
+    ],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "segments": {
+    "old_count": 23,
+    "new_count": 23,
+    "changed": 2,
+    "changed_idx": [
+     21,
+     22
+    ],
+    "added_idx": [],
+    "non_last_changed": [
+     21
+    ],
+    "samples": [
+     {
+      "idx": 21,
+      "state": "changed",
+      "fields": [
+       [
+        "endBi",
+        155,
+        157
+       ],
+       [
+        "endVal",
+        10654.78,
+        11521.06
+       ],
+       [
+        "biCount",
+        9,
+        11
+       ]
+      ],
+      "old": {
+       "idx": 21,
+       "dir": 1,
+       "startBi": 147,
+       "endBi": 155,
+       "beginVal": 8774.97,
+       "endVal": 10654.78,
+       "confirmed": false,
+       "reason": "collectleft_find_high",
+       "biCount": 9
+      },
+      "new": {
+       "idx": 21,
+       "dir": 1,
+       "startBi": 147,
+       "endBi": 157,
+       "beginVal": 8774.97,
+       "endVal": 11521.06,
+       "confirmed": false,
+       "reason": "collectleft_find_high",
+       "biCount": 11
+      }
+     },
+     {
+      "idx": 22,
+      "state": "changed",
+      "fields": [
+       [
+        "startBi",
+        156,
+        158
+       ],
+       [
+        "endBi",
+        156,
+        158
+       ],
+       [
+        "beginVal",
+        10654.78,
+        11521.06
+       ],
+       [
+        "endVal",
+        10196.0,
+        10230.54
+       ]
+      ],
+      "old": {
+       "idx": 22,
+       "dir": -1,
+       "startBi": 156,
+       "endBi": 156,
+       "beginVal": 10654.78,
+       "endVal": 10196.0,
+       "confirmed": false,
+       "reason": "collect_left_0",
+       "biCount": 1
+      },
+      "new": {
+       "idx": 22,
+       "dir": -1,
+       "startBi": 158,
+       "endBi": 158,
+       "beginVal": 11521.06,
+       "endVal": 10230.54,
+       "confirmed": false,
+       "reason": "collect_left_1",
+       "biCount": 1
+      }
+     }
+    ]
+   },
+   "centers": {
+    "old_count": 17,
+    "new_count": 17,
+    "changed": 0,
+    "changed_idx": [],
+    "added_idx": [],
+    "non_last_changed": [],
+    "samples": []
+   },
+   "append": 50,
+   "n0": 1500
+  }
+ ]
+}

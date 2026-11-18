@@ -1,0 +1,3330 @@
+[
+ {
+  "name": "600010",
+  "n_bars": 6113,
+  "k0": 200,
+  "q1": {
+   "extension": {
+    "transitions": 121,
+    "trans_with_any_change": 28,
+    "trans_change_ratio": 0.2314,
+    "center_cmp": 3,
+    "center_changed": 1,
+    "center_change_ratio": 0.3333,
+    "added": 27,
+    "removed": 0,
+    "abs_d_endKlu": {
+     "n": 1,
+     "median": 19.0,
+     "p90": 19.0,
+     "min": 19.0,
+     "max": 19.0,
+     "mean": 19.0
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 255,
+      "added": [
+       218
+      ],
+      "removed": [],
+      "seg": [
+       182,
+       253
+      ]
+     },
+     {
+      "k": 399,
+      "added": [
+       307
+      ],
+      "removed": [],
+      "seg": [
+       281,
+       395
+      ]
+     },
+     {
+      "k": 1489,
+      "added": [
+       1466
+      ],
+      "removed": [],
+      "seg": [
+       1461,
+       1488
+      ]
+     },
+     {
+      "k": 1644,
+      "added": [
+       1623
+      ],
+      "removed": [],
+      "seg": [
+       1615,
+       1643
+      ]
+     },
+     {
+      "k": 1899,
+      "added": [
+       1877
+      ],
+      "removed": [],
+      "seg": [
+       1851,
+       1898
+      ]
+     },
+     {
+      "k": 1957,
+      "added": [
+       1927
+      ],
+      "removed": [],
+      "seg": [
+       1918,
+       1955
+      ]
+     }
+    ]
+   },
+   "resplit": {
+    "transitions": 290,
+    "trans_with_any_change": 63,
+    "trans_change_ratio": 0.2172,
+    "center_cmp": 7098,
+    "center_changed": 15,
+    "center_change_ratio": 0.0021,
+    "added": 46,
+    "removed": 18,
+    "abs_d_endKlu": {
+     "n": 15,
+     "median": 26.0,
+     "p90": 63.0,
+     "min": 14.0,
+     "max": 121.0,
+     "mean": 33.2
+    },
+    "abs_d_zg": {
+     "n": 1,
+     "median": 0.04,
+     "p90": 0.04,
+     "min": 0.04,
+     "max": 0.04,
+     "mean": 0.04
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 282,
+      "center": 218,
+      "d": {
+       "endKlu": 36.0
+      },
+      "seg": [
+       9,
+       281
+      ],
+      "dates": [
+       "20010322",
+       "20020520"
+      ]
+     },
+     {
+      "k": 412,
+      "center": 218,
+      "d": {
+       "endKlu": 121.0
+      },
+      "seg": [
+       9,
+       411
+      ],
+      "dates": [
+       "20010322",
+       "20021127"
+      ]
+     },
+     {
+      "k": 412,
+      "added": [],
+      "removed": [
+       307
+      ],
+      "seg": [
+       9,
+       411
+      ]
+     },
+     {
+      "k": 502,
+      "added": [
+       444
+      ],
+      "removed": [],
+      "seg": [
+       9,
+       501
+      ]
+     },
+     {
+      "k": 669,
+      "added": [
+       631
+      ],
+      "removed": [],
+      "seg": [
+       9,
+       665
+      ]
+     },
+     {
+      "k": 707,
+      "added": [
+       680
+      ],
+      "removed": [],
+      "seg": [
+       9,
+       705
+      ]
+     }
+    ]
+   }
+  },
+  "q2": {
+   "centers": 70,
+   "zero": 59,
+   "one": 7,
+   "multi": 4,
+   "zero_ratio": 0.8429,
+   "one_ratio": 0.1,
+   "multi_ratio": 0.0571,
+   "field_freq": {
+    "endKlu": 16,
+    "zg": 1
+   },
+   "vanished_before_confirm": 15,
+   "confirmed_centers": 53,
+   "never_confirmed": 17,
+   "never_confirmed_zero_change": 17,
+   "never_confirmed_zero_ratio": 1.0
+  },
+  "q3": {
+   "centers_having_tA": 70,
+   "never_A": 0,
+   "violations": 28,
+   "samples": [
+    {
+     "first": 255,
+     "tA": 255,
+     "tAE": 399,
+     "beginKlu": 218,
+     "d": {
+      "k": 282,
+      "type": "geometry",
+      "d": {
+       "endKlu": 36.0
+      },
+      "age": 27
+     },
+     "conf": 515
+    },
+    {
+     "first": 399,
+     "tA": 399,
+     "tAE": null,
+     "beginKlu": 307,
+     "d": {
+      "k": 412,
+      "type": "vanished",
+      "d": {},
+      "age": 13
+     },
+     "conf": null
+    },
+    {
+     "first": 1168,
+     "tA": 1168,
+     "tAE": 1221,
+     "beginKlu": 1058,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 133
+     },
+     "conf": null
+    },
+    {
+     "first": 1221,
+     "tA": 1221,
+     "tAE": 1270,
+     "beginKlu": 1166,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 80
+     },
+     "conf": null
+    },
+    {
+     "first": 1270,
+     "tA": 1270,
+     "tAE": null,
+     "beginKlu": 1225,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 31
+     },
+     "conf": null
+    },
+    {
+     "first": 1301,
+     "tA": 1301,
+     "tAE": 1406,
+     "beginKlu": 1220,
+     "d": {
+      "k": 1361,
+      "type": "geometry",
+      "d": {
+       "endKlu": 81.0,
+       "zg": 0.04
+      },
+      "age": 60
+     },
+     "conf": 1537
+    },
+    {
+     "first": 1683,
+     "tA": 1683,
+     "tAE": 1760,
+     "beginKlu": 1658,
+     "d": {
+      "k": 1712,
+      "type": "geometry",
+      "d": {
+       "endKlu": 21.0
+      },
+      "age": 29
+     },
+     "conf": 1842
+    },
+    {
+     "first": 1899,
+     "tA": 1899,
+     "tAE": 1957,
+     "beginKlu": 1877,
+     "d": {
+      "k": 1920,
+      "type": "geometry",
+      "d": {
+       "endKlu": 19.0
+      },
+      "age": 21
+     },
+     "conf": 2059
+    }
+   ],
+   "violations_geo": 11,
+   "violations_van": 17,
+   "lead_bars": {
+    "n": 53,
+    "median": 93.0,
+    "p90": 244.8,
+    "min": 26,
+    "max": 340,
+    "mean": 117.02
+   },
+   "centers_having_tAE": 56,
+   "never_AE": 14,
+   "violations_E": 5,
+   "samples_E": [
+    {
+     "first": 255,
+     "tAE": 399,
+     "beginKlu": 218,
+     "d": {
+      "k": 412,
+      "type": "geometry",
+      "d": {
+       "endKlu": 121.0
+      },
+      "age": 13
+     },
+     "conf": 515
+    },
+    {
+     "first": 1168,
+     "tAE": 1221,
+     "beginKlu": 1058,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 80
+     },
+     "conf": null
+    },
+    {
+     "first": 1221,
+     "tAE": 1270,
+     "beginKlu": 1166,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 31
+     },
+     "conf": null
+    },
+    {
+     "first": 1899,
+     "tAE": 1957,
+     "beginKlu": 1877,
+     "d": {
+      "k": 1966,
+      "type": "geometry",
+      "d": {
+       "endKlu": 14.0
+      },
+      "age": 9
+     },
+     "conf": 2059
+    },
+    {
+     "first": 4282,
+     "tAE": 4317,
+     "beginKlu": 4252,
+     "d": {
+      "k": 4350,
+      "type": "geometry",
+      "d": {
+       "endKlu": 28.0
+      },
+      "age": 33
+     },
+     "conf": 4478
+    }
+   ],
+   "violations_E_geo": 3,
+   "violations_E_van": 2,
+   "lead_bars_E": {
+    "n": 53,
+    "median": 20.0,
+    "p90": 155.2,
+    "min": -238,
+    "max": 226,
+    "mean": 29.42
+   },
+   "centers_D20": 60,
+   "never_D20": 10,
+   "violations_D20": 15,
+   "samples_D20": [
+    {
+     "t": 275,
+     "beginKlu": 218,
+     "d": {
+      "k": 282,
+      "type": "geometry",
+      "d": {
+       "endKlu": 36.0
+      },
+      "age": 7
+     },
+     "conf": 515
+    },
+    {
+     "t": 1188,
+     "beginKlu": 1058,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 113
+     },
+     "conf": null
+    },
+    {
+     "t": 1241,
+     "beginKlu": 1166,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 60
+     },
+     "conf": null
+    },
+    {
+     "t": 1290,
+     "beginKlu": 1225,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 11
+     },
+     "conf": null
+    },
+    {
+     "t": 1321,
+     "beginKlu": 1220,
+     "d": {
+      "k": 1361,
+      "type": "geometry",
+      "d": {
+       "endKlu": 81.0,
+       "zg": 0.04
+      },
+      "age": 40
+     },
+     "conf": 1537
+    },
+    {
+     "t": 1703,
+     "beginKlu": 1658,
+     "d": {
+      "k": 1712,
+      "type": "geometry",
+      "d": {
+       "endKlu": 21.0
+      },
+      "age": 9
+     },
+     "conf": 1842
+    },
+    {
+     "t": 1919,
+     "beginKlu": 1877,
+     "d": {
+      "k": 1920,
+      "type": "geometry",
+      "d": {
+       "endKlu": 19.0
+      },
+      "age": 1
+     },
+     "conf": 2059
+    },
+    {
+     "t": 2433,
+     "beginKlu": 2392,
+     "d": {
+      "k": 2461,
+      "type": "geometry",
+      "d": {
+       "endKlu": 31.0
+      },
+      "age": 28
+     },
+     "conf": 2679
+    }
+   ],
+   "lead_bars_D20": {
+    "n": 53,
+    "median": 73.0,
+    "p90": 224.8,
+    "min": 6,
+    "max": 320,
+    "mean": 95.64
+   },
+   "centers_D40": 58,
+   "never_D40": 12,
+   "violations_D40": 10,
+   "samples_D40": [
+    {
+     "t": 322,
+     "beginKlu": 218,
+     "d": {
+      "k": 412,
+      "type": "geometry",
+      "d": {
+       "endKlu": 121.0
+      },
+      "age": 90
+     },
+     "conf": 515
+    },
+    {
+     "t": 1208,
+     "beginKlu": 1058,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 93
+     },
+     "conf": null
+    },
+    {
+     "t": 1261,
+     "beginKlu": 1166,
+     "d": {
+      "k": 1301,
+      "type": "vanished",
+      "d": {},
+      "age": 40
+     },
+     "conf": null
+    },
+    {
+     "t": 1341,
+     "beginKlu": 1220,
+     "d": {
+      "k": 1361,
+      "type": "geometry",
+      "d": {
+       "endKlu": 81.0,
+       "zg": 0.04
+      },
+      "age": 20
+     },
+     "conf": 1537
+    },
+    {
+     "t": 1960,
+     "beginKlu": 1877,
+     "d": {
+      "k": 1966,
+      "type": "geometry",
+      "d": {
+       "endKlu": 14.0
+      },
+      "age": 6
+     },
+     "conf": 2059
+    },
+    {
+     "t": 2453,
+     "beginKlu": 2392,
+     "d": {
+      "k": 2461,
+      "type": "geometry",
+      "d": {
+       "endKlu": 31.0
+      },
+      "age": 8
+     },
+     "conf": 2679
+    },
+    {
+     "t": 4322,
+     "beginKlu": 4252,
+     "d": {
+      "k": 4350,
+      "type": "geometry",
+      "d": {
+       "endKlu": 28.0
+      },
+      "age": 28
+     },
+     "conf": 4478
+    },
+    {
+     "t": 4431,
+     "beginKlu": 4350,
+     "d": {
+      "k": 4468,
+      "type": "vanished",
+      "d": {},
+      "age": 37
+     },
+     "conf": null
+    }
+   ],
+   "lead_bars_D40": {
+    "n": 53,
+    "median": 53.0,
+    "p90": 195.4,
+    "min": -14,
+    "max": 300,
+    "mean": 73.3
+   },
+   "B_true_conf_false": 0,
+   "conf_true_B_false": 0,
+   "post_conf_changes": 0,
+   "post_conf_vanished": 0
+  },
+  "trace_600010": [
+   {
+    "beginKlu": 5954,
+    "first": 5995,
+    "conf": null,
+    "vanished": null,
+    "tA": 5995,
+    "changes": [],
+    "n_samples": 118,
+    "viol": null
+   },
+   {
+    "beginKlu": 6008,
+    "first": 6098,
+    "conf": null,
+    "vanished": null,
+    "tA": 6098,
+    "changes": [],
+    "n_samples": 15,
+    "viol": null
+   }
+  ]
+ },
+ {
+  "name": "HSI",
+  "n_bars": 9099,
+  "k0": 200,
+  "q1": {
+   "extension": {
+    "transitions": 198,
+    "trans_with_any_change": 44,
+    "trans_change_ratio": 0.2222,
+    "center_cmp": 11,
+    "center_changed": 5,
+    "center_change_ratio": 0.4545,
+    "added": 39,
+    "removed": 0,
+    "abs_d_endKlu": {
+     "n": 5,
+     "median": 10.0,
+     "p90": 22.4,
+     "min": 6.0,
+     "max": 28.0,
+     "mean": 13.2
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 229,
+      "added": [
+       183
+      ],
+      "removed": [],
+      "seg": [
+       174,
+       228
+      ]
+     },
+     {
+      "k": 657,
+      "added": [
+       635
+      ],
+      "removed": [],
+      "seg": [
+       629,
+       656
+      ]
+     },
+     {
+      "k": 698,
+      "added": [
+       661
+      ],
+      "removed": [],
+      "seg": [
+       656,
+       697
+      ]
+     },
+     {
+      "k": 1202,
+      "added": [
+       1166
+      ],
+      "removed": [],
+      "seg": [
+       1155,
+       1201
+      ]
+     },
+     {
+      "k": 1563,
+      "added": [
+       1538
+      ],
+      "removed": [],
+      "seg": [
+       1514,
+       1562
+      ]
+     },
+     {
+      "k": 1626,
+      "added": [
+       1592
+      ],
+      "removed": [],
+      "seg": [
+       1576,
+       1625
+      ]
+     }
+    ]
+   },
+   "resplit": {
+    "transitions": 534,
+    "trans_with_any_change": 120,
+    "trans_change_ratio": 0.2247,
+    "center_cmp": 25941,
+    "center_changed": 45,
+    "center_change_ratio": 0.0017,
+    "added": 75,
+    "removed": 12,
+    "abs_d_endKlu": {
+     "n": 45,
+     "median": 18.0,
+     "p90": 41.4,
+     "min": 7.0,
+     "max": 67.0,
+     "mean": 21.02
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 235,
+      "added": [
+       166
+      ],
+      "removed": [
+       183
+      ],
+      "seg": [
+       7,
+       233
+      ]
+     },
+     {
+      "k": 265,
+      "center": 166,
+      "d": {
+       "endKlu": 21.0
+      },
+      "seg": [
+       7,
+       265
+      ],
+      "dates": [
+       "19900111",
+       "19910125"
+      ]
+     },
+     {
+      "k": 312,
+      "added": [
+       294
+      ],
+      "removed": [],
+      "seg": [
+       7,
+       311
+      ]
+     },
+     {
+      "k": 343,
+      "center": 294,
+      "d": {
+       "endKlu": 16.0
+      },
+      "seg": [
+       7,
+       341
+      ],
+      "dates": [
+       "19900111",
+       "19910520"
+      ]
+     },
+     {
+      "k": 436,
+      "added": [
+       386
+      ],
+      "removed": [],
+      "seg": [
+       7,
+       435
+      ]
+     },
+     {
+      "k": 459,
+      "center": 386,
+      "d": {
+       "endKlu": 23.0
+      },
+      "seg": [
+       7,
+       458
+      ],
+      "dates": [
+       "19900111",
+       "19911106"
+      ]
+     }
+    ]
+   }
+  },
+  "q2": {
+   "centers": 115,
+   "zero": 76,
+   "one": 30,
+   "multi": 9,
+   "zero_ratio": 0.6609,
+   "one_ratio": 0.2609,
+   "multi_ratio": 0.0783,
+   "field_freq": {
+    "endKlu": 50
+   },
+   "vanished_before_confirm": 12,
+   "confirmed_centers": 101,
+   "never_confirmed": 14,
+   "never_confirmed_zero_change": 12,
+   "never_confirmed_zero_ratio": 0.8571
+  },
+  "q3": {
+   "centers_having_tA": 115,
+   "never_A": 0,
+   "violations": 50,
+   "samples": [
+    {
+     "first": 229,
+     "tA": 229,
+     "tAE": null,
+     "beginKlu": 183,
+     "d": {
+      "k": 235,
+      "type": "vanished",
+      "d": {},
+      "age": 6
+     },
+     "conf": null
+    },
+    {
+     "first": 235,
+     "tA": 235,
+     "tAE": 312,
+     "beginKlu": 166,
+     "d": {
+      "k": 265,
+      "type": "geometry",
+      "d": {
+       "endKlu": 21.0
+      },
+      "age": 30
+     },
+     "conf": 399
+    },
+    {
+     "first": 312,
+     "tA": 312,
+     "tAE": 392,
+     "beginKlu": 294,
+     "d": {
+      "k": 343,
+      "type": "geometry",
+      "d": {
+       "endKlu": 16.0
+      },
+      "age": 31
+     },
+     "conf": 399
+    },
+    {
+     "first": 436,
+     "tA": 436,
+     "tAE": 584,
+     "beginKlu": 386,
+     "d": {
+      "k": 459,
+      "type": "geometry",
+      "d": {
+       "endKlu": 23.0
+      },
+      "age": 23
+     },
+     "conf": 575
+    },
+    {
+     "first": 917,
+     "tA": 917,
+     "tAE": 962,
+     "beginKlu": 894,
+     "d": {
+      "k": 930,
+      "type": "geometry",
+      "d": {
+       "endKlu": 9.0
+      },
+      "age": 13
+     },
+     "conf": 1145
+    },
+    {
+     "first": 962,
+     "tA": 962,
+     "tAE": 1044,
+     "beginKlu": 941,
+     "d": {
+      "k": 977,
+      "type": "geometry",
+      "d": {
+       "endKlu": 12.0
+      },
+      "age": 15
+     },
+     "conf": 1145
+    },
+    {
+     "first": 1441,
+     "tA": 1441,
+     "tAE": 1563,
+     "beginKlu": 1418,
+     "d": {
+      "k": 1474,
+      "type": "geometry",
+      "d": {
+       "endKlu": 26.0
+      },
+      "age": 33
+     },
+     "conf": 1658
+    },
+    {
+     "first": 1563,
+     "tA": 1563,
+     "tAE": 1626,
+     "beginKlu": 1538,
+     "d": {
+      "k": 1578,
+      "type": "geometry",
+      "d": {
+       "endKlu": 15.0
+      },
+      "age": 15
+     },
+     "conf": 1658
+    }
+   ],
+   "violations_geo": 39,
+   "violations_van": 11,
+   "lead_bars": {
+    "n": 101,
+    "median": 84.0,
+    "p90": 178.0,
+    "min": 20,
+    "max": 340,
+    "mean": 95.81
+   },
+   "centers_having_tAE": 104,
+   "never_AE": 11,
+   "violations_E": 5,
+   "samples_E": [
+    {
+     "first": 1563,
+     "tAE": 1626,
+     "beginKlu": 1538,
+     "d": {
+      "k": 1633,
+      "type": "geometry",
+      "d": {
+       "endKlu": 45.0
+      },
+      "age": 7
+     },
+     "conf": 1658
+    },
+    {
+     "first": 4837,
+     "tAE": 4861,
+     "beginKlu": 4798,
+     "d": {
+      "k": 4869,
+      "type": "vanished",
+      "d": {},
+      "age": 8
+     },
+     "conf": null
+    },
+    {
+     "first": 5899,
+     "tAE": 5910,
+     "beginKlu": 5869,
+     "d": {
+      "k": 5951,
+      "type": "geometry",
+      "d": {
+       "endKlu": 53.0
+      },
+      "age": 41
+     },
+     "conf": 5983
+    },
+    {
+     "first": 6362,
+     "tAE": 6409,
+     "beginKlu": 6338,
+     "d": {
+      "k": 6433,
+      "type": "geometry",
+      "d": {
+       "endKlu": 67.0
+      },
+      "age": 24
+     },
+     "conf": 6483
+    },
+    {
+     "first": 8735,
+     "tAE": 8763,
+     "beginKlu": 8704,
+     "d": {
+      "k": 8772,
+      "type": "vanished",
+      "d": {},
+      "age": 9
+     },
+     "conf": null
+    }
+   ],
+   "violations_E_geo": 3,
+   "violations_E_van": 2,
+   "lead_bars_E": {
+    "n": 101,
+    "median": 9.0,
+    "p90": 102.0,
+    "min": -152,
+    "max": 246,
+    "mean": 20.28
+   },
+   "centers_D20": 107,
+   "never_D20": 8,
+   "violations_D20": 24,
+   "samples_D20": [
+    {
+     "t": 255,
+     "beginKlu": 166,
+     "d": {
+      "k": 265,
+      "type": "geometry",
+      "d": {
+       "endKlu": 21.0
+      },
+      "age": 10
+     },
+     "conf": 399
+    },
+    {
+     "t": 332,
+     "beginKlu": 294,
+     "d": {
+      "k": 343,
+      "type": "geometry",
+      "d": {
+       "endKlu": 16.0
+      },
+      "age": 11
+     },
+     "conf": 399
+    },
+    {
+     "t": 456,
+     "beginKlu": 386,
+     "d": {
+      "k": 459,
+      "type": "geometry",
+      "d": {
+       "endKlu": 23.0
+      },
+      "age": 3
+     },
+     "conf": 575
+    },
+    {
+     "t": 1461,
+     "beginKlu": 1418,
+     "d": {
+      "k": 1474,
+      "type": "geometry",
+      "d": {
+       "endKlu": 26.0
+      },
+      "age": 13
+     },
+     "conf": 1658
+    },
+    {
+     "t": 1598,
+     "beginKlu": 1538,
+     "d": {
+      "k": 1633,
+      "type": "geometry",
+      "d": {
+       "endKlu": 45.0
+      },
+      "age": 35
+     },
+     "conf": 1658
+    },
+    {
+     "t": 2657,
+     "beginKlu": 2614,
+     "d": {
+      "k": 2664,
+      "type": "geometry",
+      "d": {
+       "endKlu": 28.0
+      },
+      "age": 7
+     },
+     "conf": 2716
+    },
+    {
+     "t": 3134,
+     "beginKlu": 3085,
+     "d": {
+      "k": 3135,
+      "type": "geometry",
+      "d": {
+       "endKlu": 16.0
+      },
+      "age": 1
+     },
+     "conf": 3243
+    },
+    {
+     "t": 3274,
+     "beginKlu": 3213,
+     "d": {
+      "k": 3277,
+      "type": "geometry",
+      "d": {
+       "endKlu": 21.0
+      },
+      "age": 3
+     },
+     "conf": 3334
+    }
+   ],
+   "lead_bars_D20": {
+    "n": 101,
+    "median": 60.0,
+    "p90": 158.0,
+    "min": 0,
+    "max": 308,
+    "mean": 72.56
+   },
+   "centers_D40": 103,
+   "never_D40": 12,
+   "violations_D40": 7,
+   "samples_D40": [
+    {
+     "t": 1618,
+     "beginKlu": 1538,
+     "d": {
+      "k": 1633,
+      "type": "geometry",
+      "d": {
+       "endKlu": 45.0
+      },
+      "age": 15
+     },
+     "conf": 1658
+    },
+    {
+     "t": 3816,
+     "beginKlu": 3749,
+     "d": {
+      "k": 3826,
+      "type": "geometry",
+      "d": {
+       "endKlu": 32.0
+      },
+      "age": 10
+     },
+     "conf": 3960
+    },
+    {
+     "t": 4363,
+     "beginKlu": 4277,
+     "d": {
+      "k": 4366,
+      "type": "geometry",
+      "d": {
+       "endKlu": 46.0
+      },
+      "age": 3
+     },
+     "conf": 4539
+    },
+    {
+     "t": 5861,
+     "beginKlu": 5803,
+     "d": {
+      "k": 5863,
+      "type": "vanished",
+      "d": {},
+      "age": 2
+     },
+     "conf": null
+    },
+    {
+     "t": 5939,
+     "beginKlu": 5869,
+     "d": {
+      "k": 5951,
+      "type": "geometry",
+      "d": {
+       "endKlu": 53.0
+      },
+      "age": 12
+     },
+     "conf": 5983
+    },
+    {
+     "t": 6402,
+     "beginKlu": 6338,
+     "d": {
+      "k": 6433,
+      "type": "geometry",
+      "d": {
+       "endKlu": 67.0
+      },
+      "age": 31
+     },
+     "conf": 6483
+    },
+    {
+     "t": 7876,
+     "beginKlu": 7795,
+     "d": {
+      "k": 7886,
+      "type": "geometry",
+      "d": {
+       "endKlu": 45.0
+      },
+      "age": 10
+     },
+     "conf": 7925
+    }
+   ],
+   "lead_bars_D40": {
+    "n": 101,
+    "median": 31.0,
+    "p90": 129.0,
+    "min": -20,
+    "max": 288,
+    "mean": 48.55
+   },
+   "B_true_conf_false": 8899,
+   "conf_true_B_false": 0,
+   "post_conf_changes": 0,
+   "post_conf_vanished": 0
+  }
+ },
+ {
+  "name": "999999",
+  "n_bars": 8763,
+  "k0": 200,
+  "q1": {
+   "extension": {
+    "transitions": 184,
+    "trans_with_any_change": 42,
+    "trans_change_ratio": 0.2283,
+    "center_cmp": 18,
+    "center_changed": 13,
+    "center_change_ratio": 0.7222,
+    "added": 29,
+    "removed": 0,
+    "abs_d_endKlu": {
+     "n": 13,
+     "median": 12.0,
+     "p90": 30.0,
+     "min": 7.0,
+     "max": 37.0,
+     "mean": 17.23
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 400,
+      "added": [
+       369
+      ],
+      "removed": [],
+      "seg": [
+       363,
+       399
+      ]
+     },
+     {
+      "k": 808,
+      "added": [
+       766
+      ],
+      "removed": [],
+      "seg": [
+       758,
+       807
+      ]
+     },
+     {
+      "k": 880,
+      "added": [
+       857
+      ],
+      "removed": [],
+      "seg": [
+       849,
+       879
+      ]
+     },
+     {
+      "k": 998,
+      "added": [
+       967
+      ],
+      "removed": [],
+      "seg": [
+       951,
+       997
+      ]
+     },
+     {
+      "k": 1385,
+      "added": [
+       1353
+      ],
+      "removed": [],
+      "seg": [
+       1332,
+       1384
+      ]
+     },
+     {
+      "k": 1691,
+      "added": [
+       1656
+      ],
+      "removed": [],
+      "seg": [
+       1645,
+       1690
+      ]
+     }
+    ]
+   },
+   "resplit": {
+    "transitions": 488,
+    "trans_with_any_change": 117,
+    "trans_change_ratio": 0.2398,
+    "center_cmp": 774,
+    "center_changed": 37,
+    "center_change_ratio": 0.0478,
+    "added": 90,
+    "removed": 22,
+    "abs_d_endKlu": {
+     "n": 37,
+     "median": 24.0,
+     "p90": 44.0,
+     "min": 8.0,
+     "max": 74.0,
+     "mean": 28.78
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 473,
+      "added": [
+       419
+      ],
+      "removed": [],
+      "seg": [
+       17,
+       472
+      ]
+     },
+     {
+      "k": 718,
+      "added": [
+       683
+      ],
+      "removed": [],
+      "seg": [
+       678,
+       718
+      ]
+     },
+     {
+      "k": 835,
+      "center": 766,
+      "d": {
+       "endKlu": 23.0
+      },
+      "seg": [
+       758,
+       835
+      ],
+      "dates": [
+       "19931208",
+       "19940401"
+      ]
+     },
+     {
+      "k": 887,
+      "added": [
+       849
+      ],
+      "removed": [
+       857
+      ],
+      "seg": [
+       758,
+       886
+      ]
+     },
+     {
+      "k": 1033,
+      "center": 967,
+      "d": {
+       "endKlu": 26.0
+      },
+      "seg": [
+       951,
+       1033
+      ],
+      "dates": [
+       "19940913",
+       "19950110"
+      ]
+     },
+     {
+      "k": 1119,
+      "added": [
+       1069
+      ],
+      "removed": [],
+      "seg": [
+       1048,
+       1119
+      ]
+     }
+    ]
+   }
+  },
+  "q2": {
+   "centers": 112,
+   "zero": 78,
+   "one": 24,
+   "multi": 10,
+   "zero_ratio": 0.6964,
+   "one_ratio": 0.2143,
+   "multi_ratio": 0.0893,
+   "field_freq": {
+    "endKlu": 51
+   },
+   "vanished_before_confirm": 15,
+   "confirmed_centers": 97,
+   "never_confirmed": 15,
+   "never_confirmed_zero_change": 11,
+   "never_confirmed_zero_ratio": 0.7333
+  },
+  "q3": {
+   "centers_having_tA": 112,
+   "never_A": 0,
+   "violations": 49,
+   "samples": [
+    {
+     "first": 808,
+     "tA": 808,
+     "tAE": 880,
+     "beginKlu": 766,
+     "d": {
+      "k": 835,
+      "type": "geometry",
+      "d": {
+       "endKlu": 23.0
+      },
+      "age": 27
+     },
+     "conf": 1018
+    },
+    {
+     "first": 880,
+     "tA": 880,
+     "tAE": null,
+     "beginKlu": 857,
+     "d": {
+      "k": 887,
+      "type": "vanished",
+      "d": {},
+      "age": 7
+     },
+     "conf": null
+    },
+    {
+     "first": 998,
+     "tA": 998,
+     "tAE": 1119,
+     "beginKlu": 967,
+     "d": {
+      "k": 1033,
+      "type": "geometry",
+      "d": {
+       "endKlu": 26.0
+      },
+      "age": 35
+     },
+     "conf": 1073
+    },
+    {
+     "first": 1182,
+     "tA": 1182,
+     "tAE": 1244,
+     "beginKlu": 1163,
+     "d": {
+      "k": 1202,
+      "type": "geometry",
+      "d": {
+       "endKlu": 16.0
+      },
+      "age": 20
+     },
+     "conf": 1232
+    },
+    {
+     "first": 1735,
+     "tA": 1735,
+     "tAE": 1828,
+     "beginKlu": 1700,
+     "d": {
+      "k": 1777,
+      "type": "geometry",
+      "d": {
+       "endKlu": 41.0
+      },
+      "age": 42
+     },
+     "conf": 1831
+    },
+    {
+     "first": 1975,
+     "tA": 1975,
+     "tAE": 2038,
+     "beginKlu": 1941,
+     "d": {
+      "k": 2072,
+      "type": "vanished",
+      "d": {},
+      "age": 97
+     },
+     "conf": null
+    },
+    {
+     "first": 2155,
+     "tA": 2155,
+     "tAE": 2233,
+     "beginKlu": 2128,
+     "d": {
+      "k": 2181,
+      "type": "geometry",
+      "d": {
+       "endKlu": 30.0
+      },
+      "age": 26
+     },
+     "conf": 2260
+    },
+    {
+     "first": 2307,
+     "tA": 2307,
+     "tAE": 2381,
+     "beginKlu": 2274,
+     "d": {
+      "k": 2345,
+      "type": "geometry",
+      "d": {
+       "endKlu": 37.0
+      },
+      "age": 38
+     },
+     "conf": 2436
+    }
+   ],
+   "violations_geo": 33,
+   "violations_van": 16,
+   "lead_bars": {
+    "n": 97,
+    "median": 94.0,
+    "p90": 251.2,
+    "min": 5,
+    "max": 496,
+    "mean": 124.15
+   },
+   "centers_having_tAE": 102,
+   "never_AE": 10,
+   "violations_E": 13,
+   "samples_E": [
+    {
+     "first": 1975,
+     "tAE": 2038,
+     "beginKlu": 1941,
+     "d": {
+      "k": 2072,
+      "type": "vanished",
+      "d": {},
+      "age": 34
+     },
+     "conf": null
+    },
+    {
+     "first": 2973,
+     "tAE": 3030,
+     "beginKlu": 2945,
+     "d": {
+      "k": 3176,
+      "type": "geometry",
+      "d": {
+       "endKlu": 30.0
+      },
+      "age": 146
+     },
+     "conf": null
+    },
+    {
+     "first": 3030,
+     "tAE": 3070,
+     "beginKlu": 2993,
+     "d": {
+      "k": 3176,
+      "type": "vanished",
+      "d": {},
+      "age": 106
+     },
+     "conf": 3234
+    },
+    {
+     "first": 3070,
+     "tAE": 3165,
+     "beginKlu": 3045,
+     "d": {
+      "k": 3176,
+      "type": "vanished",
+      "d": {},
+      "age": 11
+     },
+     "conf": 3234
+    },
+    {
+     "first": 3176,
+     "tAE": 3176,
+     "beginKlu": 3000,
+     "d": {
+      "k": 3207,
+      "type": "vanished",
+      "d": {},
+      "age": 31
+     },
+     "conf": null
+    },
+    {
+     "first": 3701,
+     "tAE": 3701,
+     "beginKlu": 3604,
+     "d": {
+      "k": 3835,
+      "type": "vanished",
+      "d": {},
+      "age": 134
+     },
+     "conf": null
+    },
+    {
+     "first": 5288,
+     "tAE": 5288,
+     "beginKlu": 5157,
+     "d": {
+      "k": 5289,
+      "type": "vanished",
+      "d": {},
+      "age": 1
+     },
+     "conf": 5429
+    },
+    {
+     "first": 6135,
+     "tAE": 6135,
+     "beginKlu": 6040,
+     "d": {
+      "k": 6177,
+      "type": "vanished",
+      "d": {},
+      "age": 42
+     },
+     "conf": null
+    }
+   ],
+   "violations_E_geo": 5,
+   "violations_E_van": 8,
+   "lead_bars_E": {
+    "n": 96,
+    "median": 24.5,
+    "p90": 183.5,
+    "min": -186,
+    "max": 377,
+    "mean": 48.19
+   },
+   "centers_D20": 106,
+   "never_D20": 6,
+   "violations_D20": 33,
+   "samples_D20": [
+    {
+     "t": 828,
+     "beginKlu": 766,
+     "d": {
+      "k": 835,
+      "type": "geometry",
+      "d": {
+       "endKlu": 23.0
+      },
+      "age": 7
+     },
+     "conf": 1018
+    },
+    {
+     "t": 1018,
+     "beginKlu": 967,
+     "d": {
+      "k": 1033,
+      "type": "geometry",
+      "d": {
+       "endKlu": 26.0
+      },
+      "age": 15
+     },
+     "conf": 1073
+    },
+    {
+     "t": 1755,
+     "beginKlu": 1700,
+     "d": {
+      "k": 1777,
+      "type": "geometry",
+      "d": {
+       "endKlu": 41.0
+      },
+      "age": 22
+     },
+     "conf": 1831
+    },
+    {
+     "t": 1995,
+     "beginKlu": 1941,
+     "d": {
+      "k": 2072,
+      "type": "vanished",
+      "d": {},
+      "age": 77
+     },
+     "conf": null
+    },
+    {
+     "t": 2175,
+     "beginKlu": 2128,
+     "d": {
+      "k": 2181,
+      "type": "geometry",
+      "d": {
+       "endKlu": 30.0
+      },
+      "age": 6
+     },
+     "conf": 2260
+    },
+    {
+     "t": 2327,
+     "beginKlu": 2274,
+     "d": {
+      "k": 2345,
+      "type": "geometry",
+      "d": {
+       "endKlu": 37.0
+      },
+      "age": 18
+     },
+     "conf": 2436
+    },
+    {
+     "t": 2993,
+     "beginKlu": 2945,
+     "d": {
+      "k": 3176,
+      "type": "geometry",
+      "d": {
+       "endKlu": 30.0
+      },
+      "age": 183
+     },
+     "conf": null
+    },
+    {
+     "t": 3050,
+     "beginKlu": 2993,
+     "d": {
+      "k": 3176,
+      "type": "vanished",
+      "d": {},
+      "age": 126
+     },
+     "conf": 3234
+    }
+   ],
+   "lead_bars_D20": {
+    "n": 97,
+    "median": 72.0,
+    "p90": 231.2,
+    "min": -15,
+    "max": 462,
+    "mean": 101.54
+   },
+   "centers_D40": 102,
+   "never_D40": 10,
+   "violations_D40": 16,
+   "samples_D40": [
+    {
+     "t": 1775,
+     "beginKlu": 1700,
+     "d": {
+      "k": 1777,
+      "type": "geometry",
+      "d": {
+       "endKlu": 41.0
+      },
+      "age": 2
+     },
+     "conf": 1831
+    },
+    {
+     "t": 2015,
+     "beginKlu": 1941,
+     "d": {
+      "k": 2072,
+      "type": "vanished",
+      "d": {},
+      "age": 57
+     },
+     "conf": null
+    },
+    {
+     "t": 3013,
+     "beginKlu": 2945,
+     "d": {
+      "k": 3176,
+      "type": "geometry",
+      "d": {
+       "endKlu": 30.0
+      },
+      "age": 163
+     },
+     "conf": null
+    },
+    {
+     "t": 3070,
+     "beginKlu": 2993,
+     "d": {
+      "k": 3176,
+      "type": "vanished",
+      "d": {},
+      "age": 106
+     },
+     "conf": 3234
+    },
+    {
+     "t": 3144,
+     "beginKlu": 3045,
+     "d": {
+      "k": 3176,
+      "type": "vanished",
+      "d": {},
+      "age": 32
+     },
+     "conf": 3234
+    },
+    {
+     "t": 3401,
+     "beginKlu": 3325,
+     "d": {
+      "k": 3454,
+      "type": "geometry",
+      "d": {
+       "endKlu": 62.0
+      },
+      "age": 53
+     },
+     "conf": 3843
+    },
+    {
+     "t": 3741,
+     "beginKlu": 3604,
+     "d": {
+      "k": 3835,
+      "type": "vanished",
+      "d": {},
+      "age": 94
+     },
+     "conf": null
+    },
+    {
+     "t": 5118,
+     "beginKlu": 5057,
+     "d": {
+      "k": 5138,
+      "type": "geometry",
+      "d": {
+       "endKlu": 44.0
+      },
+      "age": 20
+     },
+     "conf": 5429
+    }
+   ],
+   "lead_bars_D40": {
+    "n": 97,
+    "median": 39.0,
+    "p90": 209.4,
+    "min": -35,
+    "max": 442,
+    "mean": 76.67
+   },
+   "B_true_conf_false": 0,
+   "conf_true_B_false": 0,
+   "post_conf_changes": 0,
+   "post_conf_vanished": 0
+  }
+ },
+ {
+  "name": "000002",
+  "n_bars": 8517,
+  "k0": 200,
+  "q1": {
+   "extension": {
+    "transitions": 174,
+    "trans_with_any_change": 50,
+    "trans_change_ratio": 0.2874,
+    "center_cmp": 18,
+    "center_changed": 15,
+    "center_change_ratio": 0.8333,
+    "added": 35,
+    "removed": 0,
+    "abs_d_endKlu": {
+     "n": 15,
+     "median": 14.0,
+     "p90": 32.8,
+     "min": 9.0,
+     "max": 46.0,
+     "mean": 18.87
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 562,
+      "added": [
+       515
+      ],
+      "removed": [],
+      "seg": [
+       481,
+       560
+      ]
+     },
+     {
+      "k": 724,
+      "added": [
+       648
+      ],
+      "removed": [],
+      "seg": [
+       577,
+       719
+      ]
+     },
+     {
+      "k": 744,
+      "center": 648,
+      "d": {
+       "endKlu": 38.0
+      },
+      "seg": [
+       577,
+       742
+      ],
+      "dates": [
+       "19930412",
+       "19931202"
+      ]
+     },
+     {
+      "k": 759,
+      "center": 648,
+      "d": {
+       "endKlu": 14.0
+      },
+      "seg": [
+       577,
+       757
+      ],
+      "dates": [
+       "19930412",
+       "19931223"
+      ]
+     },
+     {
+      "k": 787,
+      "center": 648,
+      "d": {
+       "endKlu": 11.0
+      },
+      "seg": [
+       577,
+       785
+      ],
+      "dates": [
+       "19930412",
+       "19940201"
+      ]
+     },
+     {
+      "k": 1646,
+      "added": [
+       1615
+      ],
+      "removed": [],
+      "seg": [
+       1611,
+       1644
+      ]
+     }
+    ]
+   },
+   "resplit": {
+    "transitions": 411,
+    "trans_with_any_change": 96,
+    "trans_change_ratio": 0.2336,
+    "center_cmp": 19034,
+    "center_changed": 28,
+    "center_change_ratio": 0.0015,
+    "added": 72,
+    "removed": 14,
+    "abs_d_endKlu": {
+     "n": 28,
+     "median": 15.5,
+     "p90": 35.0,
+     "min": 6.0,
+     "max": 67.0,
+     "mean": 19.57
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 326,
+      "added": [
+       216
+      ],
+      "removed": [],
+      "seg": [
+       11,
+       326
+      ]
+     },
+     {
+      "k": 821,
+      "center": 648,
+      "d": {
+       "endKlu": 32.0
+      },
+      "seg": [
+       11,
+       819
+      ],
+      "dates": [
+       "19910213",
+       "19940328"
+      ]
+     },
+     {
+      "k": 874,
+      "added": [
+       834
+      ],
+      "removed": [],
+      "seg": [
+       11,
+       870
+      ]
+     },
+     {
+      "k": 1069,
+      "added": [
+       949
+      ],
+      "removed": [],
+      "seg": [
+       11,
+       1050
+      ]
+     },
+     {
+      "k": 1557,
+      "added": [
+       1452
+      ],
+      "removed": [],
+      "seg": [
+       11,
+       1557
+      ]
+     },
+     {
+      "k": 1609,
+      "added": [
+       1573
+      ],
+      "removed": [],
+      "seg": [
+       11,
+       1606
+      ]
+     }
+    ]
+   }
+  },
+  "q2": {
+   "centers": 104,
+   "zero": 73,
+   "one": 21,
+   "multi": 10,
+   "zero_ratio": 0.7019,
+   "one_ratio": 0.2019,
+   "multi_ratio": 0.0962,
+   "field_freq": {
+    "endKlu": 43
+   },
+   "vanished_before_confirm": 11,
+   "confirmed_centers": 92,
+   "never_confirmed": 12,
+   "never_confirmed_zero_change": 10,
+   "never_confirmed_zero_ratio": 0.8333
+  },
+  "q3": {
+   "centers_having_tA": 104,
+   "never_A": 0,
+   "violations": 42,
+   "samples": [
+    {
+     "first": 724,
+     "tA": 724,
+     "tAE": 874,
+     "beginKlu": 648,
+     "d": {
+      "k": 744,
+      "type": "geometry",
+      "d": {
+       "endKlu": 38.0
+      },
+      "age": 20
+     },
+     "conf": 1015
+    },
+    {
+     "first": 1747,
+     "tA": 1747,
+     "tAE": 1881,
+     "beginKlu": 1715,
+     "d": {
+      "k": 1768,
+      "type": "geometry",
+      "d": {
+       "endKlu": 14.0
+      },
+      "age": 21
+     },
+     "conf": 1822
+    },
+    {
+     "first": 2191,
+     "tA": 2191,
+     "tAE": 2302,
+     "beginKlu": 2119,
+     "d": {
+      "k": 2227,
+      "type": "geometry",
+      "d": {
+       "endKlu": 46.0
+      },
+      "age": 36
+     },
+     "conf": 2339
+    },
+    {
+     "first": 2841,
+     "tA": 2841,
+     "tAE": null,
+     "beginKlu": 2801,
+     "d": {
+      "k": 2865,
+      "type": "geometry",
+      "d": {
+       "endKlu": 16.0
+      },
+      "age": 24
+     },
+     "conf": null
+    },
+    {
+     "first": 3084,
+     "tA": 3084,
+     "tAE": 3163,
+     "beginKlu": 3039,
+     "d": {
+      "k": 3167,
+      "type": "vanished",
+      "d": {},
+      "age": 83
+     },
+     "conf": 3268
+    },
+    {
+     "first": 3163,
+     "tA": 3163,
+     "tAE": 3256,
+     "beginKlu": 3139,
+     "d": {
+      "k": 3167,
+      "type": "vanished",
+      "d": {},
+      "age": 4
+     },
+     "conf": 3268
+    },
+    {
+     "first": 3167,
+     "tA": 3167,
+     "tAE": 3167,
+     "beginKlu": 3009,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 89
+     },
+     "conf": null
+    },
+    {
+     "first": 3167,
+     "tA": 3167,
+     "tAE": 3167,
+     "beginKlu": 3052,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 89
+     },
+     "conf": null
+    }
+   ],
+   "violations_geo": 31,
+   "violations_van": 11,
+   "lead_bars": {
+    "n": 92,
+    "median": 104.0,
+    "p90": 266.8,
+    "min": 25,
+    "max": 408,
+    "mean": 139.9
+   },
+   "centers_having_tAE": 96,
+   "never_AE": 8,
+   "violations_E": 5,
+   "samples_E": [
+    {
+     "first": 3084,
+     "tAE": 3163,
+     "beginKlu": 3039,
+     "d": {
+      "k": 3167,
+      "type": "vanished",
+      "d": {},
+      "age": 4
+     },
+     "conf": 3268
+    },
+    {
+     "first": 3167,
+     "tAE": 3167,
+     "beginKlu": 3009,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 89
+     },
+     "conf": null
+    },
+    {
+     "first": 3167,
+     "tAE": 3167,
+     "beginKlu": 3052,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 89
+     },
+     "conf": null
+    },
+    {
+     "first": 3167,
+     "tAE": 3216,
+     "beginKlu": 3111,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 40
+     },
+     "conf": null
+    },
+    {
+     "first": 4166,
+     "tAE": 4195,
+     "beginKlu": 4106,
+     "d": {
+      "k": 4205,
+      "type": "geometry",
+      "d": {
+       "endKlu": 15.0
+      },
+      "age": 10
+     },
+     "conf": 4324
+    }
+   ],
+   "violations_E_geo": 1,
+   "violations_E_van": 4,
+   "lead_bars_E": {
+    "n": 92,
+    "median": 28.5,
+    "p90": 186.7,
+    "min": -161,
+    "max": 372,
+    "mean": 58.07
+   },
+   "centers_D20": 101,
+   "never_D20": 3,
+   "violations_D20": 24,
+   "samples_D20": [
+    {
+     "t": 779,
+     "beginKlu": 648,
+     "d": {
+      "k": 787,
+      "type": "geometry",
+      "d": {
+       "endKlu": 11.0
+      },
+      "age": 8
+     },
+     "conf": 1015
+    },
+    {
+     "t": 1767,
+     "beginKlu": 1715,
+     "d": {
+      "k": 1768,
+      "type": "geometry",
+      "d": {
+       "endKlu": 14.0
+      },
+      "age": 1
+     },
+     "conf": 1822
+    },
+    {
+     "t": 2211,
+     "beginKlu": 2119,
+     "d": {
+      "k": 2227,
+      "type": "geometry",
+      "d": {
+       "endKlu": 46.0
+      },
+      "age": 16
+     },
+     "conf": 2339
+    },
+    {
+     "t": 2861,
+     "beginKlu": 2801,
+     "d": {
+      "k": 2865,
+      "type": "geometry",
+      "d": {
+       "endKlu": 16.0
+      },
+      "age": 4
+     },
+     "conf": null
+    },
+    {
+     "t": 3104,
+     "beginKlu": 3039,
+     "d": {
+      "k": 3167,
+      "type": "vanished",
+      "d": {},
+      "age": 63
+     },
+     "conf": 3268
+    },
+    {
+     "t": 3187,
+     "beginKlu": 3009,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 69
+     },
+     "conf": null
+    },
+    {
+     "t": 3187,
+     "beginKlu": 3052,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 69
+     },
+     "conf": null
+    },
+    {
+     "t": 3187,
+     "beginKlu": 3111,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 69
+     },
+     "conf": null
+    }
+   ],
+   "lead_bars_D20": {
+    "n": 92,
+    "median": 83.0,
+    "p90": 244.1,
+    "min": -4,
+    "max": 380,
+    "mean": 116.26
+   },
+   "centers_D40": 96,
+   "never_D40": 8,
+   "violations_D40": 6,
+   "samples_D40": [
+    {
+     "t": 3124,
+     "beginKlu": 3039,
+     "d": {
+      "k": 3167,
+      "type": "vanished",
+      "d": {},
+      "age": 43
+     },
+     "conf": 3268
+    },
+    {
+     "t": 3207,
+     "beginKlu": 3009,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 49
+     },
+     "conf": null
+    },
+    {
+     "t": 3207,
+     "beginKlu": 3052,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 49
+     },
+     "conf": null
+    },
+    {
+     "t": 3207,
+     "beginKlu": 3111,
+     "d": {
+      "k": 3256,
+      "type": "vanished",
+      "d": {},
+      "age": 49
+     },
+     "conf": null
+    },
+    {
+     "t": 3382,
+     "beginKlu": 3292,
+     "d": {
+      "k": 3429,
+      "type": "geometry",
+      "d": {
+       "endKlu": 67.0
+      },
+      "age": 47
+     },
+     "conf": 3506
+    },
+    {
+     "t": 6197,
+     "beginKlu": 6121,
+     "d": {
+      "k": 6210,
+      "type": "geometry",
+      "d": {
+       "endKlu": 45.0
+      },
+      "age": 13
+     },
+     "conf": 6344
+    }
+   ],
+   "lead_bars_D40": {
+    "n": 92,
+    "median": 63.0,
+    "p90": 206.2,
+    "min": -24,
+    "max": 360,
+    "mean": 90.78
+   },
+   "B_true_conf_false": 8093,
+   "conf_true_B_false": 0,
+   "post_conf_changes": 0,
+   "post_conf_vanished": 0
+  }
+ },
+ {
+  "name": "399001",
+  "n_bars": 8718,
+  "k0": 200,
+  "q1": {
+   "extension": {
+    "transitions": 188,
+    "trans_with_any_change": 45,
+    "trans_change_ratio": 0.2394,
+    "center_cmp": 9,
+    "center_changed": 7,
+    "center_change_ratio": 0.7778,
+    "added": 38,
+    "removed": 0,
+    "abs_d_endKlu": {
+     "n": 7,
+     "median": 15.0,
+     "p90": 23.2,
+     "min": 7.0,
+     "max": 25.0,
+     "mean": 16.29
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 383,
+      "added": [
+       346
+      ],
+      "removed": [],
+      "seg": [
+       331,
+       380
+      ]
+     },
+     {
+      "k": 675,
+      "added": [
+       641
+      ],
+      "removed": [],
+      "seg": [
+       621,
+       674
+      ]
+     },
+     {
+      "k": 693,
+      "center": 641,
+      "d": {
+       "endKlu": 21.0
+      },
+      "seg": [
+       621,
+       692
+      ],
+      "dates": [
+       "19930720",
+       "19931029"
+      ]
+     },
+     {
+      "k": 704,
+      "center": 641,
+      "d": {
+       "endKlu": 7.0
+      },
+      "seg": [
+       621,
+       703
+      ],
+      "dates": [
+       "19930720",
+       "19931115"
+      ]
+     },
+     {
+      "k": 856,
+      "added": [
+       819
+      ],
+      "removed": [],
+      "seg": [
+       810,
+       854
+      ]
+     },
+     {
+      "k": 1053,
+      "added": [
+       1025
+      ],
+      "removed": [],
+      "seg": [
+       1003,
+       1052
+      ]
+     }
+    ]
+   },
+   "resplit": {
+    "transitions": 480,
+    "trans_with_any_change": 109,
+    "trans_change_ratio": 0.2271,
+    "center_cmp": 849,
+    "center_changed": 27,
+    "center_change_ratio": 0.0318,
+    "added": 108,
+    "removed": 44,
+    "abs_d_endKlu": {
+     "n": 27,
+     "median": 15.0,
+     "p90": 31.0,
+     "min": 8.0,
+     "max": 42.0,
+     "mean": 18.15
+    },
+    "abs_d_zg": {
+     "n": 0
+    },
+    "abs_d_zd": {
+     "n": 0
+    },
+    "samples": [
+     {
+      "k": 254,
+      "added": [
+       212
+      ],
+      "removed": [],
+      "seg": [
+       208,
+       253
+      ]
+     },
+     {
+      "k": 599,
+      "added": [
+       571
+      ],
+      "removed": [],
+      "seg": [
+       549,
+       596
+      ]
+     },
+     {
+      "k": 861,
+      "added": [
+       810
+      ],
+      "removed": [
+       819
+      ],
+      "seg": [
+       708,
+       860
+      ]
+     },
+     {
+      "k": 973,
+      "added": [
+       929
+      ],
+      "removed": [],
+      "seg": [
+       708,
+       973
+      ]
+     },
+     {
+      "k": 1069,
+      "added": [
+       976
+      ],
+      "removed": [
+       1025
+      ],
+      "seg": [
+       708,
+       1062
+      ]
+     },
+     {
+      "k": 1132,
+      "center": 1078,
+      "d": {
+       "endKlu": 17.0
+      },
+      "seg": [
+       708,
+       1132
+      ],
+      "dates": [
+       "19931122",
+       "19950807"
+      ]
+     }
+    ]
+   }
+  },
+  "q2": {
+   "centers": 126,
+   "zero": 99,
+   "one": 21,
+   "multi": 6,
+   "zero_ratio": 0.7857,
+   "one_ratio": 0.1667,
+   "multi_ratio": 0.0476,
+   "field_freq": {
+    "endKlu": 34
+   },
+   "vanished_before_confirm": 24,
+   "confirmed_centers": 100,
+   "never_confirmed": 26,
+   "never_confirmed_zero_change": 25,
+   "never_confirmed_zero_ratio": 0.9615
+  },
+  "q3": {
+   "centers_having_tA": 126,
+   "never_A": 0,
+   "violations": 55,
+   "samples": [
+    {
+     "first": 675,
+     "tA": 675,
+     "tAE": 856,
+     "beginKlu": 641,
+     "d": {
+      "k": 693,
+      "type": "geometry",
+      "d": {
+       "endKlu": 21.0
+      },
+      "age": 18
+     },
+     "conf": 766
+    },
+    {
+     "first": 856,
+     "tA": 856,
+     "tAE": null,
+     "beginKlu": 819,
+     "d": {
+      "k": 861,
+      "type": "vanished",
+      "d": {},
+      "age": 5
+     },
+     "conf": null
+    },
+    {
+     "first": 973,
+     "tA": 973,
+     "tAE": 1053,
+     "beginKlu": 929,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 375
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1053,
+     "tA": 1053,
+     "tAE": null,
+     "beginKlu": 1025,
+     "d": {
+      "k": 1069,
+      "type": "vanished",
+      "d": {},
+      "age": 16
+     },
+     "conf": null
+    },
+    {
+     "first": 1069,
+     "tA": 1069,
+     "tAE": 1114,
+     "beginKlu": 976,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 279
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1114,
+     "tA": 1114,
+     "tAE": 1215,
+     "beginKlu": 1078,
+     "d": {
+      "k": 1132,
+      "type": "geometry",
+      "d": {
+       "endKlu": 17.0
+      },
+      "age": 18
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1215,
+     "tA": 1215,
+     "tAE": 1295,
+     "beginKlu": 1150,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 133
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1229,
+     "tA": 1229,
+     "tAE": 1229,
+     "beginKlu": 1047,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 119
+     },
+     "conf": null
+    }
+   ],
+   "violations_geo": 27,
+   "violations_van": 28,
+   "lead_bars": {
+    "n": 100,
+    "median": 97.5,
+    "p90": 275.4,
+    "min": 6,
+    "max": 749,
+    "mean": 138.66
+   },
+   "centers_having_tAE": 113,
+   "never_AE": 13,
+   "violations_E": 21,
+   "samples_E": [
+    {
+     "first": 973,
+     "tAE": 1053,
+     "beginKlu": 929,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 295
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1069,
+     "tAE": 1114,
+     "beginKlu": 976,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 234
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1114,
+     "tAE": 1215,
+     "beginKlu": 1078,
+     "d": {
+      "k": 1229,
+      "type": "vanished",
+      "d": {},
+      "age": 14
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1215,
+     "tAE": 1295,
+     "beginKlu": 1150,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 53
+     },
+     "conf": 1610
+    },
+    {
+     "first": 1229,
+     "tAE": 1229,
+     "beginKlu": 1047,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 119
+     },
+     "conf": null
+    },
+    {
+     "first": 1229,
+     "tAE": 1229,
+     "beginKlu": 1097,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 119
+     },
+     "conf": null
+    },
+    {
+     "first": 1348,
+     "tAE": 1348,
+     "beginKlu": 913,
+     "d": {
+      "k": 1349,
+      "type": "vanished",
+      "d": {},
+      "age": 1
+     },
+     "conf": null
+    },
+    {
+     "first": 1348,
+     "tAE": 1348,
+     "beginKlu": 941,
+     "d": {
+      "k": 1349,
+      "type": "vanished",
+      "d": {},
+      "age": 1
+     },
+     "conf": null
+    }
+   ],
+   "violations_E_geo": 4,
+   "violations_E_van": 17,
+   "lead_bars_E": {
+    "n": 100,
+    "median": 28.0,
+    "p90": 196.5,
+    "min": -173,
+    "max": 637,
+    "mean": 57.69
+   },
+   "centers_D20": 116,
+   "never_D20": 10,
+   "violations_D20": 23,
+   "samples_D20": [
+    {
+     "t": 993,
+     "beginKlu": 929,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 355
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1089,
+     "beginKlu": 976,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 259
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1152,
+     "beginKlu": 1078,
+     "d": {
+      "k": 1229,
+      "type": "vanished",
+      "d": {},
+      "age": 77
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1235,
+     "beginKlu": 1150,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 113
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1249,
+     "beginKlu": 1047,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 99
+     },
+     "conf": null
+    },
+    {
+     "t": 1249,
+     "beginKlu": 1097,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 99
+     },
+     "conf": null
+    },
+    {
+     "t": 1621,
+     "beginKlu": 1571,
+     "d": {
+      "k": 1629,
+      "type": "geometry",
+      "d": {
+       "endKlu": 18.0
+      },
+      "age": 8
+     },
+     "conf": 1732
+    },
+    {
+     "t": 1953,
+     "beginKlu": 1878,
+     "d": {
+      "k": 1959,
+      "type": "vanished",
+      "d": {},
+      "age": 6
+     },
+     "conf": null
+    }
+   ],
+   "lead_bars_D20": {
+    "n": 100,
+    "median": 73.0,
+    "p90": 254.1,
+    "min": -14,
+    "max": 729,
+    "mean": 114.68
+   },
+   "centers_D40": 113,
+   "never_D40": 13,
+   "violations_D40": 16,
+   "samples_D40": [
+    {
+     "t": 1013,
+     "beginKlu": 929,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 335
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1109,
+     "beginKlu": 976,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 239
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1172,
+     "beginKlu": 1078,
+     "d": {
+      "k": 1229,
+      "type": "vanished",
+      "d": {},
+      "age": 57
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1255,
+     "beginKlu": 1150,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 93
+     },
+     "conf": 1610
+    },
+    {
+     "t": 1269,
+     "beginKlu": 1047,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 79
+     },
+     "conf": null
+    },
+    {
+     "t": 1269,
+     "beginKlu": 1097,
+     "d": {
+      "k": 1348,
+      "type": "vanished",
+      "d": {},
+      "age": 79
+     },
+     "conf": null
+    },
+    {
+     "t": 2512,
+     "beginKlu": 2383,
+     "d": {
+      "k": 2514,
+      "type": "vanished",
+      "d": {},
+      "age": 2
+     },
+     "conf": null
+    },
+    {
+     "t": 2836,
+     "beginKlu": 2725,
+     "d": {
+      "k": 3117,
+      "type": "vanished",
+      "d": {},
+      "age": 281
+     },
+     "conf": null
+    }
+   ],
+   "lead_bars_D40": {
+    "n": 100,
+    "median": 51.5,
+    "p90": 213.3,
+    "min": -34,
+    "max": 709,
+    "mean": 89.73
+   },
+   "B_true_conf_false": 0,
+   "conf_true_B_false": 0,
+   "post_conf_changes": 0,
+   "post_conf_vanished": 0
+  }
+ }
+]

@@ -1,0 +1,586 @@
+[
+ {
+  "code": "HSI",
+  "name": "恒生指数",
+  "n": 9099,
+  "nk": 120,
+  "bi_mm": 0,
+  "seg_mm": 0,
+  "cen_mm": 1,
+  "bi_maxdev": 0.0,
+  "seg_maxdev": 0.0,
+  "cen_maxdev": 0.0,
+  "cen_spans": [
+   49
+  ],
+  "cen_bi_spans": [
+   6
+  ],
+  "seg_bi_spans": [],
+  "tail_cases": {
+   "same_bi": 69,
+   "partial_new_bi": 43,
+   "lost_last_bi": 8
+  },
+  "gap0_extended": 0,
+  "gap1_start_match": 43,
+  "gapm1_prev": 8,
+  "gap0_max_extend": 0,
+  "gap1_max_delta_klu": 46,
+  "gap1_max_delta_val": 4592.230000000001,
+  "bad_rows": [
+   {
+    "k": 5852,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 49,
+    "span_bi": 6
+   }
+  ]
+ },
+ {
+  "code": "999999",
+  "name": "上证指数",
+  "n": 8763,
+  "nk": 120,
+  "bi_mm": 0,
+  "seg_mm": 2,
+  "cen_mm": 4,
+  "bi_maxdev": 0.0,
+  "seg_maxdev": 141.1300000000001,
+  "cen_maxdev": 179.3199999999997,
+  "cen_spans": [
+   89,
+   32,
+   36,
+   51
+  ],
+  "cen_bi_spans": [
+   10,
+   4,
+   6,
+   4
+  ],
+  "seg_bi_spans": [
+   14,
+   11
+  ],
+  "tail_cases": {
+   "same_bi": 64,
+   "partial_new_bi": 46,
+   "lost_last_bi": 10
+  },
+  "gap0_extended": 3,
+  "gap1_start_match": 46,
+  "gapm1_prev": 10,
+  "gap0_max_extend": 1,
+  "gap1_max_delta_klu": 38,
+  "gap1_max_delta_val": 736.8200000000002,
+  "bad_rows": [
+   {
+    "k": 2071,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 89,
+    "span_bi": 10
+   },
+   {
+    "k": 3759,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     0
+    ],
+    "cen": [
+     0,
+     0
+    ],
+    "span": null,
+    "span_bi": null
+   },
+   {
+    "k": 5264,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 32,
+    "span_bi": 4
+   },
+   {
+    "k": 6489,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     1,
+     0
+    ],
+    "span": 36,
+    "span_bi": 6
+   },
+   {
+    "k": 7200,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 51,
+    "span_bi": 4
+   }
+  ]
+ },
+ {
+  "code": "000002",
+  "name": "万 科Ａ",
+  "n": 8517,
+  "nk": 120,
+  "bi_mm": 0,
+  "seg_mm": 0,
+  "cen_mm": 3,
+  "bi_maxdev": 0.0,
+  "seg_maxdev": 0.0,
+  "cen_maxdev": 15.0,
+  "cen_spans": [
+   58,
+   22,
+   27
+  ],
+  "cen_bi_spans": [
+   5,
+   4,
+   4
+  ],
+  "seg_bi_spans": [],
+  "tail_cases": {
+   "same_bi": 71,
+   "partial_new_bi": 40,
+   "lost_last_bi": 9
+  },
+  "gap0_extended": 3,
+  "gap1_start_match": 40,
+  "gapm1_prev": 9,
+  "gap0_max_extend": 3,
+  "gap1_max_delta_klu": 26,
+  "gap1_max_delta_val": 2.280000000000001,
+  "bad_rows": [
+   {
+    "k": 2859,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 58,
+    "span_bi": 5
+   },
+   {
+    "k": 4193,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     1,
+     0
+    ],
+    "span": 22,
+    "span_bi": 4
+   },
+   {
+    "k": 4198,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     1,
+     0
+    ],
+    "span": 27,
+    "span_bi": 4
+   }
+  ]
+ },
+ {
+  "code": "399001",
+  "name": "深证成指",
+  "n": 8718,
+  "nk": 120,
+  "bi_mm": 0,
+  "seg_mm": 12,
+  "cen_mm": 12,
+  "bi_maxdev": 0.0,
+  "seg_maxdev": 3940.87,
+  "cen_maxdev": 741.7999999999993,
+  "cen_spans": [
+   158,
+   166,
+   213,
+   223,
+   418,
+   436,
+   606,
+   97,
+   149,
+   210,
+   60,
+   64
+  ],
+  "cen_bi_spans": [
+   15,
+   16,
+   20,
+   21,
+   16,
+   18,
+   30,
+   4,
+   9,
+   4,
+   4,
+   4
+  ],
+  "seg_bi_spans": [
+   21,
+   22,
+   26,
+   27,
+   44,
+   46,
+   58,
+   10,
+   10,
+   19,
+   25,
+   6
+  ],
+  "tail_cases": {
+   "same_bi": 69,
+   "partial_new_bi": 45,
+   "lost_last_bi": 6
+  },
+  "gap0_extended": 2,
+  "gap1_start_match": 45,
+  "gapm1_prev": 6,
+  "gap0_max_extend": 1,
+  "gap1_max_delta_klu": 51,
+  "gap1_max_delta_val": 3582.0199999999995,
+  "bad_rows": [
+   {
+    "k": 1284,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 158,
+    "span_bi": 15
+   },
+   {
+    "k": 1292,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 166,
+    "span_bi": 16
+   },
+   {
+    "k": 1339,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 213,
+    "span_bi": 20
+   },
+   {
+    "k": 1349,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     1
+    ],
+    "span": 223,
+    "span_bi": 21
+   },
+   {
+    "k": 1373,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     2
+    ],
+    "cen": [
+     0,
+     4
+    ],
+    "span": 418,
+    "span_bi": 16
+   },
+   {
+    "k": 1391,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     2
+    ],
+    "cen": [
+     0,
+     4
+    ],
+    "span": 436,
+    "span_bi": 18
+   },
+   {
+    "k": 1561,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     3
+    ],
+    "cen": [
+     0,
+     4
+    ],
+    "span": 606,
+    "span_bi": 30
+   },
+   {
+    "k": 2483,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     0
+    ],
+    "span": null,
+    "span_bi": null
+   },
+   {
+    "k": 2497,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     1
+    ],
+    "cen": [
+     0,
+     0
+    ],
+    "span": null,
+    "span_bi": null
+   },
+   {
+    "k": 2859,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     0,
+     2
+    ],
+    "span": 97,
+    "span_bi": 4
+   },
+   {
+    "k": 2911,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     0
+    ],
+    "cen": [
+     0,
+     2
+    ],
+    "span": 149,
+    "span_bi": 9
+   },
+   {
+    "k": 2972,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     0
+    ],
+    "cen": [
+     0,
+     3
+    ],
+    "span": 210,
+    "span_bi": 4
+   },
+   {
+    "k": 4714,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     1,
+     0
+    ],
+    "cen": [
+     0,
+     0
+    ],
+    "span": null,
+    "span_bi": null
+   },
+   {
+    "k": 6468,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     1,
+     0
+    ],
+    "span": 60,
+    "span_bi": 4
+   },
+   {
+    "k": 6472,
+    "bi": [
+     0,
+     0
+    ],
+    "seg": [
+     0,
+     0
+    ],
+    "cen": [
+     1,
+     0
+    ],
+    "span": 64,
+    "span_bi": 4
+   }
+  ]
+ }
+]

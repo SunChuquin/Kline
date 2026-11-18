@@ -74,7 +74,8 @@ struct CanvasCurve: Equatable {
     var breakOnNaN: Bool = false
     /// 已转换为可见区间局部下标的抽样关键 bar
     var keyIndices: [Int]? = nil
-    /// 缠论通道种类（CHANBIZG/CHANBIZD/CHANSEGZG/CHANSEGZD 为中枢轨道行，绘制时越界钳边；普通行 nil）
+    /// 缠论通道种类（CHANBIZG/CHANBIZD/CHANSEGZG/CHANSEGZD 及其 *UC 未确认版本为中枢轨道行，
+    /// 绘制时越界钳边；普通行 nil）
     var chanKind: String? = nil
 }
 

@@ -11,6 +11,10 @@ import Foundation
 
 enum WebUIFiles {
 
+    /// bundle 根 `WebUI/index.html` 是否存在：缺失 → App 内所有 WebView 会 404。
+    /// 本机构建时若未先 `npm run build`，自动回退原生实现而不是白屏。
+    static var isBundleReady: Bool { read("index.html") != nil }
+
     /// 读 bundle 根 WebUI/<relPath>；relPath 为空 → index.html。
     /// 返回 (data, mime, absolutePath)；路径非法（含 ".."）或文件不存在返回 nil。
     static func read(_ relPath: String) -> (data: Data, mime: String, path: String)? {

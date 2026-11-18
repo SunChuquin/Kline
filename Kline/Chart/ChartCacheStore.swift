@@ -29,6 +29,9 @@ final class ChartCacheStore {
         var bgCoverageEnd = 0
         /// 该周期是否已完成全量正确预计算（用于“当前周期算完后继续算其它周期”）
         var prefetchDone = false
+        /// 缠论通道行求值时的右缘（绝对索引）：缠论必须截到可见窗口右缘，
+        /// 右缘一变即失效；-1 表示尚未按截断口径算过
+        var chanCalcEnd = -1
         /// 后台预计算是否进行中（避免对同一周期重复启动）
         var isPrefetching = false
         /// 计算该缓存时所用的指标配置指纹：配置（主/副图指标与参数）变了，缓存视为无效需重算

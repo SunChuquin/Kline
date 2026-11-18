@@ -1510,6 +1510,7 @@ private struct LinkedInfoCell: View {
     var body: some View {
         HStack(spacing: 4) {
             IndicatorNameButton(title: portal.title,
+                                identifier: "chart.mainIndicatorButton",
                                 onTap: { portal.onTap?() })
                 .layoutPriority(2)
             Text(name)

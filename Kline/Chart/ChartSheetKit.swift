@@ -113,6 +113,7 @@ extension KlineChartView {
             .background(Color(uiColor: .systemGray6).opacity(on ? 1 : 0.45))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? Color.blue : Color.gray.opacity(0.25), lineWidth: on ? 1.5 : 1))
         }
+        .accessibilityIdentifier("chart.indicator.main.\(title)")
     }
 
     func mainCustomRow(_ ind: CustomIndicator) -> some View {

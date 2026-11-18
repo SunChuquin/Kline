@@ -546,8 +546,41 @@ struct KlineChartView: View {
     /// 缠论中枢轨道通道（区间内常值、区间外 NaN）：绘制时对超出 y 轴范围的轨道削顶钳边
     static func isChanRail(_ kind: String?) -> Bool {
         switch kind {
-        case "CHANBIZG", "CHANBIZD", "CHANSEGZG", "CHANSEGZD": return true
+        case "CHANBIZG", "CHANBIZD", "CHANSEGZG", "CHANSEGZD",
+             "CHANBIZGUC", "CHANBIZDUC", "CHANSEGZGUC", "CHANSEGZDUC": return true
         default: return false
+        }
+    }
+
+    // MARK: - 缠论未确认通道的形态分化（与回放页三套样式同源）
+
+    /// 未确认通道的三类形态：笔 / 段 / 中枢。
+    /// 目的：未确认的笔、段、中枢在**形态上**互相可辨，而不只是灰色深浅不同。
+    enum ChanUCShape: Equatable { case bi, seg, center }
+
+    static func chanUCShape(_ kind: String?) -> ChanUCShape? {
+        switch kind {
+        case "CHANBIUC": return .bi
+        case "CHANSEGUC": return .seg
+        case "CHANBIZGUC", "CHANBIZDUC", "CHANSEGZGUC", "CHANSEGZDUC",
+             "CHANBISEALUC", "CHANSEGSEALUC": return .center
+        default: return nil
+        }
+    }
+
+    /// 未确认笔：细短点线 + 两端圆点（回放页 #6f8fb8）
+    static let chanBiUCColor = Color(red: 111 / 255, green: 143 / 255, blue: 184 / 255)
+    /// 未确认段：粗长划线 + 两端方框（回放页 #c9b27a）
+    static let chanSegUCColor = Color(red: 201 / 255, green: 178 / 255, blue: 122 / 255)
+    /// 未确认中枢：点划线矩形，中性色（回放页 #8b93a0）
+    static let chanCenterUCColor = Color(red: 139 / 255, green: 147 / 255, blue: 160 / 255)
+
+    /// 未确认形态对应的线宽与虚线节奏（笔=细短点线 / 段=粗长划线 / 中枢=点划线）
+    static func chanUCStyle(_ shape: ChanUCShape) -> (width: CGFloat, dash: [CGFloat]) {
+        switch shape {
+        case .bi: return (1.2, [2, 3])
+        case .seg: return (2.4, [14, 6])
+        case .center: return (1.3, [6, 3, 1.5, 3])
         }
     }
 
@@ -1590,6 +1623,12 @@ struct MainChartCanvas: View, Equatable {
                               dimFrom: Int?, dimAlpha: Double) {
         let values = curve.values
         let boundary = dimFrom ?? values.count
+        // 未确认中枢上下轨：中性色 + 点划线（与笔的点线、段的长划线明确区分）；
+        // 已确认中枢仍用公式色实线
+        let uc = KlineChartView.chanUCShape(curve.chanKind)
+        let isCenterUC = (uc == .center)
+        let centerStyle = KlineChartView.chanUCStyle(.center)
+        let baseColor = isCenterUC ? KlineChartView.chanCenterUCColor : curve.color
         var runs = 0, clamped = 0
         var yMin = CGFloat.greatestFiniteMagnitude, yMax = -CGFloat.greatestFiniteMagnitude
         var i = 0
@@ -1615,11 +1654,18 @@ struct MainChartCanvas: View, Equatable {
                 var p = Path()
                 p.move(to: CGPoint(x: x0, y: y))
                 p.addLine(to: CGPoint(x: x1, y: y))
-                var color = dim ? curve.color.opacity(dimAlpha) : curve.color
-                var style = StrokeStyle(lineWidth: curve.lineWidth)
+                var color = dim ? baseColor.opacity(dimAlpha) : baseColor
+                var style: StrokeStyle
+                if isCenterUC {
+                    style = StrokeStyle(lineWidth: centerStyle.width, dash: centerStyle.dash)
+                } else if curve.style == .dotline {
+                    style = StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3])
+                } else {
+                    style = StrokeStyle(lineWidth: curve.lineWidth)
+                }
                 if outOfBand {
                     color = color.opacity(0.55)
-                    style = StrokeStyle(lineWidth: curve.lineWidth, dash: [4, 3])
+                    style = StrokeStyle(lineWidth: style.lineWidth, dash: [4, 3])
                 }
                 ctx.stroke(p, with: .color(color), style: style)
             }
@@ -1631,7 +1677,7 @@ struct MainChartCanvas: View, Equatable {
         recordStrokeProbe(kind: curve.chanKind ?? "RAIL", extra: [
             "path": "rail", "runs": runs, "points": runs * 2, "style": curve.style.rawValue,
             "clampedRuns": clamped, "yMin": Double(yMin), "yMax": Double(yMax),
-            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+            "rgba": Self.rgba(baseColor), "lineWidth": Double(isCenterUC ? centerStyle.width : curve.lineWidth),
         ])
     }
 
@@ -1642,14 +1688,30 @@ struct MainChartCanvas: View, Equatable {
                               dimFrom: Int?, dimAlpha: Double) {
         let values = curve.values
         let boundary = dimFrom ?? values.count
-        let s: StrokeStyle = curve.style == .dotline
-            ? StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3])
-            : StrokeStyle(lineWidth: curve.lineWidth)
+        // 未确认笔/段按形态画：细短点线 / 粗长划线（已确认笔段仍走公式实线，靠线宽与颜色区分）
+        let uc = KlineChartView.chanUCShape(curve.chanKind)
+        let s: StrokeStyle
+        if let uc {
+            let st = KlineChartView.chanUCStyle(uc)
+            s = StrokeStyle(lineWidth: st.width, dash: st.dash)
+        } else {
+            s = curve.style == .dotline
+                ? StrokeStyle(lineWidth: curve.lineWidth, dash: [3, 3])
+                : StrokeStyle(lineWidth: curve.lineWidth)
+        }
+        let baseColor: Color
+        switch uc {
+        case .bi: baseColor = KlineChartView.chanBiUCColor
+        case .seg: baseColor = KlineChartView.chanSegUCColor
+        case .center, .none: baseColor = curve.color
+        }
         var hist = Path()
         var fut = Path()
         var runs = 0, points = 0
         var yMin = CGFloat.greatestFiniteMagnitude, yMax = -CGFloat.greatestFiniteMagnitude
         var xFirst = CGFloat.nan, yFirst = CGFloat.nan, xLast = CGFloat.nan, yLast = CGFloat.nan
+        /// 未确认游程两端（每一段 = 一根未确认笔/段）的屏幕坐标：用于画圆点/方框标记
+        var runEnds: [CGPoint] = []
         var i = 0
         while i < values.count {
             if values[i].isNaN { i += 1; continue }
@@ -1672,17 +1734,41 @@ struct MainChartCanvas: View, Equatable {
                     else { fut.move(to: CGPoint(x: x, y: y)); futInRun = true }
                 }
             }
+            if uc == .bi || uc == .seg {
+                runEnds.append(CGPoint(x: (CGFloat(i) + 0.5) * candleSpacing, y: yPos(values[i], h: h)))
+                if j != i {
+                    runEnds.append(CGPoint(x: (CGFloat(j) + 0.5) * candleSpacing, y: yPos(values[j], h: h)))
+                }
+            }
             i = j + 1
         }
-        if points > 1 { ctx.stroke(hist, with: .color(curve.color), style: s) }
-        if points > 1 { ctx.stroke(fut, with: .color(curve.color.opacity(dimAlpha)), style: s) }
+        if points > 1 { ctx.stroke(hist, with: .color(baseColor), style: s) }
+        if points > 1 { ctx.stroke(fut, with: .color(baseColor.opacity(dimAlpha)), style: s) }
+        // 未确认标记：笔 = 两端实心圆点，段 = 两端空心方框（与中枢点划线矩形再区分）
+        switch uc {
+        case .bi:
+            for p in runEnds {
+                var dot = Path()
+                dot.addEllipse(in: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4))
+                ctx.fill(dot, with: .color(baseColor))
+            }
+        case .seg:
+            for p in runEnds {
+                let sq: CGFloat = 3.2
+                let rect = CGRect(x: p.x - sq / 2, y: p.y - sq / 2, width: sq, height: sq)
+                ctx.stroke(Path(rect), with: .color(baseColor), lineWidth: 1.4)
+            }
+        case .center, .none:
+            break
+        }
         recordStrokeProbe(kind: curve.chanKind ?? "POLY", extra: [
             "path": "poly", "runs": runs, "points": points,
             "style": curve.style.rawValue, "valuesCount": values.count,
+            "ucWidth": Double(s.lineWidth), "markers": runEnds.count,
             "firstX": Double(xFirst), "firstY": Double(yFirst),
             "lastX": Double(xLast), "lastY": Double(yLast),
             "yMin": yMin.isFinite ? Double(yMin) : -1, "yMax": yMax.isFinite ? Double(yMax) : -1,
-            "rgba": Self.rgba(curve.color), "lineWidth": curve.lineWidth,
+            "rgba": Self.rgba(baseColor), "lineWidth": Double(s.lineWidth),
             "canvasW": Double(canvasWidthForProbe),
         ])
     }
@@ -1728,6 +1814,9 @@ struct MainChartCanvas: View, Equatable {
         var drawn = 0, flatSkipped = 0, clamped = 0
         var yMin: CGFloat = .nan, yMax: CGFloat = .nan
         var xFirst: CGFloat = .nan, xLast: CGFloat = .nan
+        // 未确认中枢封口：中性色 + 点划线，与未确认上下轨共同围成点划线矩形
+        let isCenterUC = KlineChartView.chanUCShape(curve.chanKind) == .center
+        let centerStyle = KlineChartView.chanUCStyle(.center)
         for i in indices {
             guard i < low.count else { break }
             let a = curve.values[i]
@@ -1736,8 +1825,16 @@ struct MainChartCanvas: View, Equatable {
             let x = (CGFloat(i) + 0.5) * candleSpacing
             var ya = yPos(a, h: h)
             var yb = yPos(b, h: h)
-            var color = dimmed(curve.color, i)
-            var style = StrokeStyle(lineWidth: width)
+            var color = isCenterUC ? KlineChartView.chanCenterUCColor : dimmed(curve.color, i)
+            // 未确认中枢封口走点划线；DOTLINE 封口走普通虚线；越界时统一虚线 + 降透明度
+            var style: StrokeStyle
+            if isCenterUC {
+                style = StrokeStyle(lineWidth: max(width, centerStyle.width), dash: centerStyle.dash)
+            } else if curve.style == .dotline {
+                style = StrokeStyle(lineWidth: width, dash: [3, 3])
+            } else {
+                style = StrokeStyle(lineWidth: width)
+            }
             // 缠论中枢封口：y 轴按 K 线优先，端点可能在屏幕外——钳到画布边缘并用虚线/降透明度提示越界
             if curve.breakOnNaN {
                 let outOfBand = a < priceMin || a > priceMax || b < priceMin || b > priceMax
@@ -1875,6 +1972,8 @@ func decimatedIndices(count: Int, step: Int, extra: [Int]? = nil) -> [Int] {
 /// （信息栏也用它渲染主图指标按钮，故不对本文件私有；图标已移除，只留标题。）
 struct IndicatorNameButton: View {
     let title: String
+    /// 无障碍标识：主图指标按钮用 `chart.mainIndicatorButton`（UI 测试点击用），副图默认另一个标识避免多项匹配
+    var identifier: String = "chart.subIndicatorButton"
     let onTap: () -> Void
 
     var body: some View {
@@ -1887,6 +1986,7 @@ struct IndicatorNameButton: View {
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(Color.gray.opacity(0.12)).cornerRadius(4)
         }
+        .accessibilityIdentifier(identifier)
     }
 }
 
