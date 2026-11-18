@@ -14,6 +14,7 @@
 //
 
 import Foundation
+import UIKit
 import WebKit
 
 final class WebMessageRouter: NSObject, WKScriptMessageHandler {
@@ -140,8 +141,11 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     private func handleTheme(_ request: WebBridgeRequest) -> [String: Any] {
         switch request.action {
         case "get":
-            return WebBridgeResponse.ok(request.id, data: ["preference": KlineThemeStore.shared.theme.rawValue,
-                                                           "mode": resolvedMode])
+            // mode 由偏好 + 系统 trait 计算（PC HTTP 通道下宿主视图未运行，
+            // resolvedMode 无真值——恒为默认 light 导致 PC 调试深色失效，2026-11-18 实测）
+            let theme = KlineThemeStore.shared.theme
+            return WebBridgeResponse.ok(request.id, data: ["preference": theme.rawValue,
+                                                           "mode": Self.resolvedMode(for: theme)])
         case "set":
             // 协议 v2 首个写回动作（幂等）：写 KlineThemeStore 即完成；
             // 状态变化不在此回推——由宿主视图 onChange(themeStore) 链路推 theme.changed（写回模式单一数据流）
@@ -168,6 +172,16 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     }
 
     // MARK: - 快照数据（全部来自原生 Store，Web 侧不持有状态）
+
+    /// 偏好 → 解析外观：dark/light 直接映射；跟随系统读当前 trait（主线程调用）
+    static func resolvedMode(for preference: KlineTheme) -> String {
+        switch preference {
+        case .dark: return "dark"
+        case .light: return "light"
+        case .system:
+            return UITraitCollection.current.userInterfaceStyle == .dark ? "dark" : "light"
+        }
+    }
 
     private static func appInfo() -> [String: Any] {
         let info = Bundle.main.infoDictionary
