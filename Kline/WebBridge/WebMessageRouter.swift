@@ -18,6 +18,10 @@ import WebKit
 
 final class WebMessageRouter: NSObject, WKScriptMessageHandler {
 
+    /// 单例：信封分发与通道无关（真机走 WKScriptMessageHandler，PC 调试走
+    /// KlineHTTPServer POST /bridge——两者共用同一 dispatch）。
+    static let shared = WebMessageRouter()
+
     // MARK: - 状态
 
     private weak var webView: WKWebView?
@@ -70,6 +74,12 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     }
 
     // MARK: - 分发
+
+    /// HTTP 通道（PC 调试桥 POST /bridge）专用入口：同一 dispatch，响应由调用方回 JSON。
+    /// 注意：调用方负责主线程（Store 均为主线程对象）。
+    func dispatchHTTP(_ request: WebBridgeRequest) -> [String: Any] {
+        dispatch(request)
+    }
 
     private func dispatch(_ request: WebBridgeRequest) -> [String: Any] {
         switch request.module {

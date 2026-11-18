@@ -119,8 +119,12 @@ function applyTheme(t: { preference?: unknown; mode?: unknown }): void {
 
 async function setTheme(value: string | number): Promise<void> {
   try {
-    await klineBus.request('theme', 'set', { preference: String(value) })
-    // 写回成功：不在此更新本地状态，等 theme.changed 事件回推（写回模式 v2 单一数据流）
+    const data = await klineBus.request('theme', 'set', { preference: String(value) })
+    // pc 模式无事件推送：用回读纠正权威状态（native 模式 theme.changed 事件亦会到，值一致无害）
+    if (typeof data?.['preference'] === 'string') {
+      const t = await klineBus.request('theme', 'get')
+      applyTheme((t ?? {}) as Record<string, unknown>)
+    }
   } catch (e) {
     // 写回失败：回读真实主题纠正选择（不发额外事件，纯请求）
     console.error('主题写回失败', e)
@@ -145,10 +149,10 @@ async function pingOnce(): Promise<void> {
 }
 
 onMounted(async () => {
-  if (!klineBus.isAvailable()) {
-    bridgeAvailable.value = false
-    return
-  }
+  // 传输探测：native（真机）/ pc（USB 隧道调试桥，真数据真写回）/ none（占位）
+  const t = await klineBus.detect()
+  bridgeAvailable.value = t !== 'none'
+  if (!bridgeAvailable.value) return
 
   klineBus.on(KnownEvents.themeChanged, (e) => applyTheme((e.payload ?? {}) as Record<string, unknown>))
   klineBus.on(KnownEvents.appMemory, (e) => {

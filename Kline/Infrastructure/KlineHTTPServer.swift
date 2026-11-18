@@ -428,6 +428,25 @@ final class KlineHTTPServer {
             let json = (try? JSONSerialization.data(withJSONObject: files)) ?? Data("[]".utf8)
             respond(connection, status: 200, contentType: "application/json",
                     body: String(data: json, encoding: .utf8) ?? "[]")
+        case ("POST", "/bridge"):
+            // PC 调试桥（混合架构 P2）：HTTP 信封 → WebMessageRouter 同一分发（与真机
+            // WKScriptMessageHandler 通道无关共用）。门禁：回环（USB 隧道）/ 已暴露 / pipeline，
+            // 与沙盒读同语义。Store 均为主线程对象：主线程跳转后回 JSON 响应。
+            guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
+            DispatchQueue.main.async {
+                guard let text = String(data: body, encoding: .utf8),
+                      let request = WebBridgeRequest.parse(text) else {
+                    respond(connection, status: 400, contentType: "application/json",
+                            body: "{\"id\":\"unknown\",\"ok\":false,\"error\":{\"code\":\"bad_request\",\"message\":\"信封解析失败\"}}")
+                    return
+                }
+                let started = CFAbsoluteTimeGetCurrent()
+                let response = WebMessageRouter.shared.dispatchHTTP(request)
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
+                DebugLogger.shared.log("[WebBridge][HTTP] \(request.module).\(request.action) 处理 \(String(format: "%.2f", elapsedMs))ms")
+                let data = WebBridgeJSON.string(from: response) ?? "{}"
+                respond(connection, status: 200, contentType: "application/json", body: data)
+            }
         case ("POST", "/install"):
             handleInstall(body: body, connection: connection)
         case ("POST", "/install-local"):

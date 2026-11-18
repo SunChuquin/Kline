@@ -16,9 +16,8 @@ struct WebHostView: View {
 
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @Environment(\.colorScheme) private var colorScheme
-    // 路由是 coordinator 型对象（不发布 objectWillChange，不驱动视图刷新），
-    // 用 @State 持有引用保活即可；@StateObject 会要求 ObservableObject 不适用
-    @State private var router = WebMessageRouter()
+    // 路由为单例（通道无关：真机 messageHandler 与 PC 调试 POST /bridge 共用同一 dispatch）
+    private var router = WebMessageRouter.shared
     @State private var loadError: String?
 
     var body: some View {
