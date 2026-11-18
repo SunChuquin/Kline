@@ -241,7 +241,12 @@
 1. ~~实时页面的最终归属~~ **已定（2026-11-18）：实时页面 Web 化**，逐页推进（建议次序 Favorites → Market → Home → Simulation，可调）；布局退役并入各页批次执行。图表恒为原生全屏组件（DetailRouter 模式承载）。
 2. **布局系统退役专项规划**：删 PageLayout 引擎四件套（Schema/Renderer/WidgetRegistry/ConfigStore）+ PageLayoutStore/TradingLayoutStore + 编辑器全家 + 四页 ×3 套备用布局 View + 个人中心五个布局设置行；每页留一套布局（选型待定：Home 现默认 B，Market/Favorites/Simulation 执行时定）。清点引用面后分页分批执行，每批装机验收；与 P1 页面铺开的先后次序由用户定。
 3. **Web 页导航模式**：已验证「个人中心 → 全屏 overlay」一种；是否需要 Tab 内嵌 Web 页（与底部导航共存）的形态待定。
-4. ~~PC↔设备 Web 调试通道~~ **已实现（2026-11-18，Build #619）**：KlineHTTPServer `GET /web/` 静态路由托管 bundle 内 WebUI dist（与 kline:// scheme handler 共用 WebUIFiles，`Cache-Control: no-store`）；PC 侧经 **USB 隧道**访问（`TrollRestore/web_debug_tunnel.py`，pymobiledevice3 usbmux forward，无需同网/不受暴露开关约束）。**用法**：PC 终端跑 `python web_debug_tunnel.py`（前台常驻）→ 浏览器开 `http://127.0.0.1:5051/web/`。约束：iPad 解锁 + Kline 前台；PC Shell 会话结束会收割子进程树——agent 侧验证用 `--check`（阻塞式起隧道→验证→退出），浏览器调试由用户终端常驻承载。
+4. ~~PC↔设备 Web 调试通道~~ **已实现（2026-11-18，Build #619→#626）**：
+   - 设备侧：KlineHTTPServer `GET /web/` 静态路由托管 bundle 内 WebUI dist + **`POST /bridge` PC 调试桥**（HTTP 信封 → WebMessageRouter 同一分发，真机 messageHandler 与 PC 通道无关共用；主线程跳转 + 回环门禁）；
+   - Web 侧：klineBus **传输三态**（native 真机 messageHandler / pc `fetch('/bridge')` 同步请求响应 / none 占位），PC 模式真数据真写回（无事件推送，写回后回读权威状态）；
+   - PC 侧：`TrollRestore/web_debug_tunnel.py` USB 隧道（python -m pymobiledevice3 usbmux forward；**WMI 分离启动 + 命名互斥单实例锁**；踩坑记录：pip .exe shim 与真实 python 进程生命周期不同步致 poll 误报、stdin=DEVNULL 致子进程 EOF 自杀、多 daemon 堆积互杀——均已修复）；
+   - **用法**：PC 终端跑 `python web_debug_tunnel.py` 常驻 → 浏览器开 `http://127.0.0.1:5051/web/`（真数据真写回，Vant 深浅色跟随）；Agent 侧验收 = WMI 起 daemon + 浏览器自动化（路由/DOM/console/写回动作）+ debug_log 侧写，端到端自证无需用户参与；
+   - 已知边界：pc 模式「内存足迹」显示 —（app.memory 为 native 事件推送，P2-1 改为主动拉取）；RTT 经 USB 隧道 ~50ms（真机直连 8ms）。
 5. ~~状态快照写回规范~~ **已实现（2026-11-18，协议 v2）**：规范事实源 = [Web/src/types/protocol.ts](../../Web/src/types/protocol.ts)（信封/动作清单/事件清单/错误码表/写回模式完整文档注释）；fixtures 对拍样例 `KlineTests/Fixtures/bridge_protocol.json` + 解析测试 `WebBridgeProtocolTests.swift`（CI KlineTests 任务执行）；首个写回动作 `theme.set` 已落地（幂等、写回不回推快照——状态统一走 theme.changed 事件链路）。**P2 扩展预留**：market.snapshot 行情秒级快照通道。
 6. **注入采样日志清理**：`injectionSampleRemaining` 取证已完成，P1 移除。
 
