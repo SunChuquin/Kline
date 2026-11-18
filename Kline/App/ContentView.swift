@@ -135,6 +135,16 @@ struct ContentView: View {
             // App 启动即实例化行情行缓存，触发行情数值预热（无需等行情页首次打开）
             _ = MarketRowCache.shared
             MarketRowCache.shared.prewarmMarketData()
+            // 混合架构：Web 侧请求切 Tab（nav.switchTab）→ 原生 selectedTab；
+            // @State 投影跨 struct 拷贝共享存储，闭包写 selectedTab 即生效
+            WebMessageRouter.shared.switchTabHandler = { index in
+                guard selectedTab != index else { return }
+                selectedTab = index
+            }
+        }
+        // Tab 切换 → 推 nav.tab 事件（Web 侧切路由；keep-alive 页面不重建）
+        .onChange(of: selectedTab) { newValue in
+            WebMessageRouter.shared.pushEvent("nav.tab", payload: ["index": newValue])
         }
         .onReceive(DatabaseManager.shared.$isLoaded) { loaded in
             // 数据库就绪即预热（直接透传就绪标志，不依赖内部再读 db.isLoaded）
@@ -296,13 +306,15 @@ struct ContentView: View {
     }
 
     // MARK: - 主内容视图切换
+    // 混合架构 P2：Tab 内容逐页换 Web（原生实现类保留，回退 = 改回一行分支）。
+    // 已换：1 自选（P2-1）。未换：0 首页 / 2 行情 / 3 模拟。
     @ViewBuilder
     private var mainContentView: some View {
         switch selectedTab {
         case 0:
             HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
         case 1:
-            FavoritesView()
+            WebTabHostView(route: "favorites")
         case 2:
             MarketView()
         case 3:

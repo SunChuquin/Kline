@@ -73,35 +73,21 @@ final class WebBridgeProtocolTests: XCTestCase {
     func testEventEnvelopeNames() throws {
         let fixture = try loadFixture()
         let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
-        let knownEvents: Set<String> = ["theme.changed", "app.memory"]
+        let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab", "favorites.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
         }
     }
 
-    /// P2 预留 schema 形状锁定（方案文档 §12.2）：reserved 区块的 Favorites 快照骨架
-    /// 必须包含最小字段集——P2 实现时任何字段漂移在此提前报警
-    func testReservedFavoritesSnapshotShape() throws {
+    /// P2-1b 预留形状锁定（setNote/setPinned 属下一批）
+    func testReservedFavoritesWriteActions() throws {
         let fixture = try loadFixture()
-        let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any], "fixtures 缺 reserved 区块")
-        let snapshot = try XCTUnwrap(reserved["favorites.snapshot"] as? [String: Any])
-        let groups = try XCTUnwrap(snapshot["groups"] as? [[String: Any]])
-        XCTAssertFalse(groups.isEmpty, "groups 骨架为空")
-        let requiredRowKeys: Set<String> = ["file", "code", "name", "latestPrice", "change",
-                                            "changePct", "volume", "turnover", "lastDate",
-                                            "pinned", "note"]
-        for group in groups {
-            XCTAssertNotNil(group["id"] as? String)
-            XCTAssertEqual((group["kind"] as? String).map { ["manual", "formula"].contains($0) } ?? false,
-                           true, "kind 必须为 manual|formula")
-            let rows = try XCTUnwrap(group["rows"] as? [[String: Any]])
-            for row in rows {
-                let keys = Set(row.keys)
-                XCTAssertTrue(requiredRowKeys.isSubset(of: keys),
-                              "row 缺最小字段: \(requiredRowKeys.subtracting(keys))")
-            }
-        }
+        let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any])
+        let setNote = try XCTUnwrap(reserved["favorites.setNote"] as? [String: Any])
+        XCTAssertNotNil(setNote["file"], "setNote 预留缺 file 字段")
+        let setPinned = try XCTUnwrap(reserved["favorites.setPinned"] as? [String: Any])
+        XCTAssertNotNil(setPinned["file"], "setPinned 预留缺 file 字段")
     }
 
     /// theme.set 幂等语义：同值写入无害（直接驱动 KlineThemeStore，写入后偏好与期望一致）

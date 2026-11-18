@@ -26,10 +26,14 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     // MARK: - 状态
 
     private weak var webView: WKWebView?
-    /// 页面 didFinish 后才允许注入事件（避免对未就绪页面 evaluate 报错刷日志）
-    private var isPageReady = false
+    /// 已就绪（didFinish）页面集合：事件推送目标；弱引用随宿主销毁自动移除。
+    /// 支持多 WebView 实例并存（Tab 常驻宿主 + 个人中心入口宿主），响应回发起者、
+    /// 事件推最近就绪者。
+    private let readyWebViews = NSHashTable<WKWebView>.weakObjects()
     /// 解析后的实际外观（"light"/"dark"）：由宿主视图注入（跟随系统时视图环境是唯一真相）
     private(set) var resolvedMode = "light"
+    /// Web 请求切 Tab 的落点（ContentView 注入，写原生 selectedTab）
+    var switchTabHandler: ((Int) -> Void)?
 
     // MARK: - 生命周期
 
@@ -42,33 +46,36 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         resolvedMode = mode
     }
 
+    /// 单实例宿主销毁时移除其就绪标记（多实例并存时其余实例不受影响）
     func detach() {
-        webView = nil
-        isPageReady = false
-        DebugLogger.shared.log("[WebBridge] 路由已分离（页面销毁）")
+        if let w = webView {
+            readyWebViews.remove(w)
+        }
+        DebugLogger.shared.log("[WebBridge] 路由已分离（宿主销毁）")
     }
 
-    /// 页面 didFinish：打开事件推送门控并推送初始快照类事件
-    func markPageReady(preference: String) {
-        guard !isPageReady else { return }
-        isPageReady = true
-        pushTheme(preference: preference)
-        pushMemoryFootprint()
+    /// 页面 didFinish：登记就绪（按实例）并推送初始快照类事件
+    func markPageReady(webView: WKWebView, preference: String) {
+        readyWebViews.add(webView)
+        pushTheme(preference: preference, to: webView)
+        pushMemoryFootprint(to: webView)
     }
 
     // MARK: - WKScriptMessageHandler
 
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
-        guard message.name == WebBridgeConst.channel, let webView = webView else { return }
+        guard message.name == WebBridgeConst.channel else { return }
+        // 响应回发起者（多实例并存：Tab 常驻宿主 + 个人中心入口宿主各自独立收发）
+        guard let target = message.webView ?? webView else { return }
         let started = CFAbsoluteTimeGetCurrent()
 
         guard let request = WebBridgeRequest.parse(message.body) else {
-            respond(WebBridgeResponse.fail("unknown", code: "bad_request", message: "信封解析失败"), to: webView)
+            respond(WebBridgeResponse.fail("unknown", code: "bad_request", message: "信封解析失败"), to: target)
             return
         }
         let response = dispatch(request)
-        respond(response, to: webView)
+        respond(response, to: target)
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
         DebugLogger.shared.log("[WebBridge] \(request.module).\(request.action) 处理 \(String(format: "%.2f", elapsedMs))ms")
@@ -84,22 +91,23 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
 
     private func dispatch(_ request: WebBridgeRequest) -> [String: Any] {
         switch request.module {
-        case "app":     return handleApp(request)
-        case "theme":   return handleTheme(request)
-        case "profile": return handleProfile(request)
-        case "nav":     return handleNav(request)
+        case "app":        return handleApp(request)
+        case "theme":      return handleTheme(request)
+        case "profile":    return handleProfile(request)
+        case "nav":        return handleNav(request)
+        case "favorites":  return FavoritesBridge.handle(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_module", message: "未知模块 \(request.module)")
         }
     }
 
-    /// nav 模块：Tab 导航桥接。switchTab 当前为 stub（P2-0 骨架），
-    /// P2-1 Favorites 接入时由 WebTabHost 注入 selectedTab 绑定实现真实切换。
+    /// nav 模块：Tab 导航桥接。switchTab 由 ContentView.onAppear 注入落点写原生 selectedTab。
     private func handleNav(_ request: WebBridgeRequest) -> [String: Any] {
         switch request.action {
         case "switchTab":
             let index = (request.payload["index"] as? Int) ?? -1
-            DebugLogger.shared.log("[WebBridge] nav.switchTab index=\(index)（stub：Tab 桥接 P2-1 实装）")
+            DebugLogger.shared.log("[WebBridge] nav.switchTab index=\(index)")
+            switchTabHandler?(index)
             return WebBridgeResponse.ok(request.id, data: ["index": index])
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action", message: "nav.\(request.action) 未实现")
@@ -215,30 +223,48 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         })
     }
 
-    /// 主题变化推送（偏好变化或系统外观变化时由 WebHostView 调用）
-    func pushTheme(preference: String) {
-        guard isPageReady, let webView = webView else { return }
+    /// 事件推送（泛化入口）：推给最近就绪的页面；无就绪页面（如 PC 调试桥触发）
+    /// 时静默跳过——pc 模式由页面回读权威状态，不依赖推送。
+    func pushEvent(_ name: String, payload: [String: Any]) {
+        guard let webView = readyWebViews.allObjects.last else { return }
+        let event = WebBridgeEvent.make(name, payload: payload)
+        guard let js = WebBridgeJS.dispatchCall(event) else {
+            DebugLogger.shared.log("[WebBridge] 事件推送串构造失败(\(name))")
+            return
+        }
+        webView.evaluateJavaScript(js, completionHandler: { _, error in
+            if let error = error {
+                DebugLogger.shared.log("[WebBridge] 事件推送失败(\(name)): \(error.localizedDescription)")
+            }
+        })
+    }
+
+    /// 主题变化推送（偏好变化或系统外观变化时由宿主视图调用，推给全部就绪页面）
+    func pushTheme(preference: String, to target: WKWebView? = nil) {
+        let targets = target.map { [$0] } ?? readyWebViews.allObjects
+        guard !targets.isEmpty else { return }
         let event = WebBridgeEvent.make("theme.changed", payload: ["preference": preference, "mode": resolvedMode])
         guard let js = WebBridgeJS.dispatchCall(event) else {
             DebugLogger.shared.log("[WebBridge] 事件推送串构造失败(theme)")
             return
         }
-        webView.evaluateJavaScript(js, completionHandler: { _, error in
-            if let error = error {
-                DebugLogger.shared.log("[WebBridge] 事件推送失败(theme): \(error.localizedDescription)")
-            }
-        })
+        for webView in targets {
+            webView.evaluateJavaScript(js, completionHandler: { _, error in
+                if let error = error {
+                    DebugLogger.shared.log("[WebBridge] 事件推送失败(theme): \(error.localizedDescription)")
+                }
+            })
+        }
     }
 
     /// 内存足迹推送（页面就绪后一次；探针数据仅落日志与页面探针卡片）
-    func pushMemoryFootprint() {
-        guard isPageReady, let webView = webView else { return }
+    func pushMemoryFootprint(to target: WKWebView) {
         let event = WebBridgeEvent.make("app.memory", payload: ["footprintMB": MemoryFootprint.physFootprintMB()])
         guard let js = WebBridgeJS.dispatchCall(event) else {
             DebugLogger.shared.log("[WebBridge] 事件推送串构造失败(memory)")
             return
         }
-        webView.evaluateJavaScript(js, completionHandler: { _, error in
+        target.evaluateJavaScript(js, completionHandler: { _, error in
             if let error = error {
                 DebugLogger.shared.log("[WebBridge] 事件推送失败(memory): \(error.localizedDescription)")
             }

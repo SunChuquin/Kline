@@ -36,15 +36,9 @@
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
 //   app.memory        {footprintMB}        页面就绪后一次
 //
-// ## 预留（P2 扩展，本版未实现；schema 见方案文档 §12.2 / fixtures reserved 区块）
-//   nav.tab            {index} → 事件：原生底栏切换时推 Web 切路由（监听方已就位 main.ts）
-//   favorites.snapshot  → {tabs, groups:[{id, kind:"manual"|"formula", name, rows:[…]}]}
-//                         rows 最小集：file/code/name/latestPrice/change/changePct/volume/turnover/lastDate/pinned/note
-//   favorites.refresh   {group?} → {}            下拉刷新触发重拉（手动分组 rowCache / 公式分组 refreshFormulaGroup）
-//   favorites.openDetail {file} → {}             进原生全屏图表（DetailRouter）
-//   favorites.setNote   {file, note} → {}        备注写回（幂等）
-//   favorites.setPinned {file, pinned} → {}      固顶写回（幂等）
-//   favorites.changed   {reason:"refresh"|"edit"}  事件：页面收到后主动拉 snapshot
+// ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
+//   favorites.setNote   {file, note} → {}        备注写回（幂等）——P2-1b 实装
+//   favorites.setPinned {file, pinned} → {}      固顶写回（幂等）——P2-1b 实装
 //   market.snapshot / market.subscribe …（行情秒级快照推送通道）
 
 export interface BridgeRequest {
@@ -86,12 +80,15 @@ export const KnownActions = {
   theme: ['get', 'set'],
   profile: ['snapshot'],
   nav: ['switchTab'],
+  favorites: ['snapshot', 'refresh', 'openDetail'],
 } as const
 
 // 已约定的 event 清单（协议 v2）
 export const KnownEvents = {
   themeChanged: 'theme.changed',
   appMemory: 'app.memory',
+  navTab: 'nav.tab',
+  favoritesChanged: 'favorites.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

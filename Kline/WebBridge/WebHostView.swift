@@ -2,10 +2,10 @@
 //  WebHostView.swift
 //  Kline
 //
-//  Web UI 宿主页（混合架构 P0）：全屏 WKWebView + kline:// 内嵌资源 + 单 channel 桥接。
+//  Web 全屏入口宿主页（混合架构）：全屏 WKWebView + kline:// 内嵌资源 + 单 channel 桥接。
 //  首帧红线（方案 §6）：仅由个人中心入口按需打开（懒加载），不参与启动链路。
 //  呈现方式对齐 PythonEngineLabView：个人中心容器层全屏 overlay，页内「返回」关闭。
-//  状态快照全部来自原生 Store（Web 侧不持有状态），主题经 theme.changed 事件实时推送。
+//  Tab 内容宿主见 WebTabHostView（共用 WebViewContainer / WebMessageRouter.shared）。
 //
 
 import SwiftUI
@@ -16,9 +16,6 @@ struct WebHostView: View {
 
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @Environment(\.colorScheme) private var colorScheme
-    // 路由为单例（通道无关：真机 messageHandler 与 PC 调试 POST /bridge 共用同一 dispatch）。
-    // 注意不能用 private：private 存储属性会把 memberwise init 拉成 private，外部 WebHostView(onClose:) 失效
-    var router = WebMessageRouter.shared
     @State private var loadError: String?
 
     var body: some View {
@@ -31,7 +28,7 @@ struct WebHostView: View {
                 }
                 .padding(.leading, 16)
 
-                Text("Web 试点（P0）")
+                Text("Web 试点（P1）")
                     .font(.title)
                     .fontWeight(.bold)
 
@@ -57,8 +54,8 @@ struct WebHostView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                WebViewContainer(router: router,
-                                 onReady: { markReady() },
+                WebViewContainer(route: "profile",
+                                 onReady: { webView in markReady(webView) },
                                  onError: { loadError = $0 })
                     .ignoresSafeArea(.container, edges: .bottom)
             }
@@ -82,76 +79,12 @@ struct WebHostView: View {
         }
     }
 
-    /// 页面 didFinish：打开推送门控并推送初始主题/内存事件
-    private func markReady() {
+    private var router: WebMessageRouter { WebMessageRouter.shared }
+
+    /// 页面 didFinish：登记就绪并推送初始主题/内存事件
+    private func markReady(_ webView: WKWebView) {
         DebugLogger.shared.log(String(format: "[WebBridge] WebView 加载完成 phys_footprint=%.1fMB",
                                       MemoryFootprint.physFootprintMB()))
-        router.markPageReady(preference: themeStore.theme.rawValue)
-    }
-}
-
-// MARK: - WKWebView 容器
-
-private struct WebViewContainer: UIViewRepresentable {
-    let router: WebMessageRouter
-    let onReady: () -> Void
-    let onError: (String) -> Void
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        // 自定义 scheme 必须在 WKWebView 初始化前注册
-        config.setURLSchemeHandler(WebUISchemeHandler(), forURLScheme: WebBridgeConst.scheme)
-        let controller = WKUserContentController()
-        controller.add(router, name: WebBridgeConst.channel)
-        config.userContentController = controller
-
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.backgroundColor = .systemBackground
-        webView.isOpaque = true
-        router.attach(webView: webView)
-
-        if let url = URL(string: "\(WebBridgeConst.scheme)://app/index.html") {
-            DebugLogger.shared.log(String(format: "[WebBridge] WebView 打开前 phys_footprint=%.1fMB",
-                                          MemoryFootprint.physFootprintMB()))
-            webView.load(URLRequest(url: url))
-        } else {
-            onError("加载地址无效")
-        }
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onReady: onReady, onError: onError)
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        let onReady: () -> Void
-        let onError: (String) -> Void
-        private var didReportReady = false
-
-        init(onReady: @escaping () -> Void, onError: @escaping (String) -> Void) {
-            self.onReady = onReady
-            self.onError = onError
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // 只报一次就绪（防页面内部二次导航重复推送）
-            guard !didReportReady else { return }
-            didReportReady = true
-            onReady()
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            onError("页面加载失败: \(error.localizedDescription)")
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
-                     withError error: Error) {
-            // 404/资源缺失在 custom scheme 下多走 provisional 失败路径
-            onError("页面加载失败: \(error.localizedDescription)")
-        }
+        router.markPageReady(webView: webView, preference: themeStore.theme.rawValue)
     }
 }
