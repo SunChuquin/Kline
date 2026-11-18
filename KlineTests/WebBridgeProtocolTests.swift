@@ -73,21 +73,68 @@ final class WebBridgeProtocolTests: XCTestCase {
     func testEventEnvelopeNames() throws {
         let fixture = try loadFixture()
         let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
-        let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab", "favorites.changed"]
+        let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab",
+                                        "favorites.changed", "market.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
         }
     }
 
-    /// P2-1b 预留形状锁定（setNote/setPinned 属下一批）
-    func testReservedFavoritesWriteActions() throws {
+    /// market.snapshot 响应形状锁定（P2-2）：渲染列含 isNameCode/width、行含 fav/pinned/pct/values
+    func testMarketSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_mkt_snapshot"
+        }, "fixtures 缺 market.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        // 顶层键
+        for key in ["loaded", "topMenu", "seconds", "columns", "rows"] {
+            XCTAssertNotNil(data[key], "market.snapshot 缺 \(key)")
+        }
+        // 渲染列形状：合并列 + 数值列均带宽度
+        let cols = try XCTUnwrap(data["columns"] as? [[String: Any]])
+        let merged = cols.first { ($0["isNameCode"] as? Bool) == true }
+        XCTAssertNotNil(merged, "渲染列缺名称/代码合并列")
+        XCTAssertEqual(merged?["title"] as? String, "名称/代码")
+        XCTAssertNotNil(merged?["width"] as? Int)
+        // 行形状：着色基准 pct 恒发（可见列不含 changePct 时也要）
+        let rows = try XCTUnwrap(data["rows"] as? [[String: Any]])
+        for row in rows {
+            for key in ["file", "code", "name", "fav", "pinned", "pct", "values"] {
+                XCTAssertNotNil(row[key], "market 行缺 \(key)")
+            }
+        }
+    }
+
+    /// market.configSet payload 形状锁定：columns 含 visible/filterLabels，排序带 field/order
+    func testMarketConfigSetShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "market" && ($0["action"] as? String) == "configSet"
+        }, "fixtures 缺 market.configSet 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        let cols = try XCTUnwrap(payload["columns"] as? [[String: Any]])
+        for col in cols {
+            XCTAssertNotNil(col["field"] as? String)
+            XCTAssertNotNil(col["visible"] as? Bool)
+            XCTAssertNotNil(col["filterLabels"] as? [String])
+        }
+        let rule = try XCTUnwrap(payload["sortRule"] as? [String: Any])
+        XCTAssertEqual(rule["order"] as? String, "descending")
+        let frozen = try XCTUnwrap(payload["frozenCount"] as? Int)
+        XCTAssertTrue((1...3).contains(frozen), "frozenCount 必须在 1~3")
+    }
+
+    /// P2-5 预留形状锁定（sheet.open/close 属图表弹层批次）
+    func testReservedSheetActions() throws {
         let fixture = try loadFixture()
         let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any])
-        let setNote = try XCTUnwrap(reserved["favorites.setNote"] as? [String: Any])
-        XCTAssertNotNil(setNote["file"], "setNote 预留缺 file 字段")
-        let setPinned = try XCTUnwrap(reserved["favorites.setPinned"] as? [String: Any])
-        XCTAssertNotNil(setPinned["file"], "setPinned 预留缺 file 字段")
+        let open = try XCTUnwrap(reserved["sheet.open"] as? [String: Any])
+        XCTAssertNotNil(open["name"], "sheet.open 预留缺 name 字段")
+        XCTAssertNotNil(reserved["sheet.close"] as? [String: Any])
     }
 
     /// theme.set 幂等语义：同值写入无害（直接驱动 KlineThemeStore，写入后偏好与期望一致）

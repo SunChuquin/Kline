@@ -96,6 +96,7 @@ interface FavGroup {
   id: string
   kind: 'manual' | 'formula'
   name: string
+  count: number
   rows: FavRow[]
 }
 
@@ -138,6 +139,7 @@ async function pullSnapshot(): Promise<void> {
       id: String(g.id ?? ''),
       kind: (g.kind === 'formula' ? 'formula' : 'manual') as FavGroup['kind'],
       name: String(g.name ?? ''),
+      count: Array.isArray(g.rows) ? (g.rows as unknown[]).length : 0,
       rows: (Array.isArray(g.rows) ? (g.rows as Record<string, unknown>[]) : []).map((r) => ({
         file: String(r.file ?? ''),
         code: String(r.code ?? ''),

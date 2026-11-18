@@ -96,6 +96,7 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "profile":    return handleProfile(request)
         case "nav":        return handleNav(request)
         case "favorites":  return FavoritesBridge.handle(request)
+        case "market":     return MarketBridge.handle(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_module", message: "未知模块 \(request.module)")
         }

@@ -307,7 +307,7 @@ struct ContentView: View {
 
     // MARK: - 主内容视图切换
     // 混合架构 P2：Tab 内容逐页换 Web（原生实现类保留，回退 = 改回一行分支）。
-    // 已换：1 自选（P2-1）。未换：0 首页 / 2 行情 / 3 模拟。
+    // 已换：1 自选（P2-1）/ 2 行情（P2-2）。未换：0 首页 / 3 模拟。
     @ViewBuilder
     private var mainContentView: some View {
         switch selectedTab {
@@ -322,7 +322,13 @@ struct ContentView: View {
                 FavoritesView()
             }
         case 2:
-            MarketView()
+            if WebUIFiles.isBundleReady {
+                // P2-2：行情页 Web 化（原生浮层由 MarketWebShellView overlay 挂载）
+                MarketWebShellView()
+            } else {
+                // Web UI 未构建（bundle 根 WebUI/index.html 缺失）→ 回退原生行情页。
+                MarketView()
+            }
         case 3:
             SimulationView()
         default:

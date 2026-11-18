@@ -31,15 +31,37 @@
 //   theme.set         {preference} → {preference}            主题写回（v2 首个写回动作，幂等）
 //   profile.snapshot  {} → ProfileSnapshot                   个人中心只读快照
 //   nav.switchTab     {index} → {}                           Web 请求切 Tab（原生底栏 selectedTab；P2-0 stub、P2-1 接实装）
+//   favorites.snapshot {} → FavoritesSnapshot                自选页快照（分组结构 + 行情行）
+//   favorites.refresh  {group?} → {queued, count}            手动刷新（异步，完成推 favorites.changed）
+//   favorites.openDetail {file} → {}                         进原生 K 线详情（DetailRouter）
+//   favorites.setNote  {file, note} → {}                     备注写回（幂等；空串 = 删除）
+//   favorites.setPinned {file, pinned, group?} → {}          固顶写回（幂等；「全部」虚拟分组显式报错）
+//   favorites.moveTo   {file, where, group?} → {}            手动分组内移到最前/最后
+//   favorites.removeFromGroup {file, group?} → {}            从手动分组移除
+//   market.snapshot    {} → MarketSnapshot                   行情页快照（分类/渲染列/排序筛选后行，字段按可见列裁剪）
+//   market.select      {menu?, second?} → {}                 切一级/二级分类（原生写状态 + scheduleRefresh）
+//   market.refresh     {} → {queued, count}                  触发 scheduleRefresh（预取置顶优先）
+//   market.openDetail  {file} → {}                           进原生 K 线详情（同 favorites.openDetail）
+//   market.openSearch  {} → {}                               桥接原生全屏搜索页（HomeView 搜索模式）
+//   market.openFormulaCenter {} → {}                         桥接原生公式管理中心（选股 Tab 入口）
+//   market.groupInfo   {file} → {isFav, groups}              加自选浮层拉取（手动分组列表 + 成员态）
+//   market.setFavorite {file, fav} → {}                      一键加/取消自选（目标态语义，幂等）
+//   market.setInGroup  {file, groupID, member} → {}          加/移出手动分组（目标态语义，幂等）
+//   market.createGroup {name} → {id}                         新建自定义分组
+//   market.sortToggle  {field} → {}                          点击表头三击循环排序（降→升→取消）
+//   market.configSnapshot {} → MarketConfigSnapshot          列配置快照（全部可配置列 + 排序 + 冻结数 + 筛选档）
+//   market.configSet   {columns, sortRule?, frozenCount} → {} 整页配置写回（草稿提交，幂等）
+//   market.configReset {} → {}                               恢复默认列配置
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
 //   app.memory        {footprintMB}        页面就绪后一次
+//   favorites.changed {reason}             自选数据/编辑变化（reason: refresh|edit）
+//   market.changed    {reason}             行情数据/分类/配置变化（reason: data|config|edit；节流 ~0.8s 合并）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
-//   favorites.setNote   {file, note} → {}        备注写回（幂等）——P2-1b 实装
-//   favorites.setPinned {file, pinned} → {}      固顶写回（幂等）——P2-1b 实装
-//   market.snapshot / market.subscribe …（行情秒级快照推送通道）
+//   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
+//   chart.settings.snapshot / chart.indicators.snapshot …（P2-5 图表弹层快照通道）
 
 export interface BridgeRequest {
   id: string
@@ -74,13 +96,55 @@ export interface ProfileSnapshot {
   dbLoaded: boolean
 }
 
+/** market.snapshot 单行：数值按可见列裁剪（field key = MarketField.rawValue），无值 null */
+export interface MarketRowSnapshot {
+  file: string
+  code: string
+  name: string
+  /** 一键自选标记（FavoritesStore.isFavorited） */
+  fav: boolean
+  /** 行情页全局固顶（置顶分区 + 浅灰背景） */
+  pinned: boolean
+  /** 着色基准：涨跌幅数值（可见列不含 changePct 时也恒发） */
+  pct: number | null
+  /** 可见列数值（不含 code/name——单独扁平字段） */
+  values: Record<string, number | null>
+}
+
+/** market.snapshot 渲染列（相邻代码/名称已合并为双行单元格，field=name） */
+export interface MarketColumn {
+  field: string
+  isNameCode: boolean
+  title: string
+  width: number
+}
+
+/** market.configSnapshot 单列（全部可配置列，含隐藏） */
+export interface MarketConfigColumn {
+  field: string
+  title: string
+  /** 固定列（代码/名称）：恒置顶恒可见，面板只展示不给开关 */
+  fixed: boolean
+  visible: boolean
+  /** 用户覆盖列宽；null = 跟随默认宽 */
+  widthOverride: number | null
+  filterLabels: string[]
+  /** 范围筛选档 label 列表；null = 该字段不支持筛选 */
+  filterOptions: string[] | null
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
   theme: ['get', 'set'],
   profile: ['snapshot'],
   nav: ['switchTab'],
-  favorites: ['snapshot', 'refresh', 'openDetail'],
+  favorites: ['snapshot', 'refresh', 'openDetail', 'setNote', 'setPinned', 'moveTo', 'removeFromGroup'],
+  market: [
+    'snapshot', 'select', 'refresh', 'openDetail', 'openSearch', 'openFormulaCenter',
+    'groupInfo', 'setFavorite', 'setInGroup', 'createGroup', 'sortToggle',
+    'configSnapshot', 'configSet', 'configReset',
+  ],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -89,6 +153,7 @@ export const KnownEvents = {
   appMemory: 'app.memory',
   navTab: 'nav.tab',
   favoritesChanged: 'favorites.changed',
+  marketChanged: 'market.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）
