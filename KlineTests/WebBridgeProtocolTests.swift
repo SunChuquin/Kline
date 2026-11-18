@@ -80,6 +80,30 @@ final class WebBridgeProtocolTests: XCTestCase {
         }
     }
 
+    /// P2 预留 schema 形状锁定（方案文档 §12.2）：reserved 区块的 Favorites 快照骨架
+    /// 必须包含最小字段集——P2 实现时任何字段漂移在此提前报警
+    func testReservedFavoritesSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any], "fixtures 缺 reserved 区块")
+        let snapshot = try XCTUnwrap(reserved["favorites.snapshot"] as? [String: Any])
+        let groups = try XCTUnwrap(snapshot["groups"] as? [[String: Any]])
+        XCTAssertFalse(groups.isEmpty, "groups 骨架为空")
+        let requiredRowKeys: Set<String> = ["file", "code", "name", "latestPrice", "change",
+                                            "changePct", "volume", "turnover", "lastDate",
+                                            "pinned", "note"]
+        for group in groups {
+            XCTAssertNotNil(group["id"] as? String)
+            XCTAssertEqual((group["kind"] as? String).map { ["manual", "formula"].contains($0) } ?? false,
+                           true, "kind 必须为 manual|formula")
+            let rows = try XCTUnwrap(group["rows"] as? [[String: Any]])
+            for row in rows {
+                let keys = Set(row.keys)
+                XCTAssertTrue(requiredRowKeys.isSubset(of: keys),
+                              "row 缺最小字段: \(requiredRowKeys.subtracting(keys))")
+            }
+        }
+    }
+
     /// theme.set 幂等语义：同值写入无害（直接驱动 KlineThemeStore，写入后偏好与期望一致）
     func testThemeSetIdempotent() {
         let store = KlineThemeStore.shared

@@ -29,5 +29,27 @@
   "events": [
     { "event": "theme.changed", "payload": { "preference": "dark", "mode": "dark" } },
     { "event": "app.memory", "payload": { "footprintMB": 55.1 } }
-  ]
+  ],
+  "reserved": {
+    "comment": "P2 预留 schema（未实现，形状锁定防漂移）：Favorites 快照骨架见方案文档 §12.2",
+    "favorites.snapshot": {
+      "tabs": ["全部", "自选1"],
+      "groups": [
+        { "id": "manual-0", "kind": "manual", "name": "自选1",
+          "rows": [
+            { "file": "SH#600000", "code": "600000", "name": "浦发银行",
+              "latestPrice": 10.5, "change": 0.12, "changePct": 1.15,
+              "volume": 1234567, "turnover": 8901234, "lastDate": "20261118",
+              "pinned": true, "note": "" },
+            { "file": "SZ#000001", "code": "000001", "name": "平安银行",
+              "latestPrice": 12.3, "change": -0.05, "changePct": -0.4,
+              "volume": 987654, "turnover": 654321, "lastDate": "20261118",
+              "pinned": false, "note": "备注样例" }
+          ] }
+      ]
+    },
+    "favorites.changed": { "reason": "refresh" },
+    "favorites.refresh": { "group": "manual-0" },
+    "favorites.openDetail": { "file": "SH#600000" }
+  }
 }

@@ -190,7 +190,14 @@
 ## 9. 决策记录（2026-11-18 用户拍板）
 
 1. **试点页铺开暂缓**：P1 启动前先对齐方案细节（见 §11），避免返工；首批页面候选仍为 Profile / Training / Backtest，启动时间由用户定。
-2. **组件库**：自绘但**非从零发明**——以 Element Plus 等成熟组件库为蓝本**参考摘取**（交互规范、视觉参数），重写为贴合项目规范的自有轻组件（44pt 触达、语义色、KlineTheme CSS variables 映射、Safari 15 兼容由 agent 把关），不整体引入第三方库。组件清单约 5~6 件（卡片/设置行/开关/下拉/弹窗/按钮），源码注释标明参考来源。已随 P0 实施锁定。
+2. **组件库（双蓝本）**：自绘但**非从零发明**——蓝本 = **Element Plus（信息密度 / 表单 / 表格类）+ Vant（移动端交互类：手势 / 下拉 / 轻提示 / 滚动）**，重写为贴合项目规范的自有轻组件（44pt 触达、语义色、KlineTheme CSS variables 映射、Safari 15 兼容由 agent 把关），不整体引入第三方库。源码注释标明参考来源。
+
+   **双蓝本裁决顺序**（Agent 摘组件时按此裁决，不摇摆）：
+   1. 交互规格（触屏手势、下拉、滚动、轻提示停留时长）→ **优先跟 Vant**；
+   2. 信息密度与表单 / 表格类布局 → **优先跟 Element Plus**；
+   3. 两者冲突 → **以当前页面已落地的视觉 token 为准**：新组件向已有 token 对齐，而不是向某个库对齐。
+
+   已随 P0 实施锁定（KCard/KCell/KSwitch/KSelect/KDialog/KButton 六件套）。
 3. **分发**：**长期随 IPA 内嵌**（CI npm build → bundle 根 `WebUI/`），热更通道**取消**——原 P3 的 web-ui.zip 热更项从方案移除。
 4. **目录**：仓库根 `Web/`（pbxproj 同步组约束），已实施定案。
 5. **布局系统整体退役（方向决策，执行另行安排）**：Web 开发循环（任意 PC、无需 macOS，agent 直接开发/测试 UI 布局与样式）使设备端可视化布局体系失去存在意义——PageLayoutEditorView 等编辑器、PageLayout JSON 布局引擎、四页 A/B/C/D 布局切换**后续均可删除**，每页只保留一套布局（agent 在 PC 上开发维护）。涉及几十个文件的退役专项：分页分批删、每批独立可编译可装机验收，不与 P1 抢窗口；本轮不动代码。
@@ -237,3 +244,40 @@
 4. ~~PC↔设备 Web 调试通道~~ **已实现（2026-11-18，Build #619）**：KlineHTTPServer `GET /web/` 静态路由托管 bundle 内 WebUI dist（与 kline:// scheme handler 共用 WebUIFiles，`Cache-Control: no-store`）；PC 侧经 **USB 隧道**访问（`TrollRestore/web_debug_tunnel.py`，pymobiledevice3 usbmux forward，无需同网/不受暴露开关约束）。**用法**：PC 终端跑 `python web_debug_tunnel.py`（前台常驻）→ 浏览器开 `http://127.0.0.1:5051/web/`。约束：iPad 解锁 + Kline 前台；PC Shell 会话结束会收割子进程树——agent 侧验证用 `--check`（阻塞式起隧道→验证→退出），浏览器调试由用户终端常驻承载。
 5. ~~状态快照写回规范~~ **已实现（2026-11-18，协议 v2）**：规范事实源 = [Web/src/types/protocol.ts](../../Web/src/types/protocol.ts)（信封/动作清单/事件清单/错误码表/写回模式完整文档注释）；fixtures 对拍样例 `KlineTests/Fixtures/bridge_protocol.json` + 解析测试 `WebBridgeProtocolTests.swift`（CI KlineTests 任务执行）；首个写回动作 `theme.set` 已落地（幂等、写回不回推快照——状态统一走 theme.changed 事件链路）。**P2 扩展预留**：market.snapshot 行情秒级快照通道。
 6. **注入采样日志清理**：`injectionSampleRemaining` 取证已完成，P1 移除。
+
+---
+
+## 12. P2 前置护栏（2026-11-18，P1 闭环后、P2 开工前落定）
+
+### 12.1 Vant 首个组件的三项真机验证清单
+
+首个 Vant 蓝本组件 = **KPullRefresh（下拉刷新）**，Favorites 页直接要用。每个新摘组件验收必须过三项：
+
+1. **触达与手势**：命中区 ≥44pt；手势（下拉刷新阈值触发、回弹）与页面滚动无冲突；无桌面化交互残留（不依赖 hover）；
+2. **主题三态**：组件全部颜色走 `--k-*` tokens，日间 / 夜间 / 跟随系统切换无残留色、无对比度失效；
+3. **体积与帧率**：单组件 dist 增量 ≤15KB gzip；真机（调试通道目测）滚动无可感知掉帧。
+
+验收方式：PC 浏览器（`http://127.0.0.1:5051/web/`）看视觉 → 真机（TrollStore 装机）看手势与帧率。
+
+### 12.2 Favorites bus schema（协议 v2 预留，已进 fixtures）
+
+基于 Favorites 模块实读（FavoritesStore schema 5：manualFiles/pinnedFiles/notesByFile/globalPinnedFiles + 公式分组 cachedMatches；标的标识为稳定 `file` 如 `SH#600000`；行情字段 27 项来自 MarketField）：
+
+**预留动作**（P2 实现，Swift 侧可先 stub）：
+- `favorites.snapshot` → FavoritesSnapshot（下方 schema；rows 字段按列配置过滤，首批最小集：file/code/name/latestPrice/change/changePct/volume/turnover/lastDate + pinned/note）
+- `favorites.refresh` {group?} → {}（下拉刷新触发重拉：手动分组走 MarketRowCache.refresh，公式分组走 refreshFormulaGroup——Web 只发动作）
+- `favorites.openDetail` {file} → {}（进原生全屏图表，走 DetailRouter）
+- `favorites.setNote` {file, note} → {}、`favorites.setPinned` {file, pinned} → {}（写回，幂等）
+
+**预留事件**：
+- `favorites.changed` {reason: "refresh"|"edit"} → 页面收到后**主动拉 snapshot**（拉取 <10ms；全量推送体积大，增量优化留 P2 实测后定）
+
+**Schema 骨架**（fixtures `reserved` 区块承载形状，P2 实现前防漂移）：
+```json
+{ "tabs": ["全部", "…"], "groups": [ { "id": "…", "kind": "manual|formula", "name": "…",
+  "rows": [ { "file": "SH#600000", "code": "…", "name": "…", "latestPrice": 0, "change": 0,
+              "changePct": 0, "volume": 0, "turnover": 0, "lastDate": "20261118",
+              "pinned": false, "note": "" } ] } ] }
+```
+
+进详情路径（Web 动作 → 原生全屏图表）：`favorites.openDetail` → `DetailRouter.shared.item` → KlineDetailView 全屏覆盖（既有模式零新增机制）。

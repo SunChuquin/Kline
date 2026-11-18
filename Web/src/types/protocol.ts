@@ -35,7 +35,14 @@
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
 //   app.memory        {footprintMB}        页面就绪后一次
 //
-// ## 预留（P2 实时页面 Web 化时扩展，本版未实现）
+// ## 预留（P2 扩展，本版未实现；schema 见方案文档 §12.2 / fixtures reserved 区块）
+//   favorites.snapshot  → {tabs, groups:[{id, kind:"manual"|"formula", name, rows:[…]}]}
+//                         rows 最小集：file/code/name/latestPrice/change/changePct/volume/turnover/lastDate/pinned/note
+//   favorites.refresh   {group?} → {}            下拉刷新触发重拉（手动分组 rowCache / 公式分组 refreshFormulaGroup）
+//   favorites.openDetail {file} → {}             进原生全屏图表（DetailRouter）
+//   favorites.setNote   {file, note} → {}        备注写回（幂等）
+//   favorites.setPinned {file, pinned} → {}      固顶写回（幂等）
+//   favorites.changed   {reason:"refresh"|"edit"}  事件：页面收到后主动拉 snapshot
 //   market.snapshot / market.subscribe …（行情秒级快照推送通道）
 
 export interface BridgeRequest {
