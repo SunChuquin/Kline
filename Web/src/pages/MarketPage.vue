@@ -681,9 +681,10 @@ onMounted(async () => {
 
 <style scoped>
 .page {
-  min-height: 100%;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--k-bg);
 }
 
@@ -792,8 +793,15 @@ onMounted(async () => {
   opacity: 0.85;
 }
 
-/* ===== 表格（虚拟滚动 + 冻结列） ===== */
+/* ===== 表格（虚拟滚动 + 冻结列）：高度链 page(100vh) → pull-refresh(flex:1) → scroll(100%) ===== */
+.page :deep(.van-pull-refresh) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .table-scroll {
+  height: 100%;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
