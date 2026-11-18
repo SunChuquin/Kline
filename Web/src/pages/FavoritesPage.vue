@@ -102,6 +102,8 @@ const loaded = ref(false)
 const refreshing = ref(false)
 const activeIdx = ref(0)
 const groups = ref<FavGroup[]>([])
+/** 「全部」虚拟分组 id（原生 no-op 语义：固顶/移除/排序需在具体分组内） */
+const allGroupId = ref('')
 
 const currentRows = computed<FavRow[]>(() => groups.value[activeIdx.value]?.rows ?? [])
 const currentGroupId = computed(() => groups.value[activeIdx.value]?.id ?? null)
@@ -128,6 +130,7 @@ async function pullSnapshot(): Promise<void> {
   try {
     const s = ((await klineBus.request('favorites', 'snapshot')) ?? {}) as Record<string, unknown>
     loaded.value = s.loaded === true
+    allGroupId.value = String(s.allGroupId ?? '')
     const raw = Array.isArray(s.groups) ? (s.groups as Record<string, unknown>[]) : []
     groups.value = raw.map((g) => ({
       id: String(g.id ?? ''),
@@ -184,20 +187,24 @@ const noteDraft = ref('')
 const menuTarget = ref<FavRow | null>(null)
 const noteTarget = ref<FavRow | null>(null)
 
-/** 当前分组是否支持写回（manual / 全部虚拟分组）；公式分组只读 */
-const canEdit = computed(() => groups.value[activeIdx.value]?.kind !== 'formula')
+/** 当前分组是否支持写回：manual 实体分组（「全部」虚拟分组与公式分组只读） */
+const canEdit = computed(() => {
+  const g = groups.value[activeIdx.value]
+  return !!g && g.kind === 'manual' && g.id !== allGroupId.value
+})
 
 const menuActions = computed(() => {
   const row = menuTarget.value
   if (!row) return []
-  const actions: { name: string; value: string; color?: string }[] = [
-    { name: row.pinned ? '取消固顶' : '固顶', value: 'togglePin' },
-    { name: '移到最前', value: 'first' },
-    { name: '移到最后', value: 'last' },
-    { name: '备注', value: 'note' },
-  ]
-  if (canEdit.value && groups.value[activeIdx.value]?.kind === 'manual') {
+  const actions: { name: string; value: string; color?: string }[] = []
+  if (canEdit.value) {
+    actions.push({ name: row.pinned ? '取消固顶' : '固顶', value: 'togglePin' })
+    actions.push({ name: '移到最前', value: 'first' })
+    actions.push({ name: '移到最后', value: 'last' })
+    actions.push({ name: '备注', value: 'note' })
     actions.push({ name: '从分组移除', value: 'remove', color: '#ee0a24' })
+  } else {
+    actions.push({ name: '备注', value: 'note' })
   }
   return actions
 })
