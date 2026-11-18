@@ -75,8 +75,7 @@ enum FavoritesBridge {
             } else {
                 fav.togglePin(groupID: group.id, metaID: metaID)
             }
-        }
-        notifyEdit()
+        }        notifyEdit()
         return WebBridgeResponse.ok(request.id, data: ["pinned": pinned])
     }
 
