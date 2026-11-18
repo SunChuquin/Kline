@@ -118,6 +118,17 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "get":
             return WebBridgeResponse.ok(request.id, data: ["preference": KlineThemeStore.shared.theme.rawValue,
                                                            "mode": resolvedMode])
+        case "set":
+            // 协议 v2 首个写回动作（幂等）：写 KlineThemeStore 即完成；
+            // 状态变化不在此回推——由宿主视图 onChange(themeStore) 链路推 theme.changed（写回模式单一数据流）
+            guard let pref = request.payload["preference"] as? String,
+                  let theme = KlineTheme(rawValue: pref) else {
+                return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                              message: "preference 必须为 system / light / dark")
+            }
+            KlineThemeStore.shared.theme = theme
+            DebugLogger.shared.log("[WebBridge] 主题写回: \(theme.rawValue)")
+            return WebBridgeResponse.ok(request.id, data: ["preference": theme.rawValue])
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action", message: "theme.\(request.action) 未实现")
         }

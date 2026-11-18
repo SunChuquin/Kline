@@ -1,0 +1,33 @@
+{
+  "requests": [
+    { "id": "req_app_ping", "module": "app", "action": "ping", "payload": { "clientTs": 123.0 } },
+    { "id": "req_app_rtt", "module": "app", "action": "reportRtt", "payload": { "rttMs": 8.0 } },
+    { "id": "req_app_jsdiag", "module": "app", "action": "jsdiag",
+      "payload": { "hasWindowBus": "object", "hasWebkitHandler": true } },
+    { "id": "req_app_jserror", "module": "app", "action": "jsError",
+      "payload": { "message": "TypeError: x is undefined", "source": "assets/index.js", "line": 42 } },
+    { "id": "req_theme_get", "module": "theme", "action": "get", "payload": {} },
+    { "id": "req_theme_set", "module": "theme", "action": "set", "payload": { "preference": "dark" } },
+    { "id": "req_profile_snapshot", "module": "profile", "action": "snapshot", "payload": {} }
+  ],
+  "responses": [
+    { "id": "req_app_ping", "ok": true, "data": { "clientTs": 123.0, "serverMs": 1763361600000 } },
+    { "id": "req_app_rtt", "ok": true, "data": {} },
+    { "id": "req_theme_get", "ok": true, "data": { "preference": "system", "mode": "light" } },
+    { "id": "req_theme_set", "ok": true, "data": { "preference": "dark" } },
+    { "id": "req_profile_snapshot", "ok": true,
+      "data": { "version": "1.0.2", "build": "619", "syncEnabled": true,
+                "scheduleTimes": ["11:00", "14:30", "15:05", "17:30"],
+                "tradingDaysOnly": true, "dbLoaded": true } }
+  ],
+  "errors": [
+    { "id": "req_unknown_module", "ok": false, "error": { "code": "unknown_module", "message": "未知模块 foo" } },
+    { "id": "req_unknown_action", "ok": false, "error": { "code": "unknown_action", "message": "theme.reset 未实现" } },
+    { "id": "req_bad_payload", "ok": false, "error": { "code": "invalid_payload", "message": "preference 必须为 system / light / dark" } },
+    { "id": "req_bad_envelope", "ok": false, "error": { "code": "bad_request", "message": "信封解析失败" } }
+  ],
+  "events": [
+    { "event": "theme.changed", "payload": { "preference": "dark", "mode": "dark" } },
+    { "event": "app.memory", "payload": { "footprintMB": 55.1 } }
+  ]
+}

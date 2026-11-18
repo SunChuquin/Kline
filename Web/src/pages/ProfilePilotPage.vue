@@ -12,7 +12,11 @@
     </KCard>
 
     <KCard title="显示主题">
-      <KCell label="主题偏好" :value="themePreferenceTitle" />
+      <KCell label="主题偏好">
+        <template #value>
+          <KSelect v-model="themePreference" :options="themeOptions" @change="setTheme" />
+        </template>
+      </KCell>
       <KCell label="实际外观" :value="themeMode === 'dark' ? '夜间' : '日间'" />
     </KCard>
 
@@ -40,29 +44,7 @@
       </KCell>
     </KCard>
 
-    <!-- 组件库验收演示：纯本地 state，不落 Store、不走桥接 -->
-    <KCard title="组件演示（不落 Store）">
-      <KCell label="KSwitch 开关">
-        <template #value><KSwitch v-model="demoSwitch" /></template>
-      </KCell>
-      <KCell label="KSelect 下拉">
-        <template #value>
-          <KSelect v-model="demoSelect" :options="demoOptions" />
-        </template>
-      </KCell>
-      <KCell label="KDialog 弹窗">
-        <template #value>
-          <KButton type="text" @click="demoDialogOpen = true">打开</KButton>
-        </template>
-      </KCell>
-    </KCard>
-
-    <KDialog v-model:open="demoDialogOpen" title="组件演示" width="280">
-      <p class="demo-dialog-text">KDialog 居中弹窗：遮罩 black 25%、圆角 12、点遮罩关闭。</p>
-      <KButton type="primary" block @click="demoDialogOpen = false">知道了</KButton>
-    </KDialog>
-
-    <div class="footer">Kline 混合架构 · Swift 原生宿主 + Vue3 视图层 · 协议 v1</div>
+    <div class="footer">Kline 混合架构 · Swift 原生宿主 + Vue3 视图层 · 协议 v2</div>
   </div>
 </template>
 
@@ -72,10 +54,7 @@ import { klineBus } from '../bridge/klineBus'
 import { KnownEvents } from '../types/protocol'
 import KCard from '../components/kline/KCard.vue'
 import KCell from '../components/kline/KCell.vue'
-import KSwitch from '../components/kline/KSwitch.vue'
 import KSelect from '../components/kline/KSelect.vue'
-import KButton from '../components/kline/KButton.vue'
-import KDialog from '../components/kline/KDialog.vue'
 
 const buildTs = __BUILD_TS__
 const bridgeAvailable = ref(true)
@@ -92,19 +71,13 @@ const snap = reactive({
   dbLoaded: false,
 })
 
-// 组件演示（纯本地 state，不落 Store）
-const demoSwitch = ref(false)
-const demoSelect = ref('system')
-const demoDialogOpen = ref(false)
-const demoOptions = [
+// 主题写回（协议 v2 theme.set）：写回后状态由 theme.changed 事件回推，不乐观更新
+const themeOptions = [
   { label: '跟随系统', value: 'system' },
   { label: '日间模式', value: 'light' },
   { label: '夜间模式', value: 'dark' },
 ]
 
-const themePreferenceTitle = computed(
-  () => ({ system: '跟随系统', light: '日间模式', dark: '夜间模式' }[themePreference.value] ?? themePreference.value),
-)
 const scheduleText = computed(() => (snap.scheduleTimes.length ? snap.scheduleTimes.join(' / ') : '—'))
 
 let pingTimer: number | undefined
@@ -113,6 +86,20 @@ function applyTheme(t: { preference?: unknown; mode?: unknown }): void {
   if (typeof t.preference === 'string') themePreference.value = t.preference
   if (typeof t.mode === 'string') themeMode.value = t.mode
   document.documentElement.setAttribute('data-theme', themeMode.value === 'dark' ? 'dark' : 'light')
+}
+
+async function setTheme(value: string | number): Promise<void> {
+  try {
+    await klineBus.request('theme', 'set', { preference: String(value) })
+    // 写回成功：不在此更新本地状态，等 theme.changed 事件回推（写回模式 v2 单一数据流）
+  } catch (e) {
+    // 写回失败：回读真实主题纠正选择（不发额外事件，纯请求）
+    console.error('主题写回失败', e)
+    klineBus
+      .request('theme', 'get')
+      .then((t) => applyTheme((t ?? {}) as Record<string, unknown>))
+      .catch(() => {})
+  }
 }
 
 async function pingOnce(): Promise<void> {
@@ -201,12 +188,6 @@ b {
 
 b.ok {
   color: var(--k-ok);
-}
-
-.demo-dialog-text {
-  font-size: 14px;
-  color: var(--k-text-secondary);
-  margin: 0 0 14px;
 }
 
 .footer {

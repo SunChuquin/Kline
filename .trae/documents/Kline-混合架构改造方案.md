@@ -69,7 +69,7 @@
 | 范围 | 理由 |
 | --- | --- |
 | `Chart/` 全部（约 20 文件） | 高频渲染 + 手势 + 缠论绘制，几十条沉淀规则 |
-| Home / Market / Favorites 的实时列表与行情 widgets | 行情实时数据高频刷新，Web 桥接不划算 |
+| ~~Home / Market / Favorites 的实时列表与行情 widgets~~ | **2026-11-18 终局决策：实时页面 Web 化（§7 终局版）**，本条失效；高频行情以秒级快照推送支撑，P2 逐页验证刷新节奏 |
 | App 壳层：`KlineApp` / `ContentView` / `SidebarDrawer` / `FloatingAccessory*` | 导航壳、手势、生命周期 |
 | 全部 Store 与数据层：`Data/`、`Infrastructure/`、各 `*Store.swift`、`Trading/` 纯逻辑（SimStore、SimCondEngine） | 状态必须留在原生，Web 只消费快照 |
 | Python 桥 `Python/` 全部 | 现状可用，不重构 |
@@ -162,16 +162,16 @@
 
 ---
 
-## 7. 分阶段实施路线
+## 7. 分阶段实施路线（2026-11-18 终局版：实时页面 Web 化定案）
 
-> 每阶段独立可构建、可单独装机、经用户真机验收后进入下一阶段（对齐 kline-device-validation-loop 流程）。
+> **终局形态：全 App UI 走 Web，原生只留三样——K 线图表（全屏组件）、数据/同步层、Python 引擎。** 图表承载方式：Web 页面点击标的 → 桥接 → 原生 KlineDetailView 全屏覆盖（现有 DetailRouter 模式，零新增机制）。每阶段独立可构建、可单独装机、经用户真机验收后进入下一阶段。
 
 | 阶段 | 内容 | 验收标准 |
 | --- | --- | --- |
-| P0 桥接骨架 | `WebBridge.swift` + `MessageRouter` + Vue3 工程搭建 + 试点页只读版（Profile 设置页） | 真机打开 Web 页正常；桥接往返延迟实测记录；WKWebView 内存增量 ≤150MB；原生功能零回归 |
-| P1 试点页可交互 | Profile / Training / Backtest 三页完整可交互；协议 golden 测试入库 | 真机滚动流畅；写操作全部落原生 Store；深浅色主题同步正确 |
-| P2 编辑器栈铺开 | Simulation / Formula / Trading 视图迁移 | 每页迁移后原生页仍可回退；SimState 快照协议稳定 |
-| P3（可选） | 热更通道 + 布局编辑器评估 | 热更包校验/回退机制真机验证通过 |
+| P0 桥接骨架 ✅ | 已完成（Build #616：RTT 8~14ms、内存增量 ~1MB） | 已验收 |
+| P1 Web 基建 + 试点页可交互 | KlineHTTP `/web/` 调试路由（PC 浏览器直开真机页面）；基础组件库（Element Plus 蓝本摘取）；快照写回规范 v2；Profile/Training/Backtest 可交互；注入采样日志清理 | PC 浏览器调试循环跑通；三页写操作全部落原生 Store；主题实时跟随 |
+| P2 实时页面逐页 Web 化 | 每页一个批次 = 撤该页布局系统（布局退役并入）+ Vue 重写 + 行情快照推送通道 + 装机替换；建议次序 Favorites → Market → Home → Simulation（低频→高频，Simulation 最重放最后，可调） | 每批功能对齐原生版；行情刷新节奏不掉点；原生图表页零回归 |
+| P3 收尾 | Formula/Trading/Backtest 等剩余编辑器栈迁移；协议 golden 锁 CI；布局系统全量清除复核 | 全 App 无 PageLayout 残留；协议 fixtures 两端对拍通过 |
 
 ---
 
@@ -187,13 +187,14 @@
 
 ---
 
-## 9. 待确认决策点（实施前需用户拍板）
+## 9. 决策记录（2026-11-18 用户拍板）
 
-1. **首批试点页**：建议 Profile 设置页 + Training 配置/记录 + Backtest 参数/结果，是否认可？
-2. **组件库路线**：建议纯自绘轻组件（不用 Element Plus），是否认可？
-3. **热更通道**：建议二期（P3）再做，一期只内嵌，是否认可？
-4. ~~Web 工程目录：建议 `Kline/Web/`~~ **已定：仓库根 `Web/`** —— pbxproj 为 objectVersion 77 同步组结构，`Kline/` 内一切文件自动吸入 target（node_modules 会污染工程）；dist 经「Copy PyScripts」同款脚本阶段拷入 bundle 根 `WebUI/`（详见 §10）。
-5. **协议 golden 测试**：是否纳入 CI（build.yml 目前不跑 Swift 测试，可先落 PC 侧 Python/脚本对拍）？
+1. **试点页铺开暂缓**：P1 启动前先对齐方案细节（见 §11），避免返工；首批页面候选仍为 Profile / Training / Backtest，启动时间由用户定。
+2. **组件库**：自绘但**非从零发明**——以 Element Plus 等成熟组件库为蓝本**参考摘取**（交互规范、视觉参数），重写为贴合项目规范的自有轻组件（44pt 触达、语义色、KlineTheme CSS variables 映射、Safari 15 兼容由 agent 把关），不整体引入第三方库。组件清单约 5~6 件（卡片/设置行/开关/下拉/弹窗/按钮），源码注释标明参考来源。已随 P0 实施锁定。
+3. **分发**：**长期随 IPA 内嵌**（CI npm build → bundle 根 `WebUI/`），热更通道**取消**——原 P3 的 web-ui.zip 热更项从方案移除。
+4. **目录**：仓库根 `Web/`（pbxproj 同步组约束），已实施定案。
+5. **布局系统整体退役（方向决策，执行另行安排）**：Web 开发循环（任意 PC、无需 macOS，agent 直接开发/测试 UI 布局与样式）使设备端可视化布局体系失去存在意义——PageLayoutEditorView 等编辑器、PageLayout JSON 布局引擎、四页 A/B/C/D 布局切换**后续均可删除**，每页只保留一套布局（agent 在 PC 上开发维护）。涉及几十个文件的退役专项：分页分批删、每批独立可编译可装机验收，不与 P1 抢窗口；本轮不动代码。
+6. **协议 golden**：P1 落 fixtures + 两端解析测试，暂不锁 CI；P2（编辑器栈铺开）开工前收紧进 CI。
 
 ---
 
@@ -216,3 +217,23 @@
 **集成**：个人中心新增「Web 试点（P0）」全屏入口（对齐 Python 引擎实验室呈现模式）；「Copy PyScripts」阶段扩展拷贝 `Web/dist` → bundle `WebUI/`（缺失时警告不阻断，宿主页显式报错）；build.yml 在 xcodebuild 前增加 `npm ci && npm run build`；`.gitignore` 排除 `Web/node_modules/` 与 `Web/dist/`。
 
 **验收口径（P0）**：真机打开 Web 页正常渲染；页面探针显示桥接 RTT 与内存足迹（同步落 debug_log）；主题切换实时生效；原生功能零回归。
+
+**P0 验收实测（Build #616，iPad mini 4 / iOS 15.8.8，2026-11-18）**：桥接往返页面实测 **8~14ms**（Swift 处理 0.35~1.26ms）；WebView 打开前后 phys_footprint 54.2→55.1MB（**App 进程增量 ~1MB**；WKWebView 内容进程独立不计入，整包口径 P1 前用 Xcode 内存报告补测）；theme.get→snapshot→ping 链路间隔 <50ms；`reportRtt`/`jsdiag` 持续落日志。
+
+**P0 排障沉淀（三轮装机定位，教训价值高）**：
+1. `JSONSerialization.data(withJSONObject:)` 对 **top-level String（JSON 文本）在 iOS 真机上返回失败**（isValidJSONObject 同样拒绝）——PC 上习惯性依赖它编码字符串字面量，真机全灭。JS 字符串字面量必须手工转义（`WebBridgeJS.jsStringLiteral`）。
+2. ES module 顶层导出**不会自动挂到 window**——`window.klineBus` 需显式赋值（klineBus.ts 末尾），否则 Swift 侧 `window.klineBus.dispatch` 引用 undefined。
+3. 排障方法论：响应全丢 + 零错误日志的矛盾，靠「时间链取证（6s = 页面超时值）」+「注入串构造失败日志」+「完成回调采样」三层探针收敛；桥接边界（klineBus 字符串入参兼容、全局异常回报 jsError）已内建防御与自报通道，后续 Web 页排障直接读日志。
+
+---
+
+## 11. 方案待对齐清单（P1 启动前逐项确认）
+
+> 用户要求：铺页面前先了解清楚方案，避免返工。按影响面排序。
+
+1. ~~实时页面的最终归属~~ **已定（2026-11-18）：实时页面 Web 化**，逐页推进（建议次序 Favorites → Market → Home → Simulation，可调）；布局退役并入各页批次执行。图表恒为原生全屏组件（DetailRouter 模式承载）。
+2. **布局系统退役专项规划**：删 PageLayout 引擎四件套（Schema/Renderer/WidgetRegistry/ConfigStore）+ PageLayoutStore/TradingLayoutStore + 编辑器全家 + 四页 ×3 套备用布局 View + 个人中心五个布局设置行；每页留一套布局（选型待定：Home 现默认 B，Market/Favorites/Simulation 执行时定）。清点引用面后分页分批执行，每批装机验收；与 P1 页面铺开的先后次序由用户定。
+3. **Web 页导航模式**：已验证「个人中心 → 全屏 overlay」一种；是否需要 Tab 内嵌 Web 页（与底部导航共存）的形态待定。
+4. ~~PC↔设备 Web 调试通道~~ **已实现（2026-11-18，Build #619）**：KlineHTTPServer `GET /web/` 静态路由托管 bundle 内 WebUI dist（与 kline:// scheme handler 共用 WebUIFiles，`Cache-Control: no-store`）；PC 侧经 **USB 隧道**访问（`TrollRestore/web_debug_tunnel.py`，pymobiledevice3 usbmux forward，无需同网/不受暴露开关约束）。**用法**：PC 终端跑 `python web_debug_tunnel.py`（前台常驻）→ 浏览器开 `http://127.0.0.1:5051/web/`。约束：iPad 解锁 + Kline 前台；PC Shell 会话结束会收割子进程树——agent 侧验证用 `--check`（阻塞式起隧道→验证→退出），浏览器调试由用户终端常驻承载。
+5. ~~状态快照写回规范~~ **已实现（2026-11-18，协议 v2）**：规范事实源 = [Web/src/types/protocol.ts](../../Web/src/types/protocol.ts)（信封/动作清单/事件清单/错误码表/写回模式完整文档注释）；fixtures 对拍样例 `KlineTests/Fixtures/bridge_protocol.json` + 解析测试 `WebBridgeProtocolTests.swift`（CI KlineTests 任务执行）；首个写回动作 `theme.set` 已落地（幂等、写回不回推快照——状态统一走 theme.changed 事件链路）。**P2 扩展预留**：market.snapshot 行情秒级快照通道。
+6. **注入采样日志清理**：`injectionSampleRemaining` 取证已完成，P1 移除。
