@@ -16,8 +16,9 @@ struct WebHostView: View {
 
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @Environment(\.colorScheme) private var colorScheme
-    // 路由为单例（通道无关：真机 messageHandler 与 PC 调试 POST /bridge 共用同一 dispatch）
-    private var router = WebMessageRouter.shared
+    // 路由为单例（通道无关：真机 messageHandler 与 PC 调试 POST /bridge 共用同一 dispatch）。
+    // 注意不能用 private：private 存储属性会把 memberwise init 拉成 private，外部 WebHostView(onClose:) 失效
+    var router = WebMessageRouter.shared
     @State private var loadError: String?
 
     var body: some View {
