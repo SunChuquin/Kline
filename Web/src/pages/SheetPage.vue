@@ -295,7 +295,6 @@ onMounted(async () => {
   position: relative;
   background: transparent;
 }
-
 .panel-mask {
   position: absolute;
   inset: 0;
@@ -489,5 +488,23 @@ onMounted(async () => {
 .sr-code {
   font-size: 12px;
   color: var(--k-text-secondary);
+}
+</style>
+
+<style>
+/* ===== 弹层浮层页专用全局覆盖（非 scoped，作用于本 WebView 实例的文档根） =====
+ * SheetPage 的 WebView 以 isOpaque=false 加载（透明 WKWebView），
+ * 但 theme.css 给 html/body 画了 var(--k-bg) 白底——全屏白块盖住下层 K 线图表
+ * （2026-11-19 实测「面板打开后图表变白」根因）。此处将文档根透明化，
+ * 面板外区域透出遮罩与图表。Tab 页 WebView 不受影响：各自根 div 有页面背景，
+ * 且 WKWebView 层仍为 systemBackground 白底兜底。 */
+html,
+body {
+  background: transparent !important;
+}
+
+#app {
+  background: transparent;
+  min-height: unset;
 }
 </style>
