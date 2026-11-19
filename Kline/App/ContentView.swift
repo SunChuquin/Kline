@@ -307,12 +307,18 @@ struct ContentView: View {
 
     // MARK: - 主内容视图切换
     // 混合架构 P2：Tab 内容逐页换 Web（原生实现类保留，回退 = 改回一行分支）。
-    // 已换：1 自选（P2-1）/ 2 行情（P2-2）。未换：0 首页 / 3 模拟。
+    // 已换：0 首页（P2-3）/ 1 自选（P2-1）/ 2 行情（P2-2）。未换：3 模拟。
     @ViewBuilder
     private var mainContentView: some View {
         switch selectedTab {
         case 0:
-            HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
+            if WebUIFiles.isBundleReady {
+                // P2-3：首页 Web 化（原生浮层由 HomeWebShellView overlay 挂载）
+                HomeWebShellView()
+            } else {
+                // Web UI 未构建 → 回退原生首页
+                HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
+            }
         case 1:
             if WebUIFiles.isBundleReady {
                 WebTabHostView(route: "favorites")

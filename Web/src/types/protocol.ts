@@ -52,12 +52,16 @@
 //   market.configSnapshot {} → MarketConfigSnapshot          列配置快照（全部可配置列 + 排序 + 冻结数 + 筛选档）
 //   market.configSet   {columns, sortRule?, frozenCount} → {} 整页配置写回（草稿提交，幂等）
 //   market.configReset {} → {}                               恢复默认列配置
+//   home.snapshot      {} → HomeSnapshot                     首页快照（入口清单/指数行/涨跌家数/自选Top5/模拟摘要/涨幅榜Top5）
+//   home.openEntry     {kind} → {}                           快捷入口桥接（search/公式分段/条件单/训练/个人中心…；layoutEditor 退役不注册）
+//   home.openDetail    {file, context?} → {}                 进 K 线详情（context = 副图左右切换上下文的 file 列表）
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
 //   app.memory        {footprintMB}        页面就绪后一次
 //   favorites.changed {reason}             自选数据/编辑变化（reason: refresh|edit）
 //   market.changed    {reason}             行情数据/分类/配置变化（reason: data|config|edit；节流 ~0.8s 合并）
+//   home.changed      {reason}             首页快照数据变化（reason: data|edit|sim；节流 ~0.8s 合并）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -133,6 +137,55 @@ export interface MarketConfigColumn {
   filterOptions: string[] | null
 }
 
+/** home.snapshot 快捷入口（Web 版裁掉 layoutEditor——布局编辑器随 JSON 布局引擎退役） */
+export interface HomeEntry {
+  id: string
+  title: string
+  subtitle: string
+  /** 语义色 hex（对齐原生 HomeEntryKind.tint） */
+  tint: string
+}
+
+/** home.snapshot 指数行 / 自选行 / 涨幅榜行的公共形状（未就绪数值为 null） */
+export interface HomeQuote {
+  file: string
+  code: string
+  name: string
+  price: number | null
+  pct: number | null
+}
+
+/** home.snapshot 自选行（closes = 迷你走势最近 20 根收盘价） */
+export interface HomeFavQuote extends HomeQuote {
+  closes: number[]
+}
+
+/** home.snapshot 模拟账户摘要（金额口径与 SimStore.SimAccountSummary 一致） */
+export interface HomeSimSummary {
+  totalAssets: number
+  dayProfit: number
+  dayProfitPct: number
+  positionPct: number
+}
+
+/** home.snapshot 模拟持仓行 */
+export interface HomeSimPosition {
+  code: string
+  name: string
+  lastPrice: number
+  profit: number
+  profitPct: number
+}
+
+/** home.snapshot 涨跌家数（nil = 尚无有效聚合，界面显示加载中） */
+export interface HomeBreadth {
+  up: number
+  down: number
+  flat: number
+  limitUp: number
+  limitDown: number
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -145,6 +198,7 @@ export const KnownActions = {
     'groupInfo', 'setFavorite', 'setInGroup', 'createGroup', 'sortToggle',
     'configSnapshot', 'configSet', 'configReset',
   ],
+  home: ['snapshot', 'openEntry', 'openDetail'],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -154,6 +208,7 @@ export const KnownEvents = {
   navTab: 'nav.tab',
   favoritesChanged: 'favorites.changed',
   marketChanged: 'market.changed',
+  homeChanged: 'home.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

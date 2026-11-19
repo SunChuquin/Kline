@@ -74,11 +74,54 @@ final class WebBridgeProtocolTests: XCTestCase {
         let fixture = try loadFixture()
         let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
         let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab",
-                                        "favorites.changed", "market.changed"]
+                                        "favorites.changed", "market.changed", "home.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
         }
+    }
+
+    /// home.snapshot 响应形状锁定（P2-3）：入口清单含 tint、自选行含迷你走势 closes、模拟摘要含四个口径
+    func testHomeSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_home_snapshot"
+        }, "fixtures 缺 home.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["loaded", "hasMainBoard", "entries", "indices", "breadth",
+                    "favorites", "sim", "simPositions", "gainers", "gainersReady"] {
+            XCTAssertNotNil(data[key], "home.snapshot 缺 \(key)")
+        }
+        // 入口形状：id/title/subtitle/tint（layoutEditor 退役不返回——由实现侧裁剪）
+        let entries = try XCTUnwrap(data["entries"] as? [[String: Any]])
+        for e in entries {
+            for key in ["id", "title", "subtitle", "tint"] {
+                XCTAssertNotNil(e[key], "home 入口缺 \(key)")
+            }
+        }
+        // 自选行形状：迷你走势 closes 恒在
+        let favs = try XCTUnwrap(data["favorites"] as? [[String: Any]])
+        for row in favs {
+            XCTAssertNotNil(row["closes"], "home 自选行缺 closes（迷你走势）")
+        }
+        // 模拟摘要口径
+        let sim = try XCTUnwrap(data["sim"] as? [String: Any])
+        for key in ["totalAssets", "dayProfit", "dayProfitPct", "positionPct"] {
+            XCTAssertNotNil(sim[key], "home 模拟摘要缺 \(key)")
+        }
+    }
+
+    /// home.openEntry payload 形状锁定：kind 必须可映射 HomeEntryKind
+    func testHomeOpenEntryKind() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "home" && ($0["action"] as? String) == "openEntry"
+        }, "fixtures 缺 home.openEntry 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        let raw = try XCTUnwrap(payload["kind"] as? String)
+        XCTAssertNotNil(HomeEntryKind(rawValue: raw), "kind=\(raw) 无法映射 HomeEntryKind")
     }
 
     /// market.snapshot 响应形状锁定（P2-2）：渲染列含 isNameCode/width、行含 fav/pinned/pct/values

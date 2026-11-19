@@ -37,7 +37,11 @@
                                 { "field": "volume", "visible": false, "filterLabels": [] } ],
                    "sortRule": { "field": "changePct", "order": "descending" },
                    "frozenCount": 3 } },
-    { "id": "req_mkt_config_reset", "module": "market", "action": "configReset", "payload": {} }
+    { "id": "req_mkt_config_reset", "module": "market", "action": "configReset", "payload": {} },
+    { "id": "req_home_snapshot", "module": "home", "action": "snapshot", "payload": {} },
+    { "id": "req_home_open_entry", "module": "home", "action": "openEntry", "payload": { "kind": "search" } },
+    { "id": "req_home_open_detail", "module": "home", "action": "openDetail",
+      "payload": { "file": "SH#600000", "context": ["SH#600000", "SZ#000001"] } }
   ],
   "responses": [
     { "id": "req_app_ping", "ok": true, "data": { "clientTs": 123.0, "serverMs": 1763361600000 } },
@@ -104,7 +108,25 @@
                                "widthOverride": 62, "filterLabels": ["涨停"],
                                "filterOptions": ["涨停", ">7%", "7~5", "5~3", "3~0", "平", "0~-3", "-3~-5", "-5~-7", "跌停"] } ] } },
     { "id": "req_mkt_config_set", "ok": true, "data": {} },
-    { "id": "req_mkt_config_reset", "ok": true, "data": {} }
+    { "id": "req_mkt_config_reset", "ok": true, "data": {} },
+    { "id": "req_home_snapshot", "ok": true,
+      "data": { "loaded": true, "hasMainBoard": true,
+                "entries": [ { "id": "search", "title": "搜索标的", "subtitle": "按名称 / 代码检索", "tint": "#007aff" },
+                             { "id": "tech", "title": "技术指标", "subtitle": "主图叠加与副图指标", "tint": "#af52de" } ],
+                "indices": [ { "file": "SH#000001", "code": "000001", "name": "上证指数",
+                               "price": 3456.78, "pct": 0.52 } ],
+                "breadth": { "up": 2100, "down": 1000, "flat": 97, "limitUp": 12, "limitDown": 2 },
+                "favorites": [ { "file": "SH#600000", "code": "600000", "name": "浦发银行",
+                                 "price": 10.5, "pct": 1.15,
+                                 "closes": [10.1, 10.2, 10.15, 10.4, 10.5] } ],
+                "sim": { "totalAssets": 100000, "dayProfit": 350, "dayProfitPct": 0.35, "positionPct": 0.62 },
+                "simPositions": [ { "code": "600000", "name": "浦发银行",
+                                    "lastPrice": 10.5, "profit": 120.5, "profitPct": 1.2 } ],
+                "gainers": [ { "file": "SH#603000", "code": "603000", "name": "某某股",
+                               "price": 25.4, "pct": 10.01 } ],
+                "gainersReady": true } },
+    { "id": "req_home_open_entry", "ok": true, "data": {} },
+    { "id": "req_home_open_detail", "ok": true, "data": {} }
   ],
   "errors": [
     { "id": "req_unknown_module", "ok": false, "error": { "code": "unknown_module", "message": "未知模块 foo" } },
@@ -117,7 +139,8 @@
     { "event": "app.memory", "payload": { "footprintMB": 55.1 } },
     { "event": "nav.tab", "payload": { "index": 1 } },
     { "event": "favorites.changed", "payload": { "reason": "refresh" } },
-    { "event": "market.changed", "payload": { "reason": "data" } }
+    { "event": "market.changed", "payload": { "reason": "data" } },
+    { "event": "home.changed", "payload": { "reason": "data" } }
   ],
   "reserved": {
     "comment": "P2-5 图表弹层浮层容器预留（未实现，形状锁定防漂移）",
