@@ -8,9 +8,10 @@
     <div class="header">
       <div class="brand">
         <span class="brand-icon">📈</span>
-        <span class="brand-name">Kline</span>
+        <!-- aria-label = UITest 锚点（KlineUITests/LANSyncUITests/GapBackfillUITests 首页判定） -->
+        <span class="brand-name" aria-label="home.page">Kline</span>
       </div>
-      <button class="profile-pill" @click="openEntry('profile')">
+      <button class="profile-pill" aria-label="home.profileButton" @click="openEntry('profile')">
         <van-icon name="user-circle-o" class="profile-icon" />
         <span>登录</span>
       </button>

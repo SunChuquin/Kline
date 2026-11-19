@@ -224,9 +224,10 @@ final class HomeBridge: ObservableObject {
         case .alertRecords:
             bridge.overlayTarget = .alertRecords
         case .lanSync:
-            bridge.overlayTarget = .lanSync
+            // P2-6c-1：迁 Web 全屏页（原生 overlayTarget 分支保留可回退）
+            WebPageBridge.shared.open("lanSync")
         case .pythonLab:
-            bridge.overlayTarget = .pythonLab
+            WebPageBridge.shared.open("pythonLab")
         case .training:
             // 训练要盖住底部导航栏 → 走根层路由（与原生容器同机制）
             TrainingSetupRouter.shared.isPresented = true
@@ -303,6 +304,8 @@ struct HomeWebShellView: View {
                         case .alertRecords:
                             AlertRecordView(onClose: { bridge.overlayTarget = nil })
                         case .lanSync:
+                            // P2-6c-1 起入口走 WebPageBridge（本原生分支仅回退用：恢复
+                            // openEntry 的 overlayTarget 赋值即可重新启用）
                             LANSyncView(onClose: { bridge.overlayTarget = nil })
                         case .pythonLab:
                             PythonEngineLabView(onClose: { bridge.overlayTarget = nil })
@@ -311,6 +314,10 @@ struct HomeWebShellView: View {
                     .transition(.opacity)
                     .zIndex(1000)
                 }
+                // P2-6c-1：全屏 Web 页宿主（联机同步/本地更新/引擎实验室）。
+                // zIndex 1002 盖过原生 overlay 组（1000）与个人中心；不盖底部 Tab 栏（对齐原生 UX）
+                WebFullscreenPageHost()
+                    .zIndex(1002)
             }
     }
 }

@@ -128,11 +128,29 @@ struct ProfileDetailView: View {
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
 
-                    // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
-                    LocalUpdateView()
+                    // 本地更新（P2-6c-1：提取为全屏 Web 页；原生内嵌卡片组 LocalUpdateView 保留可回退）
+                    Button(action: { WebPageBridge.shared.open("localUpdate") }) {
+                        HStack(spacing: 10) {
+                            Text("本地更新")
+                                .font(.system(size: 16))
+                                .foregroundColor(Color.primary)
+                            Spacer(minLength: 12)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(.tertiaryLabel))
+                        }
+                        .padding(16)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .accessibilityIdentifier("profile.localUpdate.entry")
 
                     // 联机同步（局域网设备间同步：自选/模拟交易/布局/指标/增量库/主库）
-                    Button(action: { showLANSync = true }) {
+                    // P2-6c-1：迁 Web 全屏页（showLANSync 原生分支保留可回退）
+                    Button(action: { WebPageBridge.shared.open("lanSync") }) {
                         HStack(spacing: 10) {
                             Text("联机同步")
                                 .font(.system(size: 16))
@@ -152,7 +170,8 @@ struct ProfileDetailView: View {
                     .accessibilityIdentifier("profile.lansync.entry")
 
                     // Python 引擎实验室（低调调试入口；引擎不进 IPA，按需下载加载）
-                    Button(action: { showPythonLab = true }) {
+                    // P2-6c-1：迁 Web 全屏页（showPythonLab 原生分支保留可回退）
+                    Button(action: { WebPageBridge.shared.open("pythonLab") }) {
                         HStack(spacing: 10) {
                             Text("Python 引擎实验室")
                                 .font(.system(size: 16))

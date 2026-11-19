@@ -11,12 +11,15 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    EngineLabPanel: typeof import('./src/components/page/EngineLabPanel.vue')['default']
     KButton: typeof import('./src/components/kline/KButton.vue')['default']
     KCard: typeof import('./src/components/kline/KCard.vue')['default']
     KCell: typeof import('./src/components/kline/KCell.vue')['default']
     KDialog: typeof import('./src/components/kline/KDialog.vue')['default']
     KSelect: typeof import('./src/components/kline/KSelect.vue')['default']
     KSwitch: typeof import('./src/components/kline/KSwitch.vue')['default']
+    LanSyncPanel: typeof import('./src/components/page/LanSyncPanel.vue')['default']
+    LocalUpdatePanel: typeof import('./src/components/page/LocalUpdatePanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     VanActionSheet: typeof import('vant/es')['ActionSheet']
@@ -25,6 +28,7 @@ declare module 'vue' {
     VanField: typeof import('vant/es')['Field']
     VanIcon: typeof import('vant/es')['Icon']
     VanPopup: typeof import('vant/es')['Popup']
+    VanProgress: typeof import('vant/es')['Progress']
     VanPullRefresh: typeof import('vant/es')['PullRefresh']
     VanSearch: typeof import('vant/es')['Search']
     VanSwipeCell: typeof import('vant/es')['SwipeCell']

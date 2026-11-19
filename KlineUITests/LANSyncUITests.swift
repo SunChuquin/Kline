@@ -71,6 +71,21 @@ final class LANSyncUITests: XCTestCase {
         add(a)
     }
 
+    /// P2-6c-1 起 LANSyncView 迁 Web（LanSyncPanel.vue）：值行复合锚点「锚点|值」，
+    /// 用 label BEGINSWITH 定位（精确下标匹配不再命中复合串）。
+    private func prefixedElement(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH %@", id)).firstMatch
+    }
+
+    /// 输入框兜底匹配：Web <input> 在 XCUITest 里通常映射 textField，
+    /// 部分系统版本映射 other——先试 textFields，不行退 descendants(any)。
+    private func manualField(_ app: XCUIApplication) -> XCUIElement {
+        let tf = app.textFields["lansync.manual.field"].firstMatch
+        if tf.exists { return tf }
+        return app.descendants(matching: .any)["lansync.manual.field"].firstMatch
+    }
+
     /// 收起软键盘（iPad 模拟器可能连了硬件键盘 → 软键盘不出现；有则用工具栏「完成」/ return 收起）
     private func dismissKeyboardIfPresent(_ app: XCUIApplication) {
         guard app.keyboards.firstMatch.exists else { return }
@@ -116,9 +131,7 @@ final class LANSyncUITests: XCTestCase {
         // 4) 手动直连：输入对端地址（默认 UD2 的 127.0.0.1:5052；可用 TEST_RUNNER_LAN_PEER
         //    覆盖为真机地址如 192.168.2.13:5051，做「模拟器 ← 真机」跨设备验收）
         let peerAddr = ProcessInfo.processInfo.environment["LAN_PEER"] ?? "127.0.0.1:5052"
-        let field = reveal("lansync.manual.field", in: app) {
-            $0.textFields["lansync.manual.field"].firstMatch
-        }
+        let field = reveal("lansync.manual.field", in: app) { manualField($0) }
         field.tap()
         field.typeText(peerAddr)
         print("LAN manualAddress 已输入 \(peerAddr)")
@@ -162,8 +175,9 @@ final class LANSyncUITests: XCTestCase {
         start.tap()
 
         // 8) 轮询结论（≤60s）：完成卡片 / 失败卡片（对端暴露即授权，不存在确认弹窗分支）
-        let summary = app.staticTexts["lansync.result.summary"].firstMatch
-        let failMsg = app.staticTexts["lansync.fail.message"].firstMatch
+        //    P2-6c-1：summary/failMsg 为复合锚点「锚点|文案」，前缀定位（label 即复合串）
+        let summary = prefixedElement(app, "lansync.result.summary")
+        let failMsg = prefixedElement(app, "lansync.fail.message")
         let deadline = Date().addingTimeInterval(Self.verdictTimeout)
         var doneSummary: String? = nil
         var failureText: String? = nil

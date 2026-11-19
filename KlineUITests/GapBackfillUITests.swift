@@ -3,21 +3,20 @@
 //  KlineUITests
 //
 //  「补缺口（主库最新日 → 今天）」的自动化验收（**替代人工点击**）：
-//  个人中心 → 本地更新 → 「补缺口」卡片 → 补一次缺口 →
+//  个人中心 → 本地更新（P2-6c-1 起为全屏 Web 页）→ 「补缺口」卡片 → 补一次缺口 →
 //  等结论出来后断言「缺口已补」且「口径异常 0」。
 //
-//  元素定位全部基于 accessibilityIdentifier（定义在 LocalUpdateView.swift）：
-//   - home.profileButton    首页标题栏用户入口（打开个人中心）
-//   - gapBackfill.run       「补一次缺口」整行按钮
-//   - gapBackfill.status / .coverage / .fetch / .verdict   四个读数行（值是 staticText）
-//   - gapBackfill.detail.N  明细逐行
+//  元素定位（P2-6c-1 起在 WKWebView 内，LocalUpdatePanel.vue）：
+//   - home.profileButton         首页标题栏用户入口（aria-label，HomePage.vue）
+//   - profile.localUpdate.entry  个人中心「本地更新」入口行（原生 ProfileDetailView）
+//   - gapBackfill.run            「补一次缺口」整行按钮（aria-label = 锚点）
+//   - gapBackfill.status / .coverage / .fetch / .verdict / .detail.N
+//     值行复合锚点：aria-label = "锚点|值文本"（label=aria-label），读值取 | 后段
 //
-//  ⚠️ 踩坑记录（沿用 DirectQuoteProbeUITests 的两条，都值钱）：
-//  1) SwiftUI 里**离屏元素的 `isHittable` 会误报 true**（实测按钮 frame 已在屏幕外仍返回 true），
-//     照它点击会落在屏幕外被系统丢弃（表现为「点了没反应」）。
-//     故本文件对**要点的**元素一律用「帧是否完整落在屏幕内」判定可见性，不信 isHittable。
-//  2) **读取不需要可见性**：`ScrollView` 内是非懒加载 `VStack`，离屏元素同样在无障碍树里，
-//     `exists` / `label` 都能直接读 —— 不要为读一行去滑动找可见（那样会白滑几百次）。
+//  ⚠️ Web 页读值/滚动与原生 SwiftUI 的差异：
+//  1) 值行 label 是复合串「锚点|值」——必须用 label BEGINSWITH 定位、再取 | 后段；
+//  2) WKWebView 内元素通常全量暴露（离屏也可读），但要点按的按钮仍需滚进屏幕；
+//  3) app.swipeUp() 落在全屏 WebView 上 = 滚动 Web 内容，reveal 循环照常可用。
 //
 
 import XCTest
@@ -43,34 +42,33 @@ final class GapBackfillUITests: XCTestCase {
             && f.minX >= s.minX && f.maxX <= s.maxX
     }
 
-    /// 个人中心内容很长（本地更新 / 清单自动更新 / 补缺口 三组卡片），
-    /// 「补缺口」在最底部：反复整屏上滑直到按钮完整进入屏幕。
-    private func revealBackfillButton(_ app: XCUIApplication) -> XCUIElement {
-        let button = app.buttons["gapBackfill.run"].firstMatch
+    /// 反复整屏上滑直到目标元素完整进入屏幕
+    private func reveal(_ id: String, in app: XCUIApplication,
+                        using match: (XCUIApplication) -> XCUIElement) -> XCUIElement {
+        let element = match(app)
         for _ in 0..<60 {
-            if isFullyOnScreen(button, app) { return button }
+            if isFullyOnScreen(element, app) { return element }
             app.swipeUp()
             usleep(300_000)
         }
-        XCTFail("个人中心底部未能在屏幕内找到「补一次缺口」按钮（gapBackfill.run，"
-                + "frame=\(button.exists ? "\(button.frame)" : "不存在")，屏幕 \(app.frame)）")
-        return button
+        XCTFail("未能滚动到屏幕内找到元素 \(id)（exists=\(element.exists)，"
+                + "frame=\(element.exists ? "\(element.frame)" : "无")，屏幕 \(app.frame)）")
+        return element
     }
 
-    /// 读某行读数的文案：**离屏也能读 `label`**（不需要滚进视口，见文件头踩坑记录第 2 条）
+    /// 值行读值：复合锚点「anchor|值」→ label BEGINSWITH 定位，取 | 后段
     private func readText(_ app: XCUIApplication, _ id: String) -> String {
-        let element = app.staticTexts[id].firstMatch
-        return element.exists ? element.label : ""
+        let element = app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH %@", id)).firstMatch
+        guard element.exists else { return "" }
+        let label = element.label
+        if let range = label.range(of: "|") { return String(label[range.upperBound...]) }
+        return label
     }
 
-    /// 等状态行离开「尚未运行」（= run() 已被触发）
-    private func waitStatusChange(_ status: XCUIElement, _ timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if status.exists && status.label != "尚未运行" { return true }
-            usleep(500_000)
-        }
-        return false
+    private func rowExists(_ app: XCUIApplication, _ id: String) -> Bool {
+        app.staticTexts
+            .matching(NSPredicate(format: "label BEGINSWITH %@", id)).firstMatch.exists
     }
 
     private func snap(_ app: XCUIApplication, _ name: String) {
@@ -94,47 +92,59 @@ final class GapBackfillUITests: XCTestCase {
 
         // 1) 首页 → 个人中心（走标题栏用户入口，不依赖中文文案）
         app.buttons["tab.home"].tap()
-        XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10), "首页未显示")
         let profileButton = app.buttons["home.profileButton"].firstMatch
         XCTAssertTrue(profileButton.waitForExistence(timeout: 10), "首页标题栏未找到用户入口")
         profileButton.tap()
         XCTAssertTrue(app.staticTexts["个人中心"].firstMatch.waitForExistence(timeout: 10),
                       "个人中心未打开")
 
-        // 2) 滚到底部「补缺口」卡片，点「补一次缺口」
-        let runButton = revealBackfillButton(app)
+        // 2) 点「本地更新」入口行（P2-6c-1：内嵌卡片组提取为全屏 Web 页）
+        let entry = reveal("profile.localUpdate.entry", in: app) {
+            $0.buttons["profile.localUpdate.entry"].firstMatch
+        }
+        entry.tap()
+        let runButtonInWeb = app.buttons["gapBackfill.run"].firstMatch
+        XCTAssertTrue(runButtonInWeb.waitForExistence(timeout: 15),
+                      "本地更新 Web 页未打开（未找到 gapBackfill.run）")
+
+        // 3) 滚到「补一次缺口」按钮并点击
+        let runButton = reveal("gapBackfill.run", in: app) { $0.buttons["gapBackfill.run"].firstMatch }
         snap(app, "gapBackfill.before")
         print("GAP runButton frame=\(runButton.frame) 屏幕=\(app.frame)")
 
-        let status = app.staticTexts["gapBackfill.status"].firstMatch
-        func statusLabel() -> String { status.exists ? status.label : "<离屏>" }
+        func statusValue() -> String { readText(app, "gapBackfill.status") }
 
-        // 3) 触发：等状态行离开「尚未运行」（没离开就是点击没到达 Button action）
+        // 4) 触发：等状态行离开「尚未运行」（没离开就是点击没到达）
         runButton.tap()
-        _ = waitStatusChange(status, 8)
-        print("GAP status(after tap) = \(statusLabel())")
-        XCTAssertNotEqual(statusLabel(), "尚未运行",
-                          "点击「补一次缺口」未触发 GapBackfill.run()（状态仍为「尚未运行」）")
+        var changed = false
+        let changeDeadline = Date().addingTimeInterval(8)
+        while Date() < changeDeadline {
+            if rowExists(app, "gapBackfill.status") && statusValue() != "尚未运行" { changed = true; break }
+            usleep(500_000)
+        }
+        print("GAP status(after tap) = \(statusValue())")
+        XCTAssertTrue(changed && statusValue() != "尚未运行",
+                      "点击「补一次缺口」未触发 GapBackfill.run()（状态仍为「尚未运行」）")
 
-        // 4) 轮询结论行：从占位「—」变为最终结论（离屏元素仍可读 label，故只需容错 exists）
-        let verdict = app.staticTexts["gapBackfill.verdict"].firstMatch
-        let deadline = Date().addingTimeInterval(Self.verdictTimeout)
+        // 5) 轮询结论行：从占位「—」变为最终结论
+        let verdictDeadline = Date().addingTimeInterval(Self.verdictTimeout)
         var verdictLabel = "—"
         var tick = 0
-        while Date() < deadline {
-            if verdict.exists {
-                verdictLabel = verdict.label
-                if verdictLabel != "—" { break }
+        while Date() < verdictDeadline {
+            let v = readText(app, "gapBackfill.verdict")
+            if !v.isEmpty && v != "—" {
+                verdictLabel = v
+                break
             }
             tick += 1
             if tick % 20 == 0 {                                  // 每 10s 打一次状态，便于看进度
-                print("GAP tick=\(tick / 2)s status=\(statusLabel()) verdict=\(verdictLabel)")
+                print("GAP tick=\(tick / 2)s status=\(statusValue()) verdict=\(verdictLabel)")
             }
             usleep(500_000)
         }
         snap(app, "gapBackfill.after")
 
-        // 5) 打印全量读数（失败时便于定位；完整报告另见沙盒 [GapBackfill] 日志）
+        // 6) 打印全量读数（失败时便于定位；完整报告另见沙盒 [GapBackfill] 日志）
         for id in ["gapBackfill.status", "gapBackfill.coverage",
                    "gapBackfill.fetch", "gapBackfill.verdict"] {
             let label = readText(app, id)
@@ -148,16 +158,15 @@ final class GapBackfillUITests: XCTestCase {
             print("GAP detail[\(i)] = \(label)")
         }
 
-        // 6) 断言
+        // 7) 断言
         XCTAssertNotEqual(verdictLabel, "—",
                           "补缺口未在 \(Int(Self.verdictTimeout))s 内出结论（仍在运行或已卡死）")
         // ⚠️ 不能用 `contains("失败")`：结论里本就带「取数失败 N 只」这个**计数项**。
         //    硬失败的文案固定是前缀「失败：」，只认前缀。
         XCTAssertFalse(verdictLabel.hasPrefix("失败"),
                        "补缺口失败：\(verdictLabel)")
-        // 节假日 / 已补齐时走「无缺口早退」单只探测（2026-10-06 国庆实测：源侧最新 = 主库 20260930），
-        // 属**合法成功态**，此时不会出现「缺口已补」「口径异常 0」「缺口覆盖」等缺口态文案
-        // → 断言无缺口结论成立即收，跳过缺口态断言（否则每个休市日必挂）。
+        // 节假日 / 已补齐时走「无缺口早退」单只探测，属**合法成功态**，此时不会出现
+        // 「缺口已补」「口径异常 0」等缺口态文案 → 断言无缺口结论成立即收（否则每个休市日必挂）。
         if verdictLabel.contains("无缺口") {
             print("GAP 无缺口早退（非交易日或已补齐），跳过缺口态断言：\(verdictLabel)")
             return

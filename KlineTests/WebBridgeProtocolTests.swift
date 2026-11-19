@@ -75,7 +75,8 @@ final class WebBridgeProtocolTests: XCTestCase {
         let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
         let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab",
                                         "favorites.changed", "market.changed",
-                                        "home.changed", "sim.changed", "sheet.open"]
+                                        "home.changed", "sim.changed", "sheet.open",
+                                        "page.open", "lan.changed", "update.changed", "lab.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -307,5 +308,111 @@ final class WebBridgeProtocolTests: XCTestCase {
         store.theme = .dark   // 幂等：同值重复写入
         XCTAssertEqual(store.theme, .dark)
         XCTAssertEqual(UserDefaults.standard.string(forKey: "kline.displayTheme"), "dark")
+    }
+
+    /// lan.snapshot 响应形状锁定（P2-6c-1 联机同步页）：服务/暴露/扫描/对端/传输引擎/配置数据
+    func testLANSSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_lan_snapshot"
+        }, "fixtures 缺 lan.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["serverOnline", "probing", "port", "deviceName", "isExposed",
+                    "isBrowsing", "connecting", "peers", "busy", "transfer", "configure"] {
+            XCTAssertNotNil(data[key], "lan.snapshot 缺 \(key)")
+        }
+        let peers = try XCTUnwrap(data["peers"] as? [[String: Any]])
+        for p in peers {
+            for key in ["id", "name", "host", "port"] { XCTAssertNotNil(p[key], "lan 对端行缺 \(key)") }
+        }
+        let transfer = try XCTUnwrap(data["transfer"] as? [String: Any])
+        for key in ["phase", "progress", "bytesPerSecond", "currentFile",
+                    "resultSummary", "backupDir", "needsRestart", "failMessage"] {
+            XCTAssertNotNil(transfer[key], "lan 传输状态缺 \(key)")
+        }
+        let phase = try XCTUnwrap(transfer["phase"] as? String)
+        XCTAssertTrue(["idle", "pairing", "transferring", "done", "failed"].contains(phase),
+                      "非法 lan 传输 phase \(phase)")
+    }
+
+    /// lan.start payload 形状锁定：selections 的 category/mode 必须可映射传输引擎选择模型
+    func testLanStartSelectionsShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "lan" && ($0["action"] as? String) == "start"
+        }, "fixtures 缺 lan.start 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        let selections = try XCTUnwrap(payload["selections"] as? [[String: Any]])
+        XCTAssertFalse(selections.isEmpty, "lan.start selections 不能为空")
+        for sel in selections {
+            let cat = try XCTUnwrap(sel["category"] as? String)
+            XCTAssertNotNil(LANSyncCategory(rawValue: cat), "非法同步类别 \(cat)")
+            let mode = try XCTUnwrap(sel["mode"] as? String)
+            XCTAssertTrue(["all", "children"].contains(mode), "非法选择粒度 \(mode)")
+            XCTAssertNotNil(sel["childKeys"] as? [String], "selections 缺 childKeys（整类传空数组）")
+        }
+    }
+
+    /// update.snapshot 响应形状锁定（P2-6c-1 本地更新页）：App 行/引擎行同构 + 清单自动更新 + 补缺口
+    func testUpdateSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_update_snapshot"
+        }, "fixtures 缺 update.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["server", "app", "engine", "watchlist", "gap", "baseline"] {
+            XCTAssertNotNil(data[key], "update.snapshot 缺 \(key)")
+        }
+        let validStates: Set<String> = ["idle", "checking", "latest", "outdated", "downloading", "failed"]
+        for rowKey in ["app", "engine"] {
+            let row = try XCTUnwrap(data[rowKey] as? [String: Any])
+            for key in ["state", "remoteBuild", "currentBuild", "percent", "title"] {
+                XCTAssertNotNil(row[key], "update.\(rowKey) 行缺 \(key)")
+            }
+            let state = try XCTUnwrap(row["state"] as? String)
+            XCTAssertTrue(validStates.contains(state), "非法远程更新状态 \(state)")
+        }
+        let watch = try XCTUnwrap(data["watchlist"] as? [String: Any])
+        for key in ["enabled", "isRunning", "stateText", "stateTone", "lastResultText",
+                    "unionCount", "requestText", "lastTradeDate", "slots", "note"] {
+            XCTAssertNotNil(watch[key], "update.watchlist 缺 \(key)")
+        }
+        let gap = try XCTUnwrap(data["gap"] as? [String: Any])
+        for key in ["statusText", "coverageText", "baselineText", "baselineStale",
+                    "fetchText", "verdictText", "isRunning", "baselineLoading", "detailLines"] {
+            XCTAssertNotNil(gap[key], "update.gap 缺 \(key)")
+        }
+    }
+
+    /// lab.snapshot 响应形状锁定（P2-6c-1 引擎实验室）：状态/操作/输出行
+    func testLabSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_lab_snapshot"
+        }, "fixtures 缺 lab.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["status", "apiVersion", "statusText", "source", "appPath", "manifest",
+                    "isLoaded", "isBusy", "busyText", "downloadPercent", "runningExp", "outputLines"] {
+            XCTAssertNotNil(data[key], "lab.snapshot 缺 \(key)")
+        }
+        let status = try XCTUnwrap(data["status"] as? String)
+        XCTAssertTrue(["notInstalled", "installed", "versionMismatch", "corrupted"].contains(status),
+                      "非法引擎状态 \(status)")
+    }
+
+    /// lab.runExp payload 形状锁定：实验编号 1~4
+    func testLabRunExpShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "lab" && ($0["action"] as? String) == "runExp"
+        }, "fixtures 缺 lab.runExp 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        let id = try XCTUnwrap((payload["id"] as? NSNumber)?.intValue)
+        XCTAssertTrue((1...4).contains(id), "实验编号必须在 1~4（实际 \(id)）")
     }
 }

@@ -90,6 +90,33 @@
 //   quick.closeAll {} → {count}                              一键清仓（详情标的）
 //   trade.submit {accountID, metaID, direction, priceType, price?, qty} → {orderID}
 //                                                            下单提交（SimStore.submit 精确校验，拒绝 fail 返回中文文案）
+//   page.close        {} → {}                               Web 请求关闭全屏 Web 页（busy 时 fail 拒绝）
+//   page.ready        {} → {}                               全屏页 WebView 就绪拉取（补推 page.open——首次打开时事件早于 WebView 就绪会丢失）
+//   lan.snapshot      {} → LANSSnapshot                     联机同步快照（本机服务/暴露/扫描/对端/传输进度/配置数据；文案原生格式化）
+//   lan.probe         {} → {}                               本机服务真实探测（异步，结果随 lan.changed 推送）
+//   lan.setExposed    {on} → {}                             暴露开关（开=发布广播+授权；关=停止+吊销全部会话 token）
+//   lan.scan          {} → {}                               扫描一次（约 4s 窗口，结果进快照）
+//   lan.connect       {peerId?|address?} → {}               连接对端取 /sync/status（成功进配置页；失败 fail 中文文案）
+//   lan.start         {selections:[{category, mode, childKeys?}]} → {}
+//                                                           发起拉取（mode: all|children；phase/progress 随 lan.changed 推送）
+//   update.snapshot   {} → UpdateSnapshot                   本地更新快照（服务/App 行/引擎行/清单自动更新/补缺口/基准缺失）
+//   update.probeServer {} → {}                              在线服务探测（异步）
+//   update.reconnectServer {} → {}                          强制重建监听并复探
+//   update.checkApp   {} → {}                               检查 App 新版（GitHub Release）
+//   update.installApp {} → {}                               归档旧 IPA + 下载最新 + 拉起 TrollStore 安装
+//   update.checkEngine {} → {}                              检查引擎包新版（引擎 Release 固定 tag）
+//   update.installEngine {} → {}                            下载引擎 .tipa（双校验）+ 拉起 TrollStore 安装
+//   update.syncNow    {} → {}                               清单标的立即更新（设备侧腾讯直连）
+//   update.runGapBackfill {} → {}                           补一次缺口（主库最新日 → 今天）
+//   update.queryBaselineMissing {} → {}                     查询基准缺失名单（结果随 update.changed(baselineReady) 进快照）
+//   lab.snapshot      {} → LabSnapshot                      Python 引擎实验室快照（引擎状态/操作/输出行）
+//   lab.refresh       {} → LabSnapshot                      刷新引擎状态（响应直接带快照）
+//   lab.download      {} → {}                               下载引擎包 .tipa（sha256 校验）
+//   lab.install       {} → {}                               拉起 TrollStore 安装引擎
+//   lab.loadEngine    {} → {}                               进程内 dlopen+Py_Initialize 计时加载
+//   lab.runExp        {id: 1..4} → {}                       实验①-④（脚本/编排逻辑在桥内，输出行随 lab.changed 推送）
+//   lab.cleanDownloads {} → {}                              清理已下载 tipa（Engine.app 由 TrollStore 管理）
+//   lab.exportCrash   {} → {}                               导出崩溃报告到 Documents/crashlogs
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -99,6 +126,10 @@
 //   home.changed      {reason}             首页快照数据变化（reason: data|edit|sim；节流 ~0.8s 合并）
 //   sim.changed       {reason}             模拟页快照数据变化（reason: data|trade；节流 ~0.8s 合并）
 //   sheet.open        {name}               弹层打开指令（Swift→Web 弹层浮层 WebView，路由到对应面板）
+//   page.open         {name}               全屏 Web 页打开指令（Swift→Web，route:"page" 定向推送）
+//   lan.changed       {reason}             联机同步状态变化（reason: data|scan|connect|transfer|mainDBReplaced…）
+//   update.changed    {reason}             本地更新状态变化（reason: server|remote|engine|watchlist|gap|baselineReady）
+//   lab.changed       {reason}             引擎实验室状态/输出变化（reason: status|output|progress；节流 ~0.2s 合并）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -372,6 +403,127 @@ export interface IndicatorsSnapshot {
   subSlots: SubSlotSnap[]
 }
 
+// ===== P2-6c-1 全屏 Web 页三件套（lan / update / lab） =====
+
+/** lan.snapshot 对端设备行 */
+export interface LANPeerSnap {
+  id: string
+  name: string
+  host: string
+  port: number
+}
+
+/** lan.snapshot 传输引擎状态（phase/progress 由原生 LANSyncTransfer 发布） */
+export interface LANTransferSnap {
+  phase: 'idle' | 'pairing' | 'transferring' | 'done' | 'failed'
+  progress: number
+  bytesPerSecond: number
+  currentFile: string
+  resultSummary: string
+  backupDir: string | null
+  needsRestart: boolean
+  /** phase=failed 时的错误文案；其余为 null */
+  failMessage: string | null
+}
+
+/** lan.snapshot 类别行（本机量 vs 对端量 / 子项数量文案原生格式化） */
+export interface LANCategorySnap {
+  key: string
+  title: string
+  localSummary: string
+  remoteSummary: string
+  /** 对端提供细粒度子项时为 true（显示展开箭头；旧版对端/整类类别 false） */
+  hasChildren: boolean
+  children: { key: string; name: string; quantity: string }[]
+}
+
+/** lan.snapshot 响应（P2-6c-1 联机同步页；configure 仅连接成功后非空） */
+export interface LANSSnapshot {
+  serverOnline: boolean
+  probing: boolean
+  port: number
+  deviceName: string
+  isExposed: boolean
+  isBrowsing: boolean
+  connecting: boolean
+  peers: LANPeerSnap[]
+  /** 传输引擎 busy（pairing/transferring）——期间禁止关闭页面 */
+  busy: boolean
+  transfer: LANTransferSnap
+  configure: {
+    peer: { name: string; host: string; port: number; appVersion: string }
+    categories: LANCategorySnap[]
+  } | null
+}
+
+/** update.snapshot 远程更新行（App 行 / 引擎行同构；state 机语义对齐原生 RemoteState） */
+export interface UpdateRowSnap {
+  state: 'idle' | 'checking' | 'latest' | 'outdated' | 'downloading' | 'failed'
+  remoteBuild: number | null
+  currentBuild: number | null
+  /** 下载进度 0~100（downloading 态显示在圆圈里） */
+  percent: number
+  /** 行标题原生拼接（如「检查新版（最新#630 当前 #626）」） */
+  title: string
+}
+
+/** update.snapshot 响应（P2-6c-1 本地更新页） */
+export interface UpdateSnapshot {
+  server: { ok: boolean; probing: boolean }
+  app: UpdateRowSnap
+  engine: UpdateRowSnap
+  watchlist: {
+    enabled: boolean
+    isRunning: boolean
+    stateText: string
+    stateTone: 'gray' | 'yellow' | 'green' | 'red'
+    lastResultText: string
+    unionCount: number
+    requestText: string
+    lastTradeDate: string
+    /** 各时刻最近结果（title 自带「盘中快照/收盘」语义标注，原生判定） */
+    slots: { time: string; title: string; value: string }[]
+    note: string
+  }
+  gap: {
+    statusText: string
+    coverageText: string
+    baselineText: string
+    baselineStale: boolean
+    fetchText: string
+    verdictText: string
+    isRunning: boolean
+    /** 基准缺失名单查询中（行图标转圈） */
+    baselineLoading: boolean
+    detailLines: string[]
+  }
+  /** 基准缺失名单（queryBaselineMissing 成功后非空，reason=baselineReady 通知） */
+  baseline: {
+    mainLatest: number
+    items: { name: string; code: string; file: string; cause: string }[]
+  } | null
+}
+
+/** lab.snapshot 响应（P2-6c-1 Python 引擎实验室） */
+export interface LabSnapshot {
+  status: 'notInstalled' | 'installed' | 'versionMismatch' | 'corrupted'
+  /** versionMismatch 时的 api 版本；其余 null */
+  apiVersion: number | null
+  /** 状态行文案（原生拼接，含修复指引） */
+  statusText: string
+  source: string
+  appPath: string
+  manifest: string
+  isLoaded: boolean
+  isBusy: boolean
+  busyText: string
+  /** 下载进度 0~100 */
+  downloadPercent: number
+  /** 当前运行中的实验编号（0 = 空闲） */
+  runningExp: number
+  outputLines: string[]
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -398,6 +550,11 @@ export const KnownActions = {
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
+  page: ['close', 'ready'],
+  lan: ['snapshot', 'probe', 'setExposed', 'scan', 'connect', 'start'],
+  update: ['snapshot', 'probeServer', 'reconnectServer', 'checkApp', 'installApp',
+           'checkEngine', 'installEngine', 'syncNow', 'runGapBackfill', 'queryBaselineMissing'],
+  lab: ['snapshot', 'refresh', 'download', 'install', 'loadEngine', 'runExp', 'cleanDownloads', 'exportCrash'],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -410,6 +567,10 @@ export const KnownEvents = {
   homeChanged: 'home.changed',
   simChanged: 'sim.changed',
   sheetOpen: 'sheet.open',
+  pageOpen: 'page.open',
+  lanChanged: 'lan.changed',
+  updateChanged: 'update.changed',
+  labChanged: 'lab.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

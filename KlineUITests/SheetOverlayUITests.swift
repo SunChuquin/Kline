@@ -130,4 +130,80 @@ final class SheetOverlayUITests: XCTestCase {
         XCTAssertFalse(panelTitle.waitForExistence(timeout: 5), "面板关闭后标题仍可达")
         XCTAssertTrue(app.buttons["kline.backButton"].exists, "关闭后应仍在 K 线详情页")
     }
+
+    // MARK: - P2-6c-1 全屏 Web 页（个人中心三入口）
+
+    /// 反复整屏上滑直到原生入口行完整进入屏幕（个人中心较长，入口可能离屏）
+    private func revealEntry(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        let entry = app.buttons[id].firstMatch
+        for _ in 0..<30 {
+            let f = entry.exists ? entry.frame : .zero
+            let s = app.frame
+            let onScreen = f.width > 1 && f.height > 1
+                && f.minY >= s.minY && f.maxY <= s.maxY
+            if onScreen { return entry }
+            app.swipeUp()
+            usleep(300_000)
+        }
+        XCTFail("个人中心未在屏幕内找到入口 \(id)")
+        return entry
+    }
+
+    /// 本地更新页链路：首页 → 个人中心 → 本地更新入口 → Web 页打开（补缺口卡片可达）→ 返回
+    func testLocalUpdatePageOpensAndCloses() throws {
+        let app = XCUIApplication.launchingClean()
+        app.launch()
+
+        // 默认启动在行情 Tab（selectedTab=2）→ 先切首页
+        let homeTab = app.buttons["tab.home"]
+        XCTAssertTrue(homeTab.waitForExistence(timeout: 20), "底部「首页」入口未出现")
+        homeTab.tap()
+
+        // 首页（Web）→ 个人中心（原生 overlay）
+        let profileButton = app.buttons["home.profileButton"].firstMatch
+        XCTAssertTrue(profileButton.waitForExistence(timeout: 30), "首页标题栏用户入口未出现")
+        profileButton.tap()
+        XCTAssertTrue(app.staticTexts["个人中心"].waitForExistence(timeout: 10), "个人中心未打开")
+
+        // 本地更新入口行（原生）→ Web 全屏页（Web 专属锚点 gapBackfill.run 可达 = 页面真渲染）
+        let entry = revealEntry(app, "profile.localUpdate.entry")
+        entry.tap()
+        let runButton = app.buttons["gapBackfill.run"].firstMatch
+        XCTAssertTrue(runButton.waitForExistence(timeout: 15), "Web 本地更新页未打开")
+
+        // 返回（page.back）→ Web 页销毁（Web 专属锚点消失）、回到个人中心
+        let back = app.buttons["page.back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "返回按钮未出现")
+        back.tap()
+        XCTAssertFalse(runButton.waitForExistence(timeout: 5), "返回后 Web 页仍可达")
+        XCTAssertTrue(app.buttons["profile.localUpdate.entry"].exists, "返回后应回到个人中心")
+    }
+
+    /// 联机同步页链路：首页 → 个人中心 → 联机同步入口 → Web 页打开（本机服务卡可达）→ 返回
+    func testLanSyncPageOpensAndCloses() throws {
+        let app = XCUIApplication.launchingClean()
+        app.launch()
+
+        // 默认启动在行情 Tab（selectedTab=2）→ 先切首页
+        let homeTab = app.buttons["tab.home"]
+        XCTAssertTrue(homeTab.waitForExistence(timeout: 20), "底部「首页」入口未出现")
+        homeTab.tap()
+
+        let profileButton = app.buttons["home.profileButton"].firstMatch
+        XCTAssertTrue(profileButton.waitForExistence(timeout: 30), "首页标题栏用户入口未出现")
+        profileButton.tap()
+        XCTAssertTrue(app.staticTexts["个人中心"].waitForExistence(timeout: 10), "个人中心未打开")
+
+        let entry = revealEntry(app, "profile.lansync.entry")
+        entry.tap()
+        // 本机服务卡（Web 专属锚点；div aria-label 经 descendants(any) 匹配）
+        let statusCard = app.descendants(matching: .any)["lansync.local.status"].firstMatch
+        XCTAssertTrue(statusCard.waitForExistence(timeout: 15), "Web 联机同步页未打开")
+
+        let back = app.buttons["page.back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "返回按钮未出现")
+        back.tap()
+        XCTAssertFalse(statusCard.waitForExistence(timeout: 5), "返回后 Web 页仍可达")
+        XCTAssertTrue(app.buttons["profile.lansync.entry"].exists, "返回后应回到个人中心")
+    }
 }
