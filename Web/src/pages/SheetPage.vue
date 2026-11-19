@@ -278,14 +278,22 @@ function pick(r: ChartSearchResult): void {
 onMounted(async () => {
   await klineBus.detect()
   klineBus.on('sheet.open', (ev) => void handleSheetOpen(ev.payload))
+  // 浮层就绪拉取：sheet.open 事件可能早于本 WebView 创建/加载完成发出（首次打开时序）
+  // → 事件丢失面板永不渲染；就绪后主动向宿主拉取当前待展示弹层
+  try {
+    await klineBus.request('sheet', 'ready', {})
+  } catch (e) {
+    console.error('sheet.ready 失败', e)
+  }
 })
 </script>
 
 <style scoped>
 .sheet-page {
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   position: relative;
+  background: transparent;
 }
 
 .panel-mask {

@@ -11,8 +11,10 @@ import SwiftUI
 import WebKit
 
 struct WebTabHostView: View {
-    /// hash 路由名（"favorites" / "market" / "home" / "simulation"）
+    /// hash 路由名（"favorites" / "market" / "home" / "simulation" / "sheet"）
     let route: String
+    /// 不透明底（Tab 内容宿主白底；弹层浮层传 false → 全链路透明，让遮罩透出）
+    var isOpaque: Bool = true
 
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -34,11 +36,12 @@ struct WebTabHostView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 WebViewContainer(route: route,
+                                 isOpaque: isOpaque,
                                  onReady: { webView in markReady(webView) },
                                  onError: { loadError = $0 })
             }
         }
-        .background(Color(.systemBackground))
+        .background(isOpaque ? Color(.systemBackground) : Color.clear)
         .onChange(of: colorScheme) { newScheme in
             router.updateResolvedMode(newScheme == .dark ? "dark" : "light")
             router.pushTheme(preference: themeStore.theme.rawValue)

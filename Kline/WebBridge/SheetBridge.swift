@@ -69,6 +69,15 @@ final class SheetBridge: ObservableObject {
         case "close":
             shared.close()
             return WebBridgeResponse.ok(request.id)
+        case "ready":
+            // ⚠️ 浮层 WebView 就绪拉取：sheet.open 事件可能早于 WebView 创建/加载完成发出
+            // （首次打开时序：activeSheet 设置 → 事件立即推送 → 下一帧才创建 WebView →
+            // 数百毫秒后 didFinish）→ 事件丢失导致面板永不渲染（2026-11-19 真机白屏）。
+            // Web 端 mounted 后调本动作，宿主若有待展示弹层则补推 sheet.open。
+            if let name = shared.activeSheet {
+                WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": name])
+            }
+            return WebBridgeResponse.ok(request.id)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "sheet.\(request.action) 未实现")
@@ -230,7 +239,7 @@ struct SheetWebOverlayHost: View {
                     .zIndex(1)
             }
             if webCreated {
-                WebTabHostView(route: "sheet")
+                WebTabHostView(route: "sheet", isOpaque: false)
                     .opacity(bridge.activeSheet != nil ? 1 : 0)
                     .allowsHitTesting(bridge.activeSheet != nil)
                     .animation(.easeInOut(duration: 0.15), value: bridge.activeSheet != nil)

@@ -69,6 +69,7 @@
 //   sim.openTrainingRecords {} → {}                          桥接原生训练记录管理页
 //   sim.exportLogs     {keyword, logModule?} → {toast}       导出操作日志 CSV（Documents/Simulation/）
 //   sheet.close        {} → {}                               Web 弹层请求关闭（Swift 侧移除浮层遮罩并回写宿主弹层状态）
+//   sheet.ready        {} → {}                               浮层 WebView 就绪拉取（补推 sheet.open——首次打开时事件早于 WebView 就绪会丢失）
 //   chart.settings.snapshot {} → ChartSettingsSnapshot      K线设置快照（周期/类型/联动视图数/显示组/裸K）
 //   chart.settings.set {period?, chartStyle?, linkedViewCount?, showGap?, ...} → {} 设置写回（幂等目标态，即时生效图表）
 //   chart.settings.resetLinked {} → {}                       重置当前标的联动视图配置
@@ -338,7 +339,7 @@ export const KnownActions = {
     'amendPrice', 'refreshQuotes', 'openTicket', 'openCondEditor', 'openCondManage',
     'openStrategyFormulas', 'openTrainingRecords', 'exportLogs',
   ],
-  sheet: ['close'],
+  sheet: ['close', 'ready'],
   chart: ['settings.snapshot', 'settings.set', 'settings.resetLinked', 'search.query', 'search.pick'],
 } as const
 

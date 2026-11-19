@@ -13,6 +13,8 @@ import WebKit
 struct WebViewContainer: UIViewRepresentable {
     /// hash 路由（如 "profile" / "favorites"）→ 加载 kline://app/index.html#/<route>
     let route: String
+    /// 不透明底（Tab 内容宿主需要白底；弹层浮层传 false → 透明 WebView，让遮罩/下层内容透出）
+    var isOpaque: Bool = true
     let onReady: (WKWebView) -> Void
     let onError: (String) -> Void
 
@@ -26,8 +28,8 @@ struct WebViewContainer: UIViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
-        webView.backgroundColor = .systemBackground
-        webView.isOpaque = true
+        webView.backgroundColor = isOpaque ? .systemBackground : .clear
+        webView.isOpaque = isOpaque
         WebMessageRouter.shared.attach(webView: webView)
 
         if let url = URL(string: "\(WebBridgeConst.scheme)://app/index.html#/\(route)") {
