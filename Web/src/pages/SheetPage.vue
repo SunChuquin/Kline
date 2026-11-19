@@ -99,6 +99,100 @@
       <div class="dialog-note">将恢复为默认 2 个视图（左日线、右周线），且各视图标的/周期会被重置。</div>
     </van-dialog>
 
+    <!-- 指标面板（主图 / 副图两形态，对齐原生 mainSheetContent/subSheetContent） -->
+    <div v-if="activeName === 'mainIndicators' || activeName === 'subIndicators'" class="panel-mask" @click="close">
+      <div class="panel" @click.stop>
+        <div class="panel-header">
+          <span class="panel-title">{{ indicatorsTitle }}</span>
+          <button class="panel-reset" @click="resetBuiltinConfirm = true">重置内置指标</button>
+          <button class="panel-done" @click="close">完成</button>
+        </div>
+        <div class="panel-body" v-if="indicators">
+          <!-- 主图形态 -->
+          <template v-if="activeName === 'mainIndicators'">
+            <div class="sec-title">技术指标公式 · 主图</div>
+            <div class="ind-grid">
+              <button
+                v-for="d in indicators.mainDefs"
+                :key="d.id"
+                class="ind-tile"
+                :class="{ on: d.on }"
+                role="button"
+                :aria-label="`chart.indicator.main.${d.name}`"
+                @click="toggleMain(d)"
+              >
+                <span class="ind-check">{{ d.on ? '☑' : '☐' }}</span>
+                <span class="ind-name">{{ d.name }}</span>
+              </button>
+            </div>
+            <button class="param-entry" @click="openSystemEditor(true, null)">⚙ 公式编辑 · 技术指标公式 ›</button>
+            <div class="sec-title">自定义技术指标（主图）</div>
+            <button class="param-entry" @click="openCustomEditor('main')">＋ 新增/管理 ›</button>
+            <div v-if="indicators.mainCustoms.length === 0" class="block-empty">暂无主图自定义技术指标</div>
+            <div v-else class="custom-rows">
+              <div v-for="c in indicators.mainCustoms" :key="c.id" class="custom-row">
+                <button class="custom-main" @click="activateMainCustom(c)">
+                  <span class="custom-check">{{ c.active ? '◉' : '○' }}</span>
+                  <span class="custom-color" :style="{ background: '#' + c.colorHex }"></span>
+                  <span class="custom-name">{{ c.name }}</span>
+                </button>
+                <button class="custom-edit" @click="openCustomEditor('main')">✎</button>
+              </div>
+            </div>
+          </template>
+
+          <!-- 副图形态 -->
+          <template v-else-if="activeSlot">
+            <div class="sec-title">选择副图指标 · {{ activeSlot.title }}</div>
+            <template v-for="g in activeSlot.groups" :key="g.group">
+              <div class="sec-title">{{ g.group }}</div>
+              <div class="ind-grid">
+                <button
+                  v-for="k in g.kinds"
+                  :key="k"
+                  class="sub-tile"
+                  :class="{ on: !activeSlot.customID && activeSlot.kind === k }"
+                  @click="selectSubKind(k)"
+                >{{ k }}</button>
+              </div>
+            </template>
+            <button
+              v-if="!activeSlot.customID && activeSlot.hasTemplate"
+              class="param-entry"
+              @click="openSystemEditor(false, activeSlot.kind)"
+            >⚙ {{ activeSlot.kind }} 公式编辑 · 技术指标公式 ›</button>
+            <div class="sec-title">自定义技术指标（副图）</div>
+            <button class="param-entry" @click="openCustomEditor('sub')">＋ 新增/管理 ›</button>
+            <div v-if="activeSlot.customs.length === 0" class="block-empty">暂无副图自定义技术指标</div>
+            <div v-else class="custom-rows">
+              <div v-for="c in activeSlot.customs" :key="c.id" class="custom-row">
+                <button class="custom-main" @click="selectSubCustom(c)">
+                  <span class="custom-check">{{ c.active ? '◉' : '○' }}</span>
+                  <span class="custom-color" :style="{ background: '#' + c.colorHex }"></span>
+                  <span class="custom-name">{{ c.name }}</span>
+                  <span v-if="c.active" class="custom-current">当前</span>
+                </button>
+                <button class="custom-edit" @click="openCustomEditor('sub')">✎</button>
+              </div>
+            </div>
+          </template>
+          <div style="height: 24px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 重置内置指标确认 -->
+    <van-dialog
+      v-model:show="resetBuiltinConfirm"
+      title="重置内置指标"
+      show-cancel-button
+      confirm-button-text="重置"
+      confirm-button-color="#ee0a24"
+      @confirm="resetBuiltin"
+    >
+      <div class="dialog-note">将把所有内置指标恢复为编译时的内容，确定重置吗？</div>
+    </van-dialog>
+
     <!-- 图表搜索面板（顶部锚定覆盖式，对齐原生 chartSearchBar） -->
     <template v-if="activeName === 'search'">
       <div class="panel-mask" @click="close">
@@ -135,10 +229,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { klineBus } from '../bridge/klineBus'
-import type { ChartOption, ChartSearchResult, ChartSettingsSnapshot } from '../types/protocol'
+import type {
+  ChartOption,
+  ChartSearchResult,
+  ChartSettingsSnapshot,
+  CustomIndicatorSnap,
+  IndicatorDefSnap,
+  IndicatorsSnapshot,
+  SubSlotSnap,
+} from '../types/protocol'
 
 const activeName = ref<string | null>(null)
 const settings = ref<ChartSettingsSnapshot | null>(null)
+const indicators = ref<IndicatorsSnapshot | null>(null)
+const activeSlotKey = ref<string | null>(null)
 
 const keyword = ref('')
 const results = ref<ChartSearchResult[]>([])
@@ -149,11 +253,81 @@ const pickerOpen = computed({
   set: (v: boolean) => { if (!v) pickerKind.value = null },
 })
 const resetConfirm = ref(false)
+const resetBuiltinConfirm = ref(false)
 
 const viewCountLabel = computed(() => {
   const n = settings.value?.linkedViewCount ?? 2
   return `${n} 个视图`
 })
+
+// ===== 指标面板（P2-5b） =====
+const indicatorsTitle = computed(() =>
+  activeName.value === 'mainIndicators' ? '主图指标'
+    : `选择副图指标 · ${activeSlot.value?.title ?? ''}`)
+
+const activeSlot = computed(() =>
+  indicators.value?.subSlots.find((s) => s.slot === activeSlotKey.value) ?? null)
+
+/** 当前激活主图自定义指标（互斥：激活自定义即隐藏系统指标判断由原生侧处理） */
+function toggleMain(d: IndicatorDefSnap): void {
+  if (!indicators.value) return
+  void actIndicators('toggleMain', { id: d.id, on: !d.on })
+}
+
+function selectSubKind(kind: string): void {
+  if (!activeSlot.value) return
+  void actIndicators('selectSub', { slot: activeSlot.value.slot, kind })
+}
+
+function selectSubCustom(c: CustomIndicatorSnap): void {
+  if (!activeSlot.value) return
+  void actIndicators('selectSub', { slot: activeSlot.value.slot, customID: c.id })
+}
+
+function activateMainCustom(c: CustomIndicatorSnap): void {
+  void actIndicators('activateMainCustom', { customID: c.active ? null : c.id })
+}
+
+function resetBuiltin(): void {
+  void actIndicators('resetBuiltin', {})
+}
+
+function openSystemEditor(isMain: boolean, subId: string | null): void {
+  void actIndicators('openSystemEditor', { isMain, subId })
+  activeName.value = null   // 原生同款交互：先关面板再进编辑器（原生编辑器盖全屏）
+}
+
+function openCustomEditor(target: 'main' | 'sub'): void {
+  void actIndicators('openCustomEditor', { target })
+  activeName.value = null
+}
+
+/** 指标写回公共路径：动作成功即回读快照（写回模式 v2；重算由原生 recomputeHandler 执行） */
+async function actIndicators(action: string, payload: Record<string, unknown>): Promise<void> {
+  try {
+    await klineBus.request('chart', `indicators.${action}`, payload)
+    await pullIndicators()
+  } catch (e) {
+    console.error(`indicators.${action} 失败`, e)
+  }
+}
+
+async function pullIndicators(): Promise<void> {
+  try {
+    const s = ((await klineBus.request('chart', 'indicators.snapshot')) ?? {}) as Record<string, unknown>
+    indicators.value = {
+      period: String(s.period ?? ''),
+      mainDefs: (s.mainDefs ?? []) as IndicatorDefSnap[],
+      mainCustoms: (s.mainCustoms ?? []) as CustomIndicatorSnap[],
+      subSlots: (s.subSlots ?? []) as SubSlotSnap[],
+    }
+    if (activeSlotKey.value === null && indicators.value.subSlots.length > 0) {
+      activeSlotKey.value = indicators.value.subSlots[0].slot
+    }
+  } catch (e) {
+    console.error('indicators.snapshot 失败', e)
+  }
+}
 
 /** 当前选择器的选项（value 统一字符串化传给 ActionSheet） */
 const pickerActions = computed(() => {
@@ -214,6 +388,10 @@ async function handleSheetOpen(payload: Record<string, unknown> | undefined): Pr
   if (name === 'search') {
     keyword.value = ''
     results.value = []
+  }
+  if (name === 'mainIndicators' || name === 'subIndicators') {
+    activeSlotKey.value = typeof payload?.slot === 'string' ? payload.slot : null
+    await pullIndicators()
   }
 }
 
@@ -488,6 +666,136 @@ onMounted(async () => {
 .sr-code {
   font-size: 12px;
   color: var(--k-text-secondary);
+}
+
+/* ===== 指标面板（P2-5b，对齐 ChartSheetKit 视觉令牌） ===== */
+.panel-reset {
+  border: none;
+  background: none;
+  color: #ee0a24;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ind-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 6px;
+}
+
+.ind-tile,
+.sub-tile {
+  flex: 1 1 calc(25% - 8px);
+  min-width: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+  background: var(--k-bg-secondary);
+  opacity: 0.45;
+  color: var(--k-text);
+  font-size: 13px;
+  padding: 12px 4px;
+  cursor: pointer;
+}
+
+.ind-tile.on,
+.sub-tile.on {
+  opacity: 1;
+  border-color: #1989fa;
+  background: var(--k-bg-secondary);
+  font-weight: 600;
+  color: #1989fa;
+}
+
+.ind-check {
+  font-size: 14px;
+}
+
+.sub-tile {
+  flex-direction: row;
+  justify-content: center;
+}
+
+.param-entry {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: none;
+  border-radius: 8px;
+  background: rgba(25, 137, 250, 0.08);
+  color: #1989fa;
+  font-size: 13px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  cursor: pointer;
+}
+
+.custom-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.custom-row {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+}
+
+.custom-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: none;
+  color: var(--k-text);
+  font-size: 14px;
+  padding: 9px 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.custom-check {
+  font-size: 15px;
+  color: #1989fa;
+}
+
+.custom-check:not(.on) {
+  color: var(--k-text-tertiary);
+}
+
+.custom-color {
+  width: 14px;
+  height: 5px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.custom-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-current {
+  font-size: 10px;
+  color: #1989fa;
+}
+
+.custom-edit {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: none;
+  color: var(--k-text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
 }
 </style>
 

@@ -36,19 +36,53 @@ final class SheetBridge: ObservableObject {
     /// chart.search.pick 回调：KlineDetailView 注入（切标的 + loadData）
     var pickHandler: ((MetaItem) -> Void)? = nil
 
+    // MARK: 指标面板（P2-5b）宿主处理器（per-tile 动态注册，与 closeHandler 同款模式）
+
+    /// 指标写回后的重算闭包（当前面板所属 tile 注册：主图 + 三副图全量重算）
+    var recomputeHandler: (() -> Void)? = nil
+
+    /// 指标编辑器打开请求（关面板 + 原生编辑器呈现；per-tile 注册）
+    enum ChartEditorRequest {
+        case system(isMain: Bool, subId: String?)
+        case custom(target: EditorTarget)
+    }
+    var editorHandler: ((ChartEditorRequest) -> Void)? = nil
+
     // MARK: - 打开 / 关闭（宿主同步入口）
 
     /// 宿主弹层状态 → 桥（onChange 同步）。同值 no-op 防环。
-    func sync(_ name: String, active: Bool) {
+    /// - Parameter slot: 副图指标面板的槽位上下文（payload 携带，快照定位编辑对象）
+    func sync(_ name: String, active: Bool, slot: SubSlot? = nil) {
         if active {
             guard activeSheet != name else { return }
             activeSheet = name
+            var payload: [String: Any] = ["name": name]
+            if let slot { payload["slot"] = subSlotKey(slot) }
             // 定向推弹层浮层 WebView（Tab 宿主并存时 allObjects.last 会推错实例）
-            WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": name], route: "sheet")
+            WebMessageRouter.shared.pushEvent("sheet.open", payload: payload, route: "sheet")
             DebugLogger.shared.log("[SheetBridge] open \(name)")
         } else {
             guard activeSheet == name else { return }
             activeSheet = nil
+        }
+    }
+
+    /// SubSlot → 协议字符串（无 rawValue，显式映射）
+    private func subSlotKey(_ slot: SubSlot) -> String {
+        switch slot {
+        case .top: return "top"
+        case .bottom: return "bottom"
+        case .third: return "third"
+        }
+    }
+
+    /// 协议字符串 → SubSlot
+    static func subSlot(_ key: String) -> SubSlot? {
+        switch key {
+        case "top": return .top
+        case "bottom": return .bottom
+        case "third": return .third
+        default: return nil
         }
     }
 
@@ -99,6 +133,20 @@ final class SheetBridge: ObservableObject {
             return searchQuery(request)
         case "search.pick":
             return searchPick(request)
+        case "indicators.snapshot":
+            return WebBridgeResponse.ok(request.id, data: indicatorsSnapshotData())
+        case "indicators.toggleMain":
+            return indicatorsToggleMain(request)
+        case "indicators.selectSub":
+            return indicatorsSelectSub(request)
+        case "indicators.activateMainCustom":
+            return indicatorsActivateMainCustom(request)
+        case "indicators.resetBuiltin":
+            return indicatorsResetBuiltin(request)
+        case "indicators.openSystemEditor":
+            return indicatorsOpenSystemEditor(request)
+        case "indicators.openCustomEditor":
+            return indicatorsOpenCustomEditor(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "chart.\(request.action) 未实现")
@@ -210,6 +258,151 @@ final class SheetBridge: ObservableObject {
         shared.close()   // 选完即关（对齐原生 onSelect：关闭搜索栏 + 清空输入）
         shared.pickHandler?(meta)
         DebugLogger.shared.log("[SheetBridge] searchPick \(file)")
+        return WebBridgeResponse.ok(request.id)
+    }
+
+    // MARK: 指标面板（P2-5b）：快照与写回
+
+    /// chart.indicators.snapshot：主图指标（启用态）+ 主图自定义 + 三副图槽位（分组/选中/自定义）。
+    /// 周期上下文 = ChartConfigStore.selectedPeriod（面板打开期间与原生同款）。
+    static func indicatorsSnapshotData() -> [String: Any] {
+        let config = ChartConfigStore.shared
+        let sys = SystemIndicatorStore.shared
+        let customs = CustomIndicatorStore.shared
+        let period = config.selectedPeriod
+
+        let mainOn = config.mainIndicators(for: period)
+        let mainDefsAny: [[String: Any]] = sys.mainIndicatorDefs(period: period).map {
+            ["id": $0.id, "name": $0.name, "on": mainOn.contains($0.id)]
+        }
+        let mainCustomsAny: [[String: Any]] = customs.indicators
+            .filter { $0.scope == .main && CustomIndicatorStore.applicablePeriods(of: $0).contains(period) }
+            .map {
+                ["id": $0.id.uuidString, "name": $0.name, "colorHex": $0.colorHex,
+                 "active": config.activeCustomIndicatorID(for: period)?.uuidString == $0.id.uuidString]
+            }
+
+        func slotData(_ slot: SubSlot, _ model: SubChartModel, _ title: String) -> [String: Any] {
+            var map: [String: [String]] = ["量能": ["VOL", "AMO"]]
+            for def in sys.subIndicatorDefs(period: period) {
+                let g = def.group.isEmpty ? "其他" : def.group
+                map[g, default: []].append(def.id)
+            }
+            var groupsAny: [[String: Any]] = []
+            for g in SystemIndicatorStore.subGroupOrder where map[g] != nil {
+                groupsAny.append(["group": g, "kinds": map[g]!])
+            }
+            for (g, kinds) in map where !SystemIndicatorStore.subGroupOrder.contains(g) {
+                groupsAny.append(["group": g, "kinds": kinds])
+            }
+            let customsAny: [[String: Any]] = customs.indicators
+                .filter { $0.scope == .sub && CustomIndicatorStore.applicablePeriods(of: $0).contains(period) }
+                .map {
+                    ["id": $0.id.uuidString, "name": $0.name, "colorHex": $0.colorHex,
+                     "active": model.activeCustomID?.uuidString == $0.id.uuidString]
+                }
+            return ["slot": shared.subSlotKey(slot), "title": title,
+                    "kind": model.isCustom ? NSNull() : model.kind,
+                    "customID": model.activeCustomID?.uuidString ?? NSNull(),
+                    "hasTemplate": !model.isCustom && sys.template(for: model.kind, period: period) != nil,
+                    "groups": groupsAny, "customs": customsAny]
+        }
+
+        let subSlotsAny: [[String: Any]] = [
+            slotData(.top, config.subTop, "副图一"),
+            slotData(.bottom, config.subBottom, "副图二"),
+            slotData(.third, config.subThird, "副图三"),
+        ]
+
+        return ["period": period.rawValue, "mainDefs": mainDefsAny,
+                "mainCustoms": mainCustomsAny, "subSlots": subSlotsAny]
+    }
+
+    /// chart.indicators.toggleMain {id, on}：主图指标开关（目标态幂等）→ 重算
+    static func indicatorsToggleMain(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let id = request.payload["id"] as? String,
+              let on = request.payload["on"] as? Bool else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "需要 id 与 on")
+        }
+        let config = ChartConfigStore.shared
+        var cur = config.mainIndicators(for: config.selectedPeriod)
+        if on { cur.insert(id) } else { cur.remove(id) }
+        var copy = config.mainIndicatorsByPeriod
+        copy[config.selectedPeriod] = cur
+        config.mainIndicatorsByPeriod = copy
+        shared.recomputeHandler?()
+        return WebBridgeResponse.ok(request.id)
+    }
+
+    /// chart.indicators.selectSub {slot, kind?|customID?}：副图槽位选择（二选一）→ 记忆 + 重算
+    static func indicatorsSelectSub(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let slotKey = request.payload["slot"] as? String,
+              let slot = subSlot(slotKey) else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "需要有效 slot")
+        }
+        let config = ChartConfigStore.shared
+        let model: SubChartModel
+        switch slot {
+        case .top: model = config.subTop
+        case .bottom: model = config.subBottom
+        case .third: model = config.subThird
+        }
+        if let customRaw = request.payload["customID"] as? String, let customID = UUID(uuidString: customRaw) {
+            model.activeCustomID = customID
+        } else if let kind = request.payload["kind"] as? String {
+            model.activeCustomID = nil
+            model.kind = kind
+        } else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "需要 kind 或 customID")
+        }
+        config.recordSubKinds(for: config.selectedPeriod)
+        shared.recomputeHandler?()
+        return WebBridgeResponse.ok(request.id)
+    }
+
+    /// chart.indicators.activateMainCustom {customID|null}：激活/取消主图自定义指标 → 重算
+    static func indicatorsActivateMainCustom(_ request: WebBridgeRequest) -> [String: Any] {
+        let config = ChartConfigStore.shared
+        if let raw = request.payload["customID"] as? String {
+            guard let id = UUID(uuidString: raw) else {
+                return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "customID 无效")
+            }
+            config.setActiveCustom(id, for: config.selectedPeriod)
+        } else {
+            config.setActiveCustom(nil, for: config.selectedPeriod)
+        }
+        shared.recomputeHandler?()
+        return WebBridgeResponse.ok(request.id)
+    }
+
+    /// chart.indicators.resetBuiltin {}：重置内置指标为编译时内容 → 重算（对齐原生 performResetBuiltin）
+    static func indicatorsResetBuiltin(_ request: WebBridgeRequest) -> [String: Any] {
+        let ok = SystemIndicatorStore.shared.restoreAllBuiltin(period: ChartConfigStore.shared.selectedPeriod)
+        shared.recomputeHandler?()
+        if ok {
+            return WebBridgeResponse.ok(request.id)
+        }
+        return WebBridgeResponse.fail(request.id, code: "internal_error", message: "重置内置指标部分失败")
+    }
+
+    /// chart.indicators.openSystemEditor {isMain, subId?}：关闭面板 → 桥接原生系统指标编辑器
+    static func indicatorsOpenSystemEditor(_ request: WebBridgeRequest) -> [String: Any] {
+        let isMain = (request.payload["isMain"] as? Bool) ?? true
+        let subId = request.payload["subId"] as? String
+        shared.close()
+        shared.editorHandler?(.system(isMain: isMain, subId: subId))
+        return WebBridgeResponse.ok(request.id)
+    }
+
+    /// chart.indicators.openCustomEditor {target}：关闭面板 → 桥接原生自定义指标编辑器
+    static func indicatorsOpenCustomEditor(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let targetRaw = request.payload["target"] as? String,
+              let target: EditorTarget = targetRaw == "main" ? .main : (targetRaw == "sub" ? .sub : nil) else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "target 必须为 main / sub")
+        }
+        shared.close()
+        shared.editorHandler?(.custom(target: target))
         return WebBridgeResponse.ok(request.id)
     }
 }

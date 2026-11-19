@@ -128,6 +128,53 @@ final class WebBridgeProtocolTests: XCTestCase {
         }
     }
 
+    /// chart.indicators.snapshot 响应形状锁定（P2-5b 指标面板）：主图定义 on 态 / 三副图槽位分组 / 自定义行
+    func testChartIndicatorsShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_chart_ind_snapshot"
+        }, "fixtures 缺 chart.indicators.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["period", "mainDefs", "mainCustoms", "subSlots"] {
+            XCTAssertNotNil(data[key], "chart.indicators.snapshot 缺 \(key)")
+        }
+        let mainDefs = try XCTUnwrap(data["mainDefs"] as? [[String: Any]])
+        for d in mainDefs {
+            for key in ["id", "name", "on"] { XCTAssertNotNil(d[key], "主图指标缺 \(key)") }
+        }
+        let slots = try XCTUnwrap(data["subSlots"] as? [[String: Any]])
+        for slot in slots {
+            for key in ["slot", "title", "kind", "customID", "hasTemplate", "groups", "customs"] {
+                XCTAssertNotNil(slot[key], "副图槽位缺 \(key)")
+            }
+            let groups = try XCTUnwrap(slot["groups"] as? [[String: Any]])
+            for g in groups {
+                XCTAssertNotNil(g["group"], "副图分组缺 group")
+                XCTAssertNotNil(g["kinds"], "副图分组缺 kinds")
+            }
+        }
+    }
+
+    /// chart.indicators 写回动作 payload 形状锁定（slot 枚举 / direction-like 取值合法）
+    func testChartIndicatorsActionsShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let find: (String) -> [String: Any]? = { id in
+            requests.first { ($0["id"] as? String) == id }
+        }
+        let toggle = try XCTUnwrap(find("req_chart_ind_toggle_main"), "缺 toggleMain 样例")
+        let togglePayload = try XCTUnwrap(toggle["payload"] as? [String: Any])
+        XCTAssertNotNil(togglePayload["id"] as? String)
+        XCTAssertNotNil(togglePayload["on"] as? Bool)
+
+        let select = try XCTUnwrap(find("req_chart_ind_select_sub"), "缺 selectSub 样例")
+        let selectPayload = try XCTUnwrap(select["payload"] as? [String: Any])
+        let slot = try XCTUnwrap(selectPayload["slot"] as? String)
+        XCTAssertTrue(["top", "bottom", "third"].contains(slot), "非法 slot \(slot)")
+        XCTAssertNotNil(selectPayload["kind"] as? String, "selectSub 需 kind 或 customID 之一")
+    }
+
     /// sim.snapshot 响应形状锁定（P2-4）：五模块业务表 + 摘要口径 + 委托行 active 标记
     func testSimSnapshotShape() throws {
         let fixture = try loadFixture()

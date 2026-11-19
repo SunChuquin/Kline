@@ -811,16 +811,12 @@ struct KlineChartView: View {
                 }
             }
             .overlay {
-                if editorUI.showMainSheet {
-                    bottomSheet(geometry: geometry, heightFraction: 0.8) {
-                        mainSheetContent
-                    } onClose: { editorUI.showMainSheet = false }
-                } else if editorUI.showSubSheet {
-                    bottomSheet(geometry: geometry, heightFraction: 0.8) {
-                        subSheetContent
-                    } onClose: { editorUI.showSubSheet = false }
-                }
+                // P2-5b：指标面板渲染主体迁至 Web 弹层浮层——宿主常驻于 KlineDetailView
+                // 顶层（SheetWebOverlayHost 单实例跨面板类型复用 WebView），此处只做状态同步
+                //（onChange 注册 closeHandler/recomputeHandler/editorHandler，见 ChartSheetKit.sync*）
             }
+            .onChange(of: editorUI.showMainSheet) { on in syncMainSheet(on) }
+            .onChange(of: editorUI.showSubSheet) { on in syncSubSheet(on) }
             .onChange(of: pinEnabled) { enabled in
                 if enabled {
                     // 开启：把当前屏幕上那一个光标固定下来，准备点击产生第二个光标

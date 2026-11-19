@@ -75,6 +75,13 @@
 //   chart.settings.resetLinked {} → {}                       重置当前标的联动视图配置
 //   chart.search.query {keyword} → {results}                 图表搜索（DatabaseManager.searchMeta 同口径）
 //   chart.search.pick  {file} → {}                           选中搜索结果（KlineDetailView 切标的并重新加载）
+//   chart.indicators.snapshot {} → IndicatorsSnapshot         指标面板快照（主图指标/主图自定义/三副图槽位分组/自定义）
+//   chart.indicators.toggleMain {id, on} → {}                主图指标开关（目标态，幂等）
+//   chart.indicators.selectSub {slot, kind?|customID?} → {}  副图槽位选择（二选一；写回并重算）
+//   chart.indicators.activateMainCustom {customID|null} → {} 激活/取消主图自定义指标
+//   chart.indicators.resetBuiltin {} → {}                    重置内置指标（restoreAllBuiltin）
+//   chart.indicators.openSystemEditor {isMain, subId?} → {}  关面板 + 桥接原生系统指标公式编辑器
+//   chart.indicators.openCustomEditor {target} → {}          关面板 + 桥接原生自定义指标编辑器
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -321,6 +328,42 @@ export interface ChartSearchResult {
   type: string
 }
 
+/** chart.indicators.snapshot：主图指标项（on = 是否启用） */
+export interface IndicatorDefSnap {
+  id: string
+  name: string
+  on: boolean
+}
+
+/** chart.indicators.snapshot：自定义指标项（active = 当前是否激活） */
+export interface CustomIndicatorSnap {
+  id: string
+  name: string
+  colorHex: string
+  active: boolean
+}
+
+/** chart.indicators.snapshot：副图槽位（groups 顺序对齐原生 subGroupOrder） */
+export interface SubSlotSnap {
+  slot: 'top' | 'bottom' | 'third'
+  title: string
+  /** 当前选中系统指标（isCustom 时为 null） */
+  kind: string | null
+  customID: string | null
+  /** 当前选中指标是否可公式编辑（VOL/AMO 无模板不可） */
+  hasTemplate: boolean
+  groups: { group: string; kinds: string[] }[]
+  customs: CustomIndicatorSnap[]
+}
+
+/** chart.indicators.snapshot 响应（P2-5b 指标控制面板） */
+export interface IndicatorsSnapshot {
+  period: string
+  mainDefs: IndicatorDefSnap[]
+  mainCustoms: CustomIndicatorSnap[]
+  subSlots: SubSlotSnap[]
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -340,7 +383,10 @@ export const KnownActions = {
     'openStrategyFormulas', 'openTrainingRecords', 'exportLogs',
   ],
   sheet: ['close', 'ready'],
-  chart: ['settings.snapshot', 'settings.set', 'settings.resetLinked', 'search.query', 'search.pick'],
+  chart: ['settings.snapshot', 'settings.set', 'settings.resetLinked', 'search.query', 'search.pick',
+          'indicators.snapshot', 'indicators.toggleMain', 'indicators.selectSub',
+          'indicators.activateMainCustom', 'indicators.resetBuiltin',
+          'indicators.openSystemEditor', 'indicators.openCustomEditor'],
 } as const
 
 // 已约定的 event 清单（协议 v2）

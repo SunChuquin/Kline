@@ -262,6 +262,70 @@ extension KlineChartView {
         .padding(.horizontal, 16).padding(.vertical, 9)
     }
 
+    // MARK: - Web 弹层桥（P2-5b）：面板状态同步 + 宿主处理器注册
+
+    /// 主图指标面板开关 → 弹层桥（onChange 调用；打开时注册 per-tile 处理器）。
+    /// ⚠️ KlineChartView 是 struct：闭包 [self] 值捕获——@StateObject/@Binding 的
+    /// 存储是引用类型，拷贝内的写入仍作用于真实状态（与原生面板闭包同语义）。
+    func syncMainSheet(_ on: Bool) {
+        let bridge = SheetBridge.shared
+        if on {
+            bridge.closeHandler = { [self] _ in
+                editorUI.showMainSheet = false
+            }
+            bridge.recomputeHandler = { [self] in
+                recomputeMainCurves(force: true)
+                for m in [subTop, subBottom, subThird] {
+                    recomputeSub(m, force: true)
+                }
+            }
+            bridge.editorHandler = { [self] req in
+                presentEditor(req)
+            }
+            bridge.sync("mainIndicators", active: true)
+        } else if bridge.activeSheet == "mainIndicators" {
+            bridge.sync("mainIndicators", active: false)
+        }
+    }
+
+    /// 副图指标面板开关 → 弹层桥（slot 上下文随 payload 下发，快照定位编辑对象）
+    func syncSubSheet(_ on: Bool) {
+        let bridge = SheetBridge.shared
+        if on {
+            bridge.closeHandler = { [self] _ in
+                editorUI.showSubSheet = false
+            }
+            bridge.recomputeHandler = { [self] in
+                recomputeMainCurves(force: true)
+                for m in [subTop, subBottom, subThird] {
+                    recomputeSub(m, force: true)
+                }
+            }
+            bridge.editorHandler = { [self] req in
+                presentEditor(req)
+            }
+            bridge.sync("subIndicators", active: true, slot: editorUI.editingSlot)
+        } else if bridge.activeSheet == "subIndicators" {
+            bridge.sync("subIndicators", active: false)
+        }
+    }
+
+    /// 编辑器打开请求 → 原生全屏编辑器（先关 Web 面板——原生同款交互：先关面板再进编辑器；
+    /// 编辑器关闭/保存后重进面板即见最新定义，快照由 sheet.open 时拉取）
+    func presentEditor(_ req: SheetBridge.ChartEditorRequest) {
+        editorUI.showMainSheet = false
+        editorUI.showSubSheet = false
+        switch req {
+        case .system(let isMain, let subId):
+            editorUI.systemEditorIsMain = isMain
+            if let subId { editorUI.systemEditorSubId = subId }
+            showSystemEditor = true
+        case .custom(let target):
+            editorUI.editorTarget = target
+            showCustomEditor = true
+        }
+    }
+
     // MARK: - 主体 UI 组件
 
     /// 全宽参数入口按钮行（打开全屏参数编辑页）

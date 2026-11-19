@@ -353,13 +353,10 @@ struct KlineDetailView: View {
                 }
             }
             .overlay {
-                if showSettings || showSearch {
-                    // P2-5：设置/搜索面板渲染主体已迁至 Web 弹层浮层（SheetWebOverlayHost 内部
-                    // 按 SheetBridge.activeSheet 路由），原生面板仅在桥不可用时仍可回退（代码保留）
-                    SheetWebOverlayHost()
-                        .transition(.opacity)
-                        .zIndex(20)
-                }
+            // P2-5：弹层浮层宿主**常驻**（设置/搜索/指标面板共用一个浮层 WebView 实例，
+            // 首次弹层后 opacity 切换复用；面板类型切换不再销毁重建 WebView）
+            SheetWebOverlayHost()
+                .zIndex(30)
             }
             .onPreferenceChange(TopBarHeightPreferenceKey.self) { h in
                 if h > 0 { measuredTopBarHeight = h }
