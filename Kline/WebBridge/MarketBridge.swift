@@ -104,8 +104,12 @@ final class MarketBridge: ObservableObject {
 
         // init 时库已就绪（本桥是行情页 Web 化后的唯一宿主，冷启动预热通常已完成）：显式刷一次
         if dbm.isLoaded {
+            DebugLogger.shared.log("[MarketBridge] init 补刷开始 isLoaded=\(dbm.isLoaded) metas=\(model.tabItems.count)")
             model.scheduleRefresh()
+            DebugLogger.shared.log("[MarketBridge] init 补刷完成 displayRows=\(model.displayRows.count)")
             scheduleChanged(reason: "data")
+        } else {
+            DebugLogger.shared.log("[MarketBridge] init 时库未就绪，等待 isLoaded 变化触发")
         }
     }
 
@@ -181,6 +185,13 @@ final class MarketBridge: ObservableObject {
         let model = bridge.model
         let fav = FavoritesStore.shared
         let colCfg = MarketConfigStore.shared
+
+        // 自愈兜底：行集空但库已就绪 → 现场刷一次（init 时序 / 信号丢失的任何场景都收敛，
+        // scheduleRefresh 幂等轻量；行集非空时不重复刷，保持拉取 <10ms）
+        if model.displayRows.isEmpty, DatabaseManager.shared.isLoaded {
+            model.scheduleRefresh()
+            DebugLogger.shared.log("[MarketBridge] snapshot 自愈刷新 displayRows=\(model.displayRows.count)")
+        }
 
         // 渲染列布局（相邻代码/名称合并为双行单元格，与原生表格完全一致）
         let rendered = MarketTableRow.renderedColumns(for: .marketBoard, config: colCfg)
