@@ -74,11 +74,44 @@ final class WebBridgeProtocolTests: XCTestCase {
         let fixture = try loadFixture()
         let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
         let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab",
-                                        "favorites.changed", "market.changed", "home.changed"]
+                                        "favorites.changed", "market.changed",
+                                        "home.changed", "sim.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
         }
+    }
+
+    /// sim.snapshot 响应形状锁定（P2-4）：五模块业务表 + 摘要口径 + 委托行 active 标记
+    func testSimSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_sim_snapshot"
+        }, "fixtures 缺 sim.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["selectedID", "accountName", "accounts", "summary", "netValue", "module",
+                    "positions", "orders", "fills", "ledger", "logs"] {
+            XCTAssertNotNil(data[key], "sim.snapshot 缺 \(key)")
+        }
+        // 摘要八项口径
+        let summary = try XCTUnwrap(data["summary"] as? [String: Any])
+        for key in ["totalAssets", "cash", "marketValue", "positionPct",
+                    "dayProfit", "dayProfitPct", "totalProfit", "totalProfitPct"] {
+            XCTAssertNotNil(summary[key], "sim 摘要缺 \(key)")
+        }
+        // 委托行：active 标记（可撤单判定）+ 枚举取值合法
+        let orders = try XCTUnwrap(data["orders"] as? [[String: Any]])
+        for order in orders {
+            XCTAssertNotNil(order["active"], "sim 委托行缺 active")
+            let direction = try XCTUnwrap(order["direction"] as? String)
+            XCTAssertNotNil(SimOrderDirection(rawValue: direction), "非法 direction \(direction)")
+            let status = try XCTUnwrap(order["status"] as? String)
+            XCTAssertNotNil(SimOrderStatus(rawValue: status), "非法 status \(status)")
+        }
+        // 模块取值合法
+        let module = try XCTUnwrap(data["module"] as? String)
+        XCTAssertNotNil(SimModuleTab(rawValue: module), "非法 module \(module)")
     }
 
     /// home.snapshot 响应形状锁定（P2-3）：入口清单含 tint、自选行含迷你走势 closes、模拟摘要含四个口径

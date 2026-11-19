@@ -55,6 +55,19 @@
 //   home.snapshot      {} → HomeSnapshot                     首页快照（入口清单/指数行/涨跌家数/自选Top5/模拟摘要/涨幅榜Top5）
 //   home.openEntry     {kind} → {}                           快捷入口桥接（search/公式分段/条件单/训练/个人中心…；layoutEditor 退役不注册）
 //   home.openDetail    {file, context?} → {}                 进 K 线详情（context = 副图左右切换上下文的 file 列表）
+//   sim.snapshot       {} → SimSnapshot                      模拟页快照（账户/摘要/净值/持仓/委托/成交/流水/日志，时间字符串原生格式化）
+//   sim.selectAccount  {accountID|null} → {}                 切换统计/下单账户（null = 全部账户汇总）
+//   sim.selectModule   {module} → {}                         切业务模块（position/order/fill/cash/log）
+//   sim.createAccount  {name, capital} → {toast}             新建模拟账户（引擎侧开户，失败 fail）
+//   sim.cancelOrder    {orderID} → {}                        撤销在途委托（幂等目标态）
+//   sim.amendPrice     {orderID, price} → {toast}            修改委托价（限价委托）
+//   sim.refreshQuotes  {} → {toast}                          请求最新行情（prepareQuotes）
+//   sim.openTicket     {direction, positionID?} → {}         桥接原生全屏下单页（带持仓入口预填；账户/标的不可用 fail）
+//   sim.openCondEditor {positionID} → {}                     桥接原生条件单编辑器（异步组装可卖数量后呈现）
+//   sim.openCondManage {} → {}                               桥接原生条件单管理页
+//   sim.openStrategyFormulas {} → {}                         桥接原生公式管理中心（交易策略段）
+//   sim.openTrainingRecords {} → {}                          桥接原生训练记录管理页
+//   sim.exportLogs     {keyword, logModule?} → {toast}       导出操作日志 CSV（Documents/Simulation/）
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -62,6 +75,7 @@
 //   favorites.changed {reason}             自选数据/编辑变化（reason: refresh|edit）
 //   market.changed    {reason}             行情数据/分类/配置变化（reason: data|config|edit；节流 ~0.8s 合并）
 //   home.changed      {reason}             首页快照数据变化（reason: data|edit|sim；节流 ~0.8s 合并）
+//   sim.changed       {reason}             模拟页快照数据变化（reason: data|trade；节流 ~0.8s 合并）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -186,6 +200,90 @@ export interface HomeBreadth {
   limitDown: number
 }
 
+/** sim.snapshot 账户项（badge 单字图标 / colorHex 单字底色，对齐 SimAccount） */
+export interface SimAccountSnap {
+  id: string
+  name: string
+  badge: string
+  colorHex: string
+}
+
+/** sim.snapshot 资产摘要（口径与 SimStore.SimAccountSummary 一致） */
+export interface SimSummarySnap {
+  totalAssets: number
+  cash: number
+  marketValue: number
+  positionPct: number
+  dayProfit: number
+  dayProfitPct: number
+  totalProfit: number
+  totalProfitPct: number
+}
+
+/** sim.snapshot 持仓行（lastPrice 引擎快照缺失时原生回落成本价） */
+export interface SimPositionSnap {
+  id: string
+  code: string
+  name: string
+  qty: number
+  availableQty: number
+  costPrice: number
+  lastPrice: number
+  marketValue: number
+  profit: number
+  profitPct: number
+}
+
+/** sim.snapshot 委托行（时间字符串原生格式化；price null = 市价单） */
+export interface SimOrderSnap {
+  id: string
+  time: string
+  code: string
+  name: string
+  direction: 'buy' | 'sell'
+  priceType: 'limit' | 'market'
+  price: number | null
+  qty: number
+  filledQty: number
+  status: 'pending' | 'reported' | 'partial' | 'filled' | 'cancelled'
+  active: boolean
+}
+
+/** sim.snapshot 成交行 */
+export interface SimFillSnap {
+  id: string
+  time: string
+  code: string
+  name: string
+  direction: 'buy' | 'sell'
+  price: number
+  qty: number
+  amount: number
+  fee: number
+  contract: string
+}
+
+/** sim.snapshot 资金流水行（amount 有符号：入金为正、买入为负） */
+export interface SimLedgerSnap {
+  id: string
+  time: string
+  kind: string
+  note: string
+  amount: number
+  balance: number
+  accountName: string
+}
+
+/** sim.snapshot 操作日志行（result 配色由 Web 端按关键词判定，对齐原生 simResultColor） */
+export interface SimLogSnap {
+  id: string
+  time: string
+  accountName: string
+  module: string
+  content: string
+  result: string
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -199,6 +297,11 @@ export const KnownActions = {
     'configSnapshot', 'configSet', 'configReset',
   ],
   home: ['snapshot', 'openEntry', 'openDetail'],
+  sim: [
+    'snapshot', 'selectAccount', 'selectModule', 'createAccount', 'cancelOrder',
+    'amendPrice', 'refreshQuotes', 'openTicket', 'openCondEditor', 'openCondManage',
+    'openStrategyFormulas', 'openTrainingRecords', 'exportLogs',
+  ],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -209,6 +312,7 @@ export const KnownEvents = {
   favoritesChanged: 'favorites.changed',
   marketChanged: 'market.changed',
   homeChanged: 'home.changed',
+  simChanged: 'sim.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）
