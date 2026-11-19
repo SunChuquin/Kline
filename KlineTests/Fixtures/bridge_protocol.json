@@ -114,7 +114,12 @@
     { "id": "req_lab_load", "module": "lab", "action": "loadEngine", "payload": {} },
     { "id": "req_lab_run_exp", "module": "lab", "action": "runExp", "payload": { "id": 1 } },
     { "id": "req_lab_clean", "module": "lab", "action": "cleanDownloads", "payload": {} },
-    { "id": "req_lab_export_crash", "module": "lab", "action": "exportCrash", "payload": {} }
+    { "id": "req_lab_export_crash", "module": "lab", "action": "exportCrash", "payload": {} },
+    { "id": "req_backtest_snapshot", "module": "backtest", "action": "snapshot", "payload": {} },
+    { "id": "req_backtest_run", "module": "backtest", "action": "run",
+      "payload": { "days": 250, "initialCapital": 100000, "pool": "market",
+                   "executeNextOpen": true, "includeEntry": true } },
+    { "id": "req_backtest_cancel", "module": "backtest", "action": "cancel", "payload": {} }
   ],
   "responses": [
     { "id": "req_app_ping", "ok": true, "data": { "clientTs": 123.0, "serverMs": 1763361600000 } },
@@ -328,7 +333,27 @@
     { "id": "req_lab_load", "ok": true, "data": {} },
     { "id": "req_lab_run_exp", "ok": true, "data": {} },
     { "id": "req_lab_clean", "ok": true, "data": {} },
-    { "id": "req_lab_export_crash", "ok": true, "data": {} }
+    { "id": "req_lab_export_crash", "ok": true, "data": {} },
+    { "id": "req_backtest_snapshot", "ok": true,
+      "data": { "doc": { "id": "strategy-0-guid", "name": "双均线策略", "tradeEmpty": false, "defaultCapital": 100000 },
+                "phase": "finished",
+                "progress": null,
+                "failMessage": null,
+                "result": { "stats": { "initialCapital": 100000, "finalEquity": 112840, "totalReturn": 0.1284,
+                                       "annualized": 0.185, "winRate": 0.62, "profitFactor": 1.85,
+                                       "maxDrawdown": 0.083, "tradeCount": 24, "roundTrips": 12, "avgHoldDays": 5.5 },
+                            "equity": [ { "date": 20260101, "equity": 100000 },
+                                        { "date": 20260102, "equity": 100520 } ],
+                            "maxDrawdownRange": [3, 8],
+                            "trades": [ { "date": 20260105, "name": "浦发银行", "code": "600000",
+                                          "direction": "buy", "rule": null, "qty": 900,
+                                          "price": 10.5, "amount": 9450, "fee": 5.0,
+                                          "realizedPnL": null, "holdDays": null } ],
+                            "scannedCount": 3354, "hitCount": 42,
+                            "warnings": ["公式含 CLOSE 引用，注意未来函数风险"],
+                            "skipped": ["某某股 600999：行情不足 30 根（12），已跳过"] } } },
+    { "id": "req_backtest_run", "ok": true, "data": { "queued": true } },
+    { "id": "req_backtest_cancel", "ok": true, "data": {} }
   ],
   "errors": [
     { "id": "req_unknown_module", "ok": false, "error": { "code": "unknown_module", "message": "未知模块 foo" } },
@@ -348,7 +373,8 @@
     { "event": "page.open", "payload": { "name": "lanSync" } },
     { "event": "lan.changed", "payload": { "reason": "transfer" } },
     { "event": "update.changed", "payload": { "reason": "remote" } },
-    { "event": "lab.changed", "payload": { "reason": "output" } }
+    { "event": "lab.changed", "payload": { "reason": "output" } },
+    { "event": "backtest.changed", "payload": { "reason": "phase" } }
   ],
   "reserved": {
     "comment": "P2-5b 指标控制面板/快捷面板预留（未实现，形状锁定防漂移）",

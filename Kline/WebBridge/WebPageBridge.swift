@@ -48,6 +48,7 @@ final class WebPageBridge: ObservableObject {
         case "lanSync":     LANSyncBridge.shared.onOpen()
         case "localUpdate": LocalUpdateBridge.shared.onOpen()
         case "pythonLab":   EngineLabBridge.shared.onOpen()
+        case "backtest":    BacktestBridge.shared.onOpen()
         default: break
         }
     }

@@ -107,6 +107,7 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "lan":        return LANSyncBridge.handle(request)
         case "update":     return LocalUpdateBridge.handle(request)
         case "lab":        return EngineLabBridge.handle(request)
+        case "backtest":   return BacktestBridge.handle(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_module", message: "未知模块 \(request.module)")
         }

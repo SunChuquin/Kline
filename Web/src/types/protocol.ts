@@ -117,6 +117,10 @@
 //   lab.runExp        {id: 1..4} → {}                       实验①-④（脚本/编排逻辑在桥内，输出行随 lab.changed 推送）
 //   lab.cleanDownloads {} → {}                              清理已下载 tipa（Engine.app 由 TrollStore 管理）
 //   lab.exportCrash   {} → {}                               导出崩溃报告到 Documents/crashlogs
+//   backtest.snapshot {} → BacktestSnapshot                 回测快照（当前策略文档/执行 phase/进度/结果全量；策略详情页「回测」入口打开）
+//   backtest.run      {days, initialCapital, pool, executeNextOpen, includeEntry} → {queued}
+//                                                           发起回测（pool: market|favorites；period 固定日线；单任务，重跑先失效旧轮）
+//   backtest.cancel   {} → {}                               取消回测（幂等；cancelled 后 Web 自动关页回策略详情，对齐原生）
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -130,6 +134,7 @@
 //   lan.changed       {reason}             联机同步状态变化（reason: data|scan|connect|transfer|mainDBReplaced…）
 //   update.changed    {reason}             本地更新状态变化（reason: server|remote|engine|watchlist|gap|baselineReady）
 //   lab.changed       {reason}             引擎实验室状态/输出变化（reason: status|output|progress；节流 ~0.2s 合并）
+//   backtest.changed  {reason}             回测 phase/进度变化（reason: phase|progress；节流 ~0.25s 合并）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -524,6 +529,86 @@ export interface LabSnapshot {
   outputLines: string[]
 }
 
+// ===== P2-6c-2 回测（backtest） =====
+
+/** backtest.snapshot 当前被回测的策略文档（「回测」入口打开时写入） */
+export interface BacktestDocSnap {
+  id: string
+  name: string
+  /** TRADE 段未配置（结果页只提示不阻断，语义同原生） */
+  tradeEmpty: boolean
+  /** 参数页默认初始资金（绑定账户初始资金，取不到 100000） */
+  defaultCapital: number
+}
+
+/** backtest.snapshot 净值点（date = YYYYMMDD） */
+export interface BacktestEquitySnap {
+  date: number
+  equity: number
+}
+
+/** backtest.snapshot 一笔成交（数值原样，Web 端按 SimFormat 语义格式化） */
+export interface BacktestTradeSnap {
+  /** 成交日（YYYYMMDD） */
+  date: number
+  name: string
+  code: string
+  direction: 'buy' | 'sell'
+  /** 触发规则文案；入场信号为 null */
+  rule: string | null
+  qty: number
+  price: number
+  amount: number
+  fee: number
+  /** 已实现净盈亏（仅卖出，已扣卖出费用）；未平仓为 null */
+  realizedPnL: number | null
+  /** 持有自然日（仅卖出）；未平仓为 null */
+  holdDays: number | null
+}
+
+/** backtest.snapshot 统计指标（比率字段为小数：0.15 = +15%） */
+export interface BacktestStatsSnap {
+  initialCapital: number
+  finalEquity: number
+  totalReturn: number
+  annualized: number
+  /** 0...1 */
+  winRate: number
+  /** Σ盈利 / |Σ亏损| */
+  profitFactor: number
+  /** 0...1（结果页展示取负值） */
+  maxDrawdown: number
+  tradeCount: number
+  roundTrips: number
+  avgHoldDays: number
+}
+
+/** backtest.snapshot 回测结果（finished 时非空；equity/trades 全量下发，Web 端折叠展示） */
+export interface BacktestResultSnap {
+  stats: BacktestStatsSnap
+  equity: BacktestEquitySnap[]
+  /** 最大回撤区间（equity 数组下标闭区间，画图高亮用）；null = 无 */
+  maxDrawdownRange: [number, number] | null
+  trades: BacktestTradeSnap[]
+  scannedCount: number
+  hitCount: number
+  /** 未来函数 / 跳空可疑 / 口径说明 */
+  warnings: string[]
+  /** 取数失败等跳过明细 */
+  skipped: string[]
+}
+
+/** backtest.snapshot 响应（P2-6c-2 回测页；phase/result 由 StrategyBacktestRunner 发布） */
+export interface BacktestSnapshot {
+  doc: BacktestDocSnap | null
+  phase: 'idle' | 'preparing' | 'simulating' | 'finished' | 'cancelled' | 'failed'
+  /** preparing 阶段进度（done/total）；其余 phase 为 null */
+  progress: { done: number; total: number } | null
+  /** failed 时的错误文案 */
+  failMessage: string | null
+  result: BacktestResultSnap | null
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -555,6 +640,7 @@ export const KnownActions = {
   update: ['snapshot', 'probeServer', 'reconnectServer', 'checkApp', 'installApp',
            'checkEngine', 'installEngine', 'syncNow', 'runGapBackfill', 'queryBaselineMissing'],
   lab: ['snapshot', 'refresh', 'download', 'install', 'loadEngine', 'runExp', 'cleanDownloads', 'exportCrash'],
+  backtest: ['snapshot', 'run', 'cancel'],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -571,6 +657,7 @@ export const KnownEvents = {
   lanChanged: 'lan.changed',
   updateChanged: 'update.changed',
   labChanged: 'lab.changed',
+  backtestChanged: 'backtest.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

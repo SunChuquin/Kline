@@ -76,7 +76,8 @@ final class WebBridgeProtocolTests: XCTestCase {
         let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab",
                                         "favorites.changed", "market.changed",
                                         "home.changed", "sim.changed", "sheet.open",
-                                        "page.open", "lan.changed", "update.changed", "lab.changed"]
+                                        "page.open", "lan.changed", "update.changed", "lab.changed",
+                                        "backtest.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -414,5 +415,63 @@ final class WebBridgeProtocolTests: XCTestCase {
         let payload = try XCTUnwrap(req["payload"] as? [String: Any])
         let id = try XCTUnwrap((payload["id"] as? NSNumber)?.intValue)
         XCTAssertTrue((1...4).contains(id), "实验编号必须在 1~4（实际 \(id)）")
+    }
+
+    /// backtest.snapshot 响应形状锁定（P2-6c-2 回测页）：doc/phase/progress/result 全量结构
+    func testBacktestSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_backtest_snapshot"
+        }, "fixtures 缺 backtest.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["doc", "phase", "progress", "failMessage", "result"] {
+            XCTAssertNotNil(data[key], "backtest.snapshot 缺 \(key)")
+        }
+        let phase = try XCTUnwrap(data["phase"] as? String)
+        XCTAssertTrue(["idle", "preparing", "simulating", "finished", "cancelled", "failed"].contains(phase),
+                      "非法回测 phase \(phase)")
+        // 结果结构：stats 十项口径 / equity 点 / 回撤下标区间 / 成交行 / 提示明细
+        let result = try XCTUnwrap(data["result"] as? [String: Any])
+        let stats = try XCTUnwrap(result["stats"] as? [String: Any])
+        for key in ["initialCapital", "finalEquity", "totalReturn", "annualized", "winRate",
+                    "profitFactor", "maxDrawdown", "tradeCount", "roundTrips", "avgHoldDays"] {
+            XCTAssertNotNil(stats[key], "backtest stats 缺 \(key)")
+        }
+        let equity = try XCTUnwrap(result["equity"] as? [[String: Any]])
+        for point in equity {
+            XCTAssertNotNil(point["date"], "净值点缺 date")
+            XCTAssertNotNil(point["equity"], "净值点缺 equity")
+        }
+        if let range = result["maxDrawdownRange"] as? [Int] {
+            XCTAssertEqual(range.count, 2, "最大回撤区间必须是 [下标起, 下标止]")
+        }
+        let trades = try XCTUnwrap(result["trades"] as? [[String: Any]])
+        for trade in trades {
+            for key in ["date", "name", "code", "direction", "rule", "qty", "price",
+                        "amount", "fee", "realizedPnL", "holdDays"] {
+                XCTAssertNotNil(trade[key], "回测成交行缺 \(key)")
+            }
+        }
+        for key in ["scannedCount", "hitCount", "warnings", "skipped"] {
+            XCTAssertNotNil(result[key], "backtest result 缺 \(key)")
+        }
+    }
+
+    /// backtest.run payload 形状锁定：pool 枚举 / 区间 / 布尔口径
+    func testBacktestRunPayloadShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "backtest" && ($0["action"] as? String) == "run"
+        }, "fixtures 缺 backtest.run 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        let days = try XCTUnwrap((payload["days"] as? NSNumber)?.intValue)
+        XCTAssertTrue([60, 120, 250, 500].contains(days), "回测区间必须是 60/120/250/500（实际 \(days)）")
+        let pool = try XCTUnwrap(payload["pool"] as? String)
+        XCTAssertNotNil(StrategyPickPool(rawValue: pool), "非法候选池 \(pool)")
+        XCTAssertNotNil((payload["initialCapital"] as? NSNumber)?.doubleValue, "缺 initialCapital")
+        XCTAssertNotNil(payload["executeNextOpen"] as? Bool, "缺 executeNextOpen")
+        XCTAssertNotNil(payload["includeEntry"] as? Bool, "缺 includeEntry")
     }
 }

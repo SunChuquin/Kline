@@ -273,8 +273,9 @@ struct StrategyDetailView: View {
                 // 跑选股不依赖 TRADE 段：未配置交易指令也能跑，只看选股公式
                 actionButton("跑选股") { showPickList = true }
                 actionButton("生成条件单", enabled: canGenerate) { startGenerate() }
-                // 回测不依赖 TRADE 段：未配置时只提示，不阻断
-                actionButton("回测") { showBacktestParams = true }
+                // 回测不依赖 TRADE 段：未配置时只提示，不阻断。
+                // P2-6c-2：迁 Web 全屏页（showBacktestParams 原生分支保留可回退）
+                actionButton("回测") { BacktestBridge.shared.open(doc: doc) }
             }
 
             if !canGenerate {
