@@ -1,8 +1,11 @@
 # Kline P2 全页面 Vant 化改造计划
 
-> 状态：计划稿，待用户确认后执行
+> 状态：**已全部交付（P2-0 ~ P2-7 完成，2026-11-19）**
 > 日期：2026-11-18
 > 用户拍板：①Tab 栏保留原生（SwiftUI 底栏不动，四个 Tab 内容页逐页换 Web）②迁移顺序按原计划 Favorites → Market → Home → Simulation，弹层三件套放最后 ③除 K 线图表外所有页面（含图表页内的设置页/指标面板/快捷面板）全部 Vant 实现
+>
+> 交付记录（commit 序）：P2-0 基建 → P2-1 Favorites → P2-2 Market → P2-3 Home → P2-4 Simulation → P2-5a 弹层容器+设置/搜索 → P2-5b 指标面板 → P2-6a 快捷面板+Web 票面 → P2-6b-1 公式中心 tech 段 → P2-6c-1 LANSync/LocalUpdate/Debug 实验室（全屏 Web 页容器）→ P2-6c-2 Backtest（SVG 净值图）→ P2-6c-3 Training 设置浮层+记录管理 → **P2-7 收尾（布局系统全量清除 + fixtures reserved 转正）**。
+> 边界决策：训练态闭环保留原生（K 线训练图表/快捷面板训练态/条件单预警浮层/回放推进 advanceOneBar——回放联动延迟敏感，§5.2 条款）；公式编辑器与选股/策略公式中心保留原生（编辑器语法高亮可后置条款）。
 
 ---
 

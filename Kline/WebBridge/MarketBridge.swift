@@ -484,14 +484,16 @@ final class MarketBridge: ObservableObject {
 /// 关闭走浮层内返回按钮写回 false。P2-2 不引入 Web 弹层容器（那是 P2-5 的机制）。
 struct MarketWebShellView: View {
     @ObservedObject private var bridge = MarketBridge.shared
+    /// 搜索态输入文本（P2-7：HomeView 退役，直接用 HomeSearchModeView 搜索覆盖层）
+    @State private var searchText = ""
 
     var body: some View {
         WebTabHostView(route: "market")
             .overlay {
                 if bridge.homeSearchActive {
-                    // 复用 HomeView 搜索模式（与原生行情页同款）：selectedTab 传常量 2 不改底栏选中态
-                    HomeView(isSearching: $bridge.homeSearchActive, isProfilePresented: .constant(false),
-                             selectedTab: .constant(2))
+                    // 复用首页搜索模式覆盖层（与原生行情页同款交互）
+                    HomeSearchModeView(searchText: $searchText,
+                                       isSearching: $bridge.homeSearchActive)
                         .transition(.opacity)
                 }
                 if bridge.showFormulaCenter {

@@ -420,10 +420,5 @@
     { "event": "lab.changed", "payload": { "reason": "output" } },
     { "event": "backtest.changed", "payload": { "reason": "phase" } },
     { "event": "training.changed", "payload": { "reason": "begun" } }
-  ],
-  "reserved": {
-    "comment": "P2-5b 指标控制面板/快捷面板预留（未实现，形状锁定防漂移）",
-    "chart.indicators.snapshot": { "main": [], "subSlots": [] },
-    "quick.snapshot": { "accounts": [], "tradingHours": "" }
-  }
+  ]
 }

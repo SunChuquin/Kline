@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <div class="banner">自选 · Web 版（P2-1）</div>
+    <div class="banner" aria-label="favorites.title">自选 · Web 版（P2-1）</div>
 
     <div v-if="!bridgeOk" class="card-warn">桥接不可达：显示占位界面</div>
 

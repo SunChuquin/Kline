@@ -27,8 +27,6 @@ struct ContentView: View {
     @ObservedObject private var trainingSetupRouter = TrainingSetupRouter.shared
     /// 训练条件单 / 预警记录页（训练态浮层，同样盖住底部导航栏）
     @ObservedObject private var trainingCondRouter = TrainingCondRouter.shared
-    /// 全屏布局编辑器（首页/个人中心入口都置位它，见 PageLayoutEditorView.swift）
-    @ObservedObject private var layoutEditorRouter = HomeLayoutEditorRouter.shared
     @ObservedObject private var accessoryCoordinator = FloatingAccessoryCoordinator.shared
     /// 全 App 显示主题（个人中心可切换：日间 / 夜间 / 跟随系统）
     @ObservedObject private var themeStore = KlineThemeStore.shared
@@ -103,26 +101,7 @@ struct ContentView: View {
             }
 
             // 全屏布局编辑器（覆盖整个屏幕，含底部栏）：
-            // 挂在根 ZStack 而非首页内部——首页在 VStack 里只占底栏以上的区域，
-            // 页面内 overlay 永远盖不住底部导航栏（用户要求编辑器全屏）。
-            // 防御（窄屏适配）：编辑器固有宽实测 ~459pt，超过 iPhone 11 竖屏 414pt，
-            // 作为根 ZStack 直接子视图同样会撑宽根容器、拖歪 Tab 栏几何；与
-            // mainContentView 一样包 GeometryReader + 固定 frame 钳制，只向外报告
-            // 提议尺寸。编辑器内部自带 ignoresSafeArea（背景 + 底部边缘），
-            // 全屏覆盖能力不受此钳制影响。
-            if layoutEditorRouter.isPresented {
-                GeometryReader { geo in
-                    PageLayoutEditorView(page: layoutEditorRouter.page) {
-                        layoutEditorRouter.isPresented = false
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    // 编辑器盖在根 ZStack 上、不在 mainContentView 子树内，
-                    // 需单独注入实测宽：编辑器的全屏预览（PageLayoutRenderer）据此竖排
-                    .environment(\.klineAvailableWidth, geo.size.width)
-                }
-                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
-            }
+            // P2-7：全屏布局编辑器随 JSON 布局系统退役（原挂载块删除）。
 
             // 全屏训练 K 线页（覆盖整个屏幕，含底部栏）：压在同层最后，保证在最上层；
             // trainer.close() 会置 meta = nil，页面随之消失
@@ -325,41 +304,36 @@ struct ContentView: View {
     // 已换：0 首页（P2-3）/ 1 自选（P2-1）/ 2 行情（P2-2）/ 3 模拟（P2-4）。
     @ViewBuilder
     private var mainContentView: some View {
-        switch selectedTab {
-        case 0:
+        // P2-7：原生四 Tab 页随 JSON 布局系统退役，Web 资源缺失时显式占位（不再回退原生页）
+        Group {
             if WebUIFiles.isBundleReady {
-                // P2-3：首页 Web 化（原生浮层由 HomeWebShellView overlay 挂载）
-                HomeWebShellView()
+                switch selectedTab {
+                case 0:
+                    // P2-3：首页 Web 化（原生浮层由 HomeWebShellView overlay 挂载）
+                    HomeWebShellView()
+                case 1:
+                    // P2-1：自选页 Web 化
+                    WebTabHostView(route: "favorites")
+                case 2:
+                    // P2-2：行情页 Web 化（原生浮层由 MarketWebShellView overlay 挂载）
+                    MarketWebShellView()
+                default:
+                    // P2-4：模拟页 Web 化（原生浮层由 SimWebShellView 挂载：下单页/条件单/策略公式/训练记录）
+                    SimWebShellView()
+                }
             } else {
-                // Web UI 未构建 → 回退原生首页
-                HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 40))
+                        .foregroundColor(.orange)
+                    Text("Web UI 资源缺失（WebUI/index.html 不在包内），请重新构建打包")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        case 1:
-            if WebUIFiles.isBundleReady {
-                WebTabHostView(route: "favorites")
-            } else {
-                // Web UI 未构建（bundle 根 WebUI/index.html 缺失）→ 回退原生自选页。
-                // 正常发布会先 npm run build；本机构建可随时再 build 一次即自动切回 Web 化。
-                FavoritesView()
-            }
-        case 2:
-            if WebUIFiles.isBundleReady {
-                // P2-2：行情页 Web 化（原生浮层由 MarketWebShellView overlay 挂载）
-                MarketWebShellView()
-            } else {
-                // Web UI 未构建（bundle 根 WebUI/index.html 缺失）→ 回退原生行情页。
-                MarketView()
-            }
-        case 3:
-            if WebUIFiles.isBundleReady {
-                // P2-4：模拟页 Web 化（原生浮层由 SimWebShellView 挂载：下单页/条件单/策略公式/训练记录）
-                SimWebShellView()
-            } else {
-                // Web UI 未构建 → 回退原生模拟页
-                SimulationView()
-            }
-        default:
-            HomeView(isSearching: $isSearching, isProfilePresented: $isProfilePresented, selectedTab: $selectedTab)
         }
     }
 }

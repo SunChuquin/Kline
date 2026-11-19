@@ -109,7 +109,9 @@ enum LANSyncReload {
             case "sim":
                 SimStore.shared.reloadFromDisk()                // LAN同步热重载
             case "layouts":
-                PageLayoutConfigStore.shared.reloadFromDisk()   // LAN同步热重载
+                // P2-7：JSON 布局系统已退役（PageLayoutConfigStore 已删）。
+                // Layouts/*.json 文件仍可同步（文件级），但不再有消费方，热重载为空操作。
+                DebugLogger.shared.log("[LANSyncReload] layouts scope 跳过（布局系统已退役）")
             case "indicators":
                 // 指标公式目录镜像后重载全部周期定义（复用既有入口，与自定义指标增删改同款）
                 SystemIndicatorStore.shared.reloadAllPeriods()

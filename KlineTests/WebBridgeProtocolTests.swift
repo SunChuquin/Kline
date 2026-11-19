@@ -84,12 +84,15 @@ final class WebBridgeProtocolTests: XCTestCase {
         }
     }
 
-    /// P2-5b 预留形状锁定（指标控制面板/快捷面板属下一批）
-    func testReservedSheetActions() throws {
+    /// P2-7 收尾：reserved 区块已全量转正（P2-5b 指标面板 / P2-6a 快捷面板均已实装进正式 responses）
+    func testReservedSectionRetired() throws {
         let fixture = try loadFixture()
-        let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any])
-        XCTAssertNotNil(reserved["chart.indicators.snapshot"] as? [String: Any], "预留缺指标面板形状")
-        XCTAssertNotNil(reserved["quick.snapshot"] as? [String: Any], "预留缺快捷面板形状")
+        XCTAssertNil(fixture["reserved"], "P2-7 后 fixtures 不应再有 reserved 区块")
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        XCTAssertNotNil(responses.first { ($0["id"] as? String) == "req_chart_ind_snapshot" },
+                        "指标面板快照应已在正式 responses")
+        XCTAssertNotNil(responses.first { ($0["id"] as? String) == "req_sim_snapshot" },
+                        "模拟页快照应已在正式 responses")
     }
 
     /// chart.settings.snapshot 响应形状锁定（P2-5a K线设置页）：选项带 value/label，显示组开关齐备

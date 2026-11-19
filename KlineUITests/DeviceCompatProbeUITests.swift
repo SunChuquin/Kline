@@ -180,106 +180,15 @@ final class DeviceCompatProbeUITests: XCTestCase {
 
     // MARK: - 用例 2：四档行情页（A/B/C/D × 三方向）
 
-    func testProbe02_Market_ABCD() throws {
-        for style in ["A", "B", "C", "D"] {
-            let app = launchApp(["-kline.marketLayout", style])
-            XCTAssertTrue(app.buttons["tab.market"].waitForExistence(timeout: 15), "底部菜单未出现(\(style))")
-            openETFList(app)
-            settle(1.0)
-            cycleOrientations(app, label: "market\(style)")
-            app.terminate()
-        }
-    }
 
     // MARK: - 用例 3：四档自选页（A/B/C/D × 三方向；先加一只自选保证列表非空）
 
-    func testProbe03_Favorites_ABCD() throws {
-        // 3.1 首次启动（重置）：加自选
-        let app = launchApp(["-kline.favoritesLayout", "A"])
-        XCTAssertTrue(app.buttons["tab.market"].waitForExistence(timeout: 15), "底部菜单未出现")
-        openETFList(app)
-        let row = app.descendants(matching: .any)["market.rowCard"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "行情行未出现")
-        row.press(forDuration: 1.2)
-        let favToggle = app.descendants(matching: .any)["rowMenu.toggleFavorite"].firstMatch
-        XCTAssertTrue(favToggle.waitForExistence(timeout: 8), "长按面板未出现加自选项")
-        if app.staticTexts["加自选"].firstMatch.waitForExistence(timeout: 3) {
-            favToggle.tap()
-            settle(1.5)
-        } else {
-            app.buttons["取消"].firstMatch.tap()
-        }
-        app.buttons["tab.favorites"].tap()
-        XCTAssertTrue(app.staticTexts["favorites.title"].waitForExistence(timeout: 10), "自选页未显示")
-        _ = app.descendants(matching: .any)["favorites.rowCard"].firstMatch.waitForExistence(timeout: 8)
-        settle(1.0)
-        cycleOrientations(app, label: "favA")
-        app.terminate()
-
-        // 3.2 B/C/D：不重置（保留自选），仅注入布局档位
-        for style in ["B", "C", "D"] {
-            let app2 = launchApp(["-kline.favoritesLayout", style], reset: false)
-            XCTAssertTrue(app2.buttons["tab.favorites"].waitForExistence(timeout: 15), "底部菜单未出现(\(style))")
-            app2.buttons["tab.favorites"].tap()
-            XCTAssertTrue(app2.staticTexts["favorites.title"].waitForExistence(timeout: 10), "自选页未显示(\(style))")
-            settle(1.0)
-            cycleOrientations(app2, label: "fav\(style)")
-            app2.terminate()
-        }
-    }
 
     // MARK: - 用例 4：三档模拟页（A/B/C × 三方向）
 
-    func testProbe04_Simulation_ABC() throws {
-        for style in ["A", "B", "C"] {
-            let app = launchApp(["-kline.simulationLayout", style])
-            XCTAssertTrue(app.buttons["tab.simulation"].waitForExistence(timeout: 15), "底部菜单未出现(\(style))")
-            app.buttons["tab.simulation"].tap()
-            XCTAssertTrue(app.staticTexts["simulation.subtitle"].waitForExistence(timeout: 10), "模拟页未显示(\(style))")
-            settle(1.2)
-            // 买卖条三方向在屏（模拟 A/B 竖横曾整体出屏不可达）
-            cycleOrientations(app, label: "sim\(style)") { app, ctx in
-                self.assertInScreen(app, app.buttons["sim.bottomAction.买入"], "\(ctx) 买入")
-                self.assertInScreen(app, app.buttons["sim.bottomAction.卖出"], "\(ctx) 卖出")
-            }
-            app.terminate()
-        }
-    }
 
     // MARK: - 用例 5：布局编辑器（三方向；树面板 + 检查器 + 顶部栏）
 
-    func testProbe05_LayoutEditor() throws {
-        let app = launchApp()
-        XCTAssertTrue(app.buttons["tab.home"].waitForExistence(timeout: 15), "底部菜单未出现")
-        app.buttons["tab.home"].tap()
-        XCTAssertTrue(app.staticTexts["home.page"].waitForExistence(timeout: 10), "首页未显示")
-        let entry = scrollHomeEntryIntoView(app, identifier: "home.entry.layoutEditor")
-        entry.tap()
-        XCTAssertTrue(app.buttons["layoutEditor.save"].waitForExistence(timeout: 8), "布局编辑器未打开")
-        settle(1.2)
-        // 保存/恢复默认三方向在屏（竖屏曾被挤压出屏、全屏预览曾文字竖排）
-        let editorAssert: (XCUIApplication, String) -> Void = { app, ctx in
-            self.assertInScreen(app, app.buttons["layoutEditor.save"], "\(ctx) 保存")
-            self.assertInScreen(app, app.buttons["layoutEditor.resetDefault"], "\(ctx) 恢复默认")
-        }
-        cycleOrientations(app, label: "editor", extraAssert: editorAssert)
-        // 选中一个控件节点，让右侧检查器出现参数行（挤压高发区）
-        let treeRow = app.descendants(matching: .any)["layout.tree.widget.home.quickEntryRow"].firstMatch
-        if !treeRow.waitForExistence(timeout: 3) {
-            for _ in 0..<14 {
-                app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.45))
-                    .press(forDuration: 0.08,
-                           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.21)))
-                if treeRow.waitForExistence(timeout: 1) { break }
-            }
-        }
-        if treeRow.waitForExistence(timeout: 5) {
-            treeRow.tap()
-            settle(1.0)
-            cycleOrientations(app, label: "editor.selected", extraAssert: editorAssert)
-        }
-        app.terminate()
-    }
 
     // MARK: - 用例 6：非训练态 K 线（单图 + 联动多图，对照基线）
 
