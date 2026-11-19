@@ -88,14 +88,25 @@ final class MarketBridge: ObservableObject {
             .sink { [weak self] _ in self?.scheduleChanged(reason: "data") }
             .store(in: &cancellables)
 
-        // 库加载完成 → 刷新行集（无 dropFirst：init 期已加载也立即刷一次，保证快照非空）
+        // 库加载完成 → 刷新行集。
+        // ⚠️ @Published 订阅时会**同步发射当前值**，而 init 执行期间 [weak self] 无法解析
+        // （对象尚未被 shared 强持有，guard let self 静默失败）→ 同步首发的 scheduleRefresh
+        // 从未执行、displayRows 恒空（2026-11-19 实测 rows=0）。故 dropFirst 只听后续变化，
+        // init 时已加载的场景在末尾显式补刷。
         dbm.$isLoaded
+            .dropFirst()
             .sink { [weak self] loaded in
                 guard let self else { return }
                 if loaded { self.model.scheduleRefresh() }
                 self.scheduleChanged(reason: "data")
             }
             .store(in: &cancellables)
+
+        // init 时库已就绪（本桥是行情页 Web 化后的唯一宿主，冷启动预热通常已完成）：显式刷一次
+        if dbm.isLoaded {
+            model.scheduleRefresh()
+            scheduleChanged(reason: "data")
+        }
     }
 
     /// 节流合并推送：窗口内首个信号安排推送，后续信号仅更新 reason
