@@ -156,7 +156,8 @@ final class MarketBridge: ObservableObject {
             shared.homeSearchActive = true
             return WebBridgeResponse.ok(request.id)
         case "openFormulaCenter":
-            shared.showFormulaCenter = true
+            // P2-6b：选股段公式中心桥接原生全屏（Web 面板仅实装 tech 段）
+            SheetBridge.shared.openFormulaCenter(.picker)
             return WebBridgeResponse.ok(request.id)
         case "groupInfo":
             return groupInfo(request)

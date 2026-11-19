@@ -48,6 +48,25 @@ final class SheetBridge: ObservableObject {
     }
     var editorHandler: ((ChartEditorRequest) -> Void)? = nil
 
+    /// 公式中心（P2-6b）原生全屏呈现请求：Web 面板点「编辑/新建」→ 关 Web 面板 →
+    /// 原生 FormulaCenterView 全屏打开（编辑器完整可用）；关闭后重开 Web 面板即见最新。
+    /// picker/strategy 段（选股/策略公式）本版仍整体桥接原生中心（Web 仅实装 tech 段）。
+    @Published var formulaCenterRequest: String? = nil
+
+    /// 各页公式中心入口 → Web tech 段面板（picker/strategy 直接桥原生中心）
+    func openFormulaCenter(_ kind: FormulaKind) {
+        if kind == .tech {
+            guard activeSheet != "formulaCenter" else { return }
+            activeSheet = "formulaCenter"
+            WebMessageRouter.shared.pushEvent("sheet.open",
+                                              payload: ["name": "formulaCenter", "kind": kind.rawValue],
+                                              route: "sheet")
+            DebugLogger.shared.log("[SheetBridge] open formulaCenter(tech)")
+        } else {
+            formulaCenterRequest = kind.rawValue
+        }
+    }
+
     // MARK: - 打开 / 关闭（宿主同步入口）
 
     /// 宿主弹层状态 → 桥（onChange 同步）。同值 no-op 防环。
@@ -90,6 +109,7 @@ final class SheetBridge: ObservableObject {
     private func close() {
         guard let name = activeSheet else { return }
         activeSheet = nil
+        if name == "formulaCenter" { formulaCenterRequest = nil }
         closeHandler?(name)
         DebugLogger.shared.log("[SheetBridge] close \(name)")
     }
@@ -147,6 +167,15 @@ final class SheetBridge: ObservableObject {
             return indicatorsOpenSystemEditor(request)
         case "indicators.openCustomEditor":
             return indicatorsOpenCustomEditor(request)
+        case "formula.snapshot":
+            return formulaSnapshotData()
+        case "formula.deleteCustom":
+            return formulaDeleteCustom(request)
+        case "formula.openCenter":
+            // 编辑/新建入口：关 Web 面板 → 原生公式中心全屏打开（编辑器完整可用）
+            shared.close()
+            shared.formulaCenterRequest = FormulaKind.tech.rawValue
+            return WebBridgeResponse.ok(request.id)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "chart.\(request.action) 未实现")
@@ -405,6 +434,52 @@ final class SheetBridge: ObservableObject {
         shared.editorHandler?(.custom(target: target))
         return WebBridgeResponse.ok(request.id)
     }
+
+    // MARK: 公式中心（P2-6b）：tech 段快照与删除
+
+    /// chart.formula.snapshot：tech 段三节（系统主图 / 系统副图按 group / 自定义指标）。
+    /// 系统指标含当前周期公式模板有无（可编辑判断）；自定义含适用周期与色条。
+    static func formulaSnapshotData() -> [String: Any] {
+        let sys = SystemIndicatorStore.shared
+        let customs = CustomIndicatorStore.shared
+        let period = ChartConfigStore.shared.selectedPeriod
+
+        let mainItems: [[String: Any]] = sys.mainIndicatorDefs(period: period).map {
+            ["id": $0.id, "name": $0.name, "isSystem": true,
+             "hasTemplate": sys.template(for: $0.id, period: period) != nil]
+        }
+        var subGroups: [[String: Any]] = []
+        var map: [String: [String]] = ["量能": ["VOL", "AMO"]]
+        for def in sys.subIndicatorDefs(period: period) {
+            let g = def.group.isEmpty ? "其他" : def.group
+            map[g, default: []].append(def.id)
+        }
+        for g in SystemIndicatorStore.subGroupOrder where map[g] != nil {
+            subGroups.append(["group": g, "kinds": map[g]!])
+        }
+        for (g, kinds) in map where !SystemIndicatorStore.subGroupOrder.contains(g) {
+            subGroups.append(["group": g, "kinds": kinds])
+        }
+        let customsAny: [[String: Any]] = customs.indicators
+            .filter { $0.scope == .main || $0.scope == .sub }
+            .map {
+                ["id": $0.id.uuidString, "name": $0.name, "colorHex": $0.colorHex,
+                 "scope": $0.scope == .main ? "main" : "sub",
+                 "periods": CustomIndicatorStore.applicablePeriods(of: $0).map(\.rawValue)]
+            }
+        return ["period": period.rawValue,
+                "mainItems": mainItems, "subGroups": subGroups, "customs": customsAny]
+    }
+
+    /// chart.formula.deleteCustom {id}：删除自定义指标（原生同步落地/删文件/持久化）
+    static func formulaDeleteCustom(_ request: WebBridgeRequest) -> [String: Any] {
+        guard let raw = request.payload["id"] as? String, let id = UUID(uuidString: raw) else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "需要有效 id")
+        }
+        CustomIndicatorStore.shared.delete(id)
+        DebugLogger.shared.log("[SheetBridge] deleteCustom \(raw)")
+        return WebBridgeResponse.ok(request.id)
+    }
 }
 
 // MARK: - 图表弹层浮层宿主（KlineDetailView 顶层 overlay 挂载）
@@ -438,6 +513,16 @@ struct SheetWebOverlayHost: View {
                     .allowsHitTesting(bridge.activeSheet != nil)
                     .animation(.easeInOut(duration: 0.15), value: bridge.activeSheet != nil)
                     .zIndex(2)
+            }
+            // P2-6b：原生公式中心全屏呈现（Web tech 面板的编辑/新建桥接落点；
+            // picker/strategy 段入口直桥原生——编辑器在原生中心内完整可用）
+            if let kindRaw = bridge.formulaCenterRequest, let kind = FormulaKind(rawValue: kindRaw) {
+                ZStack {
+                    FormulaCenterView(initialKind: kind,
+                                      onClose: { bridge.formulaCenterRequest = nil })
+                }
+                .transition(.opacity)
+                .zIndex(1001)   // 盖住弹层浮层 WebView
             }
         }
         .onChange(of: bridge.activeSheet) { sheet in

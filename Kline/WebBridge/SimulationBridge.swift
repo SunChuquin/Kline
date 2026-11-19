@@ -113,7 +113,8 @@ final class SimulationBridge: ObservableObject {
             shared.model.condPresentation = .list(UUID())
             return WebBridgeResponse.ok(request.id)
         case "openStrategyFormulas":
-            shared.model.showStrategyFormulas = true
+            // P2-6b：策略段公式中心桥接原生全屏（Web 面板仅实装 tech 段）
+            SheetBridge.shared.openFormulaCenter(.strategy)
             return WebBridgeResponse.ok(request.id)
         case "openTrainingRecords":
             shared.model.showTrainingRecords = true

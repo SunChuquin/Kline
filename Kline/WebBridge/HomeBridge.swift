@@ -213,11 +213,12 @@ final class HomeBridge: ObservableObject {
         case .search:
             bridge.isSearching = true
         case .tech:
-            bridge.overlayTarget = .formula(.tech)
+            // P2-6b：公式中心 tech 段迁 Web 面板（picker/strategy 段桥接原生全屏中心）
+            SheetBridge.shared.openFormulaCenter(.tech)
         case .picker:
-            bridge.overlayTarget = .formula(.picker)
+            SheetBridge.shared.openFormulaCenter(.picker)
         case .strategy:
-            bridge.overlayTarget = .formula(.strategy)
+            SheetBridge.shared.openFormulaCenter(.strategy)
         case .condOrder:
             bridge.overlayTarget = .condOrder
         case .alertRecords:

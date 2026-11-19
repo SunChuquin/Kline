@@ -394,7 +394,8 @@ export const KnownActions = {
   chart: ['settings.snapshot', 'settings.set', 'settings.resetLinked', 'search.query', 'search.pick',
           'indicators.snapshot', 'indicators.toggleMain', 'indicators.selectSub',
           'indicators.activateMainCustom', 'indicators.resetBuiltin',
-          'indicators.openSystemEditor', 'indicators.openCustomEditor'],
+          'indicators.openSystemEditor', 'indicators.openCustomEditor',
+          'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
 } as const

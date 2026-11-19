@@ -337,6 +337,47 @@
       </div>
     </div>
 
+    <!-- 公式中心（tech 段，P2-6b：浏览/删除；编辑与新建桥接原生全屏中心） -->
+    <div v-if="activeName === 'formulaCenter'" class="panel-mask" @click="close">
+      <div class="panel" @click.stop>
+        <div class="panel-header">
+          <span class="panel-title">公式管理 · 技术指标（{{ formula?.period ?? '' }}）</span>
+          <button class="panel-done" @click="close">完成</button>
+        </div>
+        <div class="panel-body" v-if="formula">
+          <div class="sec-title">系统指标 · 主图</div>
+          <div class="formula-rows">
+            <div v-for="d in formula.mainItems" :key="d.id" class="formula-row">
+              <span class="q-name">{{ d.name }}</span>
+              <button v-if="d.hasTemplate" class="tool-btn" @click="openCenter">编辑</button>
+            </div>
+          </div>
+          <template v-for="g in formula.subGroups" :key="g.group">
+            <div class="sec-title">系统指标 · {{ g.group }}</div>
+            <div class="formula-rows">
+              <div v-for="k in g.kinds" :key="k" class="formula-row">
+                <span class="q-name">{{ k }}</span>
+                <button class="tool-btn" @click="openCenter">编辑</button>
+              </div>
+            </div>
+          </template>
+          <div class="sec-title">自定义技术指标</div>
+          <button class="param-entry" @click="openCenter">＋ 新建 / 管理 ›</button>
+          <div v-if="formula.customs.length === 0" class="block-empty">暂无自定义技术指标</div>
+          <div v-else class="custom-rows">
+            <div v-for="c in formula.customs" :key="c.id" class="custom-row">
+              <span class="custom-color" :style="{ background: '#' + c.colorHex }"></span>
+              <span class="custom-name">{{ c.name }}</span>
+              <span class="cfg-note">{{ c.scope === 'main' ? '主图' : '副图' }} · {{ c.periods.length }} 周期</span>
+              <button class="inline-btn cancel" @click="deleteCustom(c)">删除</button>
+            </div>
+          </div>
+          <div class="cfg-foot-note">编辑与新建在原生公式中心完成（保存后返回本面板即见最新）。</div>
+          <div style="height: 24px"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- 账户切换（快捷面板内 chips） -->
     <van-action-sheet
       v-model:show="accPickerOpen"
@@ -683,6 +724,40 @@ async function closeAll(): Promise<void> {
   showToast({ message: '清仓请求已提交', duration: 1600 })
 }
 
+// ===== 公式中心（P2-6b：tech 段浏览/删除；编辑桥接原生） =====
+interface FormulaSnapshot {
+  period: string
+  mainItems: { id: string; name: string; isSystem: boolean; hasTemplate: boolean }[]
+  subGroups: { group: string; kinds: string[] }[]
+  customs: { id: string; name: string; colorHex: string; scope: 'main' | 'sub'; periods: string[] }[]
+}
+
+const formula = ref<FormulaSnapshot | null>(null)
+
+async function pullFormula(): Promise<void> {
+  try {
+    formula.value = ((await klineBus.request('chart', 'formula.snapshot')) ?? {}) as unknown as FormulaSnapshot
+  } catch (e) {
+    console.error('formula.snapshot 失败', e)
+  }
+}
+
+async function deleteCustom(c: { id: string; name: string }): Promise<void> {
+  try {
+    await klineBus.request('chart', 'formula.deleteCustom', { id: c.id })
+    showToast({ message: `已删除「${c.name}」`, duration: 1600 })
+    await pullFormula()
+  } catch (e) {
+    showToast({ message: String(e instanceof Error ? e.message : e).slice(0, 40), duration: 1800 })
+  }
+}
+
+function openCenter(): void {
+  // 编辑/新建桥接原生公式中心（面板关闭由原生 close 链路处理，本地同步清理）
+  klineBus.request('chart', 'formula.openCenter', {}).catch((e) => console.error(e))
+  activeName.value = null
+}
+
 // ===== 打开路由（sheet.open 事件） =====
 async function handleSheetOpen(payload: Record<string, unknown> | undefined): Promise<void> {
   const name = typeof payload?.name === 'string' ? payload.name : null
@@ -715,6 +790,9 @@ async function handleSheetOpen(payload: Record<string, unknown> | undefined): Pr
     ticket.value = { direction: 'buy', priceType: 'limit', priceText: '', qtyText: '' }
     ticketError.value = ''
     await pullQuick()
+  }
+  if (name === 'formulaCenter') {
+    await pullFormula()
   }
   if (name === 'mainIndicators' || name === 'subIndicators') {
     activeSlotKey.value = typeof payload?.slot === 'string' ? payload.slot : null

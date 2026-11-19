@@ -83,7 +83,11 @@
     { "id": "req_chart_ind_open_sys_editor", "module": "chart", "action": "indicators.openSystemEditor",
       "payload": { "isMain": true } },
     { "id": "req_chart_ind_open_custom_editor", "module": "chart", "action": "indicators.openCustomEditor",
-      "payload": { "target": "sub" } }
+      "payload": { "target": "sub" } },
+    { "id": "req_chart_formula_snapshot", "module": "chart", "action": "formula.snapshot", "payload": {} },
+    { "id": "req_chart_formula_delete", "module": "chart", "action": "formula.deleteCustom",
+      "payload": { "id": "custom-0-guid" } },
+    { "id": "req_chart_formula_open_center", "module": "chart", "action": "formula.openCenter", "payload": {} }
   ],
   "responses": [
     { "id": "req_app_ping", "ok": true, "data": { "clientTs": 123.0, "serverMs": 1763361600000 } },
@@ -232,7 +236,15 @@
     { "id": "req_chart_ind_activate_custom", "ok": true, "data": {} },
     { "id": "req_chart_ind_reset_builtin", "ok": true, "data": {} },
     { "id": "req_chart_ind_open_sys_editor", "ok": true, "data": {} },
-    { "id": "req_chart_ind_open_custom_editor", "ok": true, "data": {} }
+    { "id": "req_chart_ind_open_custom_editor", "ok": true, "data": {} },
+    { "id": "req_chart_formula_snapshot", "ok": true,
+      "data": { "period": "日线",
+                "mainItems": [ { "id": "MA", "name": "MA", "isSystem": true, "hasTemplate": true } ],
+                "subGroups": [ { "group": "量能", "kinds": ["VOL", "AMO"] } ],
+                "customs": [ { "id": "custom-0-guid", "name": "我的主图", "colorHex": "1E88E5",
+                               "scope": "main", "periods": ["日线"] } ] } },
+    { "id": "req_chart_formula_delete", "ok": true, "data": {} },
+    { "id": "req_chart_formula_open_center", "ok": true, "data": {} }
   ],
   "errors": [
     { "id": "req_unknown_module", "ok": false, "error": { "code": "unknown_module", "message": "未知模块 foo" } },
