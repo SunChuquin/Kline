@@ -378,6 +378,142 @@
       </div>
     </div>
 
+    <!-- 训练设置浮层（P2-6c-3：居中卡片形态，对齐原生 TrainingSetupSheet） -->
+    <div v-if="activeName === 'training'" class="panel-mask" @click="close">
+      <div class="train-card" @click.stop>
+        <div class="train-header">
+          <span class="panel-title">单人训练</span>
+          <button class="train-x" @click="close">✕</button>
+        </div>
+        <div class="train-body">
+          <div class="sec-title">分类</div>
+          <div class="chip-row">
+            <button
+              v-for="c in trainCategories"
+              :key="c"
+              class="chip"
+              :class="{ on: trainCategory === c }"
+              @click="trainCategory = c; trainError = ''"
+            >{{ c }}</button>
+          </div>
+
+          <template v-if="trainCategory === '我的分组'">
+            <div class="sec-title">分组</div>
+            <div v-if="trainGroups.length === 0" class="cfg-note">暂无可用分组</div>
+            <div v-else class="chip-row">
+              <button
+                v-for="g in trainGroups"
+                :key="g.id"
+                class="chip"
+                :class="{ on: trainGroupID === g.id }"
+                @click="trainGroupID = g.id; trainError = ''"
+              >{{ g.name }}</button>
+            </div>
+          </template>
+
+          <div class="sec-title">训练账户</div>
+          <div class="chip-row" aria-label="trainingSetup.accountType">
+            <button
+              v-for="t in trainAccountTypes"
+              :key="t.value"
+              class="chip"
+              :class="{ on: trainAccountType === t.value }"
+              @click="trainAccountType = t.value; trainError = ''; void savePrefs({ accountType: t.value })"
+            >{{ t.title }}</button>
+          </div>
+          <div class="cfg-note">{{ trainAccountType === 'percent' ? '不占用资金，按仓位比例（1/4、1/3、1/2、全仓）买卖，任何标的都买得起' : '固定本金，买入前校验资金；开启训练要求本金至少买得起 2 手（200 股）' }}</div>
+          <div v-if="trainAccountType === 'fixedAmount'" class="train-capital" aria-label="trainingSetup.capital">
+            <span>本金</span>
+            <input v-model="trainCapitalText" class="train-capital-input" inputmode="numeric" placeholder="100000" @change="void savePrefs({ capitalText: trainCapitalText })" />
+            <span class="p-unit">元</span>
+          </div>
+
+          <div class="sec-title">交易模式</div>
+          <div class="chip-row" aria-label="trainingSetup.tradeMode">
+            <button
+              v-for="m in trainTradeModes"
+              :key="m.value"
+              class="chip"
+              :class="{ on: trainTradeMode === m.value }"
+              @click="trainTradeMode = m.value; trainError = ''; void savePrefs({ tradeMode: m.value })"
+            >{{ m.title }}</button>
+          </div>
+          <div class="cfg-note">{{ trainTradeMode === 'sameDayClose' ? '点下单立刻以当前训练日收盘价成交（成交日 = 当前训练日）' : '隔日限价委托：点下单只挂单，仅下一训练日有效；该日行情触及委托价才按委托价成交，未触及即作废' }}</div>
+
+          <div class="sec-title">标的</div>
+          <div class="train-target-line">
+            <span class="train-target" :class="{ none: !trainSelected }">
+              {{ trainSelected ? `${trainSelected.name} ${trainSelected.code}` : '未选择' }}
+            </span>
+            <button class="train-random" @click="pickRandomTarget">随机抽取</button>
+          </div>
+          <div class="train-search">
+            <input
+              v-model="trainKeyword"
+              class="train-search-input"
+              placeholder="输入名称 / 代码搜索"
+              @input="onTrainKeyword"
+            />
+            <button v-if="trainKeyword" class="train-search-x" @click="trainKeyword = ''; trainResults = []">⊗</button>
+          </div>
+          <div v-if="trainResults.length > 0" class="train-results">
+            <div
+              v-for="r in trainResults"
+              :key="r.file"
+              class="train-result-row"
+              @click="selectTrainTarget(r)"
+            >
+              <span class="sr-name">{{ r.name }}</span>
+              <span class="sr-code">{{ r.code }}</span>
+              <span v-if="!r.trainable" class="train-untrainable">历史不足</span>
+              <span v-else-if="trainSelected?.file === r.file" class="train-check">✓</span>
+            </div>
+          </div>
+
+          <div class="sec-title">起始日期</div>
+          <div class="train-target-line">
+            <span class="train-target">{{ trainDateText }}</span>
+            <button class="train-random" :disabled="!canRandomDate" @click="randomizeTrainDate">随机</button>
+          </div>
+          <div v-if="trainRangeText" class="cfg-note">可选区间 {{ trainRangeText }}</div>
+          <input
+            v-if="trainRange"
+            v-model="trainDateInput"
+            type="date"
+            class="train-date-input"
+            :min="ymd(trainRange.min)"
+            :max="ymd(trainRange.max)"
+          />
+          <div v-if="trainSelected && trainRange && !trainRange.trainable" class="warn-line-orange">
+            该标的历史数据不足（需至少能取到最新库日期前 65 天）
+          </div>
+
+          <div v-if="trainError" class="train-error">{{ trainError }}</div>
+          <div style="height: 8px"></div>
+        </div>
+        <div class="train-footer" aria-label="trainingSetup.cancel">
+          <button class="train-cancel" @click="close">取消</button>
+          <button
+            class="train-start"
+            aria-label="trainingSetup.start"
+            :disabled="!canStartTraining"
+            @click="startTraining"
+          >开始训练</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 重新选择标的（金额账户本金买不起 2 手，对齐原生 alert） -->
+    <van-dialog
+      v-model:show="trainReselectOpen"
+      title="标的需要重新选择"
+      :message="trainReselectMessage"
+      show-cancel-button
+      confirm-button-text="重新选择标的"
+      confirm-button-color="#ee0a24"
+      @confirm="clearTrainTarget"
+    />
+
     <!-- 账户切换（快捷面板内 chips） -->
     <van-action-sheet
       v-model:show="accPickerOpen"
@@ -400,7 +536,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { klineBus } from '../bridge/klineBus'
 import { showToast } from 'vant'
 import type {
@@ -411,6 +547,10 @@ import type {
   IndicatorDefSnap,
   IndicatorsSnapshot,
   SubSlotSnap,
+  TrainingAnchorResult,
+  TrainingPickResult,
+  TrainingSearchResult,
+  TrainingSetupSnapshot,
 } from '../types/protocol'
 
 const activeName = ref<string | null>(null)
@@ -758,6 +898,224 @@ function openCenter(): void {
   activeName.value = null
 }
 
+// ===== 训练设置浮层（P2-6c-3；表单态 Web 本地，数据动作走 training.*） =====
+const trainCategories = ['全部', '沪深主板', 'ETF 指数', '自选', '我的分组']
+const trainAccountTypes = [
+  { value: 'percent', title: '百分比账户' },
+  { value: 'fixedAmount', title: '仓位金额账户' },
+] as const
+const trainTradeModes = [
+  { value: 'sameDayClose', title: '当日收盘价成交' },
+  { value: 'nextDayClose', title: '隔日委托' },
+] as const
+
+const trainPrefs = ref<TrainingSetupSnapshot | null>(null)
+const trainGroups = ref<{ id: string; name: string }[]>([])
+const trainCategory = ref('全部')
+const trainGroupID = ref<string>('')
+const trainAccountType = ref<'percent' | 'fixedAmount'>('percent')
+const trainCapitalText = ref('100000')
+const trainTradeMode = ref<'sameDayClose' | 'nextDayClose'>('sameDayClose')
+const trainSelected = ref<{ file: string; name: string; code: string } | null>(null)
+const trainRange = ref<{ min: number; max: number; trainable: boolean } | null>(null)
+const trainStartDate = ref<number | null>(null)
+const trainDateInput = ref('')
+const trainKeyword = ref('')
+const trainResults = ref<TrainingSearchResult[]>([])
+const trainError = ref('')
+const trainReselectOpen = ref(false)
+const trainReselectMessage = ref('')
+let trainSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+const trainDateText = computed(() =>
+  trainStartDate.value ? ymd(trainStartDate.value) : '未选择')
+const trainRangeText = computed(() =>
+  trainRange.value && trainRange.value.min > 0
+    ? `${ymd(trainRange.value.min)} ~ ${ymd(trainRange.value.max)}` : '')
+const canRandomDate = computed(() => !!trainRange.value?.trainable)
+const canStartTraining = computed(() => {
+  if (!trainSelected.value || !trainStartDate.value || !trainRange.value?.trainable) return false
+  if (trainAccountType.value === 'fixedAmount') {
+    const cap = Number.parseFloat(trainCapitalText.value.replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(cap) || cap <= 0) return false
+  }
+  return true
+})
+
+/** YYYYMMDD → YYYY-MM-DD（date input 用） */
+function ymd(v: number): string {
+  const s = String(v)
+  return s.length === 8 ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : s
+}
+
+/** YYYY-MM-DD → YYYYMMDD（本地时区，避免 UTC 偏移） */
+function ymdInt(text: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  if (!m) return 0
+  return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3])
+}
+
+async function pullTrainingSetup(): Promise<void> {
+  try {
+    const s = (await klineBus.request('training', 'setup.snapshot')) as unknown as TrainingSetupSnapshot
+    trainPrefs.value = s
+    trainGroups.value = s.groups ?? []
+    trainAccountType.value = (s.prefs.accountType as 'percent' | 'fixedAmount') ?? 'percent'
+    trainCapitalText.value = String(s.prefs.capitalText ?? '100000')
+    trainTradeMode.value = (s.prefs.tradeMode as 'sameDayClose' | 'nextDayClose') ?? 'sameDayClose'
+    if (!trainGroups.value.some((g) => g.id === trainGroupID.value)) {
+      trainGroupID.value = trainGroups.value[0]?.id ?? ''
+    }
+  } catch (e) {
+    console.error('training.setup.snapshot 失败', e)
+  }
+}
+
+async function savePrefs(patch: Record<string, unknown>): Promise<void> {
+  try {
+    await klineBus.request('training', 'setPrefs', patch)
+  } catch (e) {
+    console.error('training.setPrefs 失败', e)
+  }
+}
+
+function onTrainKeyword(): void {
+  if (trainSearchTimer) clearTimeout(trainSearchTimer)
+  trainSearchTimer = setTimeout(() => void runTrainSearch(), 300)
+}
+
+async function runTrainSearch(): Promise<void> {
+  const kw = trainKeyword.value.trim()
+  if (!kw) {
+    trainResults.value = []
+    return
+  }
+  try {
+    const s = (await klineBus.request('training', 'search', { keyword: kw })) as Record<string, unknown>
+    trainResults.value = (Array.isArray(s.results) ? s.results : []) as TrainingSearchResult[]
+  } catch (e) {
+    console.error('training.search 失败', e)
+  }
+}
+
+/** 随机抽取：百分比路径响应直接带结果；金额路径 queued 等 changed(picked/pickFailed) */
+function pickRandomTarget(): void {
+  trainError.value = ''
+  void klineBus.request('training', 'pickRandom', {
+    category: trainCategory.value,
+    groupID: trainCategory.value === '我的分组' ? (trainGroupID.value || null) : null,
+    accountType: trainAccountType.value,
+    capital: trainAccountType.value === 'fixedAmount'
+      ? Number.parseFloat(trainCapitalText.value.replace(/[^0-9.]/g, '')) || null
+      : null,
+  }).then((data) => {
+    const d = data as unknown as TrainingPickResult | undefined
+    if (d?.file) void applyTrainPick(d)
+  }).catch((e) => {
+    trainError.value = String((e as Error).message ?? e).replace(/^invalid_payload: /, '')
+  })
+}
+
+/** 抽中/选中后：拉日期区间并设起始日（抽中自带起始日；搜索选中随机一个自然日） */
+async function applyTrainPick(pick: { file: string; name: string; code: string; startDate?: number }): Promise<void> {
+  try {
+    const a = (await klineBus.request('training', 'anchor', { file: pick.file })) as unknown as TrainingAnchorResult
+    trainSelected.value = { file: pick.file, name: pick.name, code: pick.code }
+    trainRange.value = { min: a.minDate ?? 0, max: a.maxDate ?? 0, trainable: a.trainable }
+    if (a.trainable) {
+      if (pick.startDate) trainStartDate.value = pick.startDate
+      else randomizeTrainDate()
+      trainDateInput.value = trainStartDate.value ? ymd(trainStartDate.value) : ''
+    } else {
+      trainStartDate.value = null
+      trainDateInput.value = ''
+    }
+  } catch (e) {
+    console.error('training.anchor 失败', e)
+  }
+}
+
+function selectTrainTarget(r: TrainingSearchResult): void {
+  trainError.value = ''
+  trainKeyword.value = ''
+  trainResults.value = []
+  void applyTrainPick(r)
+}
+
+/** [min, max] 自然日随机（对齐原生 randomDate） */
+function randomizeTrainDate(): void {
+  const r = trainRange.value
+  if (!r?.trainable || r.min <= 0 || r.max <= 0) return
+  const lower = ymdToDate(r.min)
+  const upper = ymdToDate(r.max)
+  const days = Math.round((upper.getTime() - lower.getTime()) / 86_400_000)
+  const offset = days > 0 ? Math.floor(Math.random() * (days + 1)) : 0
+  const picked = new Date(lower.getTime() + offset * 86_400_000)
+  trainStartDate.value = dateToYmdInt(picked)
+  trainDateInput.value = ymd(trainStartDate.value)
+}
+
+function ymdToDate(v: number): Date {
+  const s = String(v)
+  return new Date(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)))
+}
+
+function dateToYmdInt(d: Date): number {
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+}
+
+/** date input 变更 → 起始日（钳制到区间内） */
+watch(trainDateInput, (text) => {
+  const v = ymdInt(text)
+  if (!v) return
+  const r = trainRange.value
+  if (r && r.min > 0 && r.max > 0) {
+    trainStartDate.value = Math.min(Math.max(v, r.min), r.max)
+  } else {
+    trainStartDate.value = v
+  }
+})
+
+function startTraining(): void {
+  if (!trainSelected.value || !trainStartDate.value) return
+  trainError.value = ''
+  void klineBus.request('training', 'begin', {
+    file: trainSelected.value.file,
+    startDate: trainStartDate.value,
+    accountType: trainAccountType.value,
+    capital: trainAccountType.value === 'fixedAmount'
+      ? Number.parseFloat(trainCapitalText.value.replace(/[^0-9.]/g, '')) || null
+      : null,
+    tradeMode: trainTradeMode.value,
+  }).catch((e) => {
+    trainError.value = String((e as Error).message ?? e).replace(/^invalid_payload: /, '')
+  })
+}
+
+function clearTrainTarget(): void {
+  trainSelected.value = null
+  trainRange.value = null
+  trainStartDate.value = null
+  trainDateInput.value = ''
+}
+
+function handleTrainingChanged(payload: Record<string, unknown> | undefined): void {
+  const reason = String(payload?.['reason'] ?? '')
+  if (reason === 'begun') {
+    // 已开训：关面板进训练态（训练图表/快捷面板/回放由原生接管）
+    close()
+  } else if (reason === 'beginFailed') {
+    trainError.value = String(payload?.['message'] ?? '')
+  } else if (reason === 'beginReselect') {
+    trainReselectMessage.value = String(payload?.['message'] ?? '')
+    trainReselectOpen.value = true
+  } else if (reason === 'picked') {
+    void applyTrainPick(payload as unknown as { file: string; name: string; code: string; startDate?: number })
+  } else if (reason === 'pickFailed') {
+    trainError.value = String(payload?.['message'] ?? '')
+  }
+}
+
 // ===== 打开路由（sheet.open 事件） =====
 async function handleSheetOpen(payload: Record<string, unknown> | undefined): Promise<void> {
   const name = typeof payload?.name === 'string' ? payload.name : null
@@ -797,6 +1155,12 @@ async function handleSheetOpen(payload: Record<string, unknown> | undefined): Pr
   if (name === 'mainIndicators' || name === 'subIndicators') {
     activeSlotKey.value = typeof payload?.slot === 'string' ? payload.slot : null
     await pullIndicators()
+  }
+  if (name === 'training') {
+    trainError.value = ''
+    trainResults.value = []
+    trainKeyword.value = ''
+    await pullTrainingSetup()
   }
 }
 
@@ -861,6 +1225,7 @@ function pick(r: ChartSearchResult): void {
 onMounted(async () => {
   await klineBus.detect()
   klineBus.on('sheet.open', (ev) => void handleSheetOpen(ev.payload))
+  klineBus.on('training.changed', (ev) => handleTrainingChanged(ev.payload))
   // 浮层就绪拉取：sheet.open 事件可能早于本 WebView 创建/加载完成发出（首次打开时序）
   // → 事件丢失面板永不渲染；就绪后主动向宿主拉取当前待展示弹层
   try {
@@ -878,6 +1243,238 @@ onMounted(async () => {
   position: relative;
   background: transparent;
 }
+
+/* ===== 训练设置浮层（居中卡片，对齐原生 TrainingSetupSheet） ===== */
+.train-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 48px));
+  height: min(62vh, 520px);
+  min-height: 200px;
+  background: var(--k-bg-secondary);
+  border-radius: 20px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.train-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 4px 10px 16px;
+  flex-shrink: 0;
+}
+
+.train-x {
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: none;
+  color: var(--k-text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.train-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px;
+  border-top: 0.5px solid var(--k-divider, #c6c6c8);
+  border-bottom: 0.5px solid var(--k-divider, #c6c6c8);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  border: none;
+  background: var(--k-bg);
+  color: var(--k-text);
+  font-size: 13px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 16px;
+  cursor: pointer;
+}
+
+.chip.on {
+  background: var(--k-accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.train-capital {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 2px;
+}
+
+.train-capital-input {
+  width: 170px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: var(--k-bg);
+  color: var(--k-text);
+  font-size: 14px;
+  padding: 0 10px;
+  outline: none;
+}
+
+.train-target-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.train-target {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--k-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.train-target.none {
+  font-weight: 400;
+  color: var(--k-text-secondary);
+}
+
+.train-random {
+  border: none;
+  background: none;
+  color: var(--k-accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.train-random:disabled { color: var(--k-text-tertiary); cursor: default; }
+
+.train-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  background: var(--k-bg);
+  border-radius: 10px;
+  padding: 0 10px;
+}
+
+.train-search-input {
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--k-text);
+  font-size: 14px;
+  outline: none;
+}
+
+.train-search-x {
+  border: none;
+  background: none;
+  color: var(--k-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.train-results {
+  background: var(--k-bg);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.train-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 0.5px solid var(--k-divider, #c6c6c8);
+  cursor: pointer;
+}
+
+.train-result-row:last-child { border-bottom: none; }
+
+.train-untrainable {
+  margin-left: auto;
+  font-size: 11px;
+  color: #ff9500;
+}
+
+.train-check {
+  margin-left: auto;
+  color: var(--k-accent);
+  font-size: 12px;
+}
+
+.train-date-input {
+  width: 100%;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: var(--k-bg);
+  color: var(--k-text);
+  font-size: 14px;
+  padding: 0 10px;
+  outline: none;
+  margin-top: 4px;
+}
+
+.train-error {
+  font-size: 12px;
+  color: #ee0a24;
+  padding: 8px 0 0;
+}
+
+.train-footer {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  flex-shrink: 0;
+}
+
+.train-cancel {
+  flex: 1;
+  height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: var(--k-bg);
+  color: var(--k-text);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.train-start {
+  flex: 1;
+  height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: var(--k-accent);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.train-start:disabled {
+  background: var(--k-bg);
+  color: var(--k-text-tertiary);
+  cursor: default;
+}
+
 .panel-mask {
   position: absolute;
   inset: 0;

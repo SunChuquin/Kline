@@ -39,7 +39,8 @@ private enum TrainingCategory: String, CaseIterable, Identifiable {
 
 // MARK: - 日期工具（YYYYMMDD ↔ Date；固定用 Calendar.current 避免时区偏差）
 
-private enum TrainingDateMath {
+/// 训练日期工具（internal：TrainingBridge 的搜索/随机抽取/起始区间判定复用同一口径）
+enum TrainingDateMath {
     /// YYYYMMDD → 当日 0 点 Date
     static func date(fromInt v: Int) -> Date? {
         let y = v / 10000

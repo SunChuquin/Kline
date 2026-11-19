@@ -121,6 +121,19 @@
 //   backtest.run      {days, initialCapital, pool, executeNextOpen, includeEntry} → {queued}
 //                                                           发起回测（pool: market|favorites；period 固定日线；单任务，重跑先失效旧轮）
 //   backtest.cancel   {} → {}                               取消回测（幂等；cancelled 后 Web 自动关页回策略详情，对齐原生）
+//   training.setup.snapshot {} → TrainingSetupSnapshot       训练设置浮层快照（上次偏好 + 自选分组清单）
+//   training.setPrefs  {accountType?, capitalText?, tradeMode?} → {}   偏好写回（幂等，对齐原生 @AppStorage 持久化）
+//   training.search    {keyword} → {results}                 标的搜索（searchMeta 同口径，最多 20 条，带可训练标记）
+//   training.pickRandom {category, groupID?, accountType, capital?} → {file, name, code, startDate}
+//                                                           随机抽取（可训练池内；金额账户只在「2 手买得起」的标的里挑，引擎预检）
+//   training.anchor    {file} → {minDate, maxDate, trainable}  选中标的的日期区间与可训练性（firstDate ~ 最新库日-65 天）
+//   training.begin     {file, startDate, accountType, capital?, tradeMode} → {queued}
+//                                                           开始训练（金额账户原生预检 2 手可买；结果经 changed 推送：
+//                                                           begun=已开训→Web 关面板进训练态；beginFailed/beginReselect=文案）
+//   training.records.snapshot {} → TrainingRecordsSnapshot  训练记录快照（会话列表倒序）
+//   training.recordDetail {id} → TrainingRecordDetail       单会话明细（成交/条件单/预警；条件单文案经引擎投影，未就绪为占位）
+//   training.deleteRecord {id} → {}                         删除单条训练记录
+//   training.clearRecords {} → {}                           清空全部训练记录
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -135,6 +148,7 @@
 //   update.changed    {reason}             本地更新状态变化（reason: server|remote|engine|watchlist|gap|baselineReady）
 //   lab.changed       {reason}             引擎实验室状态/输出变化（reason: status|output|progress；节流 ~0.2s 合并）
 //   backtest.changed  {reason}             回测 phase/进度变化（reason: phase|progress；节流 ~0.25s 合并）
+//   training.changed  {reason}             训练状态变化（reason: begun|beginFailed|beginReselect|records|projection）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -609,6 +623,106 @@ export interface BacktestSnapshot {
   result: BacktestResultSnap | null
 }
 
+// ===== P2-6c-3 训练（training） =====
+
+/** training.setup.snapshot 偏好（上次选择持久化，对齐原生 @AppStorage） */
+export interface TrainingPrefsSnap {
+  accountType: 'percent' | 'fixedAmount'
+  capitalText: string
+  tradeMode: 'sameDayClose' | 'nextDayClose'
+}
+
+/** training.setup.snapshot 响应（训练设置浮层） */
+export interface TrainingSetupSnapshot {
+  prefs: TrainingPrefsSnap
+  /** 自选手动分组清单（「我的分组」分类 chips） */
+  groups: { id: string; name: string }[]
+}
+
+/** training.search 结果行（trainable = firstDate ≤ 最新库日-65 天，可开训） */
+export interface TrainingSearchResult {
+  file: string
+  name: string
+  code: string
+  trainable: boolean
+}
+
+/** training.pickRandom 成功结果（startDate = YYYYMMDD，实际交易日由 begin 吸附） */
+export interface TrainingPickResult {
+  file: string
+  name: string
+  code: string
+  startDate: number
+}
+
+/** training.anchor 响应（选中标的的日期区间，自然日随机在此区间内做） */
+export interface TrainingAnchorResult {
+  minDate: number | null
+  maxDate: number | null
+  trainable: boolean
+}
+
+/** training.records.snapshot 会话行（日期格式化在 Web 端做 YYYYMMDD→YYYY-MM-DD） */
+export interface TrainingSessionSnap {
+  id: string
+  name: string
+  code: string
+  startDate: number
+  endDate: number | null
+  tradeCount: number
+  status: 'running' | 'finished'
+  /** 创建时间文案（原生格式化 yyyy-MM-dd HH:mm） */
+  createdAtText: string
+}
+
+/** training.records.snapshot 响应 */
+export interface TrainingRecordsSnapshot {
+  sessions: TrainingSessionSnap[]
+}
+
+/** training.recordDetail 成交行（数值原样；pnl 仅卖出非空） */
+export interface TrainingTradeSnap {
+  seq: number
+  direction: 'buy' | 'sell'
+  /** B / S / T（做 T） */
+  mark: 'B' | 'S' | 'T'
+  tradeDate: number
+  price: number
+  qty: number
+  amount: number
+  fee: number
+  pnl: number | null
+  /** 触发来源文案（手动 / 条件单·类型，原生拼好） */
+  triggerText: string
+  note: string
+}
+
+/** training.recordDetail 条件单行（summary/validity 经引擎投影，未就绪为「…」占位） */
+export interface TrainingCondSnap {
+  kindTitle: string
+  statusTitle: string
+  alertOnly: boolean
+  createdDate: number
+  summary: string
+  validity: string
+  lastMessage: string
+}
+
+/** training.recordDetail 预警行 */
+export interface TrainingAlertSnap {
+  tradeDate: number
+  price: number
+  message: string
+}
+
+/** training.recordDetail 响应 */
+export interface TrainingRecordDetail {
+  session: TrainingSessionSnap
+  trades: TrainingTradeSnap[]
+  conds: TrainingCondSnap[]
+  alerts: TrainingAlertSnap[]
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -641,6 +755,8 @@ export const KnownActions = {
            'checkEngine', 'installEngine', 'syncNow', 'runGapBackfill', 'queryBaselineMissing'],
   lab: ['snapshot', 'refresh', 'download', 'install', 'loadEngine', 'runExp', 'cleanDownloads', 'exportCrash'],
   backtest: ['snapshot', 'run', 'cancel'],
+  training: ['setup.snapshot', 'setPrefs', 'search', 'pickRandom', 'anchor', 'begin',
+             'records.snapshot', 'recordDetail', 'deleteRecord', 'clearRecords'],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -658,6 +774,7 @@ export const KnownEvents = {
   updateChanged: 'update.changed',
   labChanged: 'lab.changed',
   backtestChanged: 'backtest.changed',
+  trainingChanged: 'training.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

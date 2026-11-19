@@ -77,7 +77,7 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "favorites.changed", "market.changed",
                                         "home.changed", "sim.changed", "sheet.open",
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
-                                        "backtest.changed"]
+                                        "backtest.changed", "training.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -473,5 +473,91 @@ final class WebBridgeProtocolTests: XCTestCase {
         XCTAssertNotNil((payload["initialCapital"] as? NSNumber)?.doubleValue, "缺 initialCapital")
         XCTAssertNotNil(payload["executeNextOpen"] as? Bool, "缺 executeNextOpen")
         XCTAssertNotNil(payload["includeEntry"] as? Bool, "缺 includeEntry")
+    }
+
+    /// training.setup.snapshot 响应形状锁定（P2-6c-3 训练设置浮层）：偏好 + 分组
+    func testTrainingSetupShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_training_setup_snapshot"
+        }, "fixtures 缺 training.setup.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["prefs", "groups"] { XCTAssertNotNil(data[key], "training.setup.snapshot 缺 \(key)") }
+        let prefs = try XCTUnwrap(data["prefs"] as? [String: Any])
+        for key in ["accountType", "capitalText", "tradeMode"] {
+            XCTAssertNotNil(prefs[key], "training prefs 缺 \(key)")
+        }
+        let accountType = try XCTUnwrap(prefs["accountType"] as? String)
+        XCTAssertNotNil(TrainAccountType(rawValue: accountType), "非法训练账户类型 \(accountType)")
+        let tradeMode = try XCTUnwrap(prefs["tradeMode"] as? String)
+        XCTAssertNotNil(TrainTradeMode(rawValue: tradeMode), "非法交易模式 \(tradeMode)")
+        let groups = try XCTUnwrap(data["groups"] as? [[String: Any]])
+        for g in groups {
+            XCTAssertNotNil(g["id"], "分组缺 id")
+            XCTAssertNotNil(g["name"], "分组缺 name")
+        }
+    }
+
+    /// training.begin payload 形状锁定：账户类型/交易模式可映射，日期 YYYYMMDD
+    func testTrainingBeginShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "training" && ($0["action"] as? String) == "begin"
+        }, "fixtures 缺 training.begin 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        XCTAssertNotNil(payload["file"] as? String, "缺 file")
+        let start = try XCTUnwrap((payload["startDate"] as? NSNumber)?.intValue)
+        XCTAssertTrue(String(start).count == 8, "startDate 必须是 YYYYMMDD（实际 \(start)）")
+        let accountType = try XCTUnwrap(payload["accountType"] as? String)
+        XCTAssertNotNil(TrainAccountType(rawValue: accountType), "非法训练账户类型 \(accountType)")
+        let tradeMode = try XCTUnwrap(payload["tradeMode"] as? String)
+        XCTAssertNotNil(TrainTradeMode(rawValue: tradeMode), "非法交易模式 \(tradeMode)")
+    }
+
+    /// training.records.snapshot 响应形状锁定：会话行 + 明细三段
+    func testTrainingRecordsShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_training_records_snapshot"
+        }, "fixtures 缺 training.records.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        let sessions = try XCTUnwrap(data["sessions"] as? [[String: Any]])
+        for s in sessions {
+            for key in ["id", "name", "code", "startDate", "endDate", "tradeCount", "status", "createdAtText"] {
+                XCTAssertNotNil(s[key], "训练会话行缺 \(key)")
+            }
+            let status = try XCTUnwrap(s["status"] as? String)
+            XCTAssertTrue(["running", "finished"].contains(status), "非法会话状态 \(status)")
+        }
+
+        let detail = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_training_record_detail"
+        }, "fixtures 缺 training.recordDetail 响应样例")
+        let dData = try XCTUnwrap(detail["data"] as? [String: Any])
+        for key in ["session", "trades", "conds", "alerts"] {
+            XCTAssertNotNil(dData[key], "training.recordDetail 缺 \(key)")
+        }
+        let trades = try XCTUnwrap(dData["trades"] as? [[String: Any]])
+        for t in trades {
+            for key in ["seq", "direction", "mark", "tradeDate", "price", "qty",
+                        "amount", "fee", "pnl", "triggerText", "note"] {
+                XCTAssertNotNil(t[key], "训练成交行缺 \(key)")
+            }
+        }
+        let conds = try XCTUnwrap(dData["conds"] as? [[String: Any]])
+        for c in conds {
+            for key in ["kindTitle", "statusTitle", "alertOnly", "createdDate", "summary", "validity", "lastMessage"] {
+                XCTAssertNotNil(c[key], "训练条件单行缺 \(key)")
+            }
+        }
+        let alerts = try XCTUnwrap(dData["alerts"] as? [[String: Any]])
+        for a in alerts {
+            for key in ["tradeDate", "price", "message"] {
+                XCTAssertNotNil(a[key], "训练预警行缺 \(key)")
+            }
+        }
     }
 }

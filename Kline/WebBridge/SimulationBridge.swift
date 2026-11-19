@@ -117,7 +117,8 @@ final class SimulationBridge: ObservableObject {
             SheetBridge.shared.openFormulaCenter(.strategy)
             return WebBridgeResponse.ok(request.id)
         case "openTrainingRecords":
-            shared.model.showTrainingRecords = true
+            // P2-6c-3：训练记录管理页迁 Web 全屏页（showTrainingRecords 原生浮层保留可回退）
+            TrainingBridge.shared.openRecords()
             return WebBridgeResponse.ok(request.id)
         case "exportLogs":
             return exportLogs(request)
@@ -372,7 +373,13 @@ struct SimWebShellView: View {
             // 条件单呈现（管理页 / 编辑器单一收敛；iOS 15 多 fullScreenCover 相互压制）
             .simCondEntryPresentation($simModel.condPresentation,
                                       accountID: SimStore.shared.queryAccountID)
-            // 训练记录管理页
+            // 训练记录管理页（P2-6c-3 起入口走 WebPageBridge；本原生浮层保留可回退）
             .simTrainingRecordPresentation($simModel.showTrainingRecords)
+            // P2-6c-3：全屏 Web 页宿主（训练记录页；与 HomeWebShellView 同款——
+            // 同一时刻只有当前 Tab 的宿主在 hierarchy，单 WebView 实例）
+            .overlay {
+                WebFullscreenPageHost()
+                    .zIndex(1002)
+            }
     }
 }

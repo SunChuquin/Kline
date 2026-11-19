@@ -229,8 +229,10 @@ final class HomeBridge: ObservableObject {
         case .pythonLab:
             WebPageBridge.shared.open("pythonLab")
         case .training:
-            // 训练要盖住底部导航栏 → 走根层路由（与原生容器同机制）
-            TrainingSetupRouter.shared.isPresented = true
+            // P2-6c-3：训练设置浮层迁 Web（sheet.open("training")，SheetPage 居中卡片面板）。
+            // closeHandler 回写 TrainingSetupRouter（保持 false，原生浮层不出现）；原生链路保留可回退
+            SheetBridge.shared.closeHandler = { _ in TrainingSetupRouter.shared.isPresented = false }
+            SheetBridge.shared.sync("training", active: true)
         case .profile:
             bridge.isProfilePresented = true
         case .layoutEditor:
