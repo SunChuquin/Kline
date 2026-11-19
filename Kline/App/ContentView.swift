@@ -201,11 +201,26 @@ struct ContentView: View {
                             .hidesDuringCursorAutoMove()
                 }
                 if isAccessoryPanelPresented {
-                    FloatingAccessoryPanel {
-                        withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = false }
+                    // P2-6a：非训练态快捷面板迁 Web（sheet.open("quick") → 常驻浮层 WebView）；
+                    // 训练态保留原生面板（训练闭环属 P2-6c Training 批次）
+                    if TrainingSessionController.shared.isActive {
+                        FloatingAccessoryPanel {
+                            withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = false }
+                        }
+                        .transition(.opacity)
+                    } else {
+                        Color.clear
+                            .onAppear {
+                                SheetBridge.shared.closeHandler = { _ in
+                                    withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = false }
+                                }
+                                SheetBridge.shared.sync("quick", active: true)
+                            }
                     }
-                    .transition(.opacity)
                 }
+                // P2-6a：弹层浮层宿主根层常驻（从 KlineDetailView 迁入——快捷面板全 App 可见；
+                // 设置/搜索/指标面板同 Host 复用浮层 WebView；置于 overlay 链尾盖过详情页与悬浮球）
+                SheetWebOverlayHost()
             }
         )
         // 异形屏横屏适配（全 App 唯一一处）：仅刘海侧保留安全区 inset，

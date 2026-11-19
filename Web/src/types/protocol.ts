@@ -82,6 +82,14 @@
 //   chart.indicators.resetBuiltin {} → {}                    重置内置指标（restoreAllBuiltin）
 //   chart.indicators.openSystemEditor {isMain, subId?} → {}  关面板 + 桥接原生系统指标公式编辑器
 //   chart.indicators.openCustomEditor {target} → {}          关面板 + 桥接原生自定义指标编辑器
+//   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
+//   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
+//   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面
+//   quick.backToList {} → {}                                 票面态返回列表态
+//   quick.cancelAll {} → {count}                             一键撤单（当前账户口径）
+//   quick.closeAll {} → {count}                              一键清仓（详情标的）
+//   trade.submit {accountID, metaID, direction, priceType, price?, qty} → {orderID}
+//                                                            下单提交（SimStore.submit 精确校验，拒绝 fail 返回中文文案）
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -387,6 +395,8 @@ export const KnownActions = {
           'indicators.snapshot', 'indicators.toggleMain', 'indicators.selectSub',
           'indicators.activateMainCustom', 'indicators.resetBuiltin',
           'indicators.openSystemEditor', 'indicators.openCustomEditor'],
+  quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
+  trade: ['submit'],
 } as const
 
 // 已约定的 event 清单（协议 v2）

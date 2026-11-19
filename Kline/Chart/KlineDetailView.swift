@@ -352,12 +352,9 @@ struct KlineDetailView: View {
                         .offset(y: infoBarTopOffset)
                 }
             }
-            .overlay {
-            // P2-5：弹层浮层宿主**常驻**（设置/搜索/指标面板共用一个浮层 WebView 实例，
-            // 首次弹层后 opacity 切换复用；面板类型切换不再销毁重建 WebView）
-            SheetWebOverlayHost()
-                .zIndex(30)
-            }
+            // P2-6a：弹层浮层宿主已迁至 ContentView 根层常驻（快捷面板全 App 可见），
+            // 本页只保留弹层状态机的 onChange 双向同步（设置/搜索/指标面板共用浮层）
+            .overlay { }
             .onPreferenceChange(TopBarHeightPreferenceKey.self) { h in
                 if h > 0 { measuredTopBarHeight = h }
             }

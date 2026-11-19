@@ -94,4 +94,40 @@ final class SheetOverlayUITests: XCTestCase {
         XCTAssertFalse(panelTitle.waitForExistence(timeout: 5), "面板关闭后标题仍可达")
         XCTAssertTrue(app.buttons["kline.backButton"].exists, "关闭后应仍在 K 线详情页")
     }
+
+    /// P2-6a 快捷面板链路：悬浮球 → Web 快捷面板（详情态）→ 票面买入提交 → 成功反馈 → 关闭
+    func testQuickPanelTicketSubmit() throws {
+        let app = XCUIApplication.launchingClean()
+        app.launch()
+
+        openChart(app)
+
+        // 悬浮球（详情页打开 + 图表首屏加载完成后延迟 1 秒淡入；干净启动引擎首算可达 30-60s）
+        // ⚠️ 树中类型是 Other（SwiftUI 组合图形映射），不是 Button——用任意后代匹配
+        let accessory = app.descendants(matching: .any).matching(identifier: "accessory.button").firstMatch
+        XCTAssertTrue(accessory.waitForExistence(timeout: 90), "悬浮球未出现（图表加载超时）")
+        sleep(2)   // 等延迟淡入完成
+        accessory.tap()
+
+        // Web 快捷面板出现（详情态）
+        let panelTitle = app.staticTexts["快捷面板"]
+        XCTAssertTrue(panelTitle.waitForExistence(timeout: 15), "Web 快捷面板未出现")
+        XCTAssertTrue(app.staticTexts["委托价"].waitForExistence(timeout: 10), "票面未渲染")
+
+        // 默认数量 100（seed 账户资金充足）→ 点买入提交（按钮 label = "买入 限价"）
+        let submit = app.buttons["买入 限价"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 10), "买入提交按钮未出现")
+        submit.tap()
+
+        // 成功反馈（toast 文案）
+        XCTAssertTrue(app.staticTexts["委托已提交"].waitForExistence(timeout: 10),
+                      "下单成功反馈未出现（提交链路回归）")
+
+        // 关闭面板
+        let close = app.buttons["关闭"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "关闭按钮未出现")
+        close.tap()
+        XCTAssertFalse(panelTitle.waitForExistence(timeout: 5), "面板关闭后标题仍可达")
+        XCTAssertTrue(app.buttons["kline.backButton"].exists, "关闭后应仍在 K 线详情页")
+    }
 }

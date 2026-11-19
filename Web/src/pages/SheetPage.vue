@@ -223,12 +223,145 @@
         </div>
       </div>
     </template>
+    <!-- 快捷面板（悬浮球，P2-6a：列表态 / 详情态票面 / picked 票面三视图） -->
+    <div v-if="activeName === 'quick'" class="panel-mask" @click="closeQuick">
+      <div class="panel quick-panel" @click.stop>
+        <div class="panel-header">
+          <span class="panel-title">快捷面板</span>
+          <button class="panel-done" @click="closeQuick">关闭</button>
+        </div>
+        <div class="panel-body" v-if="quick">
+          <template v-if="quick.view === 'detail' || quick.view === 'picked'">
+            <!-- 详情态 / picked 票面态：账户条 + 行情头 + 票面 + 持仓块 + 快捷动作 -->
+            <div v-if="!quick.detail?.hasAccount" class="block-empty">请先选择有效的模拟账户（模拟页新建）</div>
+            <template v-else>
+              <div class="qk-meta-row">
+                <span class="qk-acc" @click="accPickerOpen = true">{{ quick.selectedName }} ▾</span>
+                <span class="qk-cash">可用 {{ fmtAmount(quick.detail.cash) }}</span>
+                <span class="qk-phase">{{ quick.detail.tradingPhase }}</span>
+              </div>
+              <div class="qk-quote" v-if="quick.detail.meta">
+                <div class="q-left">
+                  <div class="q-name">{{ quick.detail.meta.name }}</div>
+                  <div class="q-code">{{ quick.detail.meta.code }}</div>
+                </div>
+                <span class="q-price big" :class="pctClass(quick.detail.meta)">{{ fmtPrice(quick.detail.meta) }}</span>
+                <span class="pct-pill" :class="pillClass(quick.detail.meta)">{{ fmtPct(quick.detail.meta) }}</span>
+              </div>
+              <!-- 票面（Web 本地表单，提交一次写回） -->
+              <div class="ticket">
+                <div class="ticket-seg">
+                  <button class="seg buy" :class="{ on: ticket.direction === 'buy' }" @click="ticket.direction = 'buy'">买入</button>
+                  <button class="seg sell" :class="{ on: ticket.direction === 'sell' }" @click="ticket.direction = 'sell'">卖出</button>
+                  <button class="seg" @click="ticket.priceType = ticket.priceType === 'limit' ? 'market' : 'limit'">
+                    {{ ticket.priceType === 'limit' ? '限价' : '市价' }}
+                  </button>
+                </div>
+                <label class="ticket-row">
+                  <span>委托价</span>
+                  <input
+                    v-model="ticket.priceText"
+                    class="ticket-input"
+                    inputmode="decimal"
+                    :disabled="ticket.priceType === 'market'"
+                    :placeholder="ticket.priceType === 'market' ? '市价' : String(ticketLastPrice ?? '')"
+                  />
+                  <span class="unit">元</span>
+                </label>
+                <label class="ticket-row">
+                  <span>数量</span>
+                  <input v-model="ticket.qtyText" class="ticket-input" inputmode="numeric" placeholder="0" />
+                  <span class="unit">股</span>
+                </label>
+                <div class="pos-chips">
+                  <button v-for="r in [0.25, 0.5, 0.75, 1]" :key="r" class="pos-chip" @click="applyPosition(r)">{{ r * 100 }}%</button>
+                </div>
+                <div v-if="ticketError" class="ticket-error">{{ ticketError }}</div>
+                <button
+                  class="submit-btn"
+                  :class="ticket.direction === 'buy' ? 'buy' : 'sell'"
+                  @click="submitTicket"
+                >{{ ticket.direction === 'buy' ? '买入' : '卖出' }} {{ ticket.priceType === 'limit' ? '限价' : '市价' }}</button>
+              </div>
+              <div class="pos-block" v-if="quick.detail.ticket?.position">
+                <div class="qk-meta-row">
+                  <span>持仓 {{ fmtShares(quick.detail.ticket.position.qty) }} · 可用 {{ fmtShares(quick.detail.ticket.position.availableQty) }}</span>
+                  <span :class="profitClass(quick.detail.ticket.position.profit)">
+                    {{ fmtSigned0(quick.detail.ticket.position.profit) }} ({{ fmtPctRaw(quick.detail.ticket.position.profitPct * 100) }})
+                  </span>
+                </div>
+              </div>
+              <div class="qk-actions" v-if="quick.detail.meta">
+                <button class="tool-btn" @click="closeAll">一键清仓</button>
+              </div>
+            </template>
+          </template>
+
+          <template v-else-if="quick.view === 'list' && quick.list">
+            <!-- 列表态：账户摘要 + 快捷动作 + 自选迷你列表 + 在途委托 -->
+            <div class="qk-meta-row">
+              <span class="qk-acc" @click="accPickerOpen = true">{{ quick.selectedName }} ▾</span>
+              <span class="qk-cash">总资产 {{ fmtAmount(quick.list.summary.totalAssets) }}</span>
+              <span class="qk-phase">当日 <span :class="profitClass(quick.list.summary.dayProfit)">{{ fmtSigned0(quick.list.summary.dayProfit) }}</span></span>
+            </div>
+            <div class="qk-actions">
+              <button class="tool-btn" @click="accPickerOpen = true">切换账户</button>
+              <button class="tool-btn" @click="cancelAll">一键撤单 ({{ quick.list.activeOrderCount }})</button>
+              <button class="tool-btn" @click="closeQuick">关闭面板</button>
+            </div>
+            <div class="sec-title">自选</div>
+            <div v-if="quick.list.watchlist.length === 0" class="block-empty">暂无自选</div>
+            <div v-else class="quote-rows">
+              <div v-for="q in quick.list.watchlist" :key="q.file" class="quote-row">
+                <div class="q-left">
+                  <div class="q-name">{{ q.name }}</div>
+                  <div class="q-code">{{ q.code }}</div>
+                </div>
+                <span class="q-price" :class="pctClass(q)">{{ fmtPrice(q) }}</span>
+                <span class="pct-pill" :class="pillClass(q)">{{ fmtPct(q) }}</span>
+                <button class="mini-btn buy" @click="pickTicket(q, 'buy')">买</button>
+                <button class="mini-btn sell" @click="pickTicket(q, 'sell')">卖</button>
+              </div>
+            </div>
+            <div class="sec-title">在途委托</div>
+            <div v-if="quick.list.activeOrders.length === 0" class="block-empty">暂无在途委托</div>
+            <div v-else class="mini-orders">
+              <div v-for="o in quick.list.activeOrders" :key="o.id" class="mini-order">
+                <span class="dir-tag" :class="o.direction === 'buy' ? 'tag-buy' : 'tag-sell'">{{ o.direction === 'buy' ? '买入' : '卖出' }}</span>
+                <span class="q-name">{{ o.name }}</span>
+                <span class="q-code">{{ fmtShares(o.qty) }} 股 · {{ o.status }}</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- 账户切换（快捷面板内 chips） -->
+    <van-action-sheet
+      v-model:show="accPickerOpen"
+      :actions="accActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onAccSelect"
+    />
+
+    <!-- 卖出二次确认 -->
+    <van-dialog
+      v-model:show="sellConfirmOpen"
+      :title="`确认卖出 ${ticketMetaName} ${fmtShares(ticketQty)} 股？`"
+      show-cancel-button
+      confirm-button-text="确认卖出"
+      confirm-button-color="#ee0a24"
+      @confirm="doSubmit"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { klineBus } from '../bridge/klineBus'
+import { showToast } from 'vant'
 import type {
   ChartOption,
   ChartSearchResult,
@@ -246,6 +379,48 @@ const activeSlotKey = ref<string | null>(null)
 
 const keyword = ref('')
 const results = ref<ChartSearchResult[]>([])
+
+// ===== 共享格式化（对齐原生 MarketRow.render / SimFormat；红涨绿跌） =====
+function fmtPrice(q: QuickQuote): string
+function fmtPrice(v: number): string
+function fmtPrice(arg: QuickQuote | number): string {
+  const v = typeof arg === 'number' ? arg : arg.price
+  return v === null || v === undefined ? '—' : v.toFixed(2)
+}
+
+function fmtPct(q: QuickQuote): string {
+  return q.pct === null || q.pct === undefined ? '—' : fmtPctRaw(q.pct)
+}
+
+function fmtPctRaw(v: number): string {
+  return `${v > 0 ? '+' : ''}${v.toFixed(2)}%`
+}
+
+function fmtAmount(v: number): string {
+  return Math.round(v).toLocaleString('en-US')
+}
+
+function fmtShares(v: number): string {
+  return v.toLocaleString('en-US')
+}
+
+function fmtSigned0(v: number): string {
+  return `${v > 0 ? '+' : ''}${Math.round(v).toLocaleString('en-US')}`
+}
+
+function pctClass(q: QuickQuote): string {
+  const p = q.pct ?? 0
+  return p > 0 ? 'up' : p < 0 ? 'down' : ''
+}
+
+function pillClass(q: QuickQuote): string {
+  const p = q.pct ?? 0
+  return p > 0 ? 'pill-up' : p < 0 ? 'pill-down' : 'pill-flat'
+}
+
+function profitClass(v: number): string {
+  return v < 0 ? 'down' : 'up'
+}
 
 const pickerKind = ref<'period' | 'chartStyle' | 'viewCount' | null>(null)
 const pickerOpen = computed({
@@ -361,6 +536,153 @@ function onPickerSelect(action: { name: string; value: string }): void {
   }
 }
 
+// ===== 快捷面板（P2-6a：悬浮球；三视图 + Web 票面） =====
+interface QuickAccount { id: string; name: string; badge: string; colorHex: string }
+interface QuickQuote { file: string; code: string; name: string; price: number | null; pct: number | null }
+interface QuickSnapshot {
+  trainingActive: boolean
+  view: 'detail' | 'picked' | 'list'
+  accounts: QuickAccount[]
+  selectedName: string
+  detail: {
+    meta: QuickQuote
+    accountName: string
+    cash: number
+    tradingPhase: string
+    hasAccount: boolean
+    ticket: { cash: number; lastPrice: number | null; position: { qty: number; availableQty: number; costPrice: number; lastPrice: number; profit: number; profitPct: number; sellableQty: number } | null } | null
+  } | null
+  list: {
+    summary: { totalAssets: number; dayProfit: number; totalProfit: number }
+    activeOrderCount: number
+    watchlist: QuickQuote[]
+    activeOrders: { id: string; name: string; direction: 'buy' | 'sell'; status: string; qty: number }[]
+  } | null
+}
+
+const quick = ref<QuickSnapshot | null>(null)
+const accPickerOpen = ref(false)
+const sellConfirmOpen = ref(false)
+const ticketError = ref('')
+
+/** 票面本地表单态（Web 编辑，提交一次写回；lastPrice 用于市价/默认价展示） */
+const ticket = ref({ direction: 'buy' as 'buy' | 'sell', priceType: 'limit' as 'limit' | 'market', priceText: '', qtyText: '' })
+const ticketMetaName = computed(() => quick.value?.detail?.meta.name ?? '')
+const ticketQty = computed(() => parseInt(ticket.value.qtyText || '0', 10) || 0)
+const ticketLastPrice = computed(() => quick.value?.detail?.ticket?.lastPrice ?? quick.value?.detail?.meta.price ?? null)
+const ticketCash = computed(() => quick.value?.detail?.ticket?.cash ?? 0)
+const ticketSellable = computed(() => quick.value?.detail?.ticket?.position?.availableQty ?? 0)
+
+const accActions = computed(() =>
+  (quick.value?.accounts ?? []).map((a) => ({ name: a.name, value: a.id })),
+)
+
+function onAccSelect(action: { name: string; value: string }): void {
+  void actQuick('selectAccount', { accountID: action.value })
+}
+
+/** 仓位 chips：买入按现金可买整手、卖出按可卖数量（提交时原生精确校验兜底） */
+function applyPosition(ratio: number): void {
+  const price = ticket.value.priceType === 'limit'
+    ? (parseFloat(ticket.value.priceText) || ticketLastPrice.value || 0)
+    : (ticketLastPrice.value || 0)
+  if (ticket.value.direction === 'buy') {
+    const affordable = Math.floor(((ticketCash.value * ratio) / Math.max(price, 0.01)) / 100) * 100
+    ticket.value.qtyText = String(affordable)
+  } else {
+    ticket.value.qtyText = String(Math.floor(ticketSellable.value * ratio))
+  }
+}
+
+function pickTicket(q: QuickQuote, direction: 'buy' | 'sell'): void {
+  ticket.value = { direction, priceType: 'limit', priceText: '', qtyText: '' }
+  ticketError.value = ''
+  void actQuick('pickTicket', { file: q.file, direction })
+}
+
+/** 提交前本地预检（对齐原生票面：限价需价格、整手数量），提交带卖出二次确认 */
+function submitTicket(): void {
+  const qty = ticketQty.value
+  if (ticket.value.priceType === 'limit' && !(parseFloat(ticket.value.priceText) > 0)) {
+    ticketError.value = '请输入有效的委托价'
+    return
+  }
+  if (qty <= 0) {
+    ticketError.value = '请输入委托数量'
+    return
+  }
+  ticketError.value = ''
+  if (ticket.value.direction === 'sell') {
+    sellConfirmOpen.value = true
+    return
+  }
+  void doSubmit()
+}
+
+async function doSubmit(): Promise<void> {
+  const meta = quick.value?.detail?.meta
+  const accountID = quick.value?.accounts.find((a) => a.name === quick.value?.selectedName)?.id
+  if (!meta || !accountID) {
+    ticketError.value = '请先选择有效的模拟账户'
+    return
+  }
+  try {
+    await klineBus.request('trade', 'submit', {
+      accountID,
+      metaID: '',   // 原生按 file 反查？——metaID 用 file 由桥解析：改为传 file
+      direction: ticket.value.direction,
+      priceType: ticket.value.priceType,
+      price: ticket.value.priceType === 'limit' ? parseFloat(ticket.value.priceText) : null,
+      qty: ticketQty.value,
+      file: meta.file,
+    })
+    showToast({ message: '委托已提交', duration: 1800 })
+    await pullQuick()
+  } catch (e) {
+    ticketError.value = String(e instanceof Error ? e.message : e).slice(0, 60)
+  }
+}
+
+function closeQuick(): void {
+  klineBus.request('sheet', 'close', {}).catch((e) => console.error(e))
+  activeName.value = null
+}
+
+async function actQuick(action: string, payload: Record<string, unknown>): Promise<void> {
+  try {
+    await klineBus.request('quick', action, payload)
+    await pullQuick()
+  } catch (e) {
+    showToast({ message: String(e instanceof Error ? e.message : e).slice(0, 40), duration: 1800 })
+  }
+}
+
+async function pullQuick(): Promise<void> {
+  try {
+    quick.value = ((await klineBus.request('quick', 'snapshot')) ?? {}) as unknown as QuickSnapshot
+    // 票面默认值跟随最新价（对齐原生 didEditPrice=false 时 price=lastPrice；数量默认 100）
+    const last = quick.value?.detail?.ticket?.lastPrice ?? quick.value?.detail?.meta.price ?? null
+    if (last !== null && ticket.value.priceText === '') {
+      ticket.value.priceText = String(last)
+    }
+    if (ticket.value.qtyText === '') {
+      ticket.value.qtyText = '100'
+    }
+  } catch (e) {
+    console.error('quick.snapshot 失败', e)
+  }
+}
+
+async function cancelAll(): Promise<void> {
+  await actQuick('cancelAll', {})
+  showToast({ message: '撤单请求已提交', duration: 1600 })
+}
+
+async function closeAll(): Promise<void> {
+  await actQuick('closeAll', {})
+  showToast({ message: '清仓请求已提交', duration: 1600 })
+}
+
 // ===== 打开路由（sheet.open 事件） =====
 async function handleSheetOpen(payload: Record<string, unknown> | undefined): Promise<void> {
   const name = typeof payload?.name === 'string' ? payload.name : null
@@ -388,6 +710,11 @@ async function handleSheetOpen(payload: Record<string, unknown> | undefined): Pr
   if (name === 'search') {
     keyword.value = ''
     results.value = []
+  }
+  if (name === 'quick') {
+    ticket.value = { direction: 'buy', priceType: 'limit', priceText: '', qtyText: '' }
+    ticketError.value = ''
+    await pullQuick()
   }
   if (name === 'mainIndicators' || name === 'subIndicators') {
     activeSlotKey.value = typeof payload?.slot === 'string' ? payload.slot : null
@@ -796,6 +1123,206 @@ onMounted(async () => {
   color: var(--k-text-tertiary);
   font-size: 13px;
   cursor: pointer;
+}
+
+/* ===== 快捷面板（P2-6a） ===== */
+.quick-panel {
+  height: 67%;
+}
+
+.qk-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.qk-acc {
+  font-weight: 600;
+  color: var(--k-accent);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qk-cash {
+  color: var(--k-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.qk-phase {
+  color: var(--k-text-secondary);
+  flex-shrink: 0;
+}
+
+.qk-quote {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 0.5px solid var(--k-border);
+}
+
+.q-price.big {
+  font-size: 17px;
+}
+
+.qk-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.ticket {
+  border: 0.5px solid var(--k-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 4px 0;
+}
+
+.ticket-seg {
+  display: flex;
+  gap: 2px;
+  background: var(--k-bg-secondary);
+  border-radius: 7px;
+  padding: 2px;
+  margin-bottom: 8px;
+}
+
+.seg {
+  flex: 1;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--k-text-secondary);
+  font-size: 13px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.seg.buy.on {
+  background: #ff4d4f;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.seg.sell.on {
+  background: #00b578;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.ticket-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border-bottom: 0.5px solid var(--k-border);
+  font-size: 13px;
+  color: var(--k-text-secondary);
+}
+
+.ticket-input {
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--k-text);
+  font-size: 15px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  min-width: 0;
+}
+
+.ticket-input:disabled {
+  color: var(--k-text-secondary);
+}
+
+.unit {
+  color: var(--k-text-tertiary);
+  font-size: 12px;
+}
+
+.pos-chips {
+  display: flex;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.pos-chip {
+  flex: 1;
+  border: 1px solid var(--k-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--k-text-secondary);
+  font-size: 11.5px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.ticket-error {
+  font-size: 12px;
+  color: #ee0a24;
+  padding: 4px 0;
+}
+
+.submit-btn {
+  width: 100%;
+  border: none;
+  border-radius: 9px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 11px 0;
+  cursor: pointer;
+}
+
+.submit-btn.buy {
+  background: #ff4d4f;
+}
+
+.submit-btn.sell {
+  background: #00b578;
+}
+
+.pos-block {
+  border-top: 0.5px solid var(--k-border);
+}
+
+.mini-btn {
+  width: 30px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 5px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mini-btn.buy {
+  background: #ff4d4f;
+}
+
+.mini-btn.sell {
+  background: #00b578;
+}
+
+.mini-orders {
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-order {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  font-size: 12.5px;
 }
 </style>
 
