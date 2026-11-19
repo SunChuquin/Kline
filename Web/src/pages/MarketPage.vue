@@ -81,6 +81,9 @@
             class="trow"
             :class="{ pinned: row.pinned }"
             :style="{ width: totalW + 'px', height: ROW_H + 'px' }"
+            :id="`market.row-${row.code}`"
+            role="button"
+            :aria-label="`market.rowCard ${row.name}`"
             @click="openDetail(row)"
           >
             <div

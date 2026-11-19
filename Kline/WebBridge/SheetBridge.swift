@@ -43,7 +43,8 @@ final class SheetBridge: ObservableObject {
         if active {
             guard activeSheet != name else { return }
             activeSheet = name
-            WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": name])
+            // 定向推弹层浮层 WebView（Tab 宿主并存时 allObjects.last 会推错实例）
+            WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": name], route: "sheet")
             DebugLogger.shared.log("[SheetBridge] open \(name)")
         } else {
             guard activeSheet == name else { return }
@@ -75,7 +76,7 @@ final class SheetBridge: ObservableObject {
             // 数百毫秒后 didFinish）→ 事件丢失导致面板永不渲染（2026-11-19 真机白屏）。
             // Web 端 mounted 后调本动作，宿主若有待展示弹层则补推 sheet.open。
             if let name = shared.activeSheet {
-                WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": name])
+                WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": name], route: "sheet")
             }
             return WebBridgeResponse.ok(request.id)
         default:

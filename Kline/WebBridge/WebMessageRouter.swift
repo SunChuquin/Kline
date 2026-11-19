@@ -228,20 +228,36 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         })
     }
 
-    /// 事件推送（泛化入口）：推给最近就绪的页面；无就绪页面（如 PC 调试桥触发）
+    /// 事件推送（泛化入口）：默认推给最近就绪的页面；无就绪页面（如 PC 调试桥触发）
     /// 时静默跳过——pc 模式由页面回读权威状态，不依赖推送。
-    func pushEvent(_ name: String, payload: [String: Any]) {
-        guard let webView = readyWebViews.allObjects.last else { return }
+    /// - Parameter route: 传定时按 hash 路由**定向推送**（如 "sheet" 只推弹层浮层 WebView）。
+    ///   ⚠️ readyWebViews 是弱引用无序集合，多 WebView 并存（Tab 宿主 + 弹层浮层）时
+    ///   allObjects.last 不保证是最近打开的实例——2026-11-19 UITest 实测 sheet.open 被推到
+    ///   Tab 宿主导致浮层面板永不渲染；宿主专属事件必须传 route。
+    func pushEvent(_ name: String, payload: [String: Any], route: String? = nil) {
+        let targets: [WKWebView]
+        if let route {
+            targets = readyWebViews.allObjects.filter {
+                $0.url?.absoluteString.contains("#/\(route)") == true
+            }
+            if targets.isEmpty {
+                DebugLogger.shared.log("[WebBridge] 事件定向推送无目标(\(name) → #/\(route))——目标 WebView 未就绪")
+            }
+        } else {
+            targets = [readyWebViews.allObjects.last].compactMap { $0 }
+        }
         let event = WebBridgeEvent.make(name, payload: payload)
         guard let js = WebBridgeJS.dispatchCall(event) else {
             DebugLogger.shared.log("[WebBridge] 事件推送串构造失败(\(name))")
             return
         }
-        webView.evaluateJavaScript(js, completionHandler: { _, error in
-            if let error = error {
-                DebugLogger.shared.log("[WebBridge] 事件推送失败(\(name)): \(error.localizedDescription)")
-            }
-        })
+        for webView in targets {
+            webView.evaluateJavaScript(js, completionHandler: { _, error in
+                if let error = error {
+                    DebugLogger.shared.log("[WebBridge] 事件推送失败(\(name)): \(error.localizedDescription)")
+                }
+            })
+        }
     }
 
     /// 主题变化推送（偏好变化或系统外观变化时由宿主视图调用，推给全部就绪页面）
