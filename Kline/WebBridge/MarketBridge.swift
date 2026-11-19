@@ -89,16 +89,22 @@ final class MarketBridge: ObservableObject {
             .store(in: &cancellables)
 
         // 库加载完成 → 刷新行集。
-        // ⚠️ @Published 订阅时会**同步发射当前值**，而 init 执行期间 [weak self] 无法解析
-        // （对象尚未被 shared 强持有，guard let self 静默失败）→ 同步首发的 scheduleRefresh
-        // 从未执行、displayRows 恒空（2026-11-19 实测 rows=0）。故 dropFirst 只听后续变化，
-        // init 时已加载的场景在末尾显式补刷。
+        // ⚠️⚠️ 两个连环坑（2026-11-19 实测排障）：
+        // ① @Published 订阅时同步回放当前值，init 执行期间 [weak self] 解析失败会静默吞掉
+        //    首发 → dropFirst 只听后续变化，init 时已加载的场景在末尾显式补刷；
+        // ② $isLoaded 是 **willSet 语义**：sink 收到 true 时属性实际值尚未写入，
+        //    scheduleRefresh 内部 guard databaseManager.isLoaded 会看到 false 而清空返回
+        //    （MarketRowCache.prewarm 显式传 isLoaded:true 参数绕开了同款坑）→
+        //    跳到下一 runloop 再刷，届时写入已完成。
         dbm.$isLoaded
             .dropFirst()
             .sink { [weak self] loaded in
-                guard let self else { return }
-                if loaded { self.model.scheduleRefresh() }
-                self.scheduleChanged(reason: "data")
+                guard loaded else { return }
+                DispatchQueue.main.async {
+                    guard let self, DatabaseManager.shared.isLoaded else { return }
+                    self.model.scheduleRefresh()
+                    self.scheduleChanged(reason: "data")
+                }
             }
             .store(in: &cancellables)
 
