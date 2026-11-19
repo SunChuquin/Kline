@@ -62,7 +62,16 @@
     { "id": "req_sim_open_strategy", "module": "sim", "action": "openStrategyFormulas", "payload": {} },
     { "id": "req_sim_open_training", "module": "sim", "action": "openTrainingRecords", "payload": {} },
     { "id": "req_sim_export_logs", "module": "sim", "action": "exportLogs",
-      "payload": { "keyword": "买入" } }
+      "payload": { "keyword": "买入" } },
+    { "id": "req_sheet_close", "module": "sheet", "action": "close", "payload": {} },
+    { "id": "req_chart_settings_snapshot", "module": "chart", "action": "settings.snapshot", "payload": {} },
+    { "id": "req_chart_settings_set", "module": "chart", "action": "settings.set",
+      "payload": { "period": "weekly", "showGap": false } },
+    { "id": "req_chart_settings_reset", "module": "chart", "action": "settings.resetLinked", "payload": {} },
+    { "id": "req_chart_search_query", "module": "chart", "action": "search.query",
+      "payload": { "keyword": "平安" } },
+    { "id": "req_chart_search_pick", "module": "chart", "action": "search.pick",
+      "payload": { "file": "SZ#000001" } }
   ],
   "responses": [
     { "id": "req_app_ping", "ok": true, "data": { "clientTs": 123.0, "serverMs": 1763361600000 } },
@@ -181,7 +190,21 @@
     { "id": "req_sim_open_cond_manage", "ok": true, "data": {} },
     { "id": "req_sim_open_strategy", "ok": true, "data": {} },
     { "id": "req_sim_open_training", "ok": true, "data": {} },
-    { "id": "req_sim_export_logs", "ok": true, "data": { "toast": "已导出 1 条日志" } }
+    { "id": "req_sim_export_logs", "ok": true, "data": { "toast": "已导出 1 条日志" } },
+    { "id": "req_sheet_close", "ok": true, "data": {} },
+    { "id": "req_chart_settings_snapshot", "ok": true,
+      "data": { "period": "日线", "periodOptions": [ { "value": "日线", "label": "日线" },
+                                                    { "value": "周线", "label": "周线" } ],
+                "chartStyle": "裸K", "styleOptions": [ { "value": "裸K", "label": "裸K" } ],
+                "linkedViewCount": 2, "viewCountOptions": [ { "value": 2, "label": "2 视图" } ],
+                "showGap": false, "gapDisappearAfterFill": false,
+                "showLatestPriceLine": true, "indicatorNotSqueezeKline": false,
+                "showBareK": false } },
+    { "id": "req_chart_settings_set", "ok": true, "data": {} },
+    { "id": "req_chart_settings_reset", "ok": true, "data": {} },
+    { "id": "req_chart_search_query", "ok": true,
+      "data": { "results": [ { "file": "SZ#000001", "code": "000001", "name": "平安银行", "type": "沪深主板" } ] } },
+    { "id": "req_chart_search_pick", "ok": true, "data": {} }
   ],
   "errors": [
     { "id": "req_unknown_module", "ok": false, "error": { "code": "unknown_module", "message": "未知模块 foo" } },
@@ -196,11 +219,12 @@
     { "event": "favorites.changed", "payload": { "reason": "refresh" } },
     { "event": "market.changed", "payload": { "reason": "data" } },
     { "event": "home.changed", "payload": { "reason": "data" } },
-    { "event": "sim.changed", "payload": { "reason": "trade" } }
+    { "event": "sim.changed", "payload": { "reason": "trade" } },
+    { "event": "sheet.open", "payload": { "name": "settings" } }
   ],
   "reserved": {
-    "comment": "P2-5 图表弹层浮层容器预留（未实现，形状锁定防漂移）",
-    "sheet.open": { "name": "chartSettings", "payload": {} },
-    "sheet.close": {}
+    "comment": "P2-5b 指标控制面板/快捷面板预留（未实现，形状锁定防漂移）",
+    "chart.indicators.snapshot": { "main": [], "subSlots": [] },
+    "quick.snapshot": { "accounts": [], "tradingHours": "" }
   }
 }

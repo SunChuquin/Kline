@@ -68,6 +68,12 @@
 //   sim.openStrategyFormulas {} → {}                         桥接原生公式管理中心（交易策略段）
 //   sim.openTrainingRecords {} → {}                          桥接原生训练记录管理页
 //   sim.exportLogs     {keyword, logModule?} → {toast}       导出操作日志 CSV（Documents/Simulation/）
+//   sheet.close        {} → {}                               Web 弹层请求关闭（Swift 侧移除浮层遮罩并回写宿主弹层状态）
+//   chart.settings.snapshot {} → ChartSettingsSnapshot      K线设置快照（周期/类型/联动视图数/显示组/裸K）
+//   chart.settings.set {period?, chartStyle?, linkedViewCount?, showGap?, ...} → {} 设置写回（幂等目标态，即时生效图表）
+//   chart.settings.resetLinked {} → {}                       重置当前标的联动视图配置
+//   chart.search.query {keyword} → {results}                 图表搜索（DatabaseManager.searchMeta 同口径）
+//   chart.search.pick  {file} → {}                           选中搜索结果（KlineDetailView 切标的并重新加载）
 //
 // ## 事件清单 v2
 //   theme.changed     {preference, mode}   主题偏好或系统外观变化（theme.set 后亦经此链路回推）
@@ -76,6 +82,7 @@
 //   market.changed    {reason}             行情数据/分类/配置变化（reason: data|config|edit；节流 ~0.8s 合并）
 //   home.changed      {reason}             首页快照数据变化（reason: data|edit|sim；节流 ~0.8s 合并）
 //   sim.changed       {reason}             模拟页快照数据变化（reason: data|trade；节流 ~0.8s 合并）
+//   sheet.open        {name}               弹层打开指令（Swift→Web 弹层浮层 WebView，路由到对应面板）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -284,6 +291,35 @@ export interface SimLogSnap {
   result: string
 }
 
+/** chart.settings.snapshot：选项列表项（label 原生文案） */
+export interface ChartOption {
+  value: string
+  label: string
+}
+
+/** chart.settings.snapshot 响应（P2-5 弹层三件套之 K线设置页） */
+export interface ChartSettingsSnapshot {
+  period: string
+  periodOptions: ChartOption[]
+  chartStyle: string
+  styleOptions: ChartOption[]
+  linkedViewCount: number
+  viewCountOptions: ChartOption[]
+  showGap: boolean
+  gapDisappearAfterFill: boolean
+  showLatestPriceLine: boolean
+  indicatorNotSqueezeKline: boolean
+  showBareK: boolean
+}
+
+/** chart.search.query 结果行 */
+export interface ChartSearchResult {
+  file: string
+  code: string
+  name: string
+  type: string
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -302,6 +338,8 @@ export const KnownActions = {
     'amendPrice', 'refreshQuotes', 'openTicket', 'openCondEditor', 'openCondManage',
     'openStrategyFormulas', 'openTrainingRecords', 'exportLogs',
   ],
+  sheet: ['close'],
+  chart: ['settings.snapshot', 'settings.set', 'settings.resetLinked', 'search.query', 'search.pick'],
 } as const
 
 // 已约定的 event 清单（协议 v2）
@@ -313,6 +351,7 @@ export const KnownEvents = {
   marketChanged: 'market.changed',
   homeChanged: 'home.changed',
   simChanged: 'sim.changed',
+  sheetOpen: 'sheet.open',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

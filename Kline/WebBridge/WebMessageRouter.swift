@@ -99,6 +99,8 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "market":     return MarketBridge.handle(request)
         case "home":       return HomeBridge.handle(request)
         case "sim":        return SimulationBridge.handle(request)
+        case "sheet":      return SheetBridge.handle(request)
+        case "chart":      return SheetBridge.handleChart(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_module", message: "未知模块 \(request.module)")
         }

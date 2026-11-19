@@ -75,10 +75,56 @@ final class WebBridgeProtocolTests: XCTestCase {
         let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
         let knownEvents: Set<String> = ["theme.changed", "app.memory", "nav.tab",
                                         "favorites.changed", "market.changed",
-                                        "home.changed", "sim.changed"]
+                                        "home.changed", "sim.changed", "sheet.open"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
+        }
+    }
+
+    /// P2-5b 预留形状锁定（指标控制面板/快捷面板属下一批）
+    func testReservedSheetActions() throws {
+        let fixture = try loadFixture()
+        let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any])
+        XCTAssertNotNil(reserved["chart.indicators.snapshot"] as? [String: Any], "预留缺指标面板形状")
+        XCTAssertNotNil(reserved["quick.snapshot"] as? [String: Any], "预留缺快捷面板形状")
+    }
+
+    /// chart.settings.snapshot 响应形状锁定（P2-5a K线设置页）：选项带 value/label，显示组开关齐备
+    func testChartSettingsShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_chart_settings_snapshot"
+        }, "fixtures 缺 chart.settings.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["period", "periodOptions", "chartStyle", "styleOptions", "linkedViewCount",
+                    "viewCountOptions", "showGap", "gapDisappearAfterFill",
+                    "showLatestPriceLine", "indicatorNotSqueezeKline", "showBareK"] {
+            XCTAssertNotNil(data[key], "chart.settings.snapshot 缺 \(key)")
+        }
+        for key in ["periodOptions", "styleOptions", "viewCountOptions"] {
+            let opts = try XCTUnwrap(data[key] as? [[String: Any]])
+            for opt in opts {
+                XCTAssertNotNil(opt["value"], "\(key) 选项缺 value")
+                XCTAssertNotNil(opt["label"], "\(key) 选项缺 label")
+            }
+        }
+    }
+
+    /// chart.search.query 响应形状锁定
+    func testChartSearchShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_chart_search_query"
+        }, "fixtures 缺 chart.search.query 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        let results = try XCTUnwrap(data["results"] as? [[String: Any]])
+        for row in results {
+            for key in ["file", "code", "name", "type"] {
+                XCTAssertNotNil(row[key], "搜索结果行缺 \(key)")
+            }
         }
     }
 
@@ -202,15 +248,6 @@ final class WebBridgeProtocolTests: XCTestCase {
         XCTAssertEqual(rule["order"] as? String, "descending")
         let frozen = try XCTUnwrap(payload["frozenCount"] as? Int)
         XCTAssertTrue((1...3).contains(frozen), "frozenCount 必须在 1~3")
-    }
-
-    /// P2-5 预留形状锁定（sheet.open/close 属图表弹层批次）
-    func testReservedSheetActions() throws {
-        let fixture = try loadFixture()
-        let reserved = try XCTUnwrap(fixture["reserved"] as? [String: Any])
-        let open = try XCTUnwrap(reserved["sheet.open"] as? [String: Any])
-        XCTAssertNotNil(open["name"], "sheet.open 预留缺 name 字段")
-        XCTAssertNotNil(reserved["sheet.close"] as? [String: Any])
     }
 
     /// theme.set 幂等语义：同值写入无害（直接驱动 KlineThemeStore，写入后偏好与期望一致）

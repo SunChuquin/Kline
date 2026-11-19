@@ -167,6 +167,9 @@ struct KlineDetailView: View {
     @State private var editorOwnerIndex: Int? = nil
     @ObservedObject private var config = ChartConfigStore.shared
     @ObservedObject private var linkedStore = LinkedViewStore.shared
+    /// 弹层浮层桥（P2-5）：设置/搜索面板渲染主体迁至 Web 浮层（SheetWebOverlayHost），
+    /// 本页保留 @State 弹层状态机（isAnyPopupActive 等聚合），经 onChange 双向同步
+    @ObservedObject private var sheetBridge = SheetBridge.shared
     @State private var dailySeries: ChartSeries? = nil
     @State private var weeklySeries: ChartSeries? = nil
     @State private var monthlySeries: ChartSeries? = nil
@@ -350,18 +353,10 @@ struct KlineDetailView: View {
                 }
             }
             .overlay {
-                if showSettings {
-                    settingsOverlay(geometry: geometry)
-                        .transition(.opacity)
-                        .zIndex(10)
-                }
-                // 单图 副图2 🔍 覆盖式搜索栏：顶部锚定后下移工具栏高度，
-                // 使搜索栏正好落在主图指标数值栏（KlineChartView 第一行 mainLegendRow）。
-                // 不能用 overlay 默认居中：垂直居中恰好落在主图/副图一交界（副图一指标栏区域）
-                if showSearch {
-                    chartSearchBar
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .offset(y: infoBarTopOffset)
+                if showSettings || showSearch {
+                    // P2-5：设置/搜索面板渲染主体已迁至 Web 弹层浮层（SheetWebOverlayHost 内部
+                    // 按 SheetBridge.activeSheet 路由），原生面板仅在桥不可用时仍可回退（代码保留）
+                    SheetWebOverlayHost()
                         .transition(.opacity)
                         .zIndex(20)
                 }
@@ -382,7 +377,27 @@ struct KlineDetailView: View {
                 // 数据库还没就绪，等就绪后再查
                 isLoading = true
             }
+            // 弹层浮层桥注入（P2-5）：关闭回写本页弹层状态；搜索选中切标的；
+            // 详情标的供给（settings 快照的联动视图数量 / 重置动作需要）
+            sheetBridge.closeHandler = { name in
+                if name == "settings" {
+                    withAnimation { showSettings = false }
+                }
+                if name == "search" {
+                    withAnimation { showSearch = false }
+                    searchText = ""
+                    searchFocused = false
+                }
+            }
+            sheetBridge.pickHandler = { meta in
+                item = meta
+                loadData()
+            }
+            SheetBridge.currentDetailItem = { item }
         }
+        // 弹层状态 → 浮层桥（onChange 同步；同值 no-op 在桥内防环）
+        .onChange(of: showSettings) { on in sheetBridge.sync("settings", active: on) }
+        .onChange(of: showSearch) { on in sheetBridge.sync("search", active: on) }
         .onChange(of: databaseManager.isLoaded) { loaded in
             if loaded {
                 if isLoading { loadData() }
