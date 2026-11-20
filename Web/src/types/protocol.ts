@@ -96,6 +96,13 @@
 //   strategyEdit.testPick {pickBody} → {queued}                          内嵌公式试算（异步，结果随 strategyEdit.changed(pickTest) 推送）
 //   strategyEdit.save {doc, pickSyntaxError} → {queued}                  保存（静态校验先同步 fail；后台引擎终校 + 写库，结果随 changed(saveResult) 推送）
 //   ticket.snapshot {} → TicketSnapshot                                  全屏下单页票面快照（账户/标的/最新价/持仓/费率常量集；提交复用 trade.submit）
+//   cond.list {} → CondListSnapshot                                      条件单管理页快照（三分段行卡片 + 投影文案；占位→就绪经 cond.changed(texts) 重推）
+//   cond.editorContext {} → CondEditorContext                            编辑器上下文（draft 走 SimCondOrder 原生 JSON 口径 iso8601）
+//   cond.evaluate {draft} → {queued}                                     引擎建单校验 + 文案投影（结果随 cond.changed(evaluate) 推送）
+//   cond.save {draft} → {queued}                                         保存（引擎终校 fail-closed；成功切回管理页）
+//   cond.cancel {id} → {}                                                撤销监控中单据（status → cancelled）
+//   cond.edit {id} → {}                                                  管理页编辑 → 切编辑器页
+//   cond.new {} → {}                                                     管理页新建 → 切编辑器页
 //   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
 //   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
 //   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面
@@ -165,6 +172,7 @@
 //   training.changed  {reason}             训练状态变化（reason: begun|beginFailed|beginReselect|records|projection）
 //   formulaEdit.changed {reason}           公式编辑器异步结果（reason: testResult|dataReady；route:"page" 定向推送）
 //   strategyEdit.changed {reason}          策略编辑器异步结果（reason: pickTest|saveResult|dataReady；route:"page" 定向推送）
+//   cond.changed {reason}                  条件单异步结果（reason: evaluate|saveResult|list|texts|newFailed；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -861,6 +869,57 @@ export interface TicketSnapshot {
   }
 }
 
+// ===== P2-9a 条件单管理页 / 编辑器（cond） =====
+
+/** cond.list 行卡片（文案为原生投影缓存直读，未就绪为占位"—"；缓存更新后 cond.changed(texts) 重推） */
+export interface CondOrderSnap {
+  id: string
+  name: string
+  code: string
+  kind: string
+  kindTitle: string
+  status: string
+  statusTitle: string
+  isAlertOnly: boolean
+  repeatable: boolean
+  conditionSummary: string
+  directiveLine: string
+  progressDone: number
+  /** repeatable 时有效；grid 未就绪为 -1 且 hasProgressTotal=false */
+  progressTotal: number
+  hasProgressTotal: boolean
+  lastMessage: string
+}
+
+/** cond.list 响应（管理页） */
+export interface CondListSnapshot {
+  accountID: string
+  engineReady: boolean
+  orders: CondOrderSnap[]
+}
+
+/** cond.editorContext 响应（编辑器初始化；draft 走 SimCondOrder 原生 JSON 口径 iso8601） */
+export interface CondEditorContext {
+  account: { id: string; cash: number }
+  meta: { metaID: number; code: string; name: string }
+  lastPrice: number | null
+  initial: { kind: string; direction: string; qty: number; price: number | null }
+  /** 编辑既有单据时的完整 SimCondOrder JSON（新建为 null） */
+  editing: Record<string, unknown> | null
+  rules: { lotSize: number; priceTick: number }
+}
+
+/** cond.changed(evaluate) 推送（引擎校验 + 投影文案，占位→就绪两段式） */
+export interface CondEvaluateResult {
+  draftID: string
+  ready: boolean
+  rejection: string
+  previewSentence: string
+  conditionSummary: string
+  directiveSummary: string
+  validitySummary: string
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -888,6 +947,7 @@ export const KnownActions = {
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
   ticket: ['snapshot'],
+  cond: ['list', 'editorContext', 'evaluate', 'save', 'cancel', 'edit', 'new'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
   page: ['close', 'ready'],
@@ -918,6 +978,7 @@ export const KnownEvents = {
   trainingChanged: 'training.changed',
   formulaEditChanged: 'formulaEdit.changed',
   strategyEditChanged: 'strategyEdit.changed',
+  condChanged: 'cond.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

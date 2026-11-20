@@ -111,7 +111,8 @@ final class SimulationBridge: ObservableObject {
         case "openCondEditor":
             return openCondEditor(request)
         case "openCondManage":
-            shared.model.condPresentation = .list(UUID())
+            // P2-9a：条件单管理页迁 Web（CondBridge；原生 SimCondListView 保留可回退）
+            CondBridge.shared.requestList()
             return WebBridgeResponse.ok(request.id)
         case "openStrategyFormulas":
             // P2-6b：策略段公式中心桥接原生全屏（Web 面板仅实装 tech 段）
@@ -279,7 +280,7 @@ final class SimulationBridge: ObservableObject {
     }
 
     /// sim.openCondEditor {positionID}：持仓行条件单入口。
-    /// 可卖数量走引擎异步组装（对齐 SimulationPageModel.openCondEditor），组装完成即呈现浮层。
+    /// P2-9a：改桥 Web 编辑器页（CondBridge.requestEditor；可卖数量异步组装同原生口径）。
     private static func openCondEditor(_ request: WebBridgeRequest) -> [String: Any] {
         guard let posRaw = request.payload["positionID"] as? String,
               let posID = UUID(uuidString: posRaw),
@@ -287,7 +288,7 @@ final class SimulationBridge: ObservableObject {
                   .first(where: { $0.id == posID }) else {
             return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "需要有效 positionID")
         }
-        shared.model.openCondEditor(for: position)
+        CondBridge.shared.requestEditor(position: position)
         return WebBridgeResponse.ok(request.id)
     }
 

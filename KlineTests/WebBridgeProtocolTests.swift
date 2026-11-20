@@ -78,7 +78,7 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "home.changed", "sim.changed", "sheet.open",
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
                                         "backtest.changed", "training.changed", "formulaEdit.changed",
-                                        "strategyEdit.changed"]
+                                        "strategyEdit.changed", "cond.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -714,5 +714,57 @@ final class WebBridgeProtocolTests: XCTestCase {
             XCTAssertNotNil(row["params"], "规则行缺 params")
         }
         XCTAssertNotNil(payload["pickSyntaxError"], "save 缺 pickSyntaxError")
+    }
+
+    /// cond.list 响应形状锁定（P2-9a 条件单管理页）：行卡片字段 + 投影文案
+    func testCondListShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_cd_list"
+        }, "fixtures 缺 cond.list 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["accountID", "engineReady", "orders"] {
+            XCTAssertNotNil(data[key], "cond.list 缺 \(key)")
+        }
+        let orders = try XCTUnwrap(data["orders"] as? [[String: Any]])
+        for o in orders {
+            for key in ["id", "name", "code", "kind", "kindTitle", "status", "statusTitle",
+                        "isAlertOnly", "repeatable", "conditionSummary", "directiveLine",
+                        "progressDone", "progressTotal", "hasProgressTotal", "lastMessage"] {
+                XCTAssertNotNil(o[key], "条件单行缺 \(key)")
+            }
+        }
+    }
+
+    /// cond.editorContext 响应形状锁定（draft 走 SimCondOrder 原生 JSON 口径）
+    func testCondEditorContextShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_cd_editor"
+        }, "fixtures 缺 cond.editorContext 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["account", "meta", "lastPrice", "initial", "editing", "rules"] {
+            XCTAssertNotNil(data[key], "cond.editorContext 缺 \(key)")
+        }
+    }
+
+    /// cond.evaluate/save payload 形状锁定：draft 为 SimCondOrder 同构 JSON（kind/params/directive 必带）
+    func testCondEvaluatePayloadShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "cond" && ($0["action"] as? String) == "evaluate"
+        }, "fixtures 缺 cond.evaluate 样例")
+        let draft = try XCTUnwrap((req["payload"] as? [String: Any])?["draft"] as? [String: Any])
+        for key in ["id", "accountID", "metaID", "code", "name", "kind", "params", "directive",
+                    "validity", "createdAt", "updatedAt"] {
+            XCTAssertNotNil(draft[key], "条件单 draft 缺 \(key)")
+        }
+        let directive = try XCTUnwrap(draft["directive"] as? [String: Any])
+        for key in ["direction", "priceType", "offsetTicks", "qty"] {
+            XCTAssertNotNil(directive[key], "委托指令缺 \(key)")
+        }
     }
 }

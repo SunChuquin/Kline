@@ -53,6 +53,7 @@ final class WebPageBridge: ObservableObject {
         case "formulaEditor": FormulaEditorBridge.shared.onOpen()
         case "strategyEditor": StrategyEditorBridge.shared.onOpen()
         case "ticket": break   // 下单页无 onOpen 生命周期（上下文在 openTicket 解析时已暂存）
+        case "condManage", "condEditor": break   // 条件单页无 onOpen 生命周期（上下文在入口动作暂存）
         default: break
         }
     }
