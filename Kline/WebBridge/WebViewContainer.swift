@@ -45,6 +45,15 @@ struct WebViewContainer: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.backgroundColor = isOpaque ? .systemBackground : .clear
         webView.isOpaque = isOpaque
+        // 夜间模式外观强制：App 主题偏好（KlineTheme）驱动整个 App preferredColorScheme，
+        // 但不透传进 WKWebView 的网页环境——不设置时 prefers-color-scheme 恒 light、
+        // systemBackground 底色取日间值（夜间加载瞬间闪白）。dark/light 显式覆盖，
+        // 跟随系统时不干预（trait 自然继承）。
+        switch KlineThemeStore.shared.theme.colorScheme {
+        case .some(.dark): webView.overrideUserInterfaceStyle = .dark
+        case .some(.light): webView.overrideUserInterfaceStyle = .light
+        default: break
+        }
         WebMessageRouter.shared.attach(webView: webView)
 
         if let url = URL(string: "\(WebBridgeConst.scheme)://app/index.html#/\(route)") {

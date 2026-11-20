@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Kline Web 试点</title>
     <style>
-      /* 启动骨架屏：WebView 加载完成 → Vue 挂载之间的白屏兜底（mount 替换 #app 内容后自动消失） */
+      /* 启动骨架屏：WebView 加载完成 → Vue 挂载之间的白屏兜底（mount 替换 #app 内容后自动消失）。
+         配色用 theme.css 变量（加载后随 data-theme 切换深浅色；字面值兜底 CSS 未就绪瞬间）。
+         ⚠️ 不用 prefers-color-scheme：WKWebView 内该查询不可靠（外观由 App 内主题偏好驱动） */
       #boot {
         position: fixed;
         inset: 0;
@@ -14,8 +16,8 @@
         gap: 16px;
         align-items: center;
         justify-content: center;
-        background: #f7f8fa;
-        color: #1989fa;
+        background: var(--k-bg, #f7f8fa);
+        color: var(--k-accent, #1989fa);
         font-family: -apple-system, system-ui, sans-serif;
       }
       #boot .boot-mark {
@@ -26,16 +28,14 @@
       #boot .boot-spinner {
         width: 26px;
         height: 26px;
+        /* 轨道色硬编码（color-mix 需 Safari 16.2+，mini4 iOS 15 不支持） */
         border: 3px solid rgba(25, 137, 250, 0.25);
-        border-top-color: #1989fa;
+        border-top-color: var(--k-accent, #1989fa);
         border-radius: 50%;
         animation: bootspin 0.8s linear infinite;
       }
       @keyframes bootspin {
         to { transform: rotate(360deg); }
-      }
-      @media (prefers-color-scheme: dark) {
-        #boot { background: #101317; }
       }
     </style>
   </head>
