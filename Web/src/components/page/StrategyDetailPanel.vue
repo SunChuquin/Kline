@@ -8,6 +8,8 @@
     </div>
 
     <template v-if="snap">
+      <!-- 页内浅蓝提示条（生成成功 toast，3 秒自动消失，对齐原生 showToast） -->
+      <div v-if="toastText" class="toast-bar">{{ toastText }}</div>
       <div class="sdp-body">
         <!-- 选股条件卡 -->
         <div class="card" aria-label="strategyDetail.pickCard">
@@ -52,17 +54,12 @@
         <div class="card" aria-label="strategyDetail.actions">
           <div class="card-title">执行</div>
           <div class="action-row">
-            <button
-              class="action-btn"
-              aria-label="strategyDetail.runPick"
-              disabled
-              title="跑选股（生成清单接入中）"
-            >跑选股</button>
+            <button class="action-btn" aria-label="strategyDetail.runPick" @click="openPickRun">跑选股</button>
             <button
               class="action-btn"
               aria-label="strategyDetail.generate"
               :disabled="!snap.canGenerate"
-              @click="generateHint"
+              @click="openPickRun"
             >生成条件单</button>
             <button class="action-btn" aria-label="strategyDetail.backtest" @click="runBacktest">回测</button>
           </div>
@@ -81,9 +78,9 @@
 // P2-9c：策略详情 Web 页（strategyDetail）。基础信息由 strategyDetail.snapshot 同步直出，
 // 引擎取值（选股摘要/交易摘要/规则触发文案）经 strategyDetail.changed(values) 推送
 // （占位→就绪两段式，对齐原生 StrategyDetailView 的 E 组口径）。
-// 编辑 → strategyDetail.edit（Web 页内切 strategyEditor）；回测 → strategyDetail.backtest。
-// 跑选股 / 生成条件单由 P2-9c-3 pickRun 承载（本批占位禁用）。
-import { computed, onMounted, ref } from 'vue'
+// 编辑 → strategyDetail.edit（Web 页内切 strategyEditor）；回测 → strategyDetail.backtest；
+// 跑选股 / 生成条件单 → Web 页内切 pickRun（P2-9c-3，勾选与确认在 pickRun 内完成）。
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { klineBus } from '../../bridge/klineBus'
 import type { StrategyDetailSnapshot, StrategyDetailValues } from '../../types/protocol'
 
@@ -91,6 +88,8 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const snap = ref<StrategyDetailSnapshot | null>(null)
 const values = ref<StrategyDetailValues | null>(null)
+const toastText = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 未就绪占位：「…」= 取数中，「—」= 引擎不可用（原生 placeholder 口径） */
 const pickSummaryText = computed(() => {
@@ -114,11 +113,26 @@ async function pullSnapshot(): Promise<void> {
       boundAccounts: (d.boundAccounts ?? []) as string[],
       missingCount: Number(d.missingCount ?? 0),
       valuesQueued: d.valuesQueued === true,
+      toast: String(d.toast ?? ''),
     }
     values.value = null
+    // 生成成功 toast（原生一次性带出）：3 秒自动消失
+    if (snap.value.toast) showToast(snap.value.toast)
   } catch (e) {
     console.error('strategyDetail.snapshot 失败', e)
   }
+}
+
+function showToast(text: string): void {
+  toastText.value = text
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastText.value = '' }, 3000)
+}
+
+/** 跑选股 / 生成条件单入口：Web 页内切 pickRun（勾选与确认在 pickRun 内完成） */
+function openPickRun(): void {
+  void klineBus.request('page', 'open', { name: 'pickRun' })
+    .catch((e) => console.error('page.open pickRun 失败', e))
 }
 
 function edit(): void {
@@ -127,11 +141,6 @@ function edit(): void {
 
 function runBacktest(): void {
   void klineBus.request('strategyDetail', 'backtest', {}).catch((e) => console.error('strategyDetail.backtest 失败', e))
-}
-
-/** 生成条件单（未配置交易指令时禁用；9c-3 接入 pickRun 前先给引导提示） */
-function generateHint(): void {
-  console.log('生成条件单：由 P2-9c-3 pickRun 承载')
 }
 
 function handleChanged(payload: Record<string, unknown> | undefined): void {
@@ -150,6 +159,10 @@ function handleChanged(payload: Record<string, unknown> | undefined): void {
 onMounted(async () => {
   klineBus.on('strategyDetail.changed', (ev) => handleChanged(ev.payload))
   await pullSnapshot()
+})
+
+onUnmounted(() => {
+  if (toastTimer) clearTimeout(toastTimer)
 })
 </script>
 
@@ -195,6 +208,19 @@ onMounted(async () => {
   flex-direction: column;
   background: var(--k-bg);
   color: var(--k-text);
+}
+
+.toast-bar {
+  position: absolute;
+  top: 52px;
+  left: 16px;
+  right: 16px;
+  z-index: 10;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(25, 137, 250, 0.14);
+  color: #1989fa;
+  font-size: 13px;
 }
 
 .sdp-body {

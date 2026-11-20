@@ -758,8 +758,45 @@ final class WebBridgeProtocolTests: XCTestCase {
         }, "fixtures 缺 strategyDetail.snapshot 响应样例")
         let data = try XCTUnwrap(snap["data"] as? [String: Any])
         for key in ["id", "name", "tradeConfigured", "canGenerate", "boundAccounts",
-                    "missingCount", "valuesQueued"] {
+                    "missingCount", "valuesQueued", "toast"] {
             XCTAssertNotNil(data[key], "strategyDetail.snapshot 缺 \(key)")
+        }
+    }
+
+    /// strategyDetail pickRun 链形状锁定（P2-9c-3）：runPick payload + genConfirm 事件推送
+    func testStrategyDetailPickRunShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let runPick = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "strategyDetail" && ($0["action"] as? String) == "runPick"
+        }, "fixtures 缺 strategyDetail.runPick 样例")
+        let pool = try XCTUnwrap((runPick["payload"] as? [String: Any])?["pool"] as? String)
+        XCTAssertTrue(["market", "favorites"].contains(pool), "runPick.pool 取值表外：\(pool)")
+
+        let generate = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "strategyDetail" && ($0["action"] as? String) == "generate"
+        }, "fixtures 缺 strategyDetail.generate 样例")
+        let genPayload = try XCTUnwrap(generate["payload"] as? [String: Any])
+        XCTAssertNotNil(genPayload["metaIDs"], "generate payload 缺 metaIDs")
+        XCTAssertNotNil(genPayload["includeEntry"], "generate payload 缺 includeEntry")
+
+        let events = try XCTUnwrap(fixture["events"] as? [[String: Any]])
+        let genConfirm = try XCTUnwrap(events.first {
+            ($0["event"] as? String) == "strategyDetail.changed"
+                && (($0["payload"] as? [String: Any])?["reason"] as? String) == "genConfirm"
+        }, "fixtures 缺 strategyDetail.changed(genConfirm) 样例")
+        let p = try XCTUnwrap(genConfirm["payload"] as? [String: Any])
+        for key in ["groups", "skips", "draftCount", "skipCount", "truncatedByLimit",
+                    "canToggleEntry", "includeEntry", "metaCount"] {
+            XCTAssertNotNil(p[key], "genConfirm 推送缺 \(key)")
+        }
+        let group = try XCTUnwrap((p["groups"] as? [[String: Any]])?.first)
+        for key in ["id", "name", "items"] {
+            XCTAssertNotNil(group[key], "草稿分组缺 \(key)")
+        }
+        let item = try XCTUnwrap((group["items"] as? [[String: Any]])?.first)
+        for key in ["draftID", "name", "code", "kindTitle", "sentence"] {
+            XCTAssertNotNil(item[key], "草稿行缺 \(key)")
         }
     }
 

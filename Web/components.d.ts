@@ -25,6 +25,7 @@ declare module 'vue' {
     LanSyncPanel: typeof import('./src/components/page/LanSyncPanel.vue')['default']
     LocalUpdatePanel: typeof import('./src/components/page/LocalUpdatePanel.vue')['default']
     PickerEditPanel: typeof import('./src/components/page/PickerEditPanel.vue')['default']
+    PickRunPanel: typeof import('./src/components/page/PickRunPanel.vue')['default']
     ProfilePanel: typeof import('./src/components/page/ProfilePanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

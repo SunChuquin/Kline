@@ -98,9 +98,14 @@
 //   pickerEdit.snapshot {} → PickerEditSnapshot                          选股公式编辑快照（id/name/pickBody/hasData）
 //   pickerEdit.testPick {pickBody} → {queued}                            公式试算（异步，结果随 pickerEdit.changed(pickTest) 推送）
 //   pickerEdit.save {id, name, pickBody} → {id}                          保存（同步写库；名称非空校验；成功即关页；id 空串 = 新建）
-//   strategyDetail.snapshot {} → StrategyDetailSnapshot                  策略详情快照（基础信息同步直出；引擎取值经 changed(values) 推送）
+//   strategyDetail.snapshot {} → StrategyDetailSnapshot                  策略详情快照（基础信息同步直出 + 一次性 toast；引擎取值经 changed(values) 推送）
 //   strategyDetail.edit {} → {}                                          跳策略编辑器（Web 页内切 strategyEditor）
 //   strategyDetail.backtest {} → {}                                      跳回测（Web 页内切 backtest，复用 backtest.* 页）
+//   strategyDetail.runPick {pool} → {queued}                             跑选股（pool: market|favorites；进度/命中随 changed(pickPhase/pickHits) 推送）
+//   strategyDetail.cancelPick {} → {}                                    取消跑选股（幂等）
+//   strategyDetail.generate {metaIDs, includeEntry?} → {queued}          组装生成草稿（引擎校验；结果随 changed(genConfirm) 推送，文案占位→就绪重推）
+//   strategyDetail.toggleEntry {includeEntry} → {queued}                 切换入场单开关重新组装（原生 recompute 同款）
+//   strategyDetail.confirmGenerate {} → {queued}                         确认写入（成功暂存 toast 并切回 strategyDetail；失败 changed(genResult)）
 //   ticket.snapshot {} → TicketSnapshot                                  全屏下单页票面快照（账户/标的/最新价/持仓/费率常量集；提交复用 trade.submit）
 //   cond.list {} → CondListSnapshot                                      条件单管理页快照（三分段行卡片 + 投影文案；占位→就绪经 cond.changed(texts) 重推）
 //   cond.editorContext {} → CondEditorContext                            编辑器上下文（draft 走 SimCondOrder 原生 JSON 口径 iso8601）
@@ -182,7 +187,7 @@
 //   formulaEdit.changed {reason}           公式编辑器异步结果（reason: testResult|dataReady；route:"page" 定向推送）
 //   strategyEdit.changed {reason}          策略编辑器异步结果（reason: pickTest|saveResult|dataReady；route:"page" 定向推送）
 //   pickerEdit.changed {reason}            选股公式编辑器异步结果（reason: pickTest|dataReady；route:"page" 定向推送）
-//   strategyDetail.changed {reason}        策略详情异步结果（reason: values；route:"page" 定向推送）
+//   strategyDetail.changed {reason}        策略详情异步结果（reason: values|pickPhase|pickHits|genConfirm|genResult；route:"page" 定向推送）
 //   cond.changed {reason}                  条件单异步结果（reason: evaluate|saveResult|list|texts|newFailed；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
@@ -873,6 +878,37 @@ export interface StrategyDetailSnapshot {
   /** 绑定了但已失效的账户数 */
   missingCount: number
   valuesQueued: boolean
+  /** 一次性 toast（生成条件单成功后的提示，取走即清） */
+  toast: string
+}
+
+/** strategyDetail.changed(pickPhase) 推送（跑选股执行器 phase；StrategyPickRunner 转发） */
+export interface StrategyPickPhaseSnap {
+  state: 'idle' | 'preparing' | 'running' | 'finished' | 'cancelled'
+  done?: number
+  total?: number
+}
+
+/** strategyDetail.changed(pickHits) 推送的命中行（价格/涨跌幅 Web 端格式化，缺省 null = 无数据） */
+export interface StrategyPickHitSnap {
+  metaID: number
+  code: string
+  name: string
+  lastPrice: number | null
+  changePct: number | null
+}
+
+/** strategyDetail.changed(genConfirm) 推送（草稿按账户分组；文案为投影缓存直读，就绪后重推） */
+export interface StrategyGenConfirmPayload {
+  groups: { id: string; name: string; items: { draftID: string; name: string; code: string; kindTitle: string; sentence: string }[] }[]
+  skips: { title: string; reason: string }[]
+  draftCount: number
+  skipCount: number
+  truncatedByLimit: boolean
+  /** 仅 TRADE 段配了方向时可见（原生 entryToggle 同口径） */
+  canToggleEntry: boolean
+  includeEntry: boolean
+  metaCount: number
 }
 
 /** strategyDetail.changed(values) 推送（引擎取值；unavailable = 引擎不可用显式降级） */
@@ -996,7 +1032,7 @@ export const KnownActions = {
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
-  strategyDetail: ['snapshot', 'edit', 'backtest'],
+  strategyDetail: ['snapshot', 'edit', 'backtest', 'runPick', 'cancelPick', 'generate', 'toggleEntry', 'confirmGenerate'],
   pickerEdit: ['snapshot', 'testPick', 'save'],
   ticket: ['snapshot'],
   cond: ['list', 'editorContext', 'evaluate', 'save', 'cancel', 'edit', 'new'],
