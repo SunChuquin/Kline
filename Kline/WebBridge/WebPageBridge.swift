@@ -51,6 +51,7 @@ final class WebPageBridge: ObservableObject {
         case "backtest":    BacktestBridge.shared.onOpen()
         case "trainingRecords": TrainingBridge.shared.onOpen()
         case "formulaEditor": FormulaEditorBridge.shared.onOpen()
+        case "strategyEditor": StrategyEditorBridge.shared.onOpen()
         default: break
         }
     }

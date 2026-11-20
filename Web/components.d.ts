@@ -24,6 +24,7 @@ declare module 'vue' {
     LocalUpdatePanel: typeof import('./src/components/page/LocalUpdatePanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    StrategyEditorPanel: typeof import('./src/components/page/StrategyEditorPanel.vue')['default']
     TrainingRecordsPanel: typeof import('./src/components/page/TrainingRecordsPanel.vue')['default']
     VanActionSheet: typeof import('vant/es')['ActionSheet']
     VanButton: typeof import('vant/es')['Button']

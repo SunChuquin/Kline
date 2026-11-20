@@ -60,9 +60,8 @@ struct FormulaCenterView: View {
     /// 选股公式新建 / 编辑浮层
     @State private var showPickerSheet = false
     @State private var editingPicker: FormulaDoc?
-    /// 策略公式新建 / 编辑浮层
-    @State private var showStrategySheet = false
-    @State private var editingStrategy: FormulaDoc?
+    /// 策略公式新建/编辑：P2-8b 起改桥 Web 编辑器页（StrategyEditorBridge.requestOpen
+    /// → strategyEditor 全屏 Web 页，原生中心被 zIndex 1002 盖住保持打开）
     /// 策略详情浮层（只读展示，编辑从详情页跳回编辑器）
     @State private var detailStrategy: FormulaDoc?
     /// 待删除的选股公式：被自选分组引用时先弹确认，确认后再解绑 + 删除
@@ -372,8 +371,7 @@ struct FormulaCenterView: View {
             }
 
             newButton("新建策略公式") {
-                editingStrategy = nil
-                showStrategySheet = true
+                StrategyEditorBridge.shared.requestOpen(initialDoc: FormulaDoc(id: "", kind: .strategy, name: ""))
             }
         }
     }
@@ -404,8 +402,7 @@ struct FormulaCenterView: View {
             }
             .buttonStyle(.plain)
             Button {
-                editingStrategy = doc
-                showStrategySheet = true
+                StrategyEditorBridge.shared.requestOpen(initialDoc: doc)
             } label: {
                 Text("编辑")
                     .font(.system(size: 13))
@@ -493,31 +490,13 @@ struct FormulaCenterView: View {
             .transition(.opacity)
             .zIndex(1000)
         }
-        if showStrategySheet || editingStrategy != nil {
-            // 策略公式编辑器：名称 + 选股条件（内嵌 / 引用二选一）+ 交易规则 + 预览校验
-            StrategyFormulaEditorView(
-                initialDoc: editingStrategy ?? FormulaDoc(id: "", kind: .strategy, name: ""),
-                data: sampleData,
-                onClose: {
-                    showStrategySheet = false
-                    editingStrategy = nil
-                },
-                onSaved: { _ in
-                    showStrategySheet = false
-                    editingStrategy = nil
-                }
-            )
-            .transition(.opacity)
-            .zIndex(1000)
-        }
         if let doc = detailStrategy {
-            // 策略详情页：只读展示；点「编辑」关详情并打开策略编辑器（editingStrategy 传被编辑的 doc，不能是 nil）
+            // 策略详情页：只读展示；点「编辑」关详情并打开 Web 策略编辑器（P2-8b）
             StrategyDetailView(doc: doc,
                                onClose: { detailStrategy = nil },
                                onEdit: {
                                    detailStrategy = nil
-                                   editingStrategy = doc
-                                   showStrategySheet = true
+                                   StrategyEditorBridge.shared.requestOpen(initialDoc: doc)
                                })
                 .transition(.opacity)
                 .zIndex(1000)
@@ -536,8 +515,7 @@ struct FormulaCenterView: View {
             editingPicker = nil
             showPickerSheet = true
         case .strategy:
-            editingStrategy = nil
-            showStrategySheet = true
+            StrategyEditorBridge.shared.requestOpen(initialDoc: FormulaDoc(id: "", kind: .strategy, name: ""))
         }
     }
 

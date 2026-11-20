@@ -91,6 +91,10 @@
 //   formulaEdit.test {formula} → {queued}                                测试公式（异步求值，结果随 formulaEdit.changed(testResult) 推送）
 //   formulaEdit.save {formula, name?, scope?, colorHex?, periods?} → {}  保存（system 写回 .tdx；custom 全量写回；成功即关页）
 //   formulaEdit.restoreBuiltin {} → {formula}                            恢复编译时内容（仅系统指标；同步返回恢复后公式）
+//   strategyEdit.snapshot {} → StrategyEditorSnapshot                    策略编辑器快照（doc 结构化 rows + 选股公式库 + 账户 + 规则目录）
+//   strategyEdit.evaluate {doc, pickSyntaxError} → StrategyEvaluateResult 静态校验 + 语义预览（纯 Swift 同步直通）
+//   strategyEdit.testPick {pickBody} → {queued}                          内嵌公式试算（异步，结果随 strategyEdit.changed(pickTest) 推送）
+//   strategyEdit.save {doc, pickSyntaxError} → {queued}                  保存（静态校验先同步 fail；后台引擎终校 + 写库，结果随 changed(saveResult) 推送）
 //   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
 //   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
 //   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面
@@ -159,6 +163,7 @@
 //   backtest.changed  {reason}             回测 phase/进度变化（reason: phase|progress；节流 ~0.25s 合并）
 //   training.changed  {reason}             训练状态变化（reason: begun|beginFailed|beginReselect|records|projection）
 //   formulaEdit.changed {reason}           公式编辑器异步结果（reason: testResult|dataReady；route:"page" 定向推送）
+//   strategyEdit.changed {reason}          策略编辑器异步结果（reason: pickTest|saveResult|dataReady；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -765,6 +770,74 @@ export interface FormulaEditSnapshot {
   palette: FormulaEditColorSnap[]
 }
 
+// ===== P2-8b 策略公式编辑器（strategyEdit） =====
+
+/** strategyEdit.snapshot 规则行（params 键值对；行文本由原生 StrategyRuleParser.line 序列化） */
+export interface StrategyRuleRowSnap {
+  kind: string
+  params: Record<string, string>
+}
+
+/** strategyEdit.snapshot 规则参数规格（type 驱动 Web 端动态渲染输入控件） */
+export interface StrategyParamSpecSnap {
+  key: string
+  title: string
+  type: 'number' | 'percent' | 'integer' | 'text' | 'option'
+  isOptional: boolean
+  placeholder: string
+  options: string[]
+  unit: string
+}
+
+/** strategyEdit.snapshot 规则类型目录项 */
+export interface StrategyKindSpecSnap {
+  kind: string
+  title: string
+  conditionOrderTitle: string
+  specs: StrategyParamSpecSnap[]
+}
+
+/** strategyEdit.snapshot 交易指令（has* 标记区分「未设置」与 0 值） */
+export interface StrategyTradeSpecSnap {
+  direction: string
+  hasQty: boolean
+  qty: number
+  hasAmount: boolean
+  amount: number
+  hasOffset: boolean
+  offsetTicks: number
+  priceType: string
+  validity: string
+  /** YYYY-MM-DD 文本（与 TRADE 段 EXPIRES 序列化口径一致） */
+  expiresAt: string
+  accountIDs: string[]
+}
+
+/** strategyEdit.snapshot 响应（编辑对象 + 选股公式库 + 可绑定账户 + 规则目录） */
+export interface StrategyEditorSnapshot {
+  doc: {
+    id: string
+    name: string
+    mode: 'inline' | 'reference'
+    pickBody: string
+    pickRef: string
+    rows: StrategyRuleRowSnap[]
+    parseErrors: string[]
+    trade: StrategyTradeSpecSnap
+  }
+  pickers: { id: string; name: string; pickBody: string }[]
+  accounts: { id: string; name: string; badge: string; colorHex: string; cash: number; archived: boolean }[]
+  ruleCatalog: StrategyKindSpecSnap[]
+  hasData: boolean
+}
+
+/** strategyEdit.evaluate 响应（静态校验 + 语义预览，同步直通） */
+export interface StrategyEvaluateResult {
+  ready: boolean
+  issues: string[]
+  preview: { trade: string; summary: string; executionNotice: string }
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -790,6 +863,7 @@ export const KnownActions = {
           'indicators.openSystemEditor', 'indicators.openCustomEditor',
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
+  strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
   page: ['close', 'ready'],
@@ -819,6 +893,7 @@ export const KnownEvents = {
   backtestChanged: 'backtest.changed',
   trainingChanged: 'training.changed',
   formulaEditChanged: 'formulaEdit.changed',
+  strategyEditChanged: 'strategyEdit.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

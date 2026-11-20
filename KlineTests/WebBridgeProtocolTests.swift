@@ -77,7 +77,8 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "favorites.changed", "market.changed",
                                         "home.changed", "sim.changed", "sheet.open",
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
-                                        "backtest.changed", "training.changed", "formulaEdit.changed"]
+                                        "backtest.changed", "training.changed", "formulaEdit.changed",
+                                        "strategyEdit.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -643,5 +644,75 @@ final class WebBridgeProtocolTests: XCTestCase {
         }, "fixtures 缺 formula.openEditor(custom) 样例")
         XCTAssertEqual(try XCTUnwrap(openNew["payload"] as? [String: Any])["id"] as? String ?? "", "",
                        "custom 新建不应带 id")
+    }
+
+    /// strategyEdit.snapshot 响应形状锁定（P2-8b 策略公式编辑器）：doc/pickers/accounts/ruleCatalog
+    func testStrategyEditSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_se_snapshot"
+        }, "fixtures 缺 strategyEdit.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["doc", "pickers", "accounts", "ruleCatalog", "hasData"] {
+            XCTAssertNotNil(data[key], "strategyEdit.snapshot 缺 \(key)")
+        }
+        let doc = try XCTUnwrap(data["doc"] as? [String: Any])
+        for key in ["id", "name", "mode", "pickBody", "pickRef", "rows", "parseErrors", "trade"] {
+            XCTAssertNotNil(doc[key], "策略 doc 缺 \(key)")
+        }
+        let trade = try XCTUnwrap(doc["trade"] as? [String: Any])
+        for key in ["direction", "hasQty", "qty", "hasAmount", "amount", "hasOffset",
+                    "offsetTicks", "priceType", "validity", "expiresAt", "accountIDs"] {
+            XCTAssertNotNil(trade[key], "交易指令缺 \(key)")
+        }
+        let catalog = try XCTUnwrap(data["ruleCatalog"] as? [[String: Any]])
+        for k in catalog {
+            for key in ["kind", "title", "conditionOrderTitle", "specs"] {
+                XCTAssertNotNil(k[key], "规则目录项缺 \(key)")
+            }
+            for spec in try XCTUnwrap(k["specs"] as? [[String: Any]]) {
+                for key in ["key", "title", "type", "isOptional", "placeholder", "options", "unit"] {
+                    XCTAssertNotNil(spec[key], "参数规格缺 \(key)")
+                }
+            }
+        }
+    }
+
+    /// strategyEdit.evaluate 响应形状锁定：ready/issues/preview 三段
+    func testStrategyEditEvaluateShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_se_evaluate"
+        }, "fixtures 缺 strategyEdit.evaluate 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["ready", "issues", "preview"] {
+            XCTAssertNotNil(data[key], "strategyEdit.evaluate 缺 \(key)")
+        }
+        let preview = try XCTUnwrap(data["preview"] as? [String: Any])
+        for key in ["trade", "summary", "executionNotice"] {
+            XCTAssertNotNil(preview[key], "语义预览缺 \(key)")
+        }
+    }
+
+    /// strategyEdit.save payload 形状锁定：doc 结构化（rows + trade）+ pickSyntaxError
+    func testStrategyEditSavePayloadShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "strategyEdit" && ($0["action"] as? String) == "save"
+        }, "fixtures 缺 strategyEdit.save 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        let doc = try XCTUnwrap(payload["doc"] as? [String: Any])
+        for key in ["id", "name", "mode", "pickBody", "pickRef", "rows", "trade"] {
+            XCTAssertNotNil(doc[key], "save doc 缺 \(key)")
+        }
+        let rows = try XCTUnwrap(doc["rows"] as? [[String: Any]])
+        for row in rows {
+            XCTAssertNotNil(row["kind"], "规则行缺 kind")
+            XCTAssertNotNil(row["params"], "规则行缺 params")
+        }
+        XCTAssertNotNil(payload["pickSyntaxError"], "save 缺 pickSyntaxError")
     }
 }
