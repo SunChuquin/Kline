@@ -9,12 +9,19 @@
 //  线程约定：动作入口均在主线程（native messageHandler 与 HTTP /bridge 皆主线程跳转）。
 //
 
+import Combine
 import Foundation
 
 enum FavoritesBridge {
 
+    /// 行情值到位推送（P2 修复自选页 "-" 挂死）：rowCache 预取/引擎值逐批到达 →
+    /// 节流推 favorites.changed（Web 自选页回读快照）。此前仅在 snapshot 时触发预取
+    /// （异步），完成后无任何推送 → 新加自选标的的行值到位后 Web 端恒显示 "-"。
+    private static let dataChangeHub = DataChangeHub()
+
     /// favorites 域动作分发
     static func handle(_ request: WebBridgeRequest) -> [String: Any] {
+        _ = dataChangeHub   // 首个动作时确保订阅注册（App 生命周期常驻）
         switch request.action {
         case "snapshot":
             return WebBridgeResponse.ok(request.id, data: snapshotData())
@@ -37,6 +44,36 @@ enum FavoritesBridge {
     }
 
     // MARK: - 写回（P2-1b）：file → metaID 反查，全部幂等/目标态语义，完成即推 changed
+
+    /// 行情数据变化的常驻订阅载体（enum 无实例，用嵌套单例挂 Combine 订阅）
+    @MainActor
+    private final class DataChangeHub {
+        private var changedItem: DispatchWorkItem? = nil
+        private var pendingReason = "data"
+        private let throttle: TimeInterval = 0.8
+        private var cancellables: Set<AnyCancellable> = []
+
+        fileprivate init() {
+            MarketRowCache.shared.objectWillChange
+                .sink { [weak self] _ in self?.scheduleChanged(reason: "data") }
+                .store(in: &cancellables)
+        }
+
+        /// 节流合并推送（对齐 MarketBridge.scheduleChanged）
+        private func scheduleChanged(reason: String) {
+            pendingReason = reason
+            guard changedItem == nil else { return }
+            let item = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.changedItem = nil
+                WebMessageRouter.shared.pushEvent("favorites.changed",
+                                                  payload: ["reason": self.pendingReason],
+                                                  route: "favorites")
+            }
+            changedItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + throttle, execute: item)
+        }
+    }
 
     /// 编辑类写回完成 → 推 changed（页面回读权威快照）
     private static func notifyEdit() {

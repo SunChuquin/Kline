@@ -316,7 +316,20 @@ final class MarketPageModel: ObservableObject {
             if overview != nil { overview = nil }
             return
         }
-        let metas = tabItems
+        // P2 修复：行集按一级分类分支——此前恒用市场分类 tabItems，Web 端切「自选」Tab
+        // 显示的仍是市场分类全量行（2026-11-20 用户实测自选标的行情 "-" 排障实锤）。
+        let metas: [MetaItem]
+        switch topMenu {
+        case .market:
+            metas = tabItems
+        case .fav:
+            // 自选分类 = 全部自选标的（「全部」虚拟分组；持仓/股池二级暂无独立数据源）
+            metas = fav.resolveMetaItems(groupID: FavoritesStore.allGroupID,
+                                         allMeta: databaseManager.metaList)
+        case .picker:
+            // 选股分类暂无数据源（对齐原生占位：badge nil）
+            metas = []
+        }
         // 1) 分固定 / 非固定
         let pinnedMetas = metas.filter { fav.isPinned($0.id) }
         let othersMetas = metas.filter { !fav.isPinned($0.id) }
