@@ -252,15 +252,16 @@ final class SimulationBridge: ObservableObject {
         let model = shared.model
         let store = SimStore.shared
 
-        // 持仓行入口：按 positionID 解析标的与账户
+        // 持仓行入口：按 positionID 解析标的与账户（P2-9a：改桥 Web 全屏票面页）
         if let posRaw = request.payload["positionID"] as? String,
            let posID = UUID(uuidString: posRaw),
            let position = store.positions(accountID: store.queryAccountID).first(where: { $0.id == posID }) {
             guard let accountID = model.orderAccountID else {
                 return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "请先新建一个模拟账户")
             }
-            model.openTicket(accountID: accountID, metaID: position.metaID,
-                             code: position.code, name: position.name, direction: direction)
+            TicketBridge.shared.requestOpen(accountID: accountID, metaID: position.metaID,
+                                            code: position.code, name: position.name,
+                                            direction: direction, position: position)
             return WebBridgeResponse.ok(request.id)
         }
 
@@ -271,8 +272,9 @@ final class SimulationBridge: ObservableObject {
         guard let target = model.defaultTarget(accountID: accountID) else {
             return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "暂无可用标的，无法下单")
         }
-        model.openTicket(accountID: accountID, metaID: target.metaID,
-                         code: target.code, name: target.name, direction: direction)
+        TicketBridge.shared.requestOpen(accountID: accountID, metaID: target.metaID,
+                                        code: target.code, name: target.name,
+                                        direction: direction, position: nil)
         return WebBridgeResponse.ok(request.id)
     }
 

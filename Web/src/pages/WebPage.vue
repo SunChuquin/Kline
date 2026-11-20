@@ -9,6 +9,7 @@
     <TrainingRecordsPanel v-else-if="activeName === 'trainingRecords'" :key="`tr-${pageSeq}`" @close="closePage" />
     <FormulaEditorPanel v-else-if="activeName === 'formulaEditor'" :key="`fe-${pageSeq}`" @close="closePage" />
     <StrategyEditorPanel v-else-if="activeName === 'strategyEditor'" :key="`se-${pageSeq}`" @close="closePage" />
+    <TicketPanel v-else-if="activeName === 'ticket'" :key="`tk-${pageSeq}`" @close="closePage" />
     <div v-else class="page-empty"></div>
   </div>
 </template>
@@ -26,6 +27,7 @@ import BacktestPanel from '../components/page/BacktestPanel.vue'
 import TrainingRecordsPanel from '../components/page/TrainingRecordsPanel.vue'
 import FormulaEditorPanel from '../components/page/FormulaEditorPanel.vue'
 import StrategyEditorPanel from '../components/page/StrategyEditorPanel.vue'
+import TicketPanel from '../components/page/TicketPanel.vue'
 
 const activeName = ref<string | null>(null)
 const pageSeq = ref(0)

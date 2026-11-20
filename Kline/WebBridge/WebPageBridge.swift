@@ -52,6 +52,7 @@ final class WebPageBridge: ObservableObject {
         case "trainingRecords": TrainingBridge.shared.onOpen()
         case "formulaEditor": FormulaEditorBridge.shared.onOpen()
         case "strategyEditor": StrategyEditorBridge.shared.onOpen()
+        case "ticket": break   // 下单页无 onOpen 生命周期（上下文在 openTicket 解析时已暂存）
         default: break
         }
     }

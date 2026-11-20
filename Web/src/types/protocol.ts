@@ -95,6 +95,7 @@
 //   strategyEdit.evaluate {doc, pickSyntaxError} → StrategyEvaluateResult 静态校验 + 语义预览（纯 Swift 同步直通）
 //   strategyEdit.testPick {pickBody} → {queued}                          内嵌公式试算（异步，结果随 strategyEdit.changed(pickTest) 推送）
 //   strategyEdit.save {doc, pickSyntaxError} → {queued}                  保存（静态校验先同步 fail；后台引擎终校 + 写库，结果随 changed(saveResult) 推送）
+//   ticket.snapshot {} → TicketSnapshot                                  全屏下单页票面快照（账户/标的/最新价/持仓/费率常量集；提交复用 trade.submit）
 //   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
 //   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
 //   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面
@@ -838,6 +839,28 @@ export interface StrategyEvaluateResult {
   preview: { trade: string; summary: string; executionNotice: string }
 }
 
+// ===== P2-9a 全屏下单页（ticket） =====
+
+/** ticket.snapshot 响应（票面初始化；提交复用 trade.submit） */
+export interface TicketSnapshot {
+  account: { id: string; name: string; cash: number }
+  meta: { metaID: number; code: string; name: string; file: string }
+  /** 最新价（行情缓存未就绪为 null；委托价默认跟随） */
+  lastPrice: number | null
+  initialDirection: 'buy' | 'sell'
+  /** 持仓行入口时非空（预填卖出与可卖数量） */
+  position: { qty: number; availableQty: number; costPrice: number } | null
+  /** 费率常量集（真源 sim_rules.py；费用/可买可卖由 Web 端按纯算术计算） */
+  rules: {
+    lotSize: number
+    commissionRate: number
+    commissionMin: number
+    stampTaxRate: number
+    priceTick: number
+    limitPct: number
+  }
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -864,6 +887,7 @@ export const KnownActions = {
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
+  ticket: ['snapshot'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
   page: ['close', 'ready'],

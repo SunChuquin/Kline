@@ -106,6 +106,7 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "page":       return WebPageBridge.handle(request)
         case "formulaEdit": return FormulaEditorBridge.handle(request)
         case "strategyEdit": return StrategyEditorBridge.handle(request)
+        case "ticket":      return TicketBridge.handle(request)
         case "lan":        return LANSyncBridge.handle(request)
         case "update":     return LocalUpdateBridge.handle(request)
         case "lab":        return EngineLabBridge.handle(request)
