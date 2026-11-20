@@ -103,6 +103,9 @@
 //   cond.cancel {id} → {}                                                撤销监控中单据（status → cancelled）
 //   cond.edit {id} → {}                                                  管理页编辑 → 切编辑器页
 //   cond.new {} → {}                                                     管理页新建 → 切编辑器页
+//   search.query {keyword} → {results}                                   搜索页模糊搜索（searchMeta 同口径）
+//   search.openDetail {file} → {}                                        选中结果进 K 线详情（关搜索页）
+//   page.open {name} → {}                                                Web 页内切换另一全屏页（个人中心 → 本地更新等同 WebView 切换）
 //   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
 //   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
 //   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面
@@ -950,7 +953,8 @@ export const KnownActions = {
   cond: ['list', 'editorContext', 'evaluate', 'save', 'cancel', 'edit', 'new'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
-  page: ['close', 'ready'],
+  page: ['close', 'ready', 'open'],
+  search: ['query', 'openDetail'],
   lan: ['snapshot', 'probe', 'setExposed', 'scan', 'connect', 'start'],
   update: ['snapshot', 'probeServer', 'reconnectServer', 'checkApp', 'installApp',
            'checkEngine', 'installEngine', 'syncNow', 'runGapBackfill', 'queryBaselineMissing'],

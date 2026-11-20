@@ -154,7 +154,8 @@ final class MarketBridge: ObservableObject {
         case "openDetail":
             return openDetail(file: (request.payload["file"] as? String) ?? "", id: request.id)
         case "openSearch":
-            shared.homeSearchActive = true
+            // P2-9b：搜索页迁 Web 全屏页（homeSearchActive 原生分支保留可回退）
+            WebPageBridge.shared.open("search")
             return WebBridgeResponse.ok(request.id)
         case "openFormulaCenter":
             // P2-6b：选股段公式中心桥接原生全屏（Web 面板仅实装 tech 段）

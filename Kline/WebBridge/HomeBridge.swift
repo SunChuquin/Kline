@@ -212,7 +212,8 @@ final class HomeBridge: ObservableObject {
         let bridge = HomeBridge.shared
         switch kind {
         case .search:
-            bridge.isSearching = true
+            // P2-9b：搜索页迁 Web 全屏页（HomeSearchModeView 原生分支保留可回退）
+            WebPageBridge.shared.open("search")
         case .tech:
             // P2-6b：公式中心 tech 段迁 Web 面板（picker/strategy 段桥接原生全屏中心）
             SheetBridge.shared.openFormulaCenter(.tech)
@@ -235,7 +236,8 @@ final class HomeBridge: ObservableObject {
             SheetBridge.shared.closeHandler = { _ in TrainingSetupRouter.shared.isPresented = false }
             SheetBridge.shared.sync("training", active: true)
         case .profile:
-            bridge.isProfilePresented = true
+            // P2-9b：个人中心迁 Web 全屏页（ProfileDetailView 原生分支保留可回退）
+            WebPageBridge.shared.open("profile")
         case .layoutEditor:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "布局编辑入口已随 JSON 布局引擎退役")

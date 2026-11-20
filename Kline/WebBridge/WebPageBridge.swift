@@ -76,6 +76,15 @@ final class WebPageBridge: ObservableObject {
         case "close":
             shared.close()
             return WebBridgeResponse.ok(request.id)
+        case "open":
+            // P2-9b：Web 页内切换另一全屏页（如个人中心 → 本地更新）：同 WebView
+            // activeName 切换（page.open 推送驱动），复用池实例复用
+            let name = request.payload["name"] as? String ?? ""
+            guard !name.isEmpty else {
+                return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "需要 name")
+            }
+            shared.open(name)
+            return WebBridgeResponse.ok(request.id)
         case "ready":
             // ⚠️ 全屏 WebView 就绪拉取：page.open 事件可能早于 WebView 创建/加载完成发出
             // （懒创建时序同弹层浮层）→ Web 端 mounted 后调本动作，宿主若有待展示页则补推。

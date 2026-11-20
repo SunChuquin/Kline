@@ -12,6 +12,8 @@
     <TicketPanel v-else-if="activeName === 'ticket'" :key="`tk-${pageSeq}`" @close="closePage" />
     <CondManagePanel v-else-if="activeName === 'condManage'" :key="`cm-${pageSeq}`" @close="closePage" />
     <CondEditorPanel v-else-if="activeName === 'condEditor'" :key="`ce-${pageSeq}`" @close="closePage" />
+    <ProfilePanel v-else-if="activeName === 'profile'" :key="`pf-${pageSeq}`" @close="closePage" />
+    <SearchPanel v-else-if="activeName === 'search'" :key="`sh-${pageSeq}`" @close="closePage" />
     <div v-else class="page-empty"></div>
   </div>
 </template>
@@ -32,6 +34,8 @@ import StrategyEditorPanel from '../components/page/StrategyEditorPanel.vue'
 import TicketPanel from '../components/page/TicketPanel.vue'
 import CondManagePanel from '../components/page/CondManagePanel.vue'
 import CondEditorPanel from '../components/page/CondEditorPanel.vue'
+import ProfilePanel from '../components/page/ProfilePanel.vue'
+import SearchPanel from '../components/page/SearchPanel.vue'
 
 const activeName = ref<string | null>(null)
 const pageSeq = ref(0)
