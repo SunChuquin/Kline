@@ -22,6 +22,10 @@ struct WebViewContainer: UIViewRepresentable {
     /// 均无法让它从 XCUITest 树消失（2026-11-20 实测「返回后 Web 页仍可达」断言挂）；
     /// 唯有把视图从 SwiftUI 层级移除（条件渲染）才能剪枝，池化保住已加载实例。
     var reuseKey: String? = nil
+    /// 外观覆盖（主题偏好切换时经 updateUIView 同步已创建实例——makeUIView 一次性设置
+    /// 会定格创建时偏好，夜间切日间后底色仍白，2026-11-20 自选页实测）；
+    /// nil = 跟随系统不干预
+    var themeStyle: UIUserInterfaceStyle?
     let onReady: (WKWebView) -> Void
     let onError: (String) -> Void
 
@@ -49,11 +53,7 @@ struct WebViewContainer: UIViewRepresentable {
         // 但不透传进 WKWebView 的网页环境——不设置时 prefers-color-scheme 恒 light、
         // systemBackground 底色取日间值（夜间加载瞬间闪白）。dark/light 显式覆盖，
         // 跟随系统时不干预（trait 自然继承）。
-        switch KlineThemeStore.shared.theme.colorScheme {
-        case .some(.dark): webView.overrideUserInterfaceStyle = .dark
-        case .some(.light): webView.overrideUserInterfaceStyle = .light
-        default: break
-        }
+        if let themeStyle { webView.overrideUserInterfaceStyle = themeStyle }
         WebMessageRouter.shared.attach(webView: webView)
 
         if let url = URL(string: "\(WebBridgeConst.scheme)://app/index.html#/\(route)") {
@@ -66,7 +66,12 @@ struct WebViewContainer: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        // 主题偏好切换 → 同步已创建实例的外观（makeUIView 只定格创建时偏好）
+        if let themeStyle, webView.overrideUserInterfaceStyle != themeStyle {
+            webView.overrideUserInterfaceStyle = themeStyle
+        }
+    }
 
     /// SwiftUI 从层级移除本容器时回调：复用 key 的实例入池（强引用持有，随取随用），
     /// 无 key 或加载未就绪（didFail 白屏实例）的正常释放，防污染复用池

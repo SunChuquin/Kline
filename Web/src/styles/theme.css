@@ -73,3 +73,15 @@ body {
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* 双外观声明：WebKit 在 dark trait 下正确取深色 canvas/滚动装饰默认值
+   （未声明时 WKWebView 视页面为浅色-only，夜间内容不足区露白） */
+html {
+  color-scheme: light dark;
+}
+
+/* Tab 页根容器 min-height:100% 的高度链锚点：#app 无确定高度时页面背景
+   只覆盖内容区，夜间内容不足一屏时下方露出 WebView 白底（2026-11-20 实测） */
+#app {
+  min-height: 100vh;
+}

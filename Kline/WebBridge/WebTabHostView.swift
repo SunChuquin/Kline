@@ -40,6 +40,7 @@ struct WebTabHostView: View {
                 WebViewContainer(route: route,
                                  isOpaque: isOpaque,
                                  reuseKey: reuseKey,
+                                 themeStyle: themeStyle,
                                  onReady: { webView in markReady(webView) },
                                  onError: { loadError = $0 })
             }
@@ -58,6 +59,15 @@ struct WebTabHostView: View {
     }
 
     private var router: WebMessageRouter { WebMessageRouter.shared }
+
+    /// 主题偏好 → WebView 外观覆盖（跟随系统返回 nil，trait 自然继承）
+    private var themeStyle: UIUserInterfaceStyle? {
+        switch themeStore.theme.colorScheme {
+        case .some(.dark): return .dark
+        case .some(.light): return .light
+        default: return nil
+        }
+    }
 
     private func markReady(_ webView: WKWebView) {
         router.markPageReady(webView: webView, preference: themeStore.theme.rawValue)
