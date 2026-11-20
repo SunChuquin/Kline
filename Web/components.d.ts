@@ -32,6 +32,7 @@ declare module 'vue' {
     SearchPanel: typeof import('./src/components/page/SearchPanel.vue')['default']
     StrategyDetailPanel: typeof import('./src/components/page/StrategyDetailPanel.vue')['default']
     StrategyEditorPanel: typeof import('./src/components/page/StrategyEditorPanel.vue')['default']
+    TestPagePanel: typeof import('./src/components/page/TestPagePanel.vue')['default']
     TicketPanel: typeof import('./src/components/page/TicketPanel.vue')['default']
     TrainingRecordsPanel: typeof import('./src/components/page/TrainingRecordsPanel.vue')['default']
     VanActionSheet: typeof import('vant/es')['ActionSheet']

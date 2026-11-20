@@ -117,6 +117,7 @@
 //   search.query {keyword} → {results}                                   搜索页模糊搜索（searchMeta 同口径）
 //   search.openDetail {file} → {}                                        选中结果进 K 线详情（关搜索页）
 //   page.open {name} → {}                                                Web 页内切换另一全屏页（个人中心 → 本地更新等同 WebView 切换）
+//   （testPage：测试页——纯静态 mock 演示复刻，零业务动作；模拟 Tab 双击入口改桥，无独立协议动作）
 //   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
 //   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
 //   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面

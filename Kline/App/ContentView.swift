@@ -159,6 +159,8 @@ struct ContentView: View {
                     ProfileDetailView(isPresented: $isProfilePresented)
                         .transition(.opacity)
                 }
+                // 测试页：P2 Web 化收尾起改桥 Web 全屏页（testPage，纯静态 mock 复刻），
+                // 原生 ProfileView 保留可回退（入口不再置位 isTestPresented）
                 if isTestPresented {
                     ProfileView(isPresented: $isTestPresented)
                         .transition(.opacity)
@@ -289,8 +291,8 @@ struct ContentView: View {
             let now = Date()
             let currentLastTime = lastSimulateTapTime
             if let lastTime = currentLastTime, now.timeIntervalSince(lastTime) < doubleTapInterval {
-                // 双击：打开测试页面
-                isTestPresented = true
+                // 双击：打开测试页面（P2 Web 化收尾：改桥 Web 全屏页）
+                WebPageBridge.shared.open("testPage")
                 lastSimulateTapTime = nil
             } else {
                 // 第一次点击
