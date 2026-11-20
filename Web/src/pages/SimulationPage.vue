@@ -27,10 +27,11 @@
       <button class="acc-add" @click="openCreateAccount">＋ 新建账户</button>
     </div>
 
-    <!-- 工具栏：条件单 / 策略公式 / 训练记录 / 资金管理 / 交易规则 / 刷新 -->
+    <!-- 工具栏：条件单 / 策略公式 / 训练记录 / 资金管理 / 交易规则 / 刷新
+         （aria-label 保持原生时代 UITest 锚点：sim.cond.entry / sim.strategyFormula.entry） -->
     <div class="toolbar">
-      <button class="tool-btn" @click="act('openCondManage')">条件单</button>
-      <button class="tool-btn" @click="act('openStrategyFormulas')">策略公式</button>
+      <button class="tool-btn" aria-label="sim.cond.entry" @click="act('openCondManage')">条件单</button>
+      <button class="tool-btn" aria-label="sim.strategyFormula.entry" @click="act('openStrategyFormulas')">策略公式</button>
       <button class="tool-btn" @click="act('openTrainingRecords')">训练记录</button>
       <button class="tool-btn" @click="walletOpen = true">资金管理</button>
       <button class="tool-btn" @click="rulesOpen = true">交易规则</button>
