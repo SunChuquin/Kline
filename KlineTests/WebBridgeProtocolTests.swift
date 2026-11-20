@@ -78,7 +78,8 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "home.changed", "sim.changed", "sheet.open",
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
                                         "backtest.changed", "training.changed", "formulaEdit.changed",
-                                        "strategyEdit.changed", "pickerEdit.changed", "cond.changed"]
+                                        "strategyEdit.changed", "pickerEdit.changed",
+                                        "strategyDetail.changed", "cond.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -746,6 +747,20 @@ final class WebBridgeProtocolTests: XCTestCase {
         }, "fixtures 缺 pickerEdit.save 响应样例")
         let data = try XCTUnwrap(resp["data"] as? [String: Any])
         XCTAssertNotNil(data["id"], "pickerEdit.save 响应缺 id（新建落盘后的 PICK_<n>）")
+    }
+
+    /// strategyDetail.snapshot 响应形状锁定（P2-9c 策略详情页）：基础信息同步直出七字段
+    func testStrategyDetailSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_sd_snapshot"
+        }, "fixtures 缺 strategyDetail.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["id", "name", "tradeConfigured", "canGenerate", "boundAccounts",
+                    "missingCount", "valuesQueued"] {
+            XCTAssertNotNil(data[key], "strategyDetail.snapshot 缺 \(key)")
+        }
     }
 
     /// cond.list 响应形状锁定（P2-9a 条件单管理页）：行卡片字段 + 投影文案

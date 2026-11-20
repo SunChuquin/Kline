@@ -59,8 +59,7 @@ struct FormulaCenterView: View {
     @State private var editingSystem: SystemIndicatorDef?
     /// 选股公式编辑：P2-9c 起改桥 Web 编辑器页（PickerEditBridge.requestOpen
     /// → pickerEditor 全屏 Web 页，原生中心被 zIndex 1002 盖住保持打开）
-    /// 策略详情浮层（只读展示，编辑从详情页跳回编辑器）
-    @State private var detailStrategy: FormulaDoc?
+    /// 策略详情：P2-9c 起改桥 Web 详情页（StrategyDetailBridge.requestOpen → strategyDetail）
     /// 待删除的选股公式：被自选分组引用时先弹确认，确认后再解绑 + 删除
     @State private var pendingDeletePicker: FormulaDoc?
     /// 页面样例行情数据（候选池首只标的的 K 线），供三个编辑器的「测试公式」使用
@@ -389,7 +388,8 @@ struct FormulaCenterView: View {
             }
             Spacer(minLength: 8)
             Button {
-                detailStrategy = doc
+                // P2-9c：详情改桥 Web 详情页（StrategyDetailBridge.requestOpen）
+                StrategyDetailBridge.shared.requestOpen(initialDoc: doc)
             } label: {
                 Text("详情")
                     .font(.system(size: 13))
@@ -464,17 +464,7 @@ struct FormulaCenterView: View {
             .transition(.opacity)
             .zIndex(1000)
         }
-        if let doc = detailStrategy {
-            // 策略详情页：只读展示；点「编辑」关详情并打开 Web 策略编辑器（P2-8b）
-            StrategyDetailView(doc: doc,
-                               onClose: { detailStrategy = nil },
-                               onEdit: {
-                                   detailStrategy = nil
-                                   StrategyEditorBridge.shared.requestOpen(initialDoc: doc)
-                               })
-                .transition(.opacity)
-                .zIndex(1000)
-        }
+        // 策略详情浮层：P2-9c 起改桥 Web 详情页（strategyDetail），原生浮层分支已移除
     }
 
     // MARK: - 动作

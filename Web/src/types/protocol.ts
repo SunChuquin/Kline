@@ -98,6 +98,9 @@
 //   pickerEdit.snapshot {} → PickerEditSnapshot                          选股公式编辑快照（id/name/pickBody/hasData）
 //   pickerEdit.testPick {pickBody} → {queued}                            公式试算（异步，结果随 pickerEdit.changed(pickTest) 推送）
 //   pickerEdit.save {id, name, pickBody} → {id}                          保存（同步写库；名称非空校验；成功即关页；id 空串 = 新建）
+//   strategyDetail.snapshot {} → StrategyDetailSnapshot                  策略详情快照（基础信息同步直出；引擎取值经 changed(values) 推送）
+//   strategyDetail.edit {} → {}                                          跳策略编辑器（Web 页内切 strategyEditor）
+//   strategyDetail.backtest {} → {}                                      跳回测（Web 页内切 backtest，复用 backtest.* 页）
 //   ticket.snapshot {} → TicketSnapshot                                  全屏下单页票面快照（账户/标的/最新价/持仓/费率常量集；提交复用 trade.submit）
 //   cond.list {} → CondListSnapshot                                      条件单管理页快照（三分段行卡片 + 投影文案；占位→就绪经 cond.changed(texts) 重推）
 //   cond.editorContext {} → CondEditorContext                            编辑器上下文（draft 走 SimCondOrder 原生 JSON 口径 iso8601）
@@ -179,6 +182,7 @@
 //   formulaEdit.changed {reason}           公式编辑器异步结果（reason: testResult|dataReady；route:"page" 定向推送）
 //   strategyEdit.changed {reason}          策略编辑器异步结果（reason: pickTest|saveResult|dataReady；route:"page" 定向推送）
 //   pickerEdit.changed {reason}            选股公式编辑器异步结果（reason: pickTest|dataReady；route:"page" 定向推送）
+//   strategyDetail.changed {reason}        策略详情异步结果（reason: values；route:"page" 定向推送）
 //   cond.changed {reason}                  条件单异步结果（reason: evaluate|saveResult|list|texts|newFailed；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
@@ -854,6 +858,33 @@ export interface StrategyEvaluateResult {
   preview: { trade: string; summary: string; executionNotice: string }
 }
 
+// ===== P2-9c 策略详情页（strategyDetail） =====
+
+/** strategyDetail.snapshot 响应（基础信息同步直出；引擎取值经 changed(values) 推送） */
+export interface StrategyDetailSnapshot {
+  id: string
+  name: string
+  /** 已配置交易指令或绑定账户（false 时交易卡显示引导文案） */
+  tradeConfigured: boolean
+  /** 「生成条件单」可用性（须已配置交易指令且绑定账户） */
+  canGenerate: boolean
+  /** 绑定的有效账户名（按 accountIDs 顺序解析） */
+  boundAccounts: string[]
+  /** 绑定了但已失效的账户数 */
+  missingCount: number
+  valuesQueued: boolean
+}
+
+/** strategyDetail.changed(values) 推送（引擎取值；unavailable = 引擎不可用显式降级） */
+export interface StrategyDetailValues {
+  reason: 'values'
+  pickSummary: string
+  tradeSummary: string
+  rules: { kindTitle: string; trigger: string }[]
+  parseErrors: string[]
+  unavailable: boolean
+}
+
 // ===== P2-9c 选股公式编辑器（pickerEdit） =====
 
 /** pickerEdit.snapshot 响应（编辑对象 + 样例数据就绪标记；极简形态：只编辑名称 + 公式） */
@@ -965,6 +996,7 @@ export const KnownActions = {
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
+  strategyDetail: ['snapshot', 'edit', 'backtest'],
   pickerEdit: ['snapshot', 'testPick', 'save'],
   ticket: ['snapshot'],
   cond: ['list', 'editorContext', 'evaluate', 'save', 'cancel', 'edit', 'new'],
@@ -999,6 +1031,7 @@ export const KnownEvents = {
   trainingChanged: 'training.changed',
   formulaEditChanged: 'formulaEdit.changed',
   strategyEditChanged: 'strategyEdit.changed',
+  strategyDetailChanged: 'strategyDetail.changed',
   pickerEditChanged: 'pickerEdit.changed',
   condChanged: 'cond.changed',
 } as const
