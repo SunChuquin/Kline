@@ -561,10 +561,10 @@ struct SheetWebOverlayHost: View {
                 .transition(.opacity)
                 .zIndex(1001)   // 盖住弹层浮层 WebView
             }
-            // P2-8a：formulaEditor 全屏 Web 页（Web tech 段「编辑/新建」直进 Web 编辑器；
-            // shell 层 WebFullscreenPageHost 排除本页名，呈现宿主唯一在详情页层级）
+            // P2-8a：formulaEditor 全屏 Web 页（Web tech 段「编辑/新建」直进 Web 编辑器）。
+            // P2-9 白屏治理：条件渲染 + 复用池（dismantle 入池 / 重建取池，二次打开零白屏）
             if pageBridge.activePage == "formulaEditor" {
-                WebTabHostView(route: "page", isOpaque: true)
+                WebTabHostView(route: "page", isOpaque: true, reuseKey: "formulaEditor")
                     .transition(.opacity)
                     .zIndex(1002)   // 盖住原生公式中心
             }

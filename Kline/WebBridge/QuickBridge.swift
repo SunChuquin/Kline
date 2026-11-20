@@ -125,7 +125,7 @@ final class QuickBridge: ObservableObject {
             let result = await store.submit(draft)
             if case .failure(let rejection) = result {
                 DebugLogger.shared.log("[QuickBridge] submit 被拒: \(rejection.message)")
-                WebMessageRouter.shared.pushEvent("sim.changed", payload: ["reason": "submit-rejected"])
+                WebMessageRouter.shared.pushEvent("sim.changed", payload: ["reason": "submit-rejected"], route: "simulation")
             } else {
                 DebugLogger.shared.log("[QuickBridge] submit 成功 \(meta.name) \(direction.title) \(qty)")
             }

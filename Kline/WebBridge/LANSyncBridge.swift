@@ -113,7 +113,7 @@ final class LANSyncBridge: ObservableObject {
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.changedItem = nil
-            WebMessageRouter.shared.pushEvent("lan.changed", payload: ["reason": self.pendingReason])
+            WebMessageRouter.shared.pushEvent("lan.changed", payload: ["reason": self.pendingReason], route: "page")
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)
@@ -122,7 +122,8 @@ final class LANSyncBridge: ObservableObject {
     /// 带消息的即时推送（连接失败 / 主库替换提示；不经节流）
     private func pushAlert(_ reason: String, _ message: String) {
         WebMessageRouter.shared.pushEvent("lan.changed",
-                                          payload: ["reason": reason, "message": message])
+                                          payload: ["reason": reason, "message": message],
+                                          route: "page")
     }
 
     // MARK: - 动作

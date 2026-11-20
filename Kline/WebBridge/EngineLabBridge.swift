@@ -57,7 +57,7 @@ final class EngineLabBridge: ObservableObject {
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.changedItem = nil
-            WebMessageRouter.shared.pushEvent("lab.changed", payload: ["reason": reason])
+            WebMessageRouter.shared.pushEvent("lab.changed", payload: ["reason": reason], route: "page")
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)

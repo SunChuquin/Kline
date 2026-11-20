@@ -40,7 +40,7 @@ enum FavoritesBridge {
 
     /// 编辑类写回完成 → 推 changed（页面回读权威快照）
     private static func notifyEdit() {
-        WebMessageRouter.shared.pushEvent("favorites.changed", payload: ["reason": "edit"])
+        WebMessageRouter.shared.pushEvent("favorites.changed", payload: ["reason": "edit"], route: "favorites")
     }
 
     /// file → 当前主库 metaID
@@ -198,7 +198,7 @@ enum FavoritesBridge {
         let metas = model.items(groupID: groupID)
 
         let finished = {
-            WebMessageRouter.shared.pushEvent("favorites.changed", payload: ["reason": "refresh"])
+            WebMessageRouter.shared.pushEvent("favorites.changed", payload: ["reason": "refresh"], route: "favorites")
         }
         if group.kind == .formula {
             fav.refreshFormulaGroup(id: groupID, candidates: metas, cache: rowCache,

@@ -81,7 +81,8 @@ final class HomeBridge: ObservableObject {
             guard let self else { return }
             self.changedItem = nil
             WebMessageRouter.shared.pushEvent("home.changed",
-                                              payload: ["reason": self.pendingReason])
+                                              payload: ["reason": self.pendingReason],
+                                              route: "home")
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)
@@ -91,7 +92,7 @@ final class HomeBridge: ObservableObject {
     private func notifyChangedNow(reason: String) {
         changedItem?.cancel()
         changedItem = nil
-        WebMessageRouter.shared.pushEvent("home.changed", payload: ["reason": reason])
+        WebMessageRouter.shared.pushEvent("home.changed", payload: ["reason": reason], route: "home")
     }
 
     // MARK: - 动作分发

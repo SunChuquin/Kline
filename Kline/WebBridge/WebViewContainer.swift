@@ -15,10 +15,25 @@ struct WebViewContainer: UIViewRepresentable {
     let route: String
     /// 不透明底（Tab 内容宿主需要白底；弹层浮层传 false → 透明 WebView，让遮罩/下层内容透出）
     var isOpaque: Bool = true
+    /// 复用池 key（nil = 不复用，销毁即释放）。P2-9 白屏治理：懒创建+关闭即销毁的宿主
+    /// （全屏 Web 页 / 公式编辑器）传 key 后，dismantle 时实例入池、重建时取池中已加载
+    /// 实例（零重载零白屏）。⚠️ 不能用「常驻 + opacity/isHidden 隐藏」替代——WKWebView 的
+    /// Web 内容元素由 WebKit 远程合成进系统无障碍树，opacity/accessibilityHidden/isHidden
+    /// 均无法让它从 XCUITest 树消失（2026-11-20 实测「返回后 Web 页仍可达」断言挂）；
+    /// 唯有把视图从 SwiftUI 层级移除（条件渲染）才能剪枝，池化保住已加载实例。
+    var reuseKey: String? = nil
     let onReady: (WKWebView) -> Void
     let onError: (String) -> Void
 
+    /// 复用池：key → 已完成加载的 WebView 实例（每 key 至多 1 个，新入池覆盖旧的）
+    static var reusePool: [String: WKWebView] = [:]
+
     func makeUIView(context: Context) -> WKWebView {
+        // 复用命中：池中实例已加载到目标路由，直接返回（不再 load，didFinish 不会再来）
+        if let reuseKey, let cached = Self.reusePool.removeValue(forKey: reuseKey) {
+            DebugLogger.shared.log("[WebBridge] WebView 复用命中（\(reuseKey)）——零重载")
+            return cached
+        }
         let config = WKWebViewConfiguration()
         // 自定义 scheme 必须在 WKWebView 初始化前注册
         config.setURLSchemeHandler(WebUISchemeHandler(), forURLScheme: WebBridgeConst.scheme)
@@ -44,16 +59,29 @@ struct WebViewContainer: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
 
+    /// SwiftUI 从层级移除本容器时回调：复用 key 的实例入池（强引用持有，随取随用），
+    /// 无 key 或加载未就绪（didFail 白屏实例）的正常释放，防污染复用池
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        guard let key = coordinator.reuseKey, coordinator.didReportReady else { return }
+        reusePool[key] = uiView
+        DebugLogger.shared.log("[WebBridge] WebView 入复用池（\(key)）——实例保留防白屏")
+    }
+
     func makeCoordinator() -> Coordinator {
-        Coordinator(onReady: onReady, onError: onError)
+        Coordinator(route: route, reuseKey: reuseKey, onReady: onReady, onError: onError)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
+        let route: String
+        let reuseKey: String?
         let onReady: (WKWebView) -> Void
         let onError: (String) -> Void
-        private var didReportReady = false
+        fileprivate var didReportReady = false
 
-        init(onReady: @escaping (WKWebView) -> Void, onError: @escaping (String) -> Void) {
+        init(route: String, reuseKey: String?, onReady: @escaping (WKWebView) -> Void,
+             onError: @escaping (String) -> Void) {
+            self.route = route
+            self.reuseKey = reuseKey
             self.onReady = onReady
             self.onError = onError
         }

@@ -70,7 +70,8 @@ final class TrainingBridge: ObservableObject {
             guard let self else { return }
             self.changedItem = nil
             WebMessageRouter.shared.pushEvent("training.changed",
-                                              payload: ["reason": self.pendingReason])
+                                              payload: ["reason": self.pendingReason],
+                                              routes: ["sheet", "page"])
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)
@@ -80,7 +81,7 @@ final class TrainingBridge: ObservableObject {
     private func pushPayload(_ reason: String, _ extra: [String: Any] = [:]) {
         var payload: [String: Any] = ["reason": reason]
         for (k, v) in extra { payload[k] = v }
-        WebMessageRouter.shared.pushEvent("training.changed", payload: payload)
+        WebMessageRouter.shared.pushEvent("training.changed", payload: payload, routes: ["sheet", "page"])
     }
 
     // MARK: - 动作分发

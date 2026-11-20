@@ -240,12 +240,19 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
     /// 事件推送（泛化入口）：默认推给最近就绪的页面；无就绪页面（如 PC 调试桥触发）
     /// 时静默跳过——pc 模式由页面回读权威状态，不依赖推送。
     /// - Parameter route: 传定时按 hash 路由**定向推送**（如 "sheet" 只推弹层浮层 WebView）。
-    ///   ⚠️ readyWebViews 是弱引用无序集合，多 WebView 并存（Tab 宿主 + 弹层浮层）时
+    ///   ⚠️ readyWebViews 是弱引用无序集合，多 WebView 并存时
     ///   allObjects.last 不保证是最近打开的实例——2026-11-19 UITest 实测 sheet.open 被推到
     ///   Tab 宿主导致浮层面板永不渲染；宿主专属事件必须传 route。
-    func pushEvent(_ name: String, payload: [String: Any], route: String? = nil) {
+    /// - Parameter routes: 多播（如 nav.tab 同时推 4 个 Tab 宿主、training.changed 双播
+    ///   sheet + page）；Tab WebView 常驻化后数据事件必须 route/routes 定向，否则
+    ///   会被无序弱表推给错误实例（2026-11-20 P2-9 白屏治理引入常驻后收紧）。
+    func pushEvent(_ name: String, payload: [String: Any], route: String? = nil, routes: [String]? = nil) {
         let targets: [WKWebView]
-        if let route {
+        if let routes {
+            targets = readyWebViews.allObjects.filter { w in
+                routes.contains { w.url?.absoluteString.contains("#/\($0)") == true }
+            }
+        } else if let route {
             targets = readyWebViews.allObjects.filter {
                 $0.url?.absoluteString.contains("#/\(route)") == true
             }

@@ -72,7 +72,8 @@ final class BacktestBridge: ObservableObject {
             guard let self else { return }
             self.changedItem = nil
             WebMessageRouter.shared.pushEvent("backtest.changed",
-                                              payload: ["reason": self.pendingReason])
+                                              payload: ["reason": self.pendingReason],
+                                              route: "page")
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)

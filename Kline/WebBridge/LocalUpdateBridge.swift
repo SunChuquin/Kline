@@ -129,7 +129,8 @@ final class LocalUpdateBridge: ObservableObject {
             guard let self else { return }
             self.changedItem = nil
             WebMessageRouter.shared.pushEvent("update.changed",
-                                              payload: ["reason": self.pendingReason])
+                                              payload: ["reason": self.pendingReason],
+                                              route: "page")
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)
@@ -139,13 +140,14 @@ final class LocalUpdateBridge: ObservableObject {
     private func notifyChangedNow(_ reason: String) {
         changedItem?.cancel()
         changedItem = nil
-        WebMessageRouter.shared.pushEvent("update.changed", payload: ["reason": reason])
+        WebMessageRouter.shared.pushEvent("update.changed", payload: ["reason": reason], route: "page")
     }
 
     /// 带消息的即时推送（基准缺失查询失败等）
     private func pushAlert(_ reason: String, _ message: String) {
         WebMessageRouter.shared.pushEvent("update.changed",
-                                          payload: ["reason": reason, "message": message])
+                                          payload: ["reason": reason, "message": message],
+                                          route: "page")
     }
 
     // MARK: - 动作分发

@@ -15,6 +15,8 @@ struct WebTabHostView: View {
     let route: String
     /// 不透明底（Tab 内容宿主白底；弹层浮层传 false → 全链路透明，让遮罩透出）
     var isOpaque: Bool = true
+    /// 复用池 key（nil = 销毁即释放；P2-9 全屏页宿主传 key 实现零重载复用）
+    var reuseKey: String? = nil
 
     @ObservedObject private var themeStore = KlineThemeStore.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -37,6 +39,7 @@ struct WebTabHostView: View {
             } else {
                 WebViewContainer(route: route,
                                  isOpaque: isOpaque,
+                                 reuseKey: reuseKey,
                                  onReady: { webView in markReady(webView) },
                                  onError: { loadError = $0 })
             }

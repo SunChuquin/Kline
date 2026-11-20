@@ -127,7 +127,8 @@ final class MarketBridge: ObservableObject {
             guard let self else { return }
             self.changedItem = nil
             WebMessageRouter.shared.pushEvent("market.changed",
-                                              payload: ["reason": self.pendingReason])
+                                              payload: ["reason": self.pendingReason],
+                                              route: "market")
         }
         changedItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + changedThrottle, execute: item)
@@ -137,7 +138,7 @@ final class MarketBridge: ObservableObject {
     private func notifyChangedNow(reason: String) {
         changedItem?.cancel()
         changedItem = nil
-        WebMessageRouter.shared.pushEvent("market.changed", payload: ["reason": reason])
+        WebMessageRouter.shared.pushEvent("market.changed", payload: ["reason": reason], route: "market")
     }
 
     // MARK: - 动作分发

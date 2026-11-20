@@ -9,6 +9,9 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab = 2
+    /// 已激活的 Tab（首次激活创建 Web 宿主，此后常驻 opacity 切换——根治每次切 Tab
+    /// 销毁重建 WebView 重载 SPA 的白屏；启动后延迟串行预热其余 Tab）
+    @State private var activatedTabs: Set<Int> = [2]
     @State private var isSearching = false
     @State private var isProfilePresented = false
     @State private var isTestPresented = false
@@ -120,10 +123,18 @@ struct ContentView: View {
                 guard selectedTab != index else { return }
                 selectedTab = index
             }
+            // P2-9：启动稳定后串行预热其余 Tab Web 宿主（首切 Tab 零白屏）
+            prewarmRemainingTabs()
         }
-        // Tab 切换 → 推 nav.tab 事件（Web 侧切路由；keep-alive 页面不重建）
+        // Tab 切换 → 推 nav.tab 事件（Web 侧切路由兜底）。⚠️ 必须 route 定向单推：
+        // P2-9 后 4 个 Tab WebView 常驻并存、每实例 hash 固定绑定各自 Tab，
+        // 广播会让全部实例 router.push 同一目标（隐藏页路由被切乱）；定向推给目标
+        // 实例，其 push 为幂等 no-op（初始 hash 已是目标路由）。
         .onChange(of: selectedTab) { newValue in
-            WebMessageRouter.shared.pushEvent("nav.tab", payload: ["index": newValue])
+            activatedTabs.insert(newValue)
+            let tabRoutes = ["home", "favorites", "market", "simulation"]
+            WebMessageRouter.shared.pushEvent("nav.tab", payload: ["index": newValue],
+                                              route: tabRoutes[newValue])
         }
         .onReceive(DatabaseManager.shared.$isLoaded) { loaded in
             // 数据库就绪即预热（直接透传就绪标志，不依赖内部再读 db.isLoaded）
@@ -302,24 +313,18 @@ struct ContentView: View {
     // MARK: - 主内容视图切换
     // 混合架构 P2：Tab 内容逐页换 Web（原生实现类保留，回退 = 改回一行分支）。
     // 已换：0 首页（P2-3）/ 1 自选（P2-1）/ 2 行情（P2-2）/ 3 模拟（P2-4）。
+    // P2-9：Tab WebView 常驻 keep-alive——switch 销毁重建（每次切 Tab 重载 SPA 白屏）
+    // 改为「首次激活创建 + opacity 切换」；启动后延迟串行预热其余 Tab，用户首切即秒显。
     @ViewBuilder
     private var mainContentView: some View {
         // P2-7：原生四 Tab 页随 JSON 布局系统退役，Web 资源缺失时显式占位（不再回退原生页）
         Group {
             if WebUIFiles.isBundleReady {
-                switch selectedTab {
-                case 0:
-                    // P2-3：首页 Web 化（原生浮层由 HomeWebShellView overlay 挂载）
-                    HomeWebShellView()
-                case 1:
-                    // P2-1：自选页 Web 化
-                    WebTabHostView(route: "favorites")
-                case 2:
-                    // P2-2：行情页 Web 化（原生浮层由 MarketWebShellView overlay 挂载）
-                    MarketWebShellView()
-                default:
-                    // P2-4：模拟页 Web 化（原生浮层由 SimWebShellView 挂载：下单页/条件单/策略公式/训练记录）
-                    SimWebShellView()
+                ZStack {
+                    tabContent(0) { HomeWebShellView() }
+                    tabContent(1) { WebTabHostView(route: "favorites") }
+                    tabContent(2) { MarketWebShellView() }
+                    tabContent(3) { SimWebShellView() }
                 }
             } else {
                 VStack(spacing: 12) {
@@ -333,6 +338,34 @@ struct ContentView: View {
                         .padding(.horizontal, 24)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    /// 单 Tab 内容宿主：未激活不创建；激活后常驻，非当前 Tab 隐藏（opacity 0 + 不参与
+    /// 命中与无障碍树——避免隐藏页元素污染 UITest 锚点与 VoiceOver 焦点）
+    @ViewBuilder
+    private func tabContent<Content: View>(_ index: Int,
+                                           @ViewBuilder content: () -> Content) -> some View {
+        Group {
+            if activatedTabs.contains(index) {
+                content()
+            }
+        }
+        .opacity(selectedTab == index ? 1 : 0)
+        .allowsHitTesting(selectedTab == index)
+        .accessibilityHidden(selectedTab != index)
+    }
+
+    /// 启动后延迟串行预热其余 Tab 宿主（各延迟 0.6s 错峰创建+加载，避免首帧与快照并发尖峰）；
+    /// 用户提前切 Tab 时 onChange 已即时激活，预热仅补齐未访问过的 Tab
+    private func prewarmRemainingTabs() {
+        let order = [0, 1, 3].filter { !activatedTabs.contains($0) }
+        Task { @MainActor in
+            for (i, index) in order.enumerated() {
+                try? await Task.sleep(nanoseconds: UInt64((2_000_000_000) + i * 600_000_000))
+                guard !Task.isCancelled else { return }
+                activatedTabs.insert(index)
             }
         }
     }

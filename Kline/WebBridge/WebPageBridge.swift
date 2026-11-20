@@ -89,16 +89,19 @@ final class WebPageBridge: ObservableObject {
 
 // MARK: - 全屏 Web 页宿主（HomeWebShellView overlay 挂载）
 
-/// 全屏 Web 页宿主：activePage 非 nil 时创建 route="page" 的 WebView，关闭即随条件渲染销毁。
-/// 例外：formulaEditor 由 SheetWebOverlayHost 呈现（入口在图表详情页弹层，shell 层会被
-/// 详情页盖住）；activePage 仍是单一事实源，page.ready 补推对本页照常生效。
+/// 全屏 Web 页宿主：activePage 非 nil 时创建 route="page" 的 WebView。
+/// P2-9 白屏治理：条件渲染销毁时 WebViewContainer dismantle 入复用池（实例保留），
+/// 重开时 makeUIView 从池取已加载实例——「关闭后元素消失」（XCUITest 断言语义）与
+/// 「二次打开零白屏」两全。formulaEditor 由 SheetWebOverlayHost 呈现（入口在图表
+/// 详情页弹层，shell 层会被详情页盖住）；activePage 仍是单一事实源，page.ready
+/// 补推对本页照常生效。
 struct WebFullscreenPageHost: View {
     @ObservedObject private var bridge = WebPageBridge.shared
 
     var body: some View {
         Group {
             if let name = bridge.activePage, name != "formulaEditor" {
-                WebTabHostView(route: "page", isOpaque: true)
+                WebTabHostView(route: "page", isOpaque: true, reuseKey: "page")
                     .transition(.opacity)
             }
         }
