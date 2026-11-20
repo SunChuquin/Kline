@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     BacktestPanel: typeof import('./src/components/page/BacktestPanel.vue')['default']
     EngineLabPanel: typeof import('./src/components/page/EngineLabPanel.vue')['default']
+    FormulaEditorPanel: typeof import('./src/components/page/FormulaEditorPanel.vue')['default']
     KButton: typeof import('./src/components/kline/KButton.vue')['default']
     KCard: typeof import('./src/components/kline/KCard.vue')['default']
     KCell: typeof import('./src/components/kline/KCell.vue')['default']

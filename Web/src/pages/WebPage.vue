@@ -5,6 +5,7 @@
     <EngineLabPanel v-else-if="activeName === 'pythonLab'" @close="closePage" />
     <BacktestPanel v-else-if="activeName === 'backtest'" @close="closePage" />
     <TrainingRecordsPanel v-else-if="activeName === 'trainingRecords'" @close="closePage" />
+    <FormulaEditorPanel v-else-if="activeName === 'formulaEditor'" @close="closePage" />
     <div v-else class="page-empty"></div>
   </div>
 </template>
@@ -19,6 +20,7 @@ import LocalUpdatePanel from '../components/page/LocalUpdatePanel.vue'
 import EngineLabPanel from '../components/page/EngineLabPanel.vue'
 import BacktestPanel from '../components/page/BacktestPanel.vue'
 import TrainingRecordsPanel from '../components/page/TrainingRecordsPanel.vue'
+import FormulaEditorPanel from '../components/page/FormulaEditorPanel.vue'
 
 const activeName = ref<string | null>(null)
 

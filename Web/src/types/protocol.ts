@@ -82,6 +82,15 @@
 //   chart.indicators.resetBuiltin {} → {}                    重置内置指标（restoreAllBuiltin）
 //   chart.indicators.openSystemEditor {isMain, subId?} → {}  关面板 + 桥接原生系统指标公式编辑器
 //   chart.indicators.openCustomEditor {target} → {}          关面板 + 桥接原生自定义指标编辑器
+//   chart.formula.snapshot {} → FormulaSnapshot                          tech 段三节快照（系统主图/副图分组/自定义）
+//   chart.formula.deleteCustom {id} → {}                                 删除自定义指标
+//   chart.formula.openCenter {} → {}                                     （回退链路）关面板 + 桥接原生公式中心
+//   chart.formula.openEditor {target:"system", id, isMain?} | {target:"custom", id?} → {}
+//                                                                        关面板 + 打开 Web 编辑器全屏页（id 缺省 custom = 新建）
+//   formulaEdit.snapshot {} → FormulaEditSnapshot                        编辑器快照（system/custom(new|edit) 三形态；palette/colorHex）
+//   formulaEdit.test {formula} → {queued}                                测试公式（异步求值，结果随 formulaEdit.changed(testResult) 推送）
+//   formulaEdit.save {formula, name?, scope?, colorHex?, periods?} → {}  保存（system 写回 .tdx；custom 全量写回；成功即关页）
+//   formulaEdit.restoreBuiltin {} → {formula}                            恢复编译时内容（仅系统指标；同步返回恢复后公式）
 //   quick.snapshot {} → QuickSnapshot                        快捷面板快照（悬浮球；列表态/详情态/票面态三视图）
 //   quick.selectAccount {accountID|null} → {}                切换账户（面板内 chips）
 //   quick.pickTicket {file, direction} → {}                  列表态自选行买/卖 → 面板内切票面
@@ -149,6 +158,7 @@
 //   lab.changed       {reason}             引擎实验室状态/输出变化（reason: status|output|progress；节流 ~0.2s 合并）
 //   backtest.changed  {reason}             回测 phase/进度变化（reason: phase|progress；节流 ~0.25s 合并）
 //   training.changed  {reason}             训练状态变化（reason: begun|beginFailed|beginReselect|records|projection）
+//   formulaEdit.changed {reason}           公式编辑器异步结果（reason: testResult|dataReady；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -723,6 +733,38 @@ export interface TrainingRecordDetail {
   alerts: TrainingAlertSnap[]
 }
 
+// ===== P2-8a tech 公式编辑器（formulaEdit） =====
+
+/** formulaEdit.snapshot 颜色板项（option = COLORXXX 选项名，Web 端点击插入光标处） */
+export interface FormulaEditColorSnap {
+  name: string
+  hex: string
+  option: string
+}
+
+/** formulaEdit.snapshot 响应（编辑器初始字段与上下文；periods null = 全周期） */
+export interface FormulaEditSnapshot {
+  /** system = 系统指标（只编辑公式）；new/edit = 自定义指标新建/编辑 */
+  mode: 'system' | 'new' | 'edit'
+  /** 页头标题里的指标名（system = id） */
+  displayName: string
+  isMain: boolean
+  name: string
+  formula: string
+  scope: 'main' | 'sub'
+  colorHex: string
+  /** 适用周期集合；null = 全周期（对齐原生 applicablePeriods = nil） */
+  periods: string[] | null
+  /** 仅系统指标 true（可恢复编译时内容） */
+  canRestoreBuiltin: boolean
+  /** 编辑上下文周期（system 写回目标 = Documents/indicator/<周期>/） */
+  period: string
+  periodOptions: string[]
+  /** 样例行情是否就绪（测试公式用；未就绪时 test 推「暂无行情数据」） */
+  hasData: boolean
+  palette: FormulaEditColorSnap[]
+}
+
 // 已约定的 module.action 清单（协议 v2）
 export const KnownActions = {
   app: ['ping', 'reportRtt', 'memory', 'info', 'jsdiag', 'jsError'],
@@ -746,7 +788,8 @@ export const KnownActions = {
           'indicators.snapshot', 'indicators.toggleMain', 'indicators.selectSub',
           'indicators.activateMainCustom', 'indicators.resetBuiltin',
           'indicators.openSystemEditor', 'indicators.openCustomEditor',
-          'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter'],
+          'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
+  formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
   trade: ['submit'],
   page: ['close', 'ready'],
@@ -775,6 +818,7 @@ export const KnownEvents = {
   labChanged: 'lab.changed',
   backtestChanged: 'backtest.changed',
   trainingChanged: 'training.changed',
+  formulaEditChanged: 'formulaEdit.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

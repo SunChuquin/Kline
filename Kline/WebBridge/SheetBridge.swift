@@ -168,14 +168,19 @@ final class SheetBridge: ObservableObject {
         case "indicators.openCustomEditor":
             return indicatorsOpenCustomEditor(request)
         case "formula.snapshot":
-            return formulaSnapshotData()
+            // ⚠️ 必须包 ok 信封：klineBus native 按 {id, ok} 配对，裸字典会被 dispatch 静默丢弃
+            // （P2-6b 遗留偏差，2026-11-20 冒烟实测面板永白——快照永不回传）
+            return WebBridgeResponse.ok(request.id, data: formulaSnapshotData())
         case "formula.deleteCustom":
             return formulaDeleteCustom(request)
         case "formula.openCenter":
-            // 编辑/新建入口：关 Web 面板 → 原生公式中心全屏打开（编辑器完整可用）
+            // 编辑/新建入口（回退链路保留）：关 Web 面板 → 原生公式中心全屏打开
             shared.close()
             shared.formulaCenterRequest = FormulaKind.tech.rawValue
             return WebBridgeResponse.ok(request.id)
+        case "formula.openEditor":
+            // P2-8a：编辑/新建直进 Web 编辑器全屏页（原生编辑链路保留可回退）
+            return formulaOpenEditor(request)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "chart.\(request.action) 未实现")
@@ -480,6 +485,36 @@ final class SheetBridge: ObservableObject {
         DebugLogger.shared.log("[SheetBridge] deleteCustom \(raw)")
         return WebBridgeResponse.ok(request.id)
     }
+
+    /// chart.formula.openEditor {target:"system", id, isMain?} | {target:"custom", id?}：
+    /// P2-8a 编辑/新建入口。关 Web 面板 → 暂存目标 → 全屏 Web 编辑器页（formulaEditor）。
+    /// id 缺省的 custom = 新建；系统指标要求当前周期存在公式模板（VOL/AMO 无模板不可编辑）。
+    static func formulaOpenEditor(_ request: WebBridgeRequest) -> [String: Any] {
+        let p = request.payload
+        let target: FormulaEditorTarget
+        switch p["target"] as? String {
+        case "system":
+            guard let id = p["id"] as? String, !id.isEmpty else {
+                return WebBridgeResponse.fail(request.id, code: "invalid_payload", message: "系统指标需要 id")
+            }
+            let period = ChartConfigStore.shared.selectedPeriod
+            guard SystemIndicatorStore.shared.template(for: id, period: period) != nil else {
+                return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                              message: "指标 \(id) 没有可编辑的公式模板")
+            }
+            target = .system(id: id, isMain: (p["isMain"] as? Bool) ?? true)
+        case "custom":
+            let id = (p["id"] as? String).flatMap(UUID.init(uuidString:))
+            target = .custom(id: id)
+        default:
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "target 必须为 system / custom")
+        }
+        shared.close()
+        FormulaEditorBridge.shared.requestOpen(target)
+        DebugLogger.shared.log("[SheetBridge] openEditor \(p["target"] ?? "")")
+        return WebBridgeResponse.ok(request.id)
+    }
 }
 
 // MARK: - 图表弹层浮层宿主（KlineDetailView 顶层 overlay 挂载）
@@ -489,6 +524,8 @@ final class SheetBridge: ObservableObject {
 /// 关闭只切 opacity（sheet.close 已由 Web 端在面板内发起，遮罩点击同样发 sheet.close）。
 struct SheetWebOverlayHost: View {
     @ObservedObject private var bridge = SheetBridge.shared
+    /// P2-8a：formulaEditor 全屏页由 WebPageBridge.activePage 驱动（需观察才有重绘）
+    @ObservedObject private var pageBridge = WebPageBridge.shared
     /// WebView 是否已创建（创建后保留复用，不再销毁）
     @State private var webCreated = false
 
@@ -523,6 +560,13 @@ struct SheetWebOverlayHost: View {
                 }
                 .transition(.opacity)
                 .zIndex(1001)   // 盖住弹层浮层 WebView
+            }
+            // P2-8a：formulaEditor 全屏 Web 页（Web tech 段「编辑/新建」直进 Web 编辑器；
+            // shell 层 WebFullscreenPageHost 排除本页名，呈现宿主唯一在详情页层级）
+            if pageBridge.activePage == "formulaEditor" {
+                WebTabHostView(route: "page", isOpaque: true)
+                    .transition(.opacity)
+                    .zIndex(1002)   // 盖住原生公式中心
             }
         }
         .onChange(of: bridge.activeSheet) { sheet in

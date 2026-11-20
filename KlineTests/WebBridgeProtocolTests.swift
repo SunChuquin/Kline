@@ -77,7 +77,7 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "favorites.changed", "market.changed",
                                         "home.changed", "sim.changed", "sheet.open",
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
-                                        "backtest.changed", "training.changed"]
+                                        "backtest.changed", "training.changed", "formulaEdit.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -562,5 +562,86 @@ final class WebBridgeProtocolTests: XCTestCase {
                 XCTAssertNotNil(a[key], "训练预警行缺 \(key)")
             }
         }
+    }
+
+    /// chart.formula.snapshot 响应形状锁定（P2-6b tech 段三节 + P2-8a 编辑入口的数据源；
+    /// 2026-11-20 修复裸字典缺 ok 信封——klineBus 按信封配对，裸响应会被静默丢弃）
+    func testChartFormulaSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_chart_formula_snapshot"
+        }, "fixtures 缺 chart.formula.snapshot 响应样例")
+        XCTAssertEqual(snap["ok"] as? Bool, true, "formula.snapshot 响应必须带 ok 信封")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any], "formula.snapshot 响应必须包 data")
+        for key in ["period", "mainItems", "subGroups", "customs"] {
+            XCTAssertNotNil(data[key], "chart.formula.snapshot 缺 \(key)")
+        }
+        let customs = try XCTUnwrap(data["customs"] as? [[String: Any]])
+        for c in customs {
+            for key in ["id", "name", "colorHex", "scope", "periods"] {
+                XCTAssertNotNil(c[key], "自定义指标行缺 \(key)")
+            }
+        }
+    }
+
+    /// formulaEdit.snapshot 响应形状锁定（P2-8a tech 公式编辑器）：三形态字段 + palette 结构
+    func testFormulaEditSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_fe_snapshot"
+        }, "fixtures 缺 formulaEdit.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["mode", "displayName", "isMain", "name", "formula", "scope", "colorHex",
+                    "periods", "canRestoreBuiltin", "period", "periodOptions", "hasData", "palette"] {
+            XCTAssertNotNil(data[key], "formulaEdit.snapshot 缺 \(key)")
+        }
+        let mode = try XCTUnwrap(data["mode"] as? String)
+        XCTAssertTrue(["system", "new", "edit"].contains(mode), "非法编辑器形态 \(mode)")
+        let palette = try XCTUnwrap(data["palette"] as? [[String: Any]])
+        for c in palette {
+            for key in ["name", "hex", "option"] {
+                XCTAssertNotNil(c[key], "颜色板项缺 \(key)")
+            }
+        }
+        // periods null = 全周期（协议语义对齐原生 applicablePeriods = nil）
+        XCTAssertTrue(data["periods"] is NSNull || data["periods"] is [String],
+                      "periods 必须为 null（全周期）或周期数组")
+    }
+
+    /// formulaEdit 动作 payload 形状锁定：test/save/restoreBuiltin 与 openEditor 目标
+    func testFormulaEditPayloadShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        // test：需要 formula 文本
+        let test = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "formulaEdit" && ($0["action"] as? String) == "test"
+        }, "fixtures 缺 formulaEdit.test 样例")
+        XCTAssertNotNil(try XCTUnwrap(test["payload"] as? [String: Any])["formula"] as? String, "test 缺 formula")
+        // save（custom 模式）：name/scope/colorHex/periods 全量
+        let saveCustom = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "formulaEdit" && ($0["action"] as? String) == "save"
+                && (($0["payload"] as? [String: Any])?["name"] != nil)
+        }, "fixtures 缺 formulaEdit.save(custom) 样例")
+        let payload = try XCTUnwrap(saveCustom["payload"] as? [String: Any])
+        for key in ["formula", "name", "scope", "colorHex", "periods"] {
+            XCTAssertNotNil(payload[key], "save(custom) 缺 \(key)")
+        }
+        let scope = try XCTUnwrap(payload["scope"] as? String)
+        XCTAssertTrue(["main", "sub"].contains(scope), "非法 scope \(scope)")
+        // chart.formula.openEditor：system 目标带 id/isMain；custom 新建不带 id
+        let openSys = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "chart" && ($0["action"] as? String) == "formula.openEditor"
+                && (($0["payload"] as? [String: Any])?["target"] as? String) == "system"
+        }, "fixtures 缺 formula.openEditor(system) 样例")
+        let sysPayload = try XCTUnwrap(openSys["payload"] as? [String: Any])
+        XCTAssertNotNil(sysPayload["id"] as? String, "system 目标缺 id")
+        let openNew = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "chart" && ($0["action"] as? String) == "formula.openEditor"
+                && (($0["payload"] as? [String: Any])?["target"] as? String) == "custom"
+        }, "fixtures 缺 formula.openEditor(custom) 样例")
+        XCTAssertEqual(try XCTUnwrap(openNew["payload"] as? [String: Any])["id"] as? String ?? "", "",
+                       "custom 新建不应带 id")
     }
 }

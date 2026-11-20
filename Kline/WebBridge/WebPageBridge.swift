@@ -50,6 +50,7 @@ final class WebPageBridge: ObservableObject {
         case "pythonLab":   EngineLabBridge.shared.onOpen()
         case "backtest":    BacktestBridge.shared.onOpen()
         case "trainingRecords": TrainingBridge.shared.onOpen()
+        case "formulaEditor": FormulaEditorBridge.shared.onOpen()
         default: break
         }
     }
@@ -89,12 +90,14 @@ final class WebPageBridge: ObservableObject {
 // MARK: - 全屏 Web 页宿主（HomeWebShellView overlay 挂载）
 
 /// 全屏 Web 页宿主：activePage 非 nil 时创建 route="page" 的 WebView，关闭即随条件渲染销毁。
+/// 例外：formulaEditor 由 SheetWebOverlayHost 呈现（入口在图表详情页弹层，shell 层会被
+/// 详情页盖住）；activePage 仍是单一事实源，page.ready 补推对本页照常生效。
 struct WebFullscreenPageHost: View {
     @ObservedObject private var bridge = WebPageBridge.shared
 
     var body: some View {
         Group {
-            if bridge.activePage != nil {
+            if let name = bridge.activePage, name != "formulaEditor" {
                 WebTabHostView(route: "page", isOpaque: true)
                     .transition(.opacity)
             }
