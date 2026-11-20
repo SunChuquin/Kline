@@ -9,6 +9,7 @@
     <TrainingRecordsPanel v-else-if="activeName === 'trainingRecords'" :key="`tr-${pageSeq}`" @close="closePage" />
     <FormulaEditorPanel v-else-if="activeName === 'formulaEditor'" :key="`fe-${pageSeq}`" @close="closePage" />
     <StrategyEditorPanel v-else-if="activeName === 'strategyEditor'" :key="`se-${pageSeq}`" @close="closePage" />
+    <PickerEditPanel v-else-if="activeName === 'pickerEditor'" :key="`pe-${pageSeq}`" @close="closePage" />
     <TicketPanel v-else-if="activeName === 'ticket'" :key="`tk-${pageSeq}`" @close="closePage" />
     <CondManagePanel v-else-if="activeName === 'condManage'" :key="`cm-${pageSeq}`" @close="closePage" />
     <CondEditorPanel v-else-if="activeName === 'condEditor'" :key="`ce-${pageSeq}`" @close="closePage" />
@@ -31,6 +32,7 @@ import BacktestPanel from '../components/page/BacktestPanel.vue'
 import TrainingRecordsPanel from '../components/page/TrainingRecordsPanel.vue'
 import FormulaEditorPanel from '../components/page/FormulaEditorPanel.vue'
 import StrategyEditorPanel from '../components/page/StrategyEditorPanel.vue'
+import PickerEditPanel from '../components/page/PickerEditPanel.vue'
 import TicketPanel from '../components/page/TicketPanel.vue'
 import CondManagePanel from '../components/page/CondManagePanel.vue'
 import CondEditorPanel from '../components/page/CondEditorPanel.vue'

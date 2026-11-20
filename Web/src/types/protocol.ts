@@ -95,6 +95,9 @@
 //   strategyEdit.evaluate {doc, pickSyntaxError} → StrategyEvaluateResult 静态校验 + 语义预览（纯 Swift 同步直通）
 //   strategyEdit.testPick {pickBody} → {queued}                          内嵌公式试算（异步，结果随 strategyEdit.changed(pickTest) 推送）
 //   strategyEdit.save {doc, pickSyntaxError} → {queued}                  保存（静态校验先同步 fail；后台引擎终校 + 写库，结果随 changed(saveResult) 推送）
+//   pickerEdit.snapshot {} → PickerEditSnapshot                          选股公式编辑快照（id/name/pickBody/hasData）
+//   pickerEdit.testPick {pickBody} → {queued}                            公式试算（异步，结果随 pickerEdit.changed(pickTest) 推送）
+//   pickerEdit.save {id, name, pickBody} → {id}                          保存（同步写库；名称非空校验；成功即关页；id 空串 = 新建）
 //   ticket.snapshot {} → TicketSnapshot                                  全屏下单页票面快照（账户/标的/最新价/持仓/费率常量集；提交复用 trade.submit）
 //   cond.list {} → CondListSnapshot                                      条件单管理页快照（三分段行卡片 + 投影文案；占位→就绪经 cond.changed(texts) 重推）
 //   cond.editorContext {} → CondEditorContext                            编辑器上下文（draft 走 SimCondOrder 原生 JSON 口径 iso8601）
@@ -175,6 +178,7 @@
 //   training.changed  {reason}             训练状态变化（reason: begun|beginFailed|beginReselect|records|projection）
 //   formulaEdit.changed {reason}           公式编辑器异步结果（reason: testResult|dataReady；route:"page" 定向推送）
 //   strategyEdit.changed {reason}          策略编辑器异步结果（reason: pickTest|saveResult|dataReady；route:"page" 定向推送）
+//   pickerEdit.changed {reason}            选股公式编辑器异步结果（reason: pickTest|dataReady；route:"page" 定向推送）
 //   cond.changed {reason}                  条件单异步结果（reason: evaluate|saveResult|list|texts|newFailed；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
@@ -850,6 +854,18 @@ export interface StrategyEvaluateResult {
   preview: { trade: string; summary: string; executionNotice: string }
 }
 
+// ===== P2-9c 选股公式编辑器（pickerEdit） =====
+
+/** pickerEdit.snapshot 响应（编辑对象 + 样例数据就绪标记；极简形态：只编辑名称 + 公式） */
+export interface PickerEditSnapshot {
+  /** 空串 = 新建（保存时由原生生成 PICK_<n>） */
+  id: string
+  name: string
+  pickBody: string
+  /** 样例行情就绪（testPick 可用；未就绪时试算走「暂无行情数据」旁路文案） */
+  hasData: boolean
+}
+
 // ===== P2-9a 全屏下单页（ticket） =====
 
 /** ticket.snapshot 响应（票面初始化；提交复用 trade.submit） */
@@ -949,6 +965,7 @@ export const KnownActions = {
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
+  pickerEdit: ['snapshot', 'testPick', 'save'],
   ticket: ['snapshot'],
   cond: ['list', 'editorContext', 'evaluate', 'save', 'cancel', 'edit', 'new'],
   quick: ['snapshot', 'selectAccount', 'pickTicket', 'backToList', 'cancelAll', 'closeAll'],
@@ -982,6 +999,7 @@ export const KnownEvents = {
   trainingChanged: 'training.changed',
   formulaEditChanged: 'formulaEdit.changed',
   strategyEditChanged: 'strategyEdit.changed',
+  pickerEditChanged: 'pickerEdit.changed',
   condChanged: 'cond.changed',
 } as const
 

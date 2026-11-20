@@ -78,7 +78,7 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "home.changed", "sim.changed", "sheet.open",
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
                                         "backtest.changed", "training.changed", "formulaEdit.changed",
-                                        "strategyEdit.changed", "cond.changed"]
+                                        "strategyEdit.changed", "pickerEdit.changed", "cond.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -714,6 +714,38 @@ final class WebBridgeProtocolTests: XCTestCase {
             XCTAssertNotNil(row["params"], "规则行缺 params")
         }
         XCTAssertNotNil(payload["pickSyntaxError"], "save 缺 pickSyntaxError")
+    }
+
+    /// pickerEdit.snapshot 响应形状锁定（P2-9c 选股公式编辑器）：极简四字段
+    func testPickerEditSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_pe_snapshot"
+        }, "fixtures 缺 pickerEdit.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["id", "name", "pickBody", "hasData"] {
+            XCTAssertNotNil(data[key], "pickerEdit.snapshot 缺 \(key)")
+        }
+    }
+
+    /// pickerEdit.save payload / 响应形状锁定：{id, name, pickBody} → {id}（同步保存，无 queued）
+    func testPickerEditSaveShape() throws {
+        let fixture = try loadFixture()
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        let req = try XCTUnwrap(requests.first {
+            ($0["module"] as? String) == "pickerEdit" && ($0["action"] as? String) == "save"
+        }, "fixtures 缺 pickerEdit.save 样例")
+        let payload = try XCTUnwrap(req["payload"] as? [String: Any])
+        for key in ["id", "name", "pickBody"] {
+            XCTAssertNotNil(payload[key], "pickerEdit.save payload 缺 \(key)")
+        }
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let resp = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_pe_save"
+        }, "fixtures 缺 pickerEdit.save 响应样例")
+        let data = try XCTUnwrap(resp["data"] as? [String: Any])
+        XCTAssertNotNil(data["id"], "pickerEdit.save 响应缺 id（新建落盘后的 PICK_<n>）")
     }
 
     /// cond.list 响应形状锁定（P2-9a 条件单管理页）：行卡片字段 + 投影文案

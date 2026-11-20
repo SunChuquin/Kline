@@ -57,11 +57,8 @@ struct FormulaCenterView: View {
     @State private var editingCustom: CustomIndicator?
     /// 系统技术指标编辑浮层
     @State private var editingSystem: SystemIndicatorDef?
-    /// 选股公式新建 / 编辑浮层
-    @State private var showPickerSheet = false
-    @State private var editingPicker: FormulaDoc?
-    /// 策略公式新建/编辑：P2-8b 起改桥 Web 编辑器页（StrategyEditorBridge.requestOpen
-    /// → strategyEditor 全屏 Web 页，原生中心被 zIndex 1002 盖住保持打开）
+    /// 选股公式编辑：P2-9c 起改桥 Web 编辑器页（PickerEditBridge.requestOpen
+    /// → pickerEditor 全屏 Web 页，原生中心被 zIndex 1002 盖住保持打开）
     /// 策略详情浮层（只读展示，编辑从详情页跳回编辑器）
     @State private var detailStrategy: FormulaDoc?
     /// 待删除的选股公式：被自选分组引用时先弹确认，确认后再解绑 + 删除
@@ -297,8 +294,8 @@ struct FormulaCenterView: View {
             }
 
             newButton("新建选股公式") {
-                editingPicker = nil
-                showPickerSheet = true
+                PickerEditBridge.shared.requestOpen(
+                    initialDoc: FormulaDoc(id: "", kind: .picker, name: ""))
             }
         }
     }
@@ -319,8 +316,8 @@ struct FormulaCenterView: View {
             }
             Spacer(minLength: 8)
             Button {
-                editingPicker = doc
-                showPickerSheet = true
+                // P2-9c：改桥 Web 选股编辑器页（PickerEditBridge.requestOpen）
+                PickerEditBridge.shared.requestOpen(initialDoc: doc)
             } label: {
                 Text("编辑")
                     .font(.system(size: 13))
@@ -467,29 +464,6 @@ struct FormulaCenterView: View {
             .transition(.opacity)
             .zIndex(1000)
         }
-        if showPickerSheet || editingPicker != nil {
-            // 选股公式编辑器：复用 IndicatorEditSheet 的选股模式（只编辑名称 + 公式）
-            IndicatorEditSheet(
-                indicator: nil, data: sampleData,
-                onCancel: {
-                    showPickerSheet = false
-                    editingPicker = nil
-                },
-                onSave: { _ in },
-                isPicker: true,
-                pickerInitialName: editingPicker?.name ?? "",
-                pickerInitialFormula: editingPicker?.pickBody ?? "",
-                onSavePicker: { name, formula in
-                    // id 为空串视为新增；保存后 FormulaLibraryStore.reload 会通过 @Published 刷新列表
-                    let id = editingPicker?.id ?? ""
-                    _ = library.save(FormulaDoc(id: id, kind: .picker, name: name, pickBody: formula))
-                    showPickerSheet = false
-                    editingPicker = nil
-                }
-            )
-            .transition(.opacity)
-            .zIndex(1000)
-        }
         if let doc = detailStrategy {
             // 策略详情页：只读展示；点「编辑」关详情并打开 Web 策略编辑器（P2-8b）
             StrategyDetailView(doc: doc,
@@ -512,8 +486,8 @@ struct FormulaCenterView: View {
             editingCustom = nil
             showCustomSheet = true
         case .picker:
-            editingPicker = nil
-            showPickerSheet = true
+            PickerEditBridge.shared.requestOpen(
+                initialDoc: FormulaDoc(id: "", kind: .picker, name: ""))
         case .strategy:
             StrategyEditorBridge.shared.requestOpen(initialDoc: FormulaDoc(id: "", kind: .strategy, name: ""))
         }
