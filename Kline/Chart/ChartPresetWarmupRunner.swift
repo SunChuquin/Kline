@@ -41,8 +41,8 @@ final class ChartPresetWarmupRunner: ObservableObject {
 
     /// 启动生成：combos = 组合 id 列表（"local"=局部独立配置——按当前局部配置解析，
     /// 指纹 mode=local 与运行时同源；"p1".."p5"=全局组合）；mode = "full" | "warm"；
-    /// periods 默认仅日线。
-    func start(combos: [String], mode: String, periods: [KlinePeriod]) {
+    /// periods 默认仅日线；metas = 标的范围（nil = 全市场，Bridge 按范围过滤后传入）。
+    func start(combos: [String], mode: String, periods: [KlinePeriod], metas overrideMetas: [MetaItem]? = nil) {
         // 重入保护：新任务等待旧任务完全退出（旧任务在求值完成后回到循环头检查标志退出），
         // 避免「重跑先取消旧轮」缺位导致两个任务并发抢引擎队列（2026-11-21 实测：连续两次
         // 点生成，local 与 p1 任务交错求值，进度日志互相覆盖）。
@@ -61,7 +61,7 @@ final class ChartPresetWarmupRunner: ObservableObject {
                 self.phase = .finished
                 return
             }
-            let metas = DatabaseManager.shared.metaList
+            let metas = overrideMetas ?? DatabaseManager.shared.metaList
             guard !metas.isEmpty else {
                 self.phase = .finished
                 DebugLogger.shared.log("[Warmup] 无标的需要生成")

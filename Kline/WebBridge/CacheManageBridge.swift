@@ -103,7 +103,15 @@ final class CacheManageBridge: ObservableObject {
             running = ["state": "cancelled"]
         }
 
+        // 标的范围选项（所有/自选/各自定义分组）——生成表单下拉
+        var scopes: [[String: Any]] = [["key": "all", "label": "所有标的"],
+                                       ["key": "favorites", "label": "自选"]]
+        for g in FavoritesStore.shared.groups {
+            scopes.append(["key": "group:\(g.name)", "label": "\(g.name)（\(g.manualMetaIDs.count)只）"])
+        }
+
         return ["combos": combos,
+                "scopes": scopes,
                 "running": running,
                 "warmupN": runner.warmupN,
                 "bufferNote": "预热保留最新 \(runner.warmupN) 根（另含 \(ChartPresetWarmupRunner.warmupBuffer) 根边界缓冲）"]
@@ -128,9 +136,10 @@ final class CacheManageBridge: ObservableObject {
 
     // MARK: 生成
 
-    /// cacheManage.generate {combos, mode, periods?, warmupN?}：启动生成引擎。
+    /// cacheManage.generate {combos, mode, periods?, warmupN?, scopes?}：启动生成引擎。
     /// combos = ["local"] + ["p1".."p5"] 子集（local=局部独立配置，按当前局部配置解析）；
-    /// mode = "full" | "warm"；periods 缺省 ["日线"]；
+    /// mode = "full" | "warm"；periods 缺省 ["日线"]；scopes 缺省 ["all"]（多选并集：
+    /// all=全市场 / favorites=全部自选 / group:<分组名>=自定义分组）；
     /// 同一时刻只跑一个任务（单例 Runner，重跑先取消旧轮）。
     private static func generate(_ request: WebBridgeRequest) -> [String: Any] {
         let combos = (request.payload["combos"] as? [String]) ?? []
@@ -154,7 +163,41 @@ final class CacheManageBridge: ObservableObject {
         if let n = (request.payload["warmupN"] as? NSNumber)?.intValue, n >= 20, n <= 1000 {
             ChartPresetWarmupRunner.shared.warmupN = n
         }
-        ChartPresetWarmupRunner.shared.start(combos: validCombos, mode: mode, periods: periods)
+        // 标的范围（多选并集）：all=全市场 / favorites=全部自选 / group:<name>=自定义分组
+        let scopeKeys = (request.payload["scopes"] as? [String]) ?? ["all"]
+        let groups = FavoritesStore.shared.groups
+        var allowedMetaIDs = Set<Int>()
+        var scopeValid = false
+        for key in scopeKeys {
+            switch key {
+            case "all":
+                allowedMetaIDs.formUnion(DatabaseManager.shared.metaList.map(\.id))
+                scopeValid = true
+            case "favorites":
+                for g in groups { allowedMetaIDs.formUnion(g.manualMetaIDs) }
+                scopeValid = true
+            default:
+                if key.hasPrefix("group:") {
+                    let name = String(key.dropFirst("group:".count))
+                    if let g = groups.first(where: { $0.name == name }) {
+                        allowedMetaIDs.formUnion(g.manualMetaIDs)
+                        scopeValid = true
+                    }
+                }
+            }
+        }
+        guard scopeValid else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "scopes 需为 all/favorites/group:<分组名>")
+        }
+        DebugLogger.shared.log("[CacheManage] scopes=\(scopeKeys) allowed=\(allowedMetaIDs.count) groups=\(groups.map { "\($0.name):manual=\($0.manualMetaIDs.count)" })")
+        let metas = DatabaseManager.shared.metaList.filter { allowedMetaIDs.contains($0.id) }
+        guard !metas.isEmpty else {
+            return WebBridgeResponse.fail(request.id, code: "invalid_payload",
+                                          message: "所选标的范围内没有标的")
+        }
+        ChartPresetWarmupRunner.shared.start(combos: validCombos, mode: mode, periods: periods,
+                                             metas: metas)
         return WebBridgeResponse.ok(request.id, data: ["queued": true])
     }
 }

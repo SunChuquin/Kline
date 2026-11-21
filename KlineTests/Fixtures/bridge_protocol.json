@@ -414,6 +414,8 @@
       "data": { "combos": [ { "comboKey": "local", "label": "局部独立配置", "count": 3, "bytes": 245760 },
                             { "comboKey": "p1", "label": "组合1", "count": 5, "bytes": 409600 },
                             { "comboKey": "p2", "label": "组合2", "count": 0, "bytes": 0 } ],
+                "scopes": [ { "key": "all", "label": "所有标的" }, { "key": "favorites", "label": "自选" },
+                            { "key": "group:热门股", "label": "热门股（5只）" } ],
                 "running": { "state": "idle" },
                 "warmupN": 80,
                 "bufferNote": "预热保留最新 80 根（另含 120 根边界缓冲）" } },

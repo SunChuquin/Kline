@@ -523,9 +523,17 @@ export interface CacheComboStats {
   bytes: number
 }
 
-/** cacheManage.stats 响应（占用统计 + 生成运行态 + 预热根数偏好） */
+/** 生成标的范围选项（key: all/favorites/group:<分组名>） */
+export interface CacheScopeOption {
+  key: string
+  label: string
+}
+
+/** cacheManage.stats 响应（占用统计 + 生成运行态 + 预热根数偏好 + 标的范围选项） */
 export interface CacheStatsSnapshot {
   combos: CacheComboStats[]
+  /** 生成标的范围选项（生成表单下拉） */
+  scopes: CacheScopeOption[]
   /** 生成引擎运行态：idle / running(done,total,comboLabel) / finished / cancelled */
   running: { state: 'idle' | 'running' | 'finished' | 'cancelled'; done?: number; total?: number; comboLabel?: string }
   warmupN: number

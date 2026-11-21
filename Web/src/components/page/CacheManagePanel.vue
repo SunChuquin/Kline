@@ -63,9 +63,20 @@
           <div class="form-row">
             <span class="form-cap">周期</span>
             <div class="chip-wrap">
-              <button class="chip on">日线</button>
-              <span class="form-cap">（其他周期将随版本迭代开放）</span>
+              <button
+                v-for="p in periodOptions"
+                :key="p"
+                class="chip"
+                :class="{ on: selPeriods.has(p) }"
+                @click="togglePeriod(p)"
+              >{{ p }}</button>
             </div>
+          </div>
+          <div class="form-row">
+            <span class="form-cap">标的</span>
+            <select v-model="scope" class="scope-select" aria-label="cacheManage.scope">
+              <option v-for="s in stats?.scopes ?? []" :key="s.key" :value="s.key">{{ s.label }}</option>
+            </select>
           </div>
         </div>
         <div class="action-row">
@@ -77,7 +88,7 @@
           >{{ running ? '生成中…' : '开始生成' }}</button>
           <button class="act-btn danger" :disabled="!running" @click="cancelGenerate">取消</button>
         </div>
-        <div class="note">全市场 3354 只标的批量计算：预热模式约 6~17 分钟/组合，全量模式约 28~56 分钟/组合（后台低优先级分批跑，可中途取消）。</div>
+        <div class="note">任务量 = 组合 × 周期 × 标的：预热模式单组合全市场约 6~17 分钟，全量模式约 28~56 分钟；周期/范围越多耗时越长（后台低优先级分批跑，可中途取消）。</div>
 
         <!-- 进度 -->
         <div v-if="progress.state === 'running'" class="progress-card">
@@ -110,6 +121,22 @@ const genSelected = ref<Set<string>>(new Set())
 const genMode = ref<'warm' | 'full'>('warm')
 const warmupNInput = ref(80)
 const progress = ref<{ state: string; done?: number; total?: number; comboLabel?: string }>({ state: 'idle' })
+
+/** 可生成周期（真机/模拟器同款 KlinePeriod 全集） */
+const periodOptions = ['日线', '周线', '月线', '季线', '年线']
+/** 已选周期（至少保留一个） */
+const selPeriods = ref<Set<string>>(new Set(['日线']))
+function togglePeriod(p: string): void {
+  const next = new Set(selPeriods.value)
+  if (next.has(p)) {
+    if (next.size > 1) next.delete(p)
+  } else {
+    next.add(p)
+  }
+  selPeriods.value = next
+}
+/** 标的范围（all/favorites/group:<分组名>；选项由 stats.scopes 下发） */
+const scope = ref('all')
 
 const running = computed(() => progress.value.state === 'running')
 const progressPct = computed(() => {
@@ -187,7 +214,8 @@ function generate(): void {
   void klineBus.request('cacheManage', 'generate', {
     combos: [...genSelected.value],
     mode: genMode.value,
-    periods: ['日线'],
+    periods: [...selPeriods.value],
+    scopes: [scope.value],
     warmupN: warmupNInput.value,
   }).catch((e) => {
     console.error('cacheManage.generate 失败', e)
@@ -398,6 +426,17 @@ onUnmounted(() => {
   background: #1989fa;
   color: #ffffff;
   font-weight: 600;
+}
+
+.scope-select {
+  flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--k-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--k-text-primary);
+  font-size: 13px;
 }
 
 .n-input {

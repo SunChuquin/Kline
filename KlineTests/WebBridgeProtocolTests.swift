@@ -794,7 +794,7 @@ final class WebBridgeProtocolTests: XCTestCase {
             ($0["id"] as? String) == "req_cache_stats"
         }, "fixtures 缺 cacheManage.stats 响应样例")
         let data = try XCTUnwrap(snap["data"] as? [String: Any])
-        for key in ["combos", "running", "warmupN", "bufferNote"] {
+        for key in ["combos", "scopes", "running", "warmupN", "bufferNote"] {
             XCTAssertNotNil(data[key], "cacheManage.stats 缺 \(key)")
         }
         let combos = try XCTUnwrap(data["combos"] as? [[String: Any]])
