@@ -212,14 +212,10 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             finishDone(plan: plan, files: plannedFiles.count, outcome: outcome)
         } catch {
             DebugLogger.shared.log("LANSync 失败: \(error)")
-            // 失败收尾：删本次备份（失败会话的备份无回退价值，真机实测一次留 5GB）；
-            // 指标缓存库已在拉取前被删/连接已关 → 恢复空库，缓存功能保持可用（重算）
+            // 失败收尾：删本次备份（失败会话的备份无回退价值，真机实测一次留 5GB）
             if let b = backupDir {
                 try? fm.removeItem(atPath: docsPath + "/" + b)
                 publishOnMain { self.backupDir = nil }
-            }
-            if plan.contains(where: { $0.category == .indicatorCache }) {
-                await MainActor.run { IndicatorCacheDB.shared.reloadExternal() }
             }
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             publishOnMain { self.phase = .failed(msg) }
@@ -285,7 +281,6 @@ final class LANSyncTransfer: NSObject, ObservableObject {
 
     /// 本机备份：将覆盖的单文件逐个复制、指标目录整份快照到
     /// Documents/Backups/<yyyyMMdd-HHmmss>/，保持相对结构。
-    /// 指标缓存（indicatorCache）：合并模式只覆盖选中组合行，但为安全起见**整库备份**。
     /// 返回备份目录（相对 Documents）；没有会被覆盖的内容时返回 nil。
     private func backupLocally(plan: [PlanCategory]) throws -> String? {
         let docs = docsPath
@@ -302,12 +297,8 @@ final class LANSyncTransfer: NSObject, ObservableObject {
                 }
             }
         }
-        // 指标缓存整库（5GB 级）**跳过备份**：缓存是可再生数据（对端有原件，失败可重拉/
-        // 本机可重生成），备份会把磁盘峰值从 5GB 抬到 15GB（2026-11-21 真机 ENOMEM 实测）；
-        // 仅备份小文件（presets.json）。显式循环（链式 filter 会触发类型检查超时）
         var files: [PlanFile] = []
         for f in plan.flatMap({ $0.files }) where fm.fileExists(atPath: docs + "/" + f.rel) {
-            if f.category == .indicatorCache && f.rel == "indicator_cache.db" { continue }
             files.append(f)
         }
         var mirrorRoots: [String] = []
@@ -353,13 +344,6 @@ final class LANSyncTransfer: NSObject, ObservableObject {
                                token: String) async throws -> TransferOutcome {
         var outcome = TransferOutcome()
         for cat in plan {
-            if cat.category == .indicatorCache {
-                // 整库拉取前置：释放本机缓存库连接并删除旧文件——磁盘峰值从
-                // 「原件+.part+备份」三份 15GB 降到 .part 单份；失败由 run 的 catch
-                // 恢复空库（reloadExternal 幂等），成功由 applyEffects reloadExternal 重开
-                await MainActor.run { IndicatorCacheDB.shared.closeForExternalReplace() }
-                try? fm.removeItem(atPath: docsPath + "/indicator_cache.db")
-            }
             guard !cat.files.isEmpty else { continue }   // 对端无此内容：已在结果注明
             // 自选子项模式：不走整文件覆盖，下载对端整份 favorites.json 后按组名合并写回
             if cat.category == .favorites && cat.mode == .children {
@@ -585,7 +569,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     /// 只对实际拉取了内容的类别生效（与 KlineHTTPServer 各 reload 分支同语义）。
     private func applyEffects(plan: [PlanCategory]) async {
         let cats = plan
-            .filter { !$0.files.isEmpty || ($0.category == .indicatorCache && !$0.skipped) }
+            .filter { !$0.files.isEmpty }
             .map(\.category)
         guard !cats.isEmpty else { return }
         publishOnMain { self.currentStage = "应用配置与重载" }
@@ -597,22 +581,6 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         }
         if cats.contains(.live) {
             await MainActor.run { LiveDataStore.shared.notifyExternalWrite() }
-        }
-        if cats.contains(.indicatorCache) {
-            await MainActor.run {
-                // 组合定义跟随（整库替换语义：对端 5 槽全覆盖）——对端 SyncCache/presets.json
-                // 已被通用文件拉取覆盖到本机，读取并整包合并（生效中组合被改 → 图表重算）
-                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                let presetsPath = docs.appendingPathComponent("SyncCache/presets.json").path
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: presetsPath)) {
-                    try? ChartPresetStore.shared.mergeRemoteJSON(
-                        data, selectedIDs: Set(ChartPresetSlots.ids))
-                }
-                // 本机缓存库文件已被整库替换 → 关旧连接重开新库 → 清内存 LRU
-                IndicatorCacheDB.shared.reloadExternal {
-                    ChartCacheStore.shared.clearAll()
-                }
-            }
         }
         if cats.contains(.main) {
             publishOnMain {

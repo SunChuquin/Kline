@@ -124,9 +124,9 @@
         <div v-if="pickOf('main') === 'all'" class="warn-card">
           ⚠ 主库约 GB 级，WiFi 传输耗时较长；替换后需重启 App 生效
         </div>
-        <div v-if="pickOf('indicatorCache') === 'all'" class="warn-card">
-          ℹ 指标缓存整库同步：替换本机 indicator_cache.db（含全部组合的指标数据），
-          并跟随对端的组合定义（五套组合整包覆盖，保证缓存指纹与本机一致才能命中）。大库 WiFi 传输耗时较长。
+        <div class="warn-card">
+          ℹ 指标缓存（indicator_cache.db，GB 级）不支持 WiFi 同步：请保持设备 USB 连接 Mac，
+          在 Mac 终端运行 <b>scripts/kline_sync_cache_usb.sh</b>（5GB 约 1 分钟，组合定义随库同步）。
         </div>
 
         <button class="primary-btn" aria-label="lansync.start" :disabled="!hasAnyPick" @click="startSync">开始拉取</button>

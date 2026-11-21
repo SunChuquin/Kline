@@ -174,18 +174,9 @@ enum LANSyncSupport {
             return files.map { LANSyncChild(key: $0.path, name: displayBasename($0.path), size: $0.size, count: nil) }
         case .indicators:
             return files.map { LANSyncChild(key: $0.path, name: displayRelative($0.path), size: $0.size, count: nil) }
-        case .sim, .live, .main, .indicatorCache:
+        case .sim, .live, .main:
             return nil
         }
-    }
-
-    /// 懒生成组合定义导出文件（Documents/SyncCache/presets.json）：/sync/status 被请求时
-    /// 刷新一次，保证对端拉取时拿到的组合定义与本机最新一致
-    private static func writePresetsExport(docs: URL) {
-        guard let data = ChartPresetStore.shared.exportJSON() else { return }
-        let dir = docs.appendingPathComponent("SyncCache", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? data.write(to: dir.appendingPathComponent("presets.json"), options: .atomic)
     }
 
     /// 自选分组子项：解析 Documents/Favorites/favorites.json，每个分组一个 child。
@@ -246,12 +237,6 @@ enum LANSyncSupport {
             return entries(docs: docs, rels: ["tdx_live.db", "tdx_live.manifest.json"])
         case .main:
             return entries(docs: docs, rels: ["tdx.db"])
-        case .indicatorCache:
-            // 指标缓存整库文件 + 组合定义导出（整库替换语义：拉取方组合定义整包跟随，
-            // 否则缓存行指纹与本地组合内容不一致、全部不命中）。writePresetsExport 在
-            // status 被请求时刷新，保证对端拉到的定义与本机最新一致
-            writePresetsExport(docs: docs)
-            return entries(docs: docs, rels: ["indicator_cache.db", "SyncCache/presets.json"])
         }
     }
 

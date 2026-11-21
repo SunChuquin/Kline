@@ -155,6 +155,12 @@ final class ChartPresetStore: ObservableObject {
     private func persistPresets() {
         if let data = try? JSONEncoder().encode(presets) {
             UserDefaults.standard.set(data, forKey: Self.presetsKey)
+            // USB 快速通道配套：组合定义落盘 Documents/SyncCache/presets.json
+            // （scripts/kline_sync_cache_usb.sh 连同缓存库一起拷入目标设备，启动时自动导入）
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let dir = docs.appendingPathComponent("SyncCache", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? data.write(to: dir.appendingPathComponent("presets.json"), options: .atomic)
         }
     }
 

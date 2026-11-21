@@ -11,15 +11,16 @@ import Foundation
 
 // MARK: - 同步内容分类（6 类）
 
-/// 联机同步的内容分类（7 类）；rawValue 同时作为 /sync/status JSON 里 items[].key
+/// 联机同步的内容分类（6 类）；rawValue 同时作为 /sync/status JSON 里 items[].key。
+/// 指标缓存（indicator_cache.db，GB 级）**不走 LAN 同步**：App 沙盒无法调用 devicectl，
+/// USB 直拷只能由 Mac 侧脚本执行（scripts/kline_sync_cache_usb.sh）——按需求移除 WiFi 传输。
 enum LANSyncCategory: String, CaseIterable, Identifiable {
-    case favorites       // 自选 Documents/Favorites/favorites.json
-    case sim             // 模拟交易 Documents/Simulation/sim.json
-    case layouts         // 页面布局 Documents/Layouts/*.json
-    case indicators      // 指标公式 indicator/<周期>/*.tdx + formula/picker/*.tdx + formula/strategy/*.tdx
-    case live            // 增量库 tdx_live.db(+manifest)
-    case main            // 主库 tdx.db
-    case indicatorCache  // 指标缓存 indicator_cache.db 按组合（专用 /sync/cache-export 通道）
+    case favorites   // 自选 Documents/Favorites/favorites.json
+    case sim         // 模拟交易 Documents/Simulation/sim.json
+    case layouts     // 页面布局 Documents/Layouts/*.json
+    case indicators  // 指标公式 indicator/<周期>/*.tdx + formula/picker/*.tdx + formula/strategy/*.tdx
+    case live        // 增量库 tdx_live.db(+manifest)
+    case main        // 主库 tdx.db
 
     var id: String { rawValue }
 
@@ -31,7 +32,6 @@ enum LANSyncCategory: String, CaseIterable, Identifiable {
         case .indicators: return "指标公式"
         case .live: return "增量库"
         case .main: return "主库"
-        case .indicatorCache: return "指标缓存"
         }
     }
 
@@ -43,7 +43,6 @@ enum LANSyncCategory: String, CaseIterable, Identifiable {
         case .indicators: return "indicator/ + formula/picker/ + formula/strategy/ (*.tdx)"
         case .live: return "Documents/tdx_live.db (+manifest)"
         case .main: return "Documents/tdx.db（替换后需重启 App 生效）"
-        case .indicatorCache: return "indicator_cache.db 按组合（同步时自动覆盖对应组合定义）"
         }
     }
 
@@ -51,11 +50,10 @@ enum LANSyncCategory: String, CaseIterable, Identifiable {
     var isDirectoryMirror: Bool { self == .indicators }
 
     /// 同步完成后是否需要热重载配置 / 指标
-    /// （indicatorCache 的生效走 LANSyncTransfer 专用分支：mergeFrom + 内存 LRU 清空）
     var needsConfigReload: Bool {
         switch self {
         case .favorites, .sim, .layouts, .indicators: return true
-        case .live, .main, .indicatorCache: return false
+        case .live, .main: return false
         }
     }
 }
