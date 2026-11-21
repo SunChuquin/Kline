@@ -103,33 +103,58 @@ final class ChartPresetWarmupRunner: ObservableObject {
 
     private var cancelFlag = false
 
-    /// 单标的生成：主线程组装请求 → 后台 Python 求值 → 组装 envelope → 落盘
+    /// 单标的生成：主线程组装请求 → 后台 Python 求值 → 组装 envelope → 落盘。
+    /// 失败原因限次落日志（前 8 次，防止 3354 只全刷屏）。
+    private static var failLogCount = 0
+    private static func failLog(_ reason: String, metaId: Int) {
+        guard failLogCount < 8 else { return }
+        failLogCount += 1
+        DebugLogger.shared.log("[Warmup] 失败#\(failLogCount) meta=\(metaId) \(reason)")
+    }
+
     private static func generateOne(metaId: Int, comboKey: String, period: KlinePeriod,
                                     mode: String, warmupN: Int) async -> Bool {
         let data = DatabaseManager.shared.fetchBars(metaId: metaId, period: period)
-        guard !data.isEmpty else { return false }
+        guard !data.isEmpty else {
+            failLog("bars 为空", metaId: metaId)
+            return false
+        }
         // 生成只处理「全局组合」的内容快照：临时按组合配置组装请求
         // （makeFullRequest 读 ChartConfigStore 的 resolver——组合模式下 resolver 已返回组合内容；
         //  但生成要为**每个**组合生成，不能依赖当前 activeMode——这里直接按 preset 构建请求）
-        guard let req = makePresetRequest(data: data, period: period, comboKey: comboKey) else { return false }
+        guard let req = makePresetRequest(data: data, period: period, comboKey: comboKey) else {
+            failLog("makePresetRequest nil（组合缺槽/主图集为空）", metaId: metaId)
+            return false
+        }
         // 缠论通道指标不做预生成（右缘截断语义与离线批量冲突，沿用 prefetchOtherPeriod 先例）
-        if req.mainFormulas.contains(where: { referencesChanChannel($0) }) { return false }
+        if req.mainFormulas.contains(where: { referencesChanChannel($0) }) {
+            failLog("缠论通道指标排除", metaId: metaId)
+            return false
+        }
 
         let fingerprint = "gen:\(comboKey)|\(Self.fingerprintCore(period: period))"
         let lastBarDate = data.last?.date ?? 0
-        let result: PrefetchCalcResult?
         if mode == "warm" {
             // 预热：末 (warmupN + buffer) 根切片求值
             let slice = Array(data.suffix(warmupN + ChartPresetWarmupRunner.warmupBuffer))
-            guard let sliceReq = makePresetRequest(data: slice, period: period, comboKey: comboKey) else { return false }
+            guard let sliceReq = makePresetRequest(data: slice, period: period, comboKey: comboKey) else {
+                failLog("切片 makePresetRequest nil", metaId: metaId)
+                return false
+            }
             let r = await Task.detached(priority: .utility) {
                 KlineChartView.evaluatePrefetch(sliceReq)
             }.value
             guard let env = ChartWarmupComposer.warmEnvelope(req: sliceReq, result: r,
                                                              period: period, total: data.count,
-                                                             keepN: warmupN) else { return false }
+                                                             keepN: warmupN) else {
+                failLog("warmEnvelope nil（求值空/长度不齐 sliceLen=\(slice.count)）", metaId: metaId)
+                return false
+            }
             let payload = try? JSONEncoder().encode(env)
-            guard let payload else { return false }
+            guard let payload else {
+                failLog("encode 失败", metaId: metaId)
+                return false
+            }
             IndicatorCacheDB.shared.save(comboKey: comboKey, metaId: metaId, period: period,
                                          fingerprint: fingerprint, genMode: "warm",
                                          lastBarDate: lastBarDate, sourceBarCount: data.count,
@@ -142,9 +167,15 @@ final class ChartPresetWarmupRunner: ObservableObject {
             }.value
             guard let env = ChartWarmupComposer.fullEnvelope(req: req, result: result,
                                                              period: period,
-                                                             barCount: data.count) else { return false }
+                                                             barCount: data.count) else {
+                failLog("fullEnvelope nil（求值空/长度不齐 n=\(data.count)）", metaId: metaId)
+                return false
+            }
             let payload = try? JSONEncoder().encode(env)
-            guard let payload else { return false }
+            guard let payload else {
+                failLog("encode 失败", metaId: metaId)
+                return false
+            }
             IndicatorCacheDB.shared.save(comboKey: comboKey, metaId: metaId, period: period,
                                          fingerprint: fingerprint, genMode: "full",
                                          lastBarDate: lastBarDate, sourceBarCount: data.count,
