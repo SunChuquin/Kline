@@ -285,15 +285,15 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     /// 返回备份目录（相对 Documents）；没有会被覆盖的内容时返回 nil。
     private func backupLocally(plan: [PlanCategory]) throws -> String? {
         let docs = docsPath
-        // 备份生命周期管理：先清理超过 6 小时的旧备份目录（失败会话的残留，真机实测一次
-        // 失败会留 5GB+ 整库备份把磁盘吃光——缓存是可再生数据，备份只需覆盖近期回退）
+        // 备份生命周期管理：先清理超过 1 小时的旧备份目录（失败会话的残留，真机实测一次
+        // 失败会留 5GB+ 整库备份把磁盘吃光——缓存是可再生数据，备份只需覆盖极近期的回退）
         let backupsRoot = docs + "/Backups"
         if let names = try? fm.contentsOfDirectory(atPath: backupsRoot) {
             for name in names {
                 let full = backupsRoot + "/" + name
                 if let attrs = try? fm.attributesOfItem(atPath: full),
                    let mod = (attrs[.modificationDate] as? Date)?.timeIntervalSinceNow,
-                   mod < -6 * 3600 {
+                   mod < -1 * 3600 {
                     try? fm.removeItem(atPath: full)
                 }
             }
