@@ -122,8 +122,14 @@ const progressPct = computed(() => {
   return Math.min(Math.max(((p.done ?? 0) / p.total) * 100, 0), 100)
 })
 
-/** 生成可选组合（p1..p5，不含 local——局部配置的缓存由 K 线页运行时自然产出） */
-const genCombos = computed(() => (stats.value?.combos ?? []).filter((c) => c.comboKey !== 'local'))
+/** 生成可选组合（p1..p5，不含 local——局部配置的缓存由 K 线页运行时自然产出）。
+ *  stats.combos 字段为 comboKey/label，此处映射为 chip 用的 id/name（此前直接透传
+ *  导致模板取 p.id=undefined：点任一组合全部高亮、生成请求 combos 为 null 被拒） */
+const genCombos = computed(() =>
+  (stats.value?.combos ?? [])
+    .filter((c) => c.comboKey !== 'local')
+    .map((c) => ({ id: c.comboKey, name: c.label })),
+)
 
 function fmtBytes(b: number): string {
   if (b >= 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`
