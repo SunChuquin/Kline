@@ -90,6 +90,14 @@ final class IndicatorComputationStore: ObservableObject {
         if let metaId {
             let entry = ChartCacheStore.shared.entry(for: metaId, period: period)
             let fingerprint = KlineChartView.currentConfigFingerprint(period: period)
+            // 内存未命中（或配置/数据已变）→ 磁盘注水（P2 指标组合期3：行级校验
+            // fingerprint + 源根数 + 末根日期全过才恢复；过期磁盘行保留待重生成）
+            if entry.configFingerprint != fingerprint
+                || !entry.mainCurves.allSatisfy({ $0.values.count == all.count }) {
+                ChartCacheStore.shared.hydrateFromDisk(
+                    metaId: metaId, period: period, fingerprint: fingerprint,
+                    barCount: all.count, lastBarDate: all.last?.date ?? 0)
+            }
             if entry.configFingerprint == fingerprint,
                entry.mainCurves.allSatisfy({ $0.values.count == all.count }) {
                 mainCurves = entry.mainCurves
@@ -1616,6 +1624,9 @@ extension KlineChartView {
             for (i, m) in [subTop, subBottom, subThird].enumerated() {
                 e.subCurves[i] = m.curves
             }
+            // P2 指标组合期3：后台正确结果落盘（异步写；行级校验字段随行保存）
+            store.persistToDisk(metaId: metaId, period: period, fingerprint: fp,
+                                barCount: sortedData.count, lastBarDate: sortedData.last?.date ?? 0)
         }
     }
 
@@ -1690,7 +1701,8 @@ extension KlineChartView {
                 entry.isPrefetching = false
                 return
             }
-            Self.commitToCache(req, r, entry: entry, data: data, fingerprint: fingerprint, period: period)
+            Self.commitToCache(req, r, entry: entry, data: data, fingerprint: fingerprint, period: period,
+                               metaId: metaId)
             entry.isPrefetching = false
             entry.prefetchDone = true
         }
@@ -1728,7 +1740,8 @@ extension KlineChartView {
     /// 全量覆盖（calcStart=0、calcEnd=末尾），无需 NaN 填充
     @MainActor
     static func commitToCache(_ req: PrefetchCalcRequest, _ result: PrefetchCalcResult,
-                                      entry: ChartCacheStore.Entry, data: [KlineItem], fingerprint: String, period: KlinePeriod) {
+                                      entry: ChartCacheStore.Entry, data: [KlineItem], fingerprint: String, period: KlinePeriod,
+                                      metaId: Int) {
         let config = ChartConfigStore.shared
         var curves: [IndicatorLine] = []
         let customStore = CustomIndicatorStore.shared
@@ -1788,6 +1801,9 @@ extension KlineChartView {
         entry.coverageEnd = data.count - 1
         entry.bgCoverageEnd = data.count - 1
         entry.configFingerprint = fingerprint
+        // P2 指标组合期3：其它周期全量结果落盘（异步写）
+        ChartCacheStore.shared.persistToDisk(metaId: metaId, period: period, fingerprint: fingerprint,
+                                             barCount: data.count, lastBarDate: data.last?.date ?? 0)
     }
 
 }
