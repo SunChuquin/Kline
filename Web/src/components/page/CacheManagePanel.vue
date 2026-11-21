@@ -35,7 +35,7 @@
           </button>
           <button class="act-btn" :disabled="selected.size === 0" @click="clearStaleHint">刷新过期</button>
         </div>
-        <div class="note">提示：点行勾选；「刷新过期」按选中组合重新生成（覆盖过期数据）。local（局部独立配置）的缓存由 K 线页运行时自然产出。</div>
+        <div class="note">提示：点行勾选；「刷新过期」按选中组合重新生成（覆盖过期数据）。生成可选 6 个组合：局部独立配置 + 组合1~5。</div>
 
         <!-- 生成表单 -->
         <div class="sec-title" style="margin-top: 18px">生成指标缓存</div>
@@ -122,13 +122,10 @@ const progressPct = computed(() => {
   return Math.min(Math.max(((p.done ?? 0) / p.total) * 100, 0), 100)
 })
 
-/** 生成可选组合（p1..p5，不含 local——局部配置的缓存由 K 线页运行时自然产出）。
- *  stats.combos 字段为 comboKey/label，此处映射为 chip 用的 id/name（此前直接透传
- *  导致模板取 p.id=undefined：点任一组合全部高亮、生成请求 combos 为 null 被拒） */
+/** 生成可选组合：local（局部独立配置）+ p1..p5 共 6 项（stats.combos 字段为
+ *  comboKey/label，映射为 chip 用的 id/name） */
 const genCombos = computed(() =>
-  (stats.value?.combos ?? [])
-    .filter((c) => c.comboKey !== 'local')
-    .map((c) => ({ id: c.comboKey, name: c.label })),
+  (stats.value?.combos ?? []).map((c) => ({ id: c.comboKey, name: c.label })),
 )
 
 function fmtBytes(b: number): string {

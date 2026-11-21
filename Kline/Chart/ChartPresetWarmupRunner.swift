@@ -39,15 +39,19 @@ final class ChartPresetWarmupRunner: ObservableObject {
 
     // MARK: - 入口
 
-    /// 启动生成：combos = 组合 id 列表（"p1".."p5"，不含 local——局部配置的缓存由
-    /// 图表运行时自然产出）；mode = "full" | "warm"；periods 默认仅日线；
+    /// 启动生成：combos = 组合 id 列表（"local"=局部独立配置——按当前局部配置解析，
+    /// 指纹 mode=local 与运行时同源；"p1".."p5"=全局组合）；mode = "full" | "warm"；
+    /// periods 默认仅日线；
     /// onlyStale = true 时只处理该组合下「过期行」的标的（口径与管理页徽标一致：
     /// 缓存末根日期 ≠ meta 表最新日期，补缺口/日更后未重新生成）。
     func start(combos: [String], mode: String, periods: [KlinePeriod], onlyStale: Bool = false) {
         cancelFlag = false
         let presets = ChartPresetStore.shared
         let targets: [(comboKey: String, label: String)] = combos.map { id in
-            (id, presets.preset(id: id)?.name ?? id)
+            let label = id == ChartPresetStore.localMode
+                ? "局部独立配置"
+                : (presets.preset(id: id)?.name ?? id)
+            return (id, label)
         }
         guard !targets.isEmpty, !periods.isEmpty, mode == "full" || mode == "warm" else {
             phase = .finished

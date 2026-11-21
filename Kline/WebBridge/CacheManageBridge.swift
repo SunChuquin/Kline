@@ -134,15 +134,18 @@ final class CacheManageBridge: ObservableObject {
     // MARK: 生成
 
     /// cacheManage.generate {combos, mode, periods?, warmupN?, onlyStale?}：启动生成引擎。
-    /// combos = ["p1".."p5"] 子集；mode = "full" | "warm"；periods 缺省 ["日线"]；
+    /// combos = ["local"] + ["p1".."p5"] 子集（local=局部独立配置，按当前局部配置解析）；
+    /// mode = "full" | "warm"；periods 缺省 ["日线"]；
     /// onlyStale = true 时只重跑该组合下过期标的（管理页「刷新过期」便捷动作）；
     /// 同一时刻只跑一个任务（单例 Runner，重跑先取消旧轮）。
     private static func generate(_ request: WebBridgeRequest) -> [String: Any] {
         let combos = (request.payload["combos"] as? [String]) ?? []
-        let validCombos = combos.filter { ChartPresetStore.shared.preset(id: $0) != nil }
+        let validCombos = combos.filter {
+            $0 == ChartPresetStore.localMode || ChartPresetStore.shared.preset(id: $0) != nil
+        }
         guard !validCombos.isEmpty else {
             return WebBridgeResponse.fail(request.id, code: "invalid_payload",
-                                          message: "需要合法的组合槽位（p1..p5）")
+                                          message: "组合需为 local 或组合槽位（p1..p5）")
         }
         let mode = request.payload["mode"] as? String ?? "warm"
         guard mode == "full" || mode == "warm" else {
