@@ -342,4 +342,158 @@ final class IndicatorCacheDB {
             DebugLogger.shared.log("[IndicatorCache] 孤儿行回收 \(orphans.count) 标的")
         }
     }
+
+    // MARK: - LAN 同步导出/合并（第 7 类 indicatorCache）
+
+    /// 各组合占用统计（LAN 同步 status 的 children 组装）：key / 行数 / payload 总字节
+    func comboStats() -> [(key: String, rows: Int, bytes: Int64)] {
+        guard let db else { return [] }
+        return queue.sync {
+            var result: [(String, Int, Int64)] = []
+            let sql = "SELECT combo_key, COUNT(*), SUM(LENGTH(payload)) FROM cache GROUP BY combo_key;"
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let key = sqlite3_column_text(statement, 0) else { continue }
+                result.append((String(cString: key),
+                               Int(sqlite3_column_int64(statement, 1)),
+                               sqlite3_column_int64(statement, 2)))
+            }
+            return result
+        }
+    }
+
+    /// 导出选中组合的全部行为同构临时 sqlite（LAN 同步 /sync/cache-export 的数据源）。
+    /// queue.sync 内完成开库→建表→逐行 blob 直拷→行数校验→关库；失败删除半成品。
+    /// 行数校验：SELECT 计数与 INSERT 计数一致才视为成功。
+    func exportCombos(combos: [String], to url: URL) throws {
+        guard let db else { throw SyncExportError(message: "本机缓存库未打开") }
+        try? FileManager.default.removeItem(at: url)
+        let keys = combos
+        try queue.sync {
+            // 目标库
+            var target: OpaquePointer?
+            let rc = sqlite3_open_v2(url.path, &target, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil)
+            guard rc == SQLITE_OK else {
+                throw SyncExportError(message: "导出库打开失败 rc=\(rc)")
+            }
+            defer { sqlite3_close(target) }
+            // 同构表 + 索引（与 createSchema 的 cache 定义一致）
+            let schema = """
+            CREATE TABLE IF NOT EXISTS cache (
+              combo_key TEXT NOT NULL, meta_id INTEGER NOT NULL, period TEXT NOT NULL,
+              fingerprint TEXT NOT NULL, gen_mode TEXT NOT NULL DEFAULT 'runtime',
+              last_bar_date INTEGER NOT NULL, source_bar_count INTEGER NOT NULL,
+              payload BLOB NOT NULL, updated_at INTEGER NOT NULL,
+              PRIMARY KEY (combo_key, meta_id, period));
+            CREATE INDEX IF NOT EXISTS idx_cache_combo ON cache (combo_key);
+            """
+            var err: UnsafeMutablePointer<CChar>?
+            guard sqlite3_exec(target, schema, nil, nil, &err) == SQLITE_OK else {
+                throw SyncExportError(message: "导出库建表失败: \(err.map { String(cString: $0) } ?? "?")")
+            }
+            // 逐行拷贝（payload BLOB 直拷，零转换）
+            let selectSQL = """
+            SELECT combo_key, meta_id, period, fingerprint, gen_mode, last_bar_date,
+                   source_bar_count, payload, updated_at FROM cache WHERE combo_key = ?;
+            """
+            let insertSQL = """
+            INSERT INTO cache (combo_key, meta_id, period, fingerprint, gen_mode,
+                               last_bar_date, source_bar_count, payload, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """
+            var selectStmt: OpaquePointer?
+            var insertStmt: OpaquePointer?
+            defer {
+                sqlite3_finalize(selectStmt)
+                sqlite3_finalize(insertStmt)
+            }
+            guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK,
+                  sqlite3_prepare_v2(target, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else {
+                throw SyncExportError(message: "导出语句 prepare 失败")
+            }
+            var expected = 0
+            var inserted = 0
+            for key in keys {
+                sqlite3_reset(selectStmt)
+                sqlite3_clear_bindings(selectStmt)
+                sqlite3_bind_text(selectStmt, 1, key, -1, SQLITE_TRANSIENT)
+                while sqlite3_step(selectStmt) == SQLITE_ROW {
+                    expected += 1
+                    sqlite3_reset(insertStmt)
+                    sqlite3_clear_bindings(insertStmt)
+                    for col in 0...8 {
+                        let c = Int32(col)
+                        switch sqlite3_column_type(selectStmt, c) {
+                        case SQLITE_TEXT:
+                            sqlite3_bind_text(insertStmt, c + 1, sqlite3_column_text(selectStmt, c), -1, SQLITE_TRANSIENT)
+                        case SQLITE_BLOB:
+                            sqlite3_bind_blob(insertStmt, c + 1, sqlite3_column_blob(selectStmt, c), sqlite3_column_bytes(selectStmt, c), SQLITE_TRANSIENT)
+                        default:
+                            sqlite3_bind_int64(insertStmt, c + 1, sqlite3_column_int64(selectStmt, c))
+                        }
+                    }
+                    guard sqlite3_step(insertStmt) == SQLITE_DONE else {
+                        throw SyncExportError(message: "导出行写入失败 meta=\(sqlite3_column_int64(selectStmt, 1))")
+                    }
+                    inserted += 1
+                }
+            }
+            guard inserted == expected else {
+                throw SyncExportError(message: "导出行数校验不符 \(inserted)/\(expected)")
+            }
+            DebugLogger.shared.log("[IndicatorCache] 导出 \(keys.count) 组合 \(inserted) 行 → \(url.lastPathComponent)")
+        }
+    }
+
+    /// 从对端导出库合并选中组合的行（ATTACH + INSERT OR REPLACE，queue.sync 内完成）。
+    /// 行级字段（fingerprint/末根/根数）随行带入，本机注水校验自然过滤不一致行。
+    func mergeFrom(path: URL, combos: [String]) throws {
+        guard let db else { throw SyncExportError(message: "本机缓存库未打开") }
+        try queue.sync {
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            // ATTACH（路径参数化）
+            guard sqlite3_prepare_v2(db, "ATTACH DATABASE ? AS peer;", -1, &statement, nil) == SQLITE_OK,
+                  sqlite3_bind_text(statement, 1, path.path, -1, SQLITE_TRANSIENT) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw SyncExportError(message: "对端缓存库 ATTACH 失败")
+            }
+            defer {
+                var detach: OpaquePointer?
+                if sqlite3_prepare_v2(db, "DETACH DATABASE peer;", -1, &detach, nil) == SQLITE_OK {
+                    sqlite3_step(detach)
+                }
+                sqlite3_finalize(detach)
+            }
+            let mergeSQL = """
+            INSERT OR REPLACE INTO cache
+              (combo_key, meta_id, period, fingerprint, gen_mode, last_bar_date,
+               source_bar_count, payload, updated_at)
+            SELECT combo_key, meta_id, period, fingerprint, gen_mode, last_bar_date,
+                   source_bar_count, payload, updated_at FROM peer.cache WHERE combo_key = ?;
+            """
+            var mergeStmt: OpaquePointer?
+            defer { sqlite3_finalize(mergeStmt) }
+            guard sqlite3_prepare_v2(db, mergeSQL, -1, &mergeStmt, nil) == SQLITE_OK else {
+                throw SyncExportError(message: "合并语句 prepare 失败")
+            }
+            for key in combos {
+                sqlite3_reset(mergeStmt)
+                sqlite3_clear_bindings(mergeStmt)
+                sqlite3_bind_text(mergeStmt, 1, key, -1, SQLITE_TRANSIENT)
+                guard sqlite3_step(mergeStmt) == SQLITE_DONE else {
+                    throw SyncExportError(message: "合并组合 \(key) 失败")
+                }
+            }
+            DebugLogger.shared.log("[IndicatorCache] 合并对端 \(combos.count) 组合完成")
+        }
+    }
+}
+
+/// LAN 同步导出/合并失败的中文错误（phase = .failed 直接展示）
+struct SyncExportError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }

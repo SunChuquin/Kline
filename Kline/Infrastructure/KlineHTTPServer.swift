@@ -542,6 +542,12 @@ final class KlineHTTPServer {
                 self.respond(connection, status: 200, contentType: "application/json",
                              body: String(data: data, encoding: .utf8) ?? "{}")
             }
+        case ("GET", "/sync/cache-export"):
+            // 指标缓存按组合导出（LAN 同步 indicatorCache 类数据通道）：
+            // ?combos=local,p1 → 导出选中组合行为临时 sqlite 流式返回（X-Kline-Sha 校验）
+            // 门禁同 /sandbox 读（暴露态 / 会话 token / 环回）
+            guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
+            handleSyncCacheExport(rawPath: rawPath, connection: connection)
         case ("GET", "/opener-log"):
             handleOpenerLog(connection: connection)
         case ("GET", "/sandbox"), ("GET", "/sandbox/"):
@@ -800,6 +806,53 @@ final class KlineHTTPServer {
         respond(connection, status: 403, contentType: "application/json",
                 body: "{\"error\":\"not exposed\"}")
         return false
+    }
+
+    /// GET /sync/cache-export?combos=local,p1：把选中组合的缓存行导出为同构临时 sqlite
+    /// 流式返回（LAN 同步第 7 类 indicatorCache 的数据通道）。X-Kline-Sha = 导出文件
+    /// sha256（客户端校验防传输损坏）。导出经主线程跳转（IndicatorCacheDB 为 MainActor
+    /// 隔离），临时文件落系统 tmp（不占 Documents），每次导出前清理旧残留。
+    private func handleSyncCacheExport(rawPath: String, connection: NWConnection) {
+        let combosRaw = Self.queryParam(rawPath, "combos") ?? ""
+        let validKeys = Set([ChartPresetStore.localMode] + ChartPresetSlots.ids)
+        let combos = combosRaw.split(separator: ",").map(String.init).filter { validKeys.contains($0) }
+        guard !combos.isEmpty else {
+            respond(connection, status: 400, contentType: "application/json",
+                    body: "{\"error\":\"need combos=local,p1..p5\"}")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let tmp = NSTemporaryDirectory()
+            // 清理旧导出残留（上次发送完成后未删的）
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: tmp) {
+                for n in names where n.hasPrefix("kline-cache-export-") {
+                    try? FileManager.default.removeItem(atPath: tmp + n)
+                }
+            }
+            let exportURL = URL(fileURLWithPath: tmp + "kline-cache-export-\(Int(Date().timeIntervalSince1970)).db")
+            do {
+                try IndicatorCacheDB.shared.exportCombos(combos: combos, to: exportURL)
+            } catch {
+                self.respond(connection, status: 500, contentType: "application/json",
+                             body: "{\"error\":\"\(Self.jsonEsc(error.localizedDescription))\"}")
+                return
+            }
+            let path = exportURL.path
+            guard let handle = FileHandle(forReadingAtPath: path) else {
+                self.respond(connection, status: 500, body: "export read failed")
+                return
+            }
+            let size = Int(((try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber)?.int64Value ?? 0)
+            let sha = Self.fileSHA256Hex(at: path) ?? ""
+            let head = "HTTP/1.1 200 OK\r\n"
+                + "Content-Type: application/octet-stream\r\n"
+                + "Content-Length: \(size)\r\n"
+                + "X-Kline-Sha: \(sha)\r\n"
+                + "Connection: close\r\n\r\n"
+            DebugLogger.shared.log("[LAN同步] 缓存导出 combos=[\(combos.joined(separator: ","))] size=\(size) sha=\(sha.prefix(8))…")
+            self.streamFileLocked(handle: handle, connection: connection, header: Data(head.utf8))
+        }
     }
 
     /// POST /sync/request-pair：{"from":"设备名","items":["favorites","sim"]}

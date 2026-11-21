@@ -360,7 +360,15 @@ final class LANSyncBridge: ObservableObject {
 
     /// 类别清单人性化摘要（对齐原生 LANSyncView.sideSummary）
     static func sideSummary(_ item: LANSyncItem?) -> String {
-        guard let item, !item.files.isEmpty else { return "—" }
+        guard let item else { return "—" }
+        if item.category == .indicatorCache {
+            // 指标缓存无文件语义：显示组合数与缓存字节总量
+            let children = item.children ?? []
+            guard !children.isEmpty else { return "—" }
+            let bytes = children.reduce(Int64(0)) { $0 + $1.size }
+            return "\(children.count) 个组合 / \(byteText(bytes))"
+        }
+        guard !item.files.isEmpty else { return "—" }
         if item.files.count == 1 {
             let f = item.files[0]
             return "\(byteText(f.size)) · \(mtimeText(f.mod))"

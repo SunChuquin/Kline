@@ -124,6 +124,10 @@
         <div v-if="pickOf('main') === 'all'" class="warn-card">
           ⚠ 主库约 GB 级，WiFi 传输耗时较长；替换后需重启 App 生效
         </div>
+        <div v-if="pickOf('indicatorCache') !== 'none'" class="warn-card">
+          ℹ 指标缓存按组合同步：勾选的组合其缓存行会合并到本机，同时**自动覆盖对应的组合定义**
+          （保证缓存指纹与本机一致才能命中）；本机未勾选的组合不受影响，本机「局部独立配置」的定义也不会被覆盖。
+        </div>
 
         <button class="primary-btn" aria-label="lansync.start" :disabled="!hasAnyPick" @click="startSync">开始拉取</button>
       </template>

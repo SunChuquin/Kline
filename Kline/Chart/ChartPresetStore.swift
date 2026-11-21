@@ -143,4 +143,32 @@ final class ChartPresetStore: ObservableObject {
             UserDefaults.standard.set(data, forKey: Self.presetsKey)
         }
     }
+
+    // MARK: - LAN 同步组合定义导出/合并（第 7 类 indicatorCache 的「组合定义跟随」）
+
+    /// 本机五套组合定义 JSON（对端 SyncCache/presets.json 的数据源；与 persistPresets 同编码）
+    func exportJSON() -> Data? {
+        try? JSONEncoder().encode(presets)
+    }
+
+    /// 合并对端组合定义：**只替换 selectedIDs 中的槽位**（本机未选中槽位/顺序原样不动；
+    /// local 不是槽位、调用方过滤）。合并后持久化 + bump revision（生效中组合被替换 →
+    /// 指纹变化 → 图表重算，磁盘缓存行级校验自然衔接新内容）。
+    /// 对端 JSON 缺槽/槽位 id 非法时跳过该槽（不整体失败）。
+    func mergeRemoteJSON(_ data: Data, selectedIDs: Set<String>) throws {
+        let remote = try JSONDecoder().decode([ChartPreset].self, from: data)
+        var replaced = 0
+        var updated = presets
+        for (idx, local) in updated.enumerated() where selectedIDs.contains(local.id) {
+            if let peer = remote.first(where: { $0.id == local.id }), peer != local {
+                updated[idx] = peer
+                replaced += 1
+            }
+        }
+        guard replaced > 0 else { return }
+        presets = updated
+        persistPresets()
+        ChartConfigStore.shared.bumpConfigModeRevision()
+        DebugLogger.shared.log("[ChartPreset] LAN 同步覆盖 \(replaced) 个组合定义: \(selectedIDs.sorted().joined(separator: ","))")
+    }
 }
