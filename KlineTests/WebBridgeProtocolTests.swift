@@ -79,7 +79,8 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
                                         "backtest.changed", "training.changed", "formulaEdit.changed",
                                         "strategyEdit.changed", "pickerEdit.changed",
-                                        "strategyDetail.changed", "cond.changed", "preset.changed"]
+                                        "strategyDetail.changed", "cond.changed", "preset.changed",
+                                        "cacheManage.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -783,6 +784,25 @@ final class WebBridgeProtocolTests: XCTestCase {
             ($0["id"] as? String) == "req_preset_edit_commit"
         }, "fixtures 缺 preset.editCommit 响应样例")
         XCTAssertNotNil(editCommit["ok"], "editCommit 响应缺 ok 信封")
+    }
+
+    /// cacheManage.stats 响应形状锁定（P2 指标组合期4）：组合占用/过期数 + 生成运行态
+    func testCacheStatsShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_cache_stats"
+        }, "fixtures 缺 cacheManage.stats 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["combos", "running", "warmupN", "bufferNote"] {
+            XCTAssertNotNil(data[key], "cacheManage.stats 缺 \(key)")
+        }
+        let combos = try XCTUnwrap(data["combos"] as? [[String: Any]])
+        for c in combos {
+            for key in ["comboKey", "label", "count", "bytes", "staleCount"] {
+                XCTAssertNotNil(c[key], "组合占用行缺 \(key)")
+            }
+        }
     }
 
     /// strategyDetail.snapshot 响应形状锁定（P2-9c 策略详情页）：基础信息同步直出七字段

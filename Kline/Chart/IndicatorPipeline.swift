@@ -303,7 +303,7 @@ private func buildMainLine(id: String, isCustom: Bool, customColor: Color?,
 }
 
 /// VOL/AMO 量均线固定周期（0=隐藏，公式固定值，不再支持编辑）
-private let volMAFixedPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
+let volMAFixedPeriods: [Int] = [5, 10, 0, 0, 0, 0, 0, 0]
 
 // MARK: - 缠论结构 dump（设备侧可读：Documents/chan_dump.json）
 
@@ -1811,4 +1811,132 @@ extension KlineChartView {
                                              barCount: data.count, lastBarDate: data.last?.date ?? 0)
     }
 
+}
+
+// MARK: - 生成引擎组装器（P2 指标组合期4：ChartPresetWarmupRunner 的求值结果 → 缓存 envelope）
+//
+// 复用 commitToCache 的曲线组装逻辑（同文件 private helper：buildMainLine / prefetchLineColor 等），
+// 但不触碰 ChartCacheStore 内存与可见视图——纯产出 IndicatorCacheEnvelope 供生成引擎直接落盘。
+
+enum ChartWarmupComposer {
+
+    /// 组装主图曲线（照 commitToCache 的主图段）
+    static func mainLines(req: PrefetchCalcRequest, result: PrefetchCalcResult, period: KlinePeriod) -> [IndicatorLine] {
+        var curves: [IndicatorLine] = []
+        let customColor = CustomIndicatorStore.shared.indicators
+            .first { $0.id == ChartConfigStore.shared.activeCustomIndicatorID(for: period) }?.color
+        for (idx, id) in req.mainIDs.enumerated() {
+            guard idx < result.main.count else { continue }
+            let isCustom = id == MainIndicatorCache.customKey
+            for (i, out) in result.main[idx].enumerated() {
+                guard !tdxAllNaN(out.values) || isChanRow(out) else { continue }
+                if let built = buildMainLine(id: id, isCustom: isCustom,
+                                             customColor: isCustom ? customColor : nil, i: i, out: out) {
+                    curves.append(built)
+                }
+            }
+        }
+        return curves
+    }
+
+    /// 组装副图曲线（照 commitToCache 的副图三分支；slot 0/1/2 ↔ 三副图选择顺序）
+    static func subLines(req: PrefetchCalcRequest, result: PrefetchCalcResult, period: KlinePeriod) -> [Int: [IndicatorLine]] {
+        let config = ChartConfigStore.shared
+        var subCurves: [Int: [IndicatorLine]] = [:]
+        let subSels = config.subSelections(for: period)
+        for (i, sel) in subSels.enumerated() {
+            guard i < req.subs.count, i < result.subs.count else { continue }
+            let subReq = req.subs[i]
+            let raw = result.subs[i]
+            var sc: [IndicatorLine] = []
+            if subReq.customFormula != nil {
+                let customInd = sel.customID.flatMap { id in CustomIndicatorStore.shared.indicators.first { $0.id == id } }
+                for (j, out) in raw.enumerated() {
+                    guard !tdxAllNaN(out.values) else { continue }
+                    sc.append(IndicatorLine(name: prefetchDisplayName(out.name), values: out.values,
+                                            color: prefetchCustomLineColor(j, line: out, indicatorColor: customInd?.color),
+                                            style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue))
+                }
+            } else if subReq.kind == "VOL" || subReq.kind == "AMO" {
+                let isAmo = subReq.kind == "AMO"
+                let baseSlice = isAmo ? req.turnovers : req.volumes
+                sc.append(IndicatorLine(name: subReq.kind, values: baseSlice,
+                                        color: isAmo ? prefetchUpColor : prefetchDownColor,
+                                        style: .stick, lineWidth: 1, hideValue: false, barColor: .candle))
+                for (p, period) in subReq.volPeriods.enumerated() where period > 0 {
+                    sc.append(IndicatorLine(name: "MA\(period)", values: ChartSeries.ma(values: baseSlice, period: period),
+                                            color: prefetchMaColor(p), style: .solid, lineWidth: 1, hideValue: false))
+                }
+            } else if subReq.formula != nil {
+                for (j, out) in raw.enumerated() {
+                    guard !tdxAllNaN(out.values) else { continue }
+                    sc.append(IndicatorLine(name: prefetchDisplayName(out.name), values: out.values,
+                                            color: prefetchLineColor(from: out, fallback: prefetchMaColor(j)),
+                                            style: out.style, lineWidth: out.lineWidth, hideValue: out.hideValue,
+                                            barColor: out.colorStick ? .sign : .fixed,
+                                            markerColors: out.markerDirections?.map { $0 ? prefetchUpColor : prefetchDownColor }))
+                }
+            }
+            subCurves[i] = sc
+        }
+        return subCurves
+    }
+
+    /// 全量 envelope：整段求值结果原样落盘
+    static func fullEnvelope(req: PrefetchCalcRequest, result: PrefetchCalcResult,
+                             period: KlinePeriod, barCount: Int) -> IndicatorCacheEnvelope? {
+        let main = mainLines(req: req, result: result, period: period)
+        guard !main.isEmpty, main.allSatisfy({ $0.values.count == barCount }) else { return nil }
+        let subs = subLines(req: req, result: result, period: period)
+        for (_, lines) in subs where !lines.allSatisfy({ $0.values.count == barCount }) { return nil }
+        return IndicatorCacheEnvelope(main: main.map { IndicatorLineBlob(from: $0) },
+                                      subs: subs.mapValues { $0.map { IndicatorLineBlob(from: $0) } },
+                                      coverageStart: 0, coverageEnd: barCount - 1,
+                                      bgCoverageEnd: barCount - 1)
+    }
+
+    /// 预热 envelope：切片（末 keepN+buffer 根）求值结果，values 前段补 NaN 对齐全量根数。
+    /// bgCoverageEnd 只推进到保留段起点（前台打开该标的时按既有链路对未覆盖段重算；
+    /// 缠论通道指标本就不参与预生成——referencesChanChannel 排除）。
+    static func warmEnvelope(req: PrefetchCalcRequest, result: PrefetchCalcResult,
+                             period: KlinePeriod, total: Int, keepN: Int) -> IndicatorCacheEnvelope? {
+        guard total >= keepN else { return nil }
+        let main = mainLines(req: req, result: result, period: period)
+        guard !main.isEmpty else { return nil }
+        let subs = subLines(req: req, result: result, period: period)
+        // 对齐：切片长度 = req.data.count（末 keepN+buffer 根）；保留段 = 全量末 keepN 根
+        // → full[i] = NaN（i < total-keepN），full[total-keepN+i] = v[buffer+i]
+        let sliceLen = req.data.count
+        let buffer = sliceLen - keepN
+        guard buffer >= 0 else { return nil }
+        func align(_ v: [Double]) -> [Double]? {
+            guard v.count == sliceLen else { return nil }
+            var full = [Double](repeating: .nan, count: total)
+            for i in 0..<keepN { full[total - keepN + i] = v[buffer + i] }
+            return full
+        }
+        var mainAligned: [IndicatorLine] = []
+        for line in main {
+            guard let v = align(line.values) else { return nil }
+            var l = line
+            l.values = v
+            mainAligned.append(l)
+        }
+        var subsAligned: [Int: [IndicatorLine]] = [:]
+        for (slot, lines) in subs {
+            var out: [IndicatorLine] = []
+            for line in lines {
+                guard let v = align(line.values) else { return nil }
+                var l = line
+                l.values = v
+                out.append(l)
+            }
+            subsAligned[slot] = out
+        }
+        let warmStart = total - keepN
+        return IndicatorCacheEnvelope(main: mainAligned.map { IndicatorLineBlob(from: $0) },
+                                      subs: subsAligned.mapValues { $0.map { IndicatorLineBlob(from: $0) } },
+                                      coverageStart: warmStart, coverageEnd: total - 1,
+                                      bgCoverageEnd: warmStart)
+    }
 }

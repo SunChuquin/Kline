@@ -145,6 +145,11 @@
                                  "activeCustomByPeriod": {}, "subSelectionsByPeriod": {} },
                                { "id": "p5", "name": "组合5", "mainIndicatorsByPeriod": {},
                                  "activeCustomByPeriod": {}, "subSelectionsByPeriod": {} } ] } },
+    { "id": "req_cache_stats", "module": "cacheManage", "action": "stats", "payload": {} },
+    { "id": "req_cache_clear", "module": "cacheManage", "action": "clear", "payload": { "ids": ["p1", "p2"] } },
+    { "id": "req_cache_generate", "module": "cacheManage", "action": "generate",
+      "payload": { "combos": ["p1"], "mode": "warm", "periods": ["日线"], "warmupN": 80 } },
+    { "id": "req_cache_cancel", "module": "cacheManage", "action": "cancelGenerate", "payload": {} },
     { "id": "req_sd_snapshot", "module": "strategyDetail", "action": "snapshot", "payload": {} },
     { "id": "req_sd_edit", "module": "strategyDetail", "action": "edit", "payload": {} },
     { "id": "req_sd_backtest", "module": "strategyDetail", "action": "backtest", "payload": {} },
@@ -405,6 +410,16 @@
     { "id": "req_preset_setmode", "ok": true, "data": {} },
     { "id": "req_preset_open_editor", "ok": true, "data": {} },
     { "id": "req_preset_edit_commit", "ok": true, "data": {} },
+    { "id": "req_cache_stats", "ok": true,
+      "data": { "combos": [ { "comboKey": "local", "label": "局部独立配置", "count": 3, "bytes": 245760, "staleCount": 1 },
+                            { "comboKey": "p1", "label": "组合1", "count": 5, "bytes": 409600, "staleCount": 0 },
+                            { "comboKey": "p2", "label": "组合2", "count": 0, "bytes": 0, "staleCount": 0 } ],
+                "running": { "state": "idle" },
+                "warmupN": 80,
+                "bufferNote": "预热保留最新 80 根（另含 120 根边界缓冲）" } },
+    { "id": "req_cache_clear", "ok": true, "data": {} },
+    { "id": "req_cache_generate", "ok": true, "data": { "queued": true } },
+    { "id": "req_cache_cancel", "ok": true, "data": {} },
     { "id": "req_chart_formula_snapshot", "ok": true,
       "data": { "period": "日线",
                 "mainItems": [ { "id": "MA", "name": "MA", "isSystem": true, "hasTemplate": true } ],
@@ -663,6 +678,8 @@
                                             "conditionSummary": "现价 ≥ 1480.00 元 触发",
                                             "directiveSummary": "触发后 市价卖出 100 股",
                                             "validitySummary": "长期有效" } },
-    { "event": "preset.changed", "payload": { "reason": "mode", "mode": "p1" } }
+    { "event": "preset.changed", "payload": { "reason": "mode", "mode": "p1" } },
+    { "event": "cacheManage.changed", "payload": { "reason": "progress", "state": "running",
+                                                   "done": 320, "total": 3354, "comboLabel": "组合1" } }
   ]
 }

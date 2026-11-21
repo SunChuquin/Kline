@@ -46,6 +46,12 @@
         <span class="chev">›</span>
       </button>
 
+      <!-- 缓存管理（P2 指标组合：指标缓存占用/清除/生成） -->
+      <button class="entry-card row" aria-label="profile.cacheManage.entry" @click="openPage('cacheManage')">
+        <span class="entry-title">缓存管理</span>
+        <span class="chev">›</span>
+      </button>
+
       <!-- 联机同步 -->
       <button class="entry-card row" aria-label="profile.lansync.entry" @click="openPage('lanSync')">
         <span class="entry-title">联机同步</span>

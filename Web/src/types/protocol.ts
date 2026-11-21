@@ -86,6 +86,11 @@
 //   preset.setMode {id} → {}                                  切换生效组合（"local"=局部独立配置 / "p1".."p5"；幂等；图表即时重算）
 //   preset.editCommit {presets:[5套]} → {}                    组合编辑页整包提交（生效中组合被改即重算）
 //   preset.openEditor {} → {}                                 设置面板「编辑五套组合」→ 切 sheet 面板到 presetEditor
+//   cacheManage.stats {} → CacheStatsSnapshot                 指标缓存占用统计（六组合条目数/字节/过期数 + 生成运行态）
+//   cacheManage.clear {ids?} → {}                             按组合清除磁盘缓存（ids 缺省清全部）
+//   cacheManage.generate {combos, mode, periods?, warmupN?} → {queued}
+//                                                             启动生成引擎（全市场批量：mode full=完整计算 / warm=最新N根近似；进度随 changed 推送）
+//   cacheManage.cancelGenerate {} → {}                        取消生成（幂等）
 //   chart.formula.snapshot {} → FormulaSnapshot                          tech 段三节快照（系统主图/副图分组/自定义）
 //   chart.formula.deleteCustom {id} → {}                                 删除自定义指标
 //   chart.formula.openCenter {} → {}                                     （回退链路）关面板 + 桥接原生公式中心
@@ -195,6 +200,7 @@
 //   strategyDetail.changed {reason}        策略详情异步结果（reason: values|pickPhase|pickHits|genConfirm|genResult；route:"page" 定向推送）
 //   cond.changed {reason}                  条件单异步结果（reason: evaluate|saveResult|list|texts|newFailed；route:"page" 定向推送）
 //   preset.changed {reason}                指标组合变化（reason: mode|presets；route:"sheet" 定向推送）
+//   cacheManage.changed {reason}           指标缓存生成进度/清除（reason: progress|done|cancelled|cleared；route:"page" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -503,6 +509,36 @@ export interface IndicatorsSnapshot {
   mainDefs: IndicatorDefSnap[]
   mainCustoms: CustomIndicatorSnap[]
   subSlots: SubSlotSnap[]
+}
+
+// ===== 指标缓存管理（cacheManage） =====
+
+/** cacheManage.stats 单组合占用（staleCount = 末根日期≠meta 最新日 的日线行数，过期待更新） */
+export interface CacheComboStats {
+  /** "local" / "p1".."p5" */
+  comboKey: string
+  label: string
+  count: number
+  bytes: number
+  staleCount: number
+}
+
+/** cacheManage.stats 响应（占用统计 + 生成运行态 + 预热根数偏好） */
+export interface CacheStatsSnapshot {
+  combos: CacheComboStats[]
+  /** 生成引擎运行态：idle / running(done,total,comboLabel) / finished / cancelled */
+  running: { state: 'idle' | 'running' | 'finished' | 'cancelled'; done?: number; total?: number; comboLabel?: string }
+  warmupN: number
+  bufferNote: string
+}
+
+/** cacheManage.changed(progress) 推送 */
+export interface CacheProgressPayload {
+  reason: 'progress' | 'done' | 'cancelled' | 'cleared'
+  state?: 'idle' | 'running'
+  done?: number
+  total?: number
+  comboLabel?: string
 }
 
 // ===== P2-6c-1 全屏 Web 页三件套（lan / update / lab） =====
@@ -1074,6 +1110,7 @@ export const KnownActions = {
           'indicators.openSystemEditor', 'indicators.openCustomEditor',
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
   preset: ['snapshot', 'setMode', 'editCommit', 'openEditor'],
+  cacheManage: ['stats', 'clear', 'generate', 'cancelGenerate'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
   strategyDetail: ['snapshot', 'edit', 'backtest', 'runPick', 'cancelPick', 'generate', 'toggleEntry', 'confirmGenerate'],
@@ -1115,6 +1152,7 @@ export const KnownEvents = {
   pickerEditChanged: 'pickerEdit.changed',
   condChanged: 'cond.changed',
   presetChanged: 'preset.changed',
+  cacheManageChanged: 'cacheManage.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

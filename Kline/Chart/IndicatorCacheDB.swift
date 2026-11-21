@@ -269,6 +269,34 @@ final class IndicatorCacheDB {
         }
     }
 
+    /// 行级明细（同步；组合 → 每行的 metaID/period/末根日期/字节数）——缓存管理页过期统计
+    func rowsDetail() -> [(comboKey: String, metaID: Int, period: String,
+                           lastBarDate: Int, genMode: String, bytes: Int)] {
+        guard let db else { return [] }
+        return queue.sync {
+            var result: [(String, Int, String, Int, String, Int)] = []
+            let sql = """
+            SELECT combo_key, meta_id, period, last_bar_date, gen_mode, LENGTH(payload)
+            FROM cache ORDER BY combo_key, meta_id;
+            """
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let key = sqlite3_column_text(statement, 0),
+                      let period = sqlite3_column_text(statement, 2),
+                      let mode = sqlite3_column_text(statement, 4) else { continue }
+                result.append((String(cString: key),
+                               Int(sqlite3_column_int64(statement, 1)),
+                               String(cString: period),
+                               Int(sqlite3_column_int64(statement, 3)),
+                               String(cString: mode),
+                               Int(sqlite3_column_int64(statement, 5))))
+            }
+            return result
+        }
+    }
+
     /// 孤儿行回收（清单标的自动更新：删除标的的行按当前 metaList 差集清理）——期4
     func purgeOrphans(validMetaIDs: Set<Int>) {
         queue.async { [weak self] in
