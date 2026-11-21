@@ -479,6 +479,26 @@ class DatabaseManager: ObservableObject {
         }
     }
 
+    /// 各标的日线**实际**末根（`SELECT meta_id, MAX(date) FROM daily GROUP BY meta_id`，一次聚合全表）。
+    /// 为什么不用 meta.last_date：那是声明值，个别标的与实际数据存在数日偏差（种子快照差异，
+    /// 实测英力特声明 20261109 而实际末根 20261112）——指标缓存的「过期」判定必须与注水校验
+    /// 同口径（注水用的正是 fetchBars 实际数据末根），否则会误报过期/误判可命中。
+    func actualDailyLastDates() -> [Int: Int] {
+        return dbQueue.sync {
+            guard let db else { return [:] }
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_prepare_v2(db, "SELECT meta_id, MAX(date) FROM daily GROUP BY meta_id;", -1, &statement, nil) == SQLITE_OK else {
+                return [:]
+            }
+            var result: [Int: Int] = [:]
+            while sqlite3_step(statement) == SQLITE_ROW {
+                result[Int(sqlite3_column_int64(statement, 0))] = Int(sqlite3_column_int64(statement, 1))
+            }
+            return result
+        }
+    }
+
     /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空。
     ///
     /// **增量优先 + 主库补齐**（三处出口共用同一规则）：

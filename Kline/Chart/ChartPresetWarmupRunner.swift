@@ -67,12 +67,13 @@ final class ChartPresetWarmupRunner: ObservableObject {
             if onlyStale {
                 let periodNames = Set(periods.map(\.rawValue))
                 let targetKeys = Set(targets.map(\.comboKey))
-                let metaByID = Dictionary(uniqueKeysWithValues: metas.map { ($0.id, $0) })
+                // 过期基准 = 主库实际末根（与注水校验/stats 徽标同口径，meta.last_date 是
+                // 声明值、个别标的与实际有偏差，作基准会把正确的行永久判过期）
+                let actualLast = DatabaseManager.shared.actualDailyLastDates()
                 var staleIDs = Set<Int>()
                 for row in IndicatorCacheDB.shared.rowsDetail()
                 where targetKeys.contains(row.comboKey) && periodNames.contains(row.period) {
-                    if let meta = metaByID[row.metaID], let lastDate = meta.lastDate,
-                       row.lastBarDate != lastDate {
+                    if let actual = actualLast[row.metaID], row.lastBarDate != actual {
                         staleIDs.insert(row.metaID)
                     }
                 }

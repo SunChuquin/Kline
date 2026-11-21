@@ -73,7 +73,9 @@ final class CacheManageBridge: ObservableObject {
         let store = ChartPresetStore.shared
         let db = IndicatorCacheDB.shared
         let rows = db.rowsDetail()
-        let metaByID = Dictionary(uniqueKeysWithValues: DatabaseManager.shared.metaList.map { ($0.id, $0) })
+        // 过期基准 = 主库实际末根（与注水校验同口径；meta.last_date 是声明值，
+        // 个别标的与实际数据有数日偏差，作基准会永久误报过期）
+        let actualLast = DatabaseManager.shared.actualDailyLastDates()
 
         // 行按 comboKey 聚合
         var byCombo: [String: (count: Int, bytes: Int, stale: Int)] = [:]
@@ -81,9 +83,9 @@ final class CacheManageBridge: ObservableObject {
             var agg = byCombo[row.comboKey] ?? (0, 0, 0)
             agg.count += 1
             agg.bytes += row.bytes
-            // 过期判定（日线行）：缓存末根日期 ≠ meta 表最新日期（补缺口/日更后未重新生成）
-            if row.period == "日线", let meta = metaByID[row.metaID],
-               let lastDate = meta.lastDate, row.lastBarDate != lastDate {
+            // 过期判定（日线行）：缓存末根 ≠ 主库实际末根（补缺口/日更后未重新生成）
+            if row.period == "日线", let actual = actualLast[row.metaID],
+               row.lastBarDate != actual {
                 agg.stale += 1
             }
             byCombo[row.comboKey] = agg
