@@ -143,8 +143,8 @@
 //   lan.scan          {} → {}                               扫描一次（约 4s 窗口，结果进快照）
 //   lan.connect       {peerId?|address?} → {}               连接对端取 /sync/status（成功进配置页；失败 fail 中文文案）
 //   lan.start         {selections:[{category, mode, childKeys?}]} → {}
-//                                                           发起拉取（mode: all|children；category 可含 indicatorCache
-//                                                           ——按组合同步指标缓存并自动覆盖对应组合定义；phase/progress 随 lan.changed 推送）
+//                                                           发起拉取（mode: all|children；category 含 indicatorCache
+//                                                           ——indicator_cache.db 整库文件同步，组合定义五槽整包跟随；phase/progress 随 lan.changed 推送）
 //   update.snapshot   {} → UpdateSnapshot                   本地更新快照（服务/App 行/引擎行/清单自动更新/补缺口/基准缺失）
 //   update.probeServer {} → {}                              在线服务探测（异步）
 //   update.reconnectServer {} → {}                          强制重建监听并复探

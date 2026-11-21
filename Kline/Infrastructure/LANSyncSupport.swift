@@ -174,18 +174,7 @@ enum LANSyncSupport {
             return files.map { LANSyncChild(key: $0.path, name: displayBasename($0.path), size: $0.size, count: nil) }
         case .indicators:
             return files.map { LANSyncChild(key: $0.path, name: displayRelative($0.path), size: $0.size, count: nil) }
-        case .indicatorCache:
-            // 6 个组合各一个子项（key=comboKey 供 /sync/cache-export?combos= 使用）；
-            // 懒生成组合定义导出文件（勾选任意组合时由拉取端自动附带覆盖）
-            writePresetsExport(docs: docs)
-            let presets = ChartPresetStore.shared
-            return IndicatorCacheDB.shared.comboStats().map { stat in
-                let name = stat.key == ChartPresetStore.localMode
-                    ? "局部独立配置"
-                    : (presets.preset(id: stat.key)?.name ?? stat.key)
-                return LANSyncChild(key: stat.key, name: name, size: stat.bytes, count: stat.rows)
-            }
-        case .sim, .live, .main:
+        case .sim, .live, .main, .indicatorCache:
             return nil
         }
     }
@@ -258,10 +247,11 @@ enum LANSyncSupport {
         case .main:
             return entries(docs: docs, rels: ["tdx.db"])
         case .indicatorCache:
-            // 指标缓存本体（indicator_cache.db）不作为文件暴露——按组合的细粒度同步
-            // 走专用端点 /sync/cache-export（行级导出临时 sqlite）；组合定义文件
-            // SyncCache/presets.json 由 children(for:) 懒生成、经 /sandbox 通道拉取
-            return []
+            // 指标缓存整库文件 + 组合定义导出（整库替换语义：拉取方组合定义整包跟随，
+            // 否则缓存行指纹与本地组合内容不一致、全部不命中）。writePresetsExport 在
+            // status 被请求时刷新，保证对端拉到的定义与本机最新一致
+            writePresetsExport(docs: docs)
+            return entries(docs: docs, rels: ["indicator_cache.db", "SyncCache/presets.json"])
         }
     }
 

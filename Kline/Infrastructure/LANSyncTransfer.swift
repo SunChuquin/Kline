@@ -127,10 +127,6 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         let skipped: Bool            // 对端无此内容
         /// 自选子项模式：选中的分组名（分组合并语义）；其余类别为空
         let favoriteGroupNames: Set<String>
-        /// 指标缓存子项模式：选中的组合 key（local/p1..p5，专用 /sync/cache-export 通道）；其余类别为空
-        let cacheCombos: [String]
-        /// 指标缓存预计字节数（对端 children size 总和，进度分母估算）
-        let cacheEstimatedBytes: Int64
     }
 
     // MARK: - 入口
@@ -180,14 +176,11 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             // ---- 步骤 1：计算文件计划（源端 = 对端快照）----
             let plan = buildPlan(selections: selections, remoteStatus: remoteStatus)
             let plannedFiles = plan.flatMap(\.files)
-            let cacheBytes = plan.reduce(Int64(0)) { $0 + $1.cacheEstimatedBytes }
-            totalBytes = plannedFiles.reduce(0) { $0 + $1.size } + cacheBytes
-            let cacheComboCount = plan.reduce(0) { $0 + $1.cacheCombos.count }
-            DebugLogger.shared.log("LANSync 计划: 拉取 \(plannedFiles.count) 文件 / \(totalBytes) bytes（含指标缓存 \(cacheComboCount) 组合）← \(peer.name)(\(peer.host):\(peer.port))")
+            totalBytes = plannedFiles.reduce(0) { $0 + $1.size }
+            DebugLogger.shared.log("LANSync 计划: 拉取 \(plannedFiles.count) 文件 / \(totalBytes) bytes ← \(peer.name)(\(peer.host):\(peer.port))")
 
             // 对端全部选中类别源端都为空 → 无事可做，不打扰对端，直接汇总收尾
-            let hasCacheWork = plan.contains { !$0.cacheCombos.isEmpty && !$0.skipped }
-            guard !plannedFiles.isEmpty || hasCacheWork else {
+            guard !plannedFiles.isEmpty else {
                 finishDone(plan: plan, files: 0, outcome: TransferOutcome())
                 return
             }
@@ -233,34 +226,18 @@ final class LANSyncTransfer: NSObject, ObservableObject {
                 // 自选子项模式：分组合并路径（对端整份 favorites.json 下载后按组名合并写回）
                 let files = remoteFiles.map { PlanFile(rel: $0.path, size: $0.size, category: sel.category) }
                 return PlanCategory(category: sel.category, mode: .children, files: files,
-                                    skipped: files.isEmpty, favoriteGroupNames: sel.childKeys,
-                                    cacheCombos: [], cacheEstimatedBytes: 0)
-            case (.indicatorCache, .children), (.indicatorCache, .all):
-                // 指标缓存模式：无文件计划，走专用 /sync/cache-export 通道（按组合导出）。
-                // 整类勾选（all）= 对端全部组合；子项模式 = 对端 children 里选中的组合。
-                // 对端 children 里选中的组合存在（行数>0）才不 skipped；
-                // 进度估算 = 选中组合的 payload 字节总和（导出库含页开销略大）。
-                let remoteChildren = sourceItems.first { $0.key == sel.category.rawValue }?.children ?? []
-                let selected = sel.mode == .all
-                    ? remoteChildren
-                    : remoteChildren.filter { sel.childKeys.contains($0.key) }
-                return PlanCategory(category: sel.category, mode: sel.mode, files: [],
-                                    skipped: selected.isEmpty, favoriteGroupNames: [],
-                                    cacheCombos: selected.map(\.key).sorted(),
-                                    cacheEstimatedBytes: selected.reduce(0) { $0 + $1.size })
+                                    skipped: files.isEmpty, favoriteGroupNames: sel.childKeys)
             case (.layouts, .children), (.indicators, .children):
                 // 文件类子项模式：按子项 key（Documents 相对路径）过滤对端清单
                 let files = remoteFiles.filter { sel.childKeys.contains($0.path) }
                     .map { PlanFile(rel: $0.path, size: $0.size, category: sel.category) }
                 return PlanCategory(category: sel.category, mode: .children, files: files,
-                                    skipped: files.isEmpty, favoriteGroupNames: [],
-                                    cacheCombos: [], cacheEstimatedBytes: 0)
+                                    skipped: files.isEmpty, favoriteGroupNames: [])
             default:
                 // 整类模式（sim/live/main 无子项语义，任何模式都按整类处理）
                 let files = remoteFiles.map { PlanFile(rel: $0.path, size: $0.size, category: sel.category) }
                 return PlanCategory(category: sel.category, mode: .all, files: files,
-                                    skipped: files.isEmpty, favoriteGroupNames: [],
-                                    cacheCombos: [], cacheEstimatedBytes: 0)
+                                    skipped: files.isEmpty, favoriteGroupNames: [])
             }
         }
     }
@@ -304,12 +281,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             // 本机两个根目录整份快照（存在才备份）
             mirrorRoots = ["indicator", "formula"].filter { fm.fileExists(atPath: docs + "/" + $0) }
         }
-        let cachePlan = plan.first { $0.category == .indicatorCache }
-        let needCacheBackup = cachePlan.map { !$0.skipped && !$0.cacheCombos.isEmpty } ?? false
-        let hasCacheDB = fm.fileExists(atPath: docs + "/indicator_cache.db")
-        guard !files.isEmpty || !mirrorRoots.isEmpty || (needCacheBackup && hasCacheDB) else {
-            return nil   // 没有会被覆盖的内容
-        }
+        guard !files.isEmpty || !mirrorRoots.isEmpty else { return nil }   // 没有会被覆盖的内容
 
         let ts = Self.backupTimestamp()
         let root = docs + "/Backups/" + ts
@@ -324,10 +296,6 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             try fm.createDirectory(atPath: root + "/" + d, withIntermediateDirectories: true)
             try fm.copyItem(atPath: docs + "/" + d, toPath: root + "/" + d)
         }
-        if needCacheBackup && hasCacheDB {
-            try fm.createDirectory(atPath: root + "/SyncCache", withIntermediateDirectories: true)
-            try fm.copyItem(atPath: docs + "/indicator_cache.db", toPath: root + "/SyncCache/indicator_cache.db")
-        }
         let rel = "Backups/" + ts
         publishOnMain { self.backupDir = rel }
         return rel
@@ -339,20 +307,14 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     private struct TransferOutcome {
         var mirrorDeleted = 0              // indicators 整类镜像清理掉的多余文件数
         var favoritesNotes: [String] = []  // 自选分组合并结果注明（合并/新增/对端缺组）
-        var cacheMergedCombos = 0          // 指标缓存合并的组合数
     }
 
-    /// 逐文件拉取 + favorites 分组合并 + indicators 整类镜像清理 + 指标缓存专用通道。
+    /// 逐文件拉取 + favorites 分组合并 + indicators 整类镜像清理。
     private func transferFiles(plan: [PlanCategory],
                                peer: LANSyncPeer,
                                token: String) async throws -> TransferOutcome {
         var outcome = TransferOutcome()
         for cat in plan {
-            if cat.category == .indicatorCache {
-                guard !cat.skipped, !cat.cacheCombos.isEmpty else { continue }
-                outcome.cacheMergedCombos += try await mergeIndicatorCache(peer: peer, token: token, cat: cat)
-                continue
-            }
             guard !cat.files.isEmpty else { continue }   // 对端无此内容：已在结果注明
             // 自选子项模式：不走整文件覆盖，下载对端整份 favorites.json 后按组名合并写回
             if cat.category == .favorites && cat.mode == .children {
@@ -491,48 +453,6 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         return try Data(contentsOf: URL(fileURLWithPath: tempPath))
     }
 
-    // MARK: - 指标缓存按组合同步（专用 /sync/cache-export 通道）
-
-    /// 指标缓存 children 模式：
-    /// 1. GET /sync/cache-export?combos=... → 对端导出选中组合行为临时 sqlite（X-Kline-Sha
-    ///    header 校验）→ IndicatorCacheDB.mergeFrom（ATTACH + INSERT OR REPLACE 选中组合）
-    /// 2. **组合定义自动跟随**：对端 /sandbox/SyncCache/presets.json（status 时懒生成）→
-    ///    按选中槽位合并（local 非槽位不涉及）——保证缓存行指纹与本地组合内容一致才可命中。
-    /// 返回合并的组合数。定义拉取失败不整体失败（行级校验会挡住指纹不匹配的行）。
-    private func mergeIndicatorCache(peer: LANSyncPeer, token: String, cat: PlanCategory) async throws -> Int {
-        let tmpPath = NSTemporaryDirectory() + "kline-peer-cache-export.db"
-        defer { try? fm.removeItem(atPath: tmpPath) }
-        publishOnMain { self.currentFile = "指标缓存（\(cat.cacheCombos.count) 组合）" }
-        let combos = cat.cacheCombos.joined(separator: ",")
-        try await withRetry(combos, "下载") {
-            try? self.fm.removeItem(atPath: tmpPath)   // 上次尝试的残留
-            var req = try self.makeRequest(peer, method: "GET", path: "/sync/cache-export",
-                                           query: ["combos": combos], token: token)
-            // 服务端导出+sha（单组合可达 5GB）需要数十秒才开始发送字节——放宽单请求超时
-            //（60s 全局配置会让大库在服务端导出阶段就超时，2026-11-21 双模拟器实测）
-            req.timeoutInterval = 600
-            try await self.download(request: req, toPart: tmpPath, shaHeader: "X-Kline-Sha")
-        }
-        // 大库合并（ATTACH 拷贝数 GB，数十秒）放后台——阻塞 MainActor 会冻结客户端 UI
-        let mergeURL = URL(fileURLWithPath: tmpPath)
-        let mergeCombos = cat.cacheCombos
-        try await Task.detached(priority: .utility) {
-            try IndicatorCacheDB.shared.mergeFrom(path: mergeURL, combos: mergeCombos)
-        }.value
-        var presetNote = ""
-        do {
-            let data = try await downloadPeerFile(peer: peer, rel: "SyncCache/presets.json", token: token)
-            try ChartPresetStore.shared.mergeRemoteJSON(data, selectedIDs: Set(cat.cacheCombos))
-            let slots = cat.cacheCombos.filter { $0 != ChartPresetStore.localMode }
-            if !slots.isEmpty { presetNote = "组合定义已覆盖 \(slots.count) 个槽位" }
-        } catch {
-            DebugLogger.shared.log("LANSync 组合定义跟随失败（缓存行已合并）: \(error.localizedDescription)")
-            presetNote = "组合定义拉取失败，缓存行将按本机指纹校验过滤"
-        }
-        DebugLogger.shared.log("LANSync 指标缓存合并完成 combos=[\(combos)] \(presetNote)")
-        return cat.cacheCombos.count
-    }
-
     /// 按组名把对端 groups 合入本机 favorites.json。用 JSONSerialization 直改根字典，
     /// 只动 "groups"，其余根字段（notes / selectedGroupID / schemaVersion / 全局固顶）原样保留：
     /// - 同名组 → 用对端组内容整体替换，但保留本机组 id（selectedGroupID 引用本地 id 不断链）
@@ -604,9 +524,20 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             await MainActor.run { LiveDataStore.shared.notifyExternalWrite() }
         }
         if cats.contains(.indicatorCache) {
-            // 内存 LRU 与磁盘行对齐（合并行是 INSERT OR REPLACE，外部写入后清内存最干净；
-            // 组合定义合并时 bumpConfigModeRevision 已驱动图表重算）
-            await MainActor.run { ChartCacheStore.shared.clearAll() }
+            await MainActor.run {
+                // 组合定义跟随（整库替换语义：对端 5 槽全覆盖）——对端 SyncCache/presets.json
+                // 已被通用文件拉取覆盖到本机，读取并整包合并（生效中组合被改 → 图表重算）
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let presetsPath = docs.appendingPathComponent("SyncCache/presets.json").path
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: presetsPath)) {
+                    try? ChartPresetStore.shared.mergeRemoteJSON(
+                        data, selectedIDs: Set(ChartPresetSlots.ids))
+                }
+                // 本机缓存库文件已被整库替换 → 关旧连接重开新库 → 清内存 LRU
+                IndicatorCacheDB.shared.reloadExternal {
+                    ChartCacheStore.shared.clearAll()
+                }
+            }
         }
         if cats.contains(.main) {
             publishOnMain {
@@ -623,10 +554,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         if files > 0 {
             let mb = Double(transferred) / 1_048_576
             parts.append("已拉取 \(files) 个文件 / \(String(format: "%.1f", mb)) MB")
-        }
-        if outcome.cacheMergedCombos > 0 {
-            parts.append("已合并 \(outcome.cacheMergedCombos) 个组合的指标缓存（含组合定义跟随，内存缓存已对齐）")
-        } else if files == 0 {
+        } else {
             parts.append("对端没有可拉取的内容")
         }
         parts += outcome.favoritesNotes
@@ -732,12 +660,11 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         throw lastError ?? SyncError(message: "\(action)失败：\(label)")
     }
 
-    /// delegate 型流式下载（downloadTask 落系统临时文件，didFinishDownloadingTo 里搬到 <rel>.part）。
-    /// shaHeader 非空时校验响应头该字段的 sha256 与落地文件一致（不符按失败处理 → 重试）。
-    private func download(request: URLRequest, toPart partPath: String, shaHeader: String? = nil) async throws {
+    /// delegate 型流式下载（downloadTask 落系统临时文件，didFinishDownloadingTo 里搬到 <rel>.part）
+    private func download(request: URLRequest, toPart partPath: String) async throws {
         guard let session = session else { throw SyncError(message: "会话已结束") }
         try await withCheckedThrowingContinuation { cont in
-            let box = TransferBox(continuation: cont, downloadDest: partPath, shaHeader: shaHeader) { [weak self] delta in
+            let box = TransferBox(continuation: cont, downloadDest: partPath) { [weak self] delta in
                 self?.noteBytes(delta)
             }
             let task = session.downloadTask(with: request)
@@ -784,8 +711,8 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     // MARK: - 工具
 
     /// 大文件流式 sha256：FileHandle 每次读 1MB 喂 CryptoKit（禁止 readDataToEndOfFile，
-    /// 1.4GB 主库必须分块）。fileprivate：TransferBox 的下载 sha 校验同文件复用。
-    fileprivate static func streamSHA256(path: String) throws -> String {
+    /// 1.4GB 主库必须分块）
+    private static func streamSHA256(path: String) throws -> String {
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
         defer { try? handle.close() }
         var hasher = SHA256()
@@ -857,18 +784,14 @@ private final class TransferBox {
     let onProgress: (Int64) -> Void
     /// 下载任务的目标路径（<rel>.part）
     let downloadDest: String
-    /// 期望的 sha256 响应头名（非 nil 时 finishDownload 校验响应头与落地文件一致）
-    let shaHeader: String?
     /// didFinishDownloadingTo 的处理结果，didCompleteWithError 时统一 resume
     var pendingResult: Result<Void, Error>?
 
     init(continuation: CheckedContinuation<Void, Error>,
          downloadDest: String,
-         shaHeader: String? = nil,
          onProgress: @escaping (Int64) -> Void) {
         self.continuation = continuation
         self.downloadDest = downloadDest
-        self.shaHeader = shaHeader
         self.onProgress = onProgress
     }
 
@@ -879,16 +802,6 @@ private final class TransferBox {
         guard (200..<300).contains(status) else {
             pendingResult = .failure(SyncError(message: "下载失败 HTTP \(status)"))
             return
-        }
-        // sha256 响应头校验（/sync/cache-export 的 X-Kline-Sha）：不符按失败处理 → 重试
-        if let headerName = shaHeader,
-           let http = response as? HTTPURLResponse,
-           let expected = http.value(forHTTPHeaderField: headerName)?.lowercased(), !expected.isEmpty {
-            let local = (try? LANSyncTransfer.streamSHA256(path: location.path)) ?? ""
-            guard local == expected else {
-                pendingResult = .failure(SyncError(message: "sha256 校验不符（\(headerName)）"))
-                return
-            }
         }
         let fm = FileManager.default
         // 目标目录可能不存在（对端新增的子目录），先确保父目录
