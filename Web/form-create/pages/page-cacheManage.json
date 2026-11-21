@@ -1,0 +1,114 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "props": { "title": "缓存管理", "backAria": "cacheManage.back", "data-act": "close" },
+      "emit": [{ "name": "back", "inject": ["close"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "指标缓存占用" }
+    },
+    {
+      "type": "k-combo-row-list",
+      "field": "combos",
+      "value": { "rows": [], "checked": [] },
+      "emit": [{ "name": "toggle", "inject": ["toggleCombo"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-button",
+      "name": "clearBtn",
+      "props": { "type": "danger", "block": true, "plain": true, "color": "#ee0a24", "disabled": true, "data-act": "clearSelected", "aria-label": "cacheManage.clear" },
+      "children": ["清除选中"],
+      "emit": [{ "name": "click", "inject": ["clearSelected"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "12px" }
+    },
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div class=\"fc-note\">提示：点行勾选后清除对应组合的缓存。生成可选 6 个组合：局部独立配置 + 组合1~5。</div>"]
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "生成指标缓存" }
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "组合", "titleWidth": "44px", "center": true, "border": false },
+      "children": [
+        { "type": "k-chip-group", "field": "genCombos", "props": { "multiple": true, "options": [], "aria-label": "cacheManage.genCombos" } }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "模式", "titleWidth": "44px", "center": true, "border": false },
+      "children": [
+        { "type": "k-chip-group", "field": "genMode", "props": { "options": [ { "label": "预热（最新 N 根近似）", "value": "warm" }, { "label": "全量（完整计算）", "value": "full" } ] } }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "name": "warmupNRow",
+      "props": { "title": "根数", "titleWidth": "44px", "center": true },
+      "children": [
+        { "type": "van-field", "field": "warmupN", "props": { "type": "number", "center": true, "style": { "width": "90px", "padding": "0", "background": "transparent" } } },
+        { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">根</span>"] }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "周期", "titleWidth": "44px", "center": true },
+      "children": [
+        { "type": "k-chip-group", "field": "selPeriods", "props": { "multiple": true, "options": [ { "label": "日线", "value": "日线" }, { "label": "周线", "value": "周线" }, { "label": "月线", "value": "月线" }, { "label": "季线", "value": "季线" }, { "label": "年线", "value": "年线" } ] } }
+      ]
+    },
+    {
+      "type": "van-field",
+      "field": "scopeLabel",
+      "props": { "label": "标的", "labelWidth": "44px", "isLink": true, "readonly": true, "center": true, "aria-label": "cacheManage.scope", "placeholder": "选择范围", "data-act": "openScope" },
+      "emit": [{ "name": "click-input", "inject": ["openScope"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-action-sheet",
+      "field": "scopeOpen",
+      "value": false,
+      "props": { "actions": [], "cancelText": "取消", "closeOnClickAction": true },
+      "emit": [{ "name": "select", "inject": ["scopeSelect"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-button",
+      "name": "generateBtn",
+      "props": { "type": "primary", "block": true, "round": false, "disabled": true, "loading": false, "data-act": "generate", "aria-label": "cacheManage.generate" },
+      "children": ["开始生成"],
+      "emit": [{ "name": "click", "inject": ["generate"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "12px" }
+    },
+    {
+      "type": "van-button",
+      "name": "cancelBtn",
+      "props": { "type": "danger", "block": true, "round": false, "plain": true, "color": "#ee0a24", "disabled": true, "data-act": "cancelGenerate" },
+      "children": ["取消"],
+      "emit": [{ "name": "click", "inject": ["cancelGenerate"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "8px" }
+    },
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div class=\"fc-note\">任务量 = 组合 × 周期 × 标的：预热模式单组合全市场约 6~17 分钟，全量模式约 28~56 分钟；周期/范围越多耗时越长（后台低优先级分批跑，可中途取消）。</div>"]
+    },
+    {
+      "type": "k-progress-card",
+      "field": "progress",
+      "value": { "state": "idle", "done": 0, "total": 0, "comboLabel": "" }
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

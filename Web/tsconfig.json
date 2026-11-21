@@ -6,6 +6,7 @@
     "lib": ["ES2021", "DOM", "DOM.Iterable"],
     "strict": true,
     "noEmit": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "jsx": "preserve",
     "types": ["vite/client"]

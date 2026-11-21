@@ -38,3 +38,6 @@ EngineCache/
 # Web UI（混合架构）：依赖与构建产物不入库，dist 由 CI 现场构建
 Web/node_modules/
 Web/dist/
+
+# form-create k-* 组件 lib 构建产物（npm run build:fc 生成）
+Web/form-create/lib/

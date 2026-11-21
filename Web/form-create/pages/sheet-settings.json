@@ -1,0 +1,129 @@
+{
+  "rule": [
+    {
+      "type": "k-sec-title",
+      "props": { "text": "通用" }
+    },
+    {
+      "type": "van-cell-group",
+      "props": { "inset": true },
+      "children": [
+        {
+          "type": "van-cell",
+          "name": "periodRow",
+          "props": { "title": "行情周期", "isLink": true, "clickable": true, "center": true, "data-act": "openPeriod" },
+          "emit": [{ "name": "click", "inject": ["openPeriod"] }],
+          "emitPrefix": "act"
+        },
+        {
+          "type": "van-cell",
+          "name": "viewCountRow",
+          "props": { "title": "联动视图数量", "isLink": true, "clickable": true, "center": true, "data-act": "openViewCount" },
+          "emit": [{ "name": "click", "inject": ["openViewCount"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "指标组合" }
+    },
+    {
+      "type": "van-cell-group",
+      "props": { "inset": true },
+      "children": [
+        {
+          "type": "van-cell",
+          "name": "presetRow",
+          "props": { "title": "生效组合", "isLink": true, "clickable": true, "center": true, "aria-label": "chart.preset.mode", "data-act": "openPreset" },
+          "emit": [{ "name": "click", "inject": ["openPreset"] }],
+          "emitPrefix": "act"
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "编辑五套组合", "isLink": true, "clickable": true, "center": true, "aria-label": "chart.preset.editor", "data-act": "openPresetEditor" },
+          "emit": [{ "name": "click", "inject": ["openPresetEditor"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "重置", "danger": true }
+    },
+    {
+      "type": "van-cell-group",
+      "props": { "inset": true },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "重置当前标的联动视图配置", "center": true, "titleStyle": { "color": "#ee0a24", "width": "100%", "textAlign": "center", "fontWeight": "500" }, "data-act": "resetLinked" },
+          "emit": [{ "name": "click", "inject": ["resetLinked"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "显示" }
+    },
+    {
+      "type": "van-cell-group",
+      "props": { "inset": true },
+      "children": [
+        {
+          "type": "van-cell",
+          "name": "styleRow",
+          "props": { "title": "K线类型", "isLink": true, "clickable": true, "center": true, "data-act": "openChartStyle" },
+          "emit": [{ "name": "click", "inject": ["openChartStyle"] }],
+          "emitPrefix": "act"
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "跳空缺口", "label": "在 K 线之间标出跳空缺口区域" },
+          "children": [{ "type": "van-switch", "field": "showGap", "props": { "size": "22px" } }]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "缺口回补后消失", "label": "开启时缺口被回补后整体隐藏；关闭时仅截止，保留形成区" },
+          "children": [{ "type": "van-switch", "field": "gapDisappearAfterFill", "props": { "size": "22px" } }]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "最新价线", "label": "在最新收盘价位置绘制水平虚线" },
+          "children": [{ "type": "van-switch", "field": "showLatestPriceLine", "props": { "size": "22px" } }]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "指标不挤压K线", "label": "主图价格范围仅按 K 线计算；关闭后指标线会撑大范围" },
+          "children": [{ "type": "van-switch", "field": "indicatorNotSqueezeKline", "props": { "size": "22px" } }]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "裸 K", "label": "开启后只显示 K 线、隐藏全部主图指标" },
+          "children": [{ "type": "van-switch", "field": "showBareK", "props": { "size": "22px" } }]
+        }
+      ]
+    },
+    {
+      "type": "van-action-sheet",
+      "field": "pickerOpen",
+      "value": false,
+      "props": { "actions": [], "cancelText": "取消", "closeOnClickAction": true },
+      "emit": [{ "name": "select", "inject": ["pickerSelect"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "resetConfirm",
+      "value": false,
+      "props": { "title": "重置当前标的的联动视图配置？", "showCancelButton": true, "confirmButtonText": "重置", "confirmButtonColor": "#ee0a24" },
+      "children": [
+        { "type": "html", "native": true, "children": ["<div class=\"dialog-note\">将恢复为默认 2 个视图（左日线、右周线），且各视图标的/周期会被重置。</div>"], "style": { "display": "block", "width": "100%" } }
+      ],
+      "emit": [{ "name": "confirm", "inject": ["doResetLinked"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

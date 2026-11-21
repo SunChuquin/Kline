@@ -13,7 +13,8 @@
     <StrategyDetailPanel v-else-if="activeName === 'strategyDetail'" :key="`sd-${pageSeq}`" @close="closePage" />
     <PickRunPanel v-else-if="activeName === 'pickRun'" :key="`pr-${pageSeq}`" @close="closePage" />
     <TestPagePanel v-else-if="activeName === 'testPage'" :key="`tp-${pageSeq}`" @close="closePage" />
-    <CacheManagePanel v-else-if="activeName === 'cacheManage'" :key="`cm-${pageSeq}`" @close="closePage" />
+    <!-- P1 规则化迁移：缓存管理页由 FcPageHost 按规则 JSON 渲染 -->
+    <FcPageHost v-else-if="activeName === 'cacheManage'" name="page-cacheManage" domain="page" :key="`cm-${pageSeq}`" @close="closePage" />
     <TicketPanel v-else-if="activeName === 'ticket'" :key="`tk-${pageSeq}`" @close="closePage" />
     <CondManagePanel v-else-if="activeName === 'condManage'" :key="`cm-${pageSeq}`" @close="closePage" />
     <CondEditorPanel v-else-if="activeName === 'condEditor'" :key="`ce-${pageSeq}`" @close="closePage" />
@@ -29,6 +30,7 @@
 // P2-9：宿主 WebView 常驻复用（关闭仅隐藏），pageSeq 驱动面板重挂载拉最新快照。
 import { onMounted, ref } from 'vue'
 import { klineBus } from '../bridge/klineBus'
+import FcPageHost from '../fc/FcPageHost.vue'
 import LanSyncPanel from '../components/page/LanSyncPanel.vue'
 import LocalUpdatePanel from '../components/page/LocalUpdatePanel.vue'
 import EngineLabPanel from '../components/page/EngineLabPanel.vue'
@@ -40,7 +42,6 @@ import PickerEditPanel from '../components/page/PickerEditPanel.vue'
 import StrategyDetailPanel from '../components/page/StrategyDetailPanel.vue'
 import PickRunPanel from '../components/page/PickRunPanel.vue'
 import TestPagePanel from '../components/page/TestPagePanel.vue'
-import CacheManagePanel from '../components/page/CacheManagePanel.vue'
 import TicketPanel from '../components/page/TicketPanel.vue'
 import CondManagePanel from '../components/page/CondManagePanel.vue'
 import CondEditorPanel from '../components/page/CondEditorPanel.vue'
@@ -61,6 +62,11 @@ onMounted(async () => {
     activeName.value = String(ev.payload?.['name'] ?? '')
     pageSeq.value += 1
   })
+  // dev/PC 调试循环：非 native 通道时支持 #/page?open=name 直开面板，便于规则页迭代验证
+  if (klineBus.transport !== 'native') {
+    const open = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('open')
+    if (open) activeName.value = open
+  }
   try {
     await klineBus.request('page', 'ready')
   } catch (e) {

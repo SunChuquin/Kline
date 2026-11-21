@@ -1,120 +1,18 @@
 <template>
   <div class="sheet-page">
-    <!-- K线设置面板（底部 75% 高，对齐原生 settingsOverlay） -->
+    <!-- K线设置面板（底部 75% 高，对齐原生 settingsOverlay）：
+         P1 规则化迁移 — 内容区由 FcPageHost 按规则 JSON 渲染（含 picker/重置确认弹层） -->
     <div v-if="activeName === 'settings'" class="panel-mask" @click="close">
       <div class="panel" @click.stop>
         <div class="panel-header">
           <span class="panel-title">K线设置</span>
           <button class="panel-done" @click="close">完成</button>
         </div>
-        <div class="panel-body" v-if="settings">
-          <div class="sec-title">通用</div>
-          <div class="grouped">
-            <button class="sel-row" @click="pickerKind = 'period'">
-              <span>行情周期</span>
-              <span class="sel-value">{{ settings.period }} ›</span>
-            </button>
-            <div class="g-divider"></div>
-            <button class="sel-row" @click="pickerKind = 'viewCount'">
-              <span>联动视图数量</span>
-              <span class="sel-value">{{ viewCountLabel }} ›</span>
-            </button>
-          </div>
-
-          <div class="sec-title">指标组合</div>
-          <div class="grouped">
-            <button class="sel-row" @click="pickerKind = 'preset'" aria-label="chart.preset.mode">
-              <span>生效组合</span>
-              <span class="sel-value">{{ presetLabel }} ›</span>
-            </button>
-            <div class="g-divider"></div>
-            <button
-              class="sel-row"
-              aria-label="chart.preset.editor"
-              @click="openPresetEditor"
-            >
-              <span>编辑五套组合</span>
-              <span class="sel-value">›</span>
-            </button>
-          </div>
-
-          <div class="sec-title danger">重置</div>
-          <div class="grouped">
-            <button class="sel-row destructive" @click="resetConfirm = true">重置当前标的联动视图配置</button>
-          </div>
-
-          <div class="sec-title">显示</div>
-          <div class="grouped">
-            <button class="sel-row" @click="pickerKind = 'chartStyle'">
-              <span>K线类型</span>
-              <span class="sel-value">{{ settings.chartStyle }} ›</span>
-            </button>
-            <div class="g-divider"></div>
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <div class="toggle-title">跳空缺口</div>
-                <div class="toggle-sub">在 K 线之间标出跳空缺口区域</div>
-              </div>
-              <van-switch :model-value="settings.showGap" size="22px" @update:model-value="(v: boolean) => setSetting('showGap', v)" />
-            </label>
-            <div class="g-divider"></div>
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <div class="toggle-title">缺口回补后消失</div>
-                <div class="toggle-sub">开启时缺口被回补后整体隐藏；关闭时仅截止，保留形成区</div>
-              </div>
-              <van-switch :model-value="settings.gapDisappearAfterFill" size="22px" @update:model-value="(v: boolean) => setSetting('gapDisappearAfterFill', v)" />
-            </label>
-            <div class="g-divider"></div>
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <div class="toggle-title">最新价线</div>
-                <div class="toggle-sub">在最新收盘价位置绘制水平虚线</div>
-              </div>
-              <van-switch :model-value="settings.showLatestPriceLine" size="22px" @update:model-value="(v: boolean) => setSetting('showLatestPriceLine', v)" />
-            </label>
-            <div class="g-divider"></div>
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <div class="toggle-title">指标不挤压K线</div>
-                <div class="toggle-sub">主图价格范围仅按 K 线计算；关闭后指标线会撑大范围</div>
-              </div>
-              <van-switch :model-value="settings.indicatorNotSqueezeKline" size="22px" @update:model-value="(v: boolean) => setSetting('indicatorNotSqueezeKline', v)" />
-            </label>
-            <div class="g-divider"></div>
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <div class="toggle-title">裸 K</div>
-                <div class="toggle-sub">开启后只显示 K 线、隐藏全部主图指标</div>
-              </div>
-              <van-switch :model-value="settings.showBareK" size="22px" @update:model-value="(v: boolean) => setSetting('showBareK', v)" />
-            </label>
-          </div>
-          <div style="height: 16px"></div>
+        <div class="panel-body">
+          <FcPageHost name="sheet-settings" domain="sheet" @close="close" />
         </div>
       </div>
     </div>
-
-    <!-- 选项选择（周期 / K线类型 / 视图数量，底部弹出带 checkmark，对齐原生 confirmationDialog） -->
-    <van-action-sheet
-      v-model:show="pickerOpen"
-      :actions="pickerActions"
-      cancel-text="取消"
-      close-on-click-action
-      @select="onPickerSelect"
-    />
-
-    <!-- 重置确认 -->
-    <van-dialog
-      v-model:show="resetConfirm"
-      title="重置当前标的的联动视图配置？"
-      show-cancel-button
-      confirm-button-text="重置"
-      confirm-button-color="#ee0a24"
-      @confirm="resetLinked"
-    >
-      <div class="dialog-note">将恢复为默认 2 个视图（左日线、右周线），且各视图标的/周期会被重置。</div>
-    </van-dialog>
 
     <!-- 指标面板（主图 / 副图两形态，对齐原生 mainSheetContent/subSheetContent） -->
     <div v-if="activeName === 'mainIndicators' || activeName === 'subIndicators'" class="panel-mask" @click="close">
@@ -563,10 +461,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { klineBus } from '../bridge/klineBus'
 import { showToast } from 'vant'
 import PresetEditorPanel from '../components/sheet/PresetEditorPanel.vue'
+import FcPageHost from '../fc/FcPageHost.vue'
 import type {
-  ChartOption,
   ChartSearchResult,
-  ChartSettingsSnapshot,
   CustomIndicatorSnap,
   IndicatorDefSnap,
   IndicatorsSnapshot,
@@ -578,7 +475,7 @@ import type {
 } from '../types/protocol'
 
 const activeName = ref<string | null>(null)
-const settings = ref<ChartSettingsSnapshot | null>(null)
+const pageSeq = ref(0)
 const indicators = ref<IndicatorsSnapshot | null>(null)
 const activeSlotKey = ref<string | null>(null)
 
@@ -627,31 +524,7 @@ function profitClass(v: number): string {
   return v < 0 ? 'down' : 'up'
 }
 
-const pickerKind = ref<'period' | 'chartStyle' | 'viewCount' | 'preset' | null>(null)
-const pickerOpen = computed({
-  get: () => pickerKind.value !== null,
-  set: (v: boolean) => { if (!v) pickerKind.value = null },
-})
-const resetConfirm = ref(false)
 const resetBuiltinConfirm = ref(false)
-
-const viewCountLabel = computed(() => {
-  const n = settings.value?.linkedViewCount ?? 2
-  return `${n} 个视图`
-})
-
-// ===== 指标组合（P2 指标组合体系） =====
-/** 生效组合展示名（下拉选项里按当前 mode 反查 label） */
-const presetLabel = computed(() => {
-  const s = settings.value
-  if (!s) return ''
-  return s.presetOptions.find((o) => o.value === s.activeMode)?.label ?? s.activeMode
-})
-
-/** 组合编辑页（presetEditor，sheet 域面板切换由原生 activeSheet 驱动） */
-function openPresetEditor(): void {
-  void klineBus.request('preset', 'openEditor', {}).catch((e) => console.error('preset.openEditor 失败', e))
-}
 
 // ===== 指标面板（P2-5b） =====
 const indicatorsTitle = computed(() =>
@@ -719,45 +592,6 @@ async function pullIndicators(): Promise<void> {
     }
   } catch (e) {
     console.error('indicators.snapshot 失败', e)
-  }
-}
-
-/** 当前选择器的选项（value 统一字符串化传给 ActionSheet） */
-const pickerActions = computed(() => {
-  const s = settings.value
-  if (!s || !pickerKind.value) return []
-  const toActions = (opts: ChartOption[]) =>
-    opts.map((o) => ({ name: o.label, value: String(o.value) }))
-  if (pickerKind.value === 'period') return toActions(s.periodOptions)
-  if (pickerKind.value === 'chartStyle') return toActions(s.styleOptions)
-  if (pickerKind.value === 'preset') return toActions(s.presetOptions)
-  return toActions(s.viewCountOptions)
-})
-
-function onPickerSelect(action: { name: string; value: string }): void {
-  const s = settings.value
-  if (!s) return
-  switch (pickerKind.value) {
-    case 'period':
-      s.period = action.name
-      void setSetting('period', action.name)
-      break
-    case 'chartStyle':
-      s.chartStyle = action.name
-      void setSetting('chartStyle', action.name)
-      break
-    case 'viewCount': {
-      const n = Number(action.value)
-      s.linkedViewCount = n
-      void setSetting('linkedViewCount', n)
-      break
-    }
-    case 'preset': {
-      // 切换生效指标组合（原生 setActiveMode → 图表即时重算）
-      s.activeMode = action.value
-      void setSetting('activeMode', action.value)
-      break
-    }
   }
 }
 
@@ -1164,28 +998,6 @@ function handleTrainingChanged(payload: Record<string, unknown> | undefined): vo
 async function handleSheetOpen(payload: Record<string, unknown> | undefined): Promise<void> {
   const name = typeof payload?.name === 'string' ? payload.name : null
   activeName.value = name
-  if (name === 'settings') {
-    try {
-      const s = ((await klineBus.request('chart', 'settings.snapshot')) ?? {}) as Record<string, unknown>
-      settings.value = {
-        period: String(s.period ?? '日线'),
-        periodOptions: (s.periodOptions ?? []) as ChartOption[],
-        chartStyle: String(s.chartStyle ?? ''),
-        styleOptions: (s.styleOptions ?? []) as ChartOption[],
-        linkedViewCount: typeof s.linkedViewCount === 'number' ? s.linkedViewCount : 2,
-        viewCountOptions: (s.viewCountOptions ?? []) as ChartOption[],
-        showGap: s.showGap === true,
-        gapDisappearAfterFill: s.gapDisappearAfterFill === true,
-        showLatestPriceLine: s.showLatestPriceLine === true,
-        indicatorNotSqueezeKline: s.indicatorNotSqueezeKline === true,
-        showBareK: s.showBareK === true,
-        activeMode: String(s.activeMode ?? 'local'),
-        presetOptions: (s.presetOptions ?? []) as ChartOption[],
-      }
-    } catch (e) {
-      console.error('settings.snapshot 失败', e)
-    }
-  }
   if (name === 'search') {
     keyword.value = ''
     results.value = []
@@ -1214,23 +1026,6 @@ async function handleSheetOpen(payload: Record<string, unknown> | undefined): Pr
 function close(): void {
   klineBus.request('sheet', 'close', {}).catch((e) => console.error(e))
   activeName.value = null
-}
-
-/** 设置写回（幂等目标态；面板保持打开，图表即时生效——对齐原生交互） */
-async function setSetting(key: string, value: string | number | boolean): Promise<void> {
-  try {
-    await klineBus.request('chart', 'settings.set', { [key]: value })
-  } catch (e) {
-    console.error('settings.set 失败', e)
-  }
-}
-
-async function resetLinked(): Promise<void> {
-  try {
-    await klineBus.request('chart', 'settings.resetLinked', {})
-  } catch (e) {
-    console.error('resetLinked 失败', e)
-  }
 }
 
 // ===== 搜索（原生同款 300ms 防抖） =====
@@ -1272,8 +1067,11 @@ onMounted(async () => {
   await klineBus.detect()
   klineBus.on('sheet.open', (ev) => void handleSheetOpen(ev.payload))
   klineBus.on('training.changed', (ev) => handleTrainingChanged(ev.payload))
-  // 指标组合变化（编辑页提交改名/模式切换）：刷新设置面板下拉选项与生效态
-  klineBus.on('preset.changed', (ev) => void refreshPresetState(ev.payload))
+  // dev/PC 调试循环：非 native 通道时支持 #/sheet?open=name 直开弹层，便于规则页迭代验证
+  if (klineBus.transport !== 'native') {
+    const open = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('open')
+    if (open) await handleSheetOpen({ name: open })
+  }
   // 浮层就绪拉取：sheet.open 事件可能早于本 WebView 创建/加载完成发出（首次打开时序）
   // → 事件丢失面板永不渲染；就绪后主动向宿主拉取当前待展示弹层
   try {
@@ -1282,27 +1080,6 @@ onMounted(async () => {
     console.error('sheet.ready 失败', e)
   }
 })
-
-/** preset.changed：编辑提交（presets）重拉 settings 快照；模式切换（mode）本地同步即可 */
-async function refreshPresetState(payload: Record<string, unknown> | undefined): Promise<void> {
-  const reason = String(payload?.['reason'] ?? '')
-  if (reason === 'mode') {
-    const mode = String(payload?.['mode'] ?? '')
-    if (settings.value) settings.value.activeMode = mode
-    return
-  }
-  if (reason === 'presets') {
-    try {
-      const s = ((await klineBus.request('chart', 'settings.snapshot')) ?? {}) as Record<string, unknown>
-      if (settings.value) {
-        settings.value.activeMode = String(s.activeMode ?? 'local')
-        settings.value.presetOptions = (s.presetOptions ?? []) as ChartOption[]
-      }
-    } catch (e) {
-      console.error('preset.changed 刷新失败', e)
-    }
-  }
-}
 </script>
 
 <style scoped>
@@ -1603,80 +1380,12 @@ async function refreshPresetState(payload: Record<string, unknown> | undefined):
   color: #ee0a24;
 }
 
-.grouped {
-  background: var(--k-bg-secondary);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.g-divider {
-  height: 0.5px;
-  background: var(--k-border);
-  margin-left: 14px;
-}
-
-.sel-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border: none;
-  background: none;
-  color: var(--k-text);
-  font-size: 15px;
-  min-height: 46px;
-  padding: 0 14px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sel-row.destructive {
-  color: #ee0a24;
-  justify-content: center;
-  font-weight: 500;
-}
-
-.sel-row.disabled {
-  color: var(--k-text-tertiary);
-  cursor: default;
-}
-
-.sel-row.disabled .sel-value {
-  color: var(--k-text-tertiary);
-}
-
 /* 指标组合编辑页：全屏不透明容器（盖住设置面板，返回即关整个弹层链） */
 .editor-full {
   position: fixed;
   inset: 0;
   z-index: 10;
   background: var(--k-bg);
-}
-
-.sel-value {
-  font-size: 14px;
-  color: var(--k-text-secondary);
-}
-
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 52px;
-  padding: 8px 14px;
-  cursor: pointer;
-}
-
-.toggle-title {
-  font-size: 15px;
-  color: var(--k-text);
-}
-
-.toggle-sub {
-  font-size: 11.5px;
-  color: var(--k-text-secondary);
-  margin-top: 2px;
 }
 
 .dialog-note {

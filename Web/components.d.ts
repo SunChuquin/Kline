@@ -12,7 +12,6 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     BacktestPanel: typeof import('./src/components/page/BacktestPanel.vue')['default']
-    CacheManagePanel: typeof import('./src/components/page/CacheManagePanel.vue')['default']
     CondEditorPanel: typeof import('./src/components/page/CondEditorPanel.vue')['default']
     CondManagePanel: typeof import('./src/components/page/CondManagePanel.vue')['default']
     EngineLabPanel: typeof import('./src/components/page/EngineLabPanel.vue')['default']

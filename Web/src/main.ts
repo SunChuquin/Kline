@@ -3,6 +3,7 @@ import App from './App.vue'
 import router from './router'
 import { klineBus } from './bridge/klineBus'
 import { initWebTheme } from './theme'
+import { installFormCreate } from './fc/formCreate'
 import './styles/theme.css'
 // Vant 函数式 API（Toast/Dialog）样式需手动引入（组件样式由 VantResolver 按需注入）
 import 'vant/es/toast/style'
@@ -27,7 +28,7 @@ if (typeof window.addEventListener === 'function') {
   })
 }
 
-createApp(App).use(router).mount('#app')
+createApp(App).use(router).use(installFormCreate).mount('#app')
 
 // Tab 切换事件（协议 nav.tab）：原生底栏切换时由此切路由（P2-1 接入发送方）
 klineBus.on('nav.tab', (e) => {
