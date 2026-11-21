@@ -119,11 +119,18 @@ final class ChartPresetWarmupRunner: ObservableObject {
             failLog("bars 为空", metaId: metaId)
             return false
         }
-        // 生成只处理「全局组合」的内容快照：临时按组合配置组装请求
-        // （makeFullRequest 读 ChartConfigStore 的 resolver——组合模式下 resolver 已返回组合内容；
-        //  但生成要为**每个**组合生成，不能依赖当前 activeMode——这里直接按 preset 构建请求）
-        guard let req = makePresetRequest(data: data, period: period, comboKey: comboKey) else {
-            failLog("makePresetRequest nil（组合缺槽/主图集为空）", metaId: metaId)
+        // 组装段（override 上下文：resolver/指纹按该组合解析）——与运行时 activeMode=comboKey
+        // 的指纹口径完全一致，保证「生成后切到该组合」注水命中
+        let (req, fingerprint, sliceReq) = ChartPresetStore.shared.withResolverOverride(comboKey) {
+            let req = KlineChartView.makeFullRequest(data: data, period: period)
+            let fp = KlineChartView.currentConfigFingerprint(period: period)
+            // 预热：末 (warmupN + buffer) 根切片（buffer 保证 MA60 等长窗口指标边界收敛）
+            let slice = mode == "warm" ? Array(data.suffix(warmupN + ChartPresetWarmupRunner.warmupBuffer)) : []
+            let sliceReq = slice.isEmpty ? nil : KlineChartView.makeFullRequest(data: slice, period: period)
+            return (req, fp, sliceReq)
+        }
+        guard let req else {
+            failLog("makeFullRequest nil（主图集为空/裸K）", metaId: metaId)
             return false
         }
         // 缠论通道指标不做预生成（右缘截断语义与离线批量冲突，沿用 prefetchOtherPeriod 先例）
@@ -131,109 +138,44 @@ final class ChartPresetWarmupRunner: ObservableObject {
             failLog("缠论通道指标排除", metaId: metaId)
             return false
         }
-
-        let fingerprint = "gen:\(comboKey)|\(Self.fingerprintCore(period: period))"
         let lastBarDate = data.last?.date ?? 0
+
+        // 求值（后台；不持有 override）
+        let envelopeData: Data?
         if mode == "warm" {
-            // 预热：末 (warmupN + buffer) 根切片求值
-            let slice = Array(data.suffix(warmupN + ChartPresetWarmupRunner.warmupBuffer))
-            guard let sliceReq = makePresetRequest(data: slice, period: period, comboKey: comboKey) else {
-                failLog("切片 makePresetRequest nil", metaId: metaId)
+            guard let sliceReq else {
+                failLog("切片 makeFullRequest nil", metaId: metaId)
                 return false
             }
             let r = await Task.detached(priority: .utility) {
                 KlineChartView.evaluatePrefetch(sliceReq)
             }.value
-            guard let env = ChartWarmupComposer.warmEnvelope(req: sliceReq, result: r,
-                                                             period: period, total: data.count,
-                                                             keepN: warmupN) else {
-                failLog("warmEnvelope nil（求值空/长度不齐 sliceLen=\(slice.count)）", metaId: metaId)
-                return false
+            // 组装段（override 恢复：副图选择/颜色按组合解析）
+            envelopeData = ChartPresetStore.shared.withResolverOverride(comboKey) {
+                guard let env = ChartWarmupComposer.warmEnvelope(req: sliceReq, result: r,
+                                                                 period: period, total: data.count,
+                                                                 keepN: warmupN) else { return nil as Data? }
+                return try? JSONEncoder.indicatorCache.encode(env)
             }
-            let payload = try? JSONEncoder.indicatorCache.encode(env)
-            guard let payload else {
-                failLog("encode 失败", metaId: metaId)
-                return false
-            }
-            IndicatorCacheDB.shared.save(comboKey: comboKey, metaId: metaId, period: period,
-                                         fingerprint: fingerprint, genMode: "warm",
-                                         lastBarDate: lastBarDate, sourceBarCount: data.count,
-                                         payload: payload)
-            return true
         } else {
-            // 全量：整段求值（超时随根数放宽）
-            let result = await Task.detached(priority: .utility) {
+            let r = await Task.detached(priority: .utility) {
                 KlineChartView.evaluatePrefetch(req)
             }.value
-            guard let env = ChartWarmupComposer.fullEnvelope(req: req, result: result,
-                                                             period: period,
-                                                             barCount: data.count) else {
-                failLog("fullEnvelope nil（求值空/长度不齐 n=\(data.count)）", metaId: metaId)
-                return false
-            }
-            let payload = try? JSONEncoder.indicatorCache.encode(env)
-            guard let payload else {
-                failLog("encode 失败", metaId: metaId)
-                return false
-            }
-            IndicatorCacheDB.shared.save(comboKey: comboKey, metaId: metaId, period: period,
-                                         fingerprint: fingerprint, genMode: "full",
-                                         lastBarDate: lastBarDate, sourceBarCount: data.count,
-                                         payload: payload)
-            return true
-        }
-    }
-
-    /// 按指定组合构建求值请求（不依赖当前 activeMode：直接读 preset 的按周期配置组装公式集）
-    private static func makePresetRequest(data: [KlineItem], period: KlinePeriod, comboKey: String) -> PrefetchCalcRequest? {
-        guard !data.isEmpty, let preset = ChartPresetStore.shared.preset(id: comboKey) else { return nil }
-        let config = ChartConfigStore.shared
-        let sys = SystemIndicatorStore.shared
-        let customStore = CustomIndicatorStore.shared
-        let volumes = data.map(\.volume)
-        let turnovers = data.map(\.turnover)
-        // 主图：preset 启用集合 ∩ 该周期可用指标
-        let enabled = preset.mainIndicators(for: period)
-        var mainFormulas: [String] = []
-        var mainIDs: [String] = []
-        for def in sys.mainIndicatorDefs(period: period) where enabled.contains(def.id) {
-            mainFormulas.append(sys.formula(for: def.id, values: [:], period: period) ?? "")
-            mainIDs.append(def.id)
-        }
-        if let customID = preset.activeCustomID(for: period),
-           let custom = customStore.indicators.first(where: { $0.id == customID }) {
-            mainFormulas.append(custom.formula)
-            mainIDs.append(MainIndicatorCache.customKey)
-        }
-        // 副图：preset 三槽选择
-        var subs: [SubPrefetchRequest] = []
-        for sel in preset.subSelections(for: period) {
-            let customInd = sel.customID.flatMap { id in customStore.indicators.first { $0.id == id } }
-            if let customInd {
-                subs.append(SubPrefetchRequest(kind: sel.kind, customFormula: customInd.formula,
-                                               formula: nil, volPeriods: []))
-            } else if sel.kind == "VOL" || sel.kind == "AMO" {
-                subs.append(SubPrefetchRequest(kind: sel.kind, customFormula: nil, formula: nil,
-                                               volPeriods: volMAFixedPeriods))
-            } else {
-                subs.append(SubPrefetchRequest(kind: sel.kind, customFormula: nil,
-                                               formula: sys.formula(for: sel.kind, values: [:], period: period),
-                                               volPeriods: []))
+            envelopeData = ChartPresetStore.shared.withResolverOverride(comboKey) {
+                guard let env = ChartWarmupComposer.fullEnvelope(req: req, result: r,
+                                                                 period: period,
+                                                                 barCount: data.count) else { return nil as Data? }
+                return try? JSONEncoder.indicatorCache.encode(env)
             }
         }
-        return PrefetchCalcRequest(calcStart: 0, calcEnd: data.count - 1,
-                                   data: data, volumes: volumes, turnovers: turnovers,
-                                   mainFormulas: mainFormulas, mainIDs: mainIDs, subs: subs)
-    }
-
-    /// 指纹核心（组合内容指纹：与运行时指纹同口径，保证生成行与运行时校验一致）
-    private static func fingerprintCore(period: KlinePeriod) -> String {
-        // 复用运行时指纹算法（resolver 已含组合内容），剥掉 mode 前缀部分
-        let fp = KlineChartView.currentConfigFingerprint(period: period)
-        // 运行时指纹首段为 "mode=xxx"——生成行按组合 key 分行，fingerprint 用其内容部分
-        if let range = fp.range(of: "\u{1F}") {
-            return String(fp[range.upperBound...])
+        guard let payload = envelopeData else {
+            failLog("envelope nil/encode 失败（求值空/长度不齐 n=\(data.count)）", metaId: metaId)
+            return false
         }
-        return fp
+        IndicatorCacheDB.shared.save(comboKey: comboKey, metaId: metaId, period: period,
+                                     fingerprint: fingerprint, genMode: mode,
+                                     lastBarDate: lastBarDate, sourceBarCount: data.count,
+                                     payload: payload)
+        return true
     }
 }

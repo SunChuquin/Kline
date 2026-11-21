@@ -27,6 +27,20 @@ final class ChartPresetStore: ObservableObject {
     /// 当前生效模式："local"（局部独立配置）或 "p1"…"p5"
     @Published private(set) var activeMode: String
 
+    /// 生成引擎临时覆盖：非 nil 时 resolver/指纹按该组合解析（仅主线程组装段置位，
+    /// await 挂起期间已退出——UI 渲染不会读到覆盖值）
+    private(set) var resolverOverride: String? = nil
+
+    /// resolver 生效模式（override 优先）
+    var effectiveMode: String { resolverOverride ?? activeMode }
+
+    /// 在覆盖上下文中执行（同步闭包；resolver 临时按指定组合解析）
+    func withResolverOverride<T>(_ mode: String, _ body: () -> T) -> T {
+        resolverOverride = mode
+        defer { resolverOverride = nil }
+        return body()
+    }
+
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.presetsKey),
            let decoded = try? JSONDecoder().decode([ChartPreset].self, from: data),
@@ -48,6 +62,13 @@ final class ChartPresetStore: ObservableObject {
     var activePreset: ChartPreset? {
         guard !isLocalMode else { return nil }
         return presets.first { $0.id == activeMode }
+    }
+
+    /// resolver 生效组合（override 优先；ChartConfigStore.activePreset 走这里）
+    var effectivePreset: ChartPreset? {
+        let mode = effectiveMode
+        guard mode != Self.localMode else { return nil }
+        return presets.first { $0.id == mode }
     }
 
     func preset(id: String) -> ChartPreset? {

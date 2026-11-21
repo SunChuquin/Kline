@@ -18,8 +18,9 @@ import Combine
 final class ChartConfigStore: ObservableObject {
     static let shared = ChartConfigStore()
 
-    /// 当前生效组合（nil = 局部独立配置）：resolver 与写分流共用
-    private var activePreset: ChartPreset? { ChartPresetStore.shared.activePreset }
+    /// 当前生效组合（nil = 局部独立配置）：resolver 与写分流共用。
+    /// 生成引擎临时覆盖（resolverOverride）期间按覆盖组合解析。
+    private var activePreset: ChartPreset? { ChartPresetStore.shared.effectivePreset }
 
     /// 组合模式/内容变化计数：KlineChartView 监听触发 force 重算（切组合、编辑生效中组合）
     @Published private(set) var configModeRevision = 0
