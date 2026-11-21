@@ -148,7 +148,7 @@
     { "id": "req_cache_stats", "module": "cacheManage", "action": "stats", "payload": {} },
     { "id": "req_cache_clear", "module": "cacheManage", "action": "clear", "payload": { "ids": ["p1", "p2"] } },
     { "id": "req_cache_generate", "module": "cacheManage", "action": "generate",
-      "payload": { "combos": ["p1"], "mode": "warm", "periods": ["日线"], "warmupN": 80 } },
+      "payload": { "combos": ["p1"], "mode": "warm", "periods": ["日线"], "warmupN": 80, "onlyStale": true } },
     { "id": "req_cache_cancel", "module": "cacheManage", "action": "cancelGenerate", "payload": {} },
     { "id": "req_sd_snapshot", "module": "strategyDetail", "action": "snapshot", "payload": {} },
     { "id": "req_sd_edit", "module": "strategyDetail", "action": "edit", "payload": {} },

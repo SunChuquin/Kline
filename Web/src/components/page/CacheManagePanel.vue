@@ -164,10 +164,16 @@ async function clearSelected(): Promise<void> {
   }
 }
 
-/** 刷新过期 = 按选中组合重新生成（预热模式覆盖过期行） */
+/** 刷新过期：只重新生成选中组合下「过期行」的标的（预热覆盖，口径与徽标一致） */
 function clearStaleHint(): void {
-  genSelected.value = new Set(selected.value)
-  genMode.value = 'warm'
+  if (selected.value.size === 0) return
+  void klineBus.request('cacheManage', 'generate', {
+    combos: [...selected.value],
+    mode: 'warm',
+    periods: ['日线'],
+    warmupN: warmupNInput.value,
+    onlyStale: true,
+  }).catch((e) => console.error('cacheManage.generate(onlyStale) 失败', e))
 }
 
 function generate(): void {

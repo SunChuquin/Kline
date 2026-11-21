@@ -40,8 +40,10 @@ final class ChartPresetWarmupRunner: ObservableObject {
     // MARK: - 入口
 
     /// 启动生成：combos = 组合 id 列表（"p1".."p5"，不含 local——局部配置的缓存由
-    /// 图表运行时自然产出）；mode = "full" | "warm"；periods 默认仅日线。
-    func start(combos: [String], mode: String, periods: [KlinePeriod]) {
+    /// 图表运行时自然产出）；mode = "full" | "warm"；periods 默认仅日线；
+    /// onlyStale = true 时只处理该组合下「过期行」的标的（口径与管理页徽标一致：
+    /// 缓存末根日期 ≠ meta 表最新日期，补缺口/日更后未重新生成）。
+    func start(combos: [String], mode: String, periods: [KlinePeriod], onlyStale: Bool = false) {
         cancelFlag = false
         let presets = ChartPresetStore.shared
         let targets: [(comboKey: String, label: String)] = combos.map { id in
@@ -51,14 +53,29 @@ final class ChartPresetWarmupRunner: ObservableObject {
             phase = .finished
             return
         }
-        let metas = DatabaseManager.shared.metaList
+        var metas = DatabaseManager.shared.metaList
+        if onlyStale {
+            let periodNames = Set(periods.map(\.rawValue))
+            let targetKeys = Set(targets.map(\.comboKey))
+            let metaByID = Dictionary(uniqueKeysWithValues: metas.map { ($0.id, $0) })
+            var staleIDs = Set<Int>()
+            for row in IndicatorCacheDB.shared.rowsDetail()
+            where targetKeys.contains(row.comboKey) && periodNames.contains(row.period) {
+                if let meta = metaByID[row.metaID], let lastDate = meta.lastDate,
+                   row.lastBarDate != lastDate {
+                    staleIDs.insert(row.metaID)
+                }
+            }
+            metas = metas.filter { staleIDs.contains($0.id) }
+        }
         guard !metas.isEmpty else {
             phase = .finished
+            DebugLogger.shared.log("[Warmup] 无\(onlyStale ? "过期" : "")标的需要生成")
             return
         }
         let total = targets.count * periods.count * metas.count
         phase = .running(done: 0, total: total, comboLabel: targets[0].label)
-        DebugLogger.shared.log("[Warmup] 生成启动 combos=\(combos) mode=\(mode) periods=\(periods.map(\.rawValue)) 标的=\(metas.count) total=\(total)")
+        DebugLogger.shared.log("[Warmup] 生成启动 combos=\(combos) mode=\(mode) onlyStale=\(onlyStale) periods=\(periods.map(\.rawValue)) 标的=\(metas.count) total=\(total)")
 
         Task { @MainActor in
             var done = 0

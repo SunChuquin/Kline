@@ -133,8 +133,9 @@ final class CacheManageBridge: ObservableObject {
 
     // MARK: 生成
 
-    /// cacheManage.generate {combos, mode, periods?, warmupN?}：启动生成引擎。
+    /// cacheManage.generate {combos, mode, periods?, warmupN?, onlyStale?}：启动生成引擎。
     /// combos = ["p1".."p5"] 子集；mode = "full" | "warm"；periods 缺省 ["日线"]；
+    /// onlyStale = true 时只重跑该组合下过期标的（管理页「刷新过期」便捷动作）；
     /// 同一时刻只跑一个任务（单例 Runner，重跑先取消旧轮）。
     private static func generate(_ request: WebBridgeRequest) -> [String: Any] {
         let combos = (request.payload["combos"] as? [String]) ?? []
@@ -156,7 +157,9 @@ final class CacheManageBridge: ObservableObject {
         if let n = (request.payload["warmupN"] as? NSNumber)?.intValue, n >= 20, n <= 1000 {
             ChartPresetWarmupRunner.shared.warmupN = n
         }
-        ChartPresetWarmupRunner.shared.start(combos: validCombos, mode: mode, periods: periods)
+        let onlyStale = (request.payload["onlyStale"] as? Bool) ?? false
+        ChartPresetWarmupRunner.shared.start(combos: validCombos, mode: mode, periods: periods,
+                                             onlyStale: onlyStale)
         return WebBridgeResponse.ok(request.id, data: ["queued": true])
     }
 }
