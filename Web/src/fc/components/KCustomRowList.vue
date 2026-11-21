@@ -1,13 +1,20 @@
 <template>
   <div class="custom-rows">
     <div v-for="c in modelValue.rows" :key="c.id" class="custom-row">
-      <button class="custom-main" @click="emit('activate', c)">
+      <button v-if="modelValue.showActivate !== false" class="custom-main" @click="emit('activate', c)">
         <span class="custom-check" :class="{ on: c.active }">{{ c.active ? '◉' : '○' }}</span>
         <span class="custom-color" :style="{ background: '#' + c.colorHex }"></span>
         <span class="custom-name">{{ c.name }}</span>
         <span v-if="c.active && modelValue.showCurrent" class="custom-current">当前</span>
+        <span v-if="c.note" class="custom-note">{{ c.note }}</span>
       </button>
-      <button class="custom-edit" :aria-label="`custom.edit.${c.name}`" @click="emit('edit', c)">✎</button>
+      <span v-else class="custom-main static">
+        <span class="custom-color" :style="{ background: '#' + c.colorHex }"></span>
+        <span class="custom-name">{{ c.name }}</span>
+        <span v-if="c.note" class="custom-note">{{ c.note }}</span>
+      </span>
+      <button v-if="modelValue.showEdit" class="custom-edit" :aria-label="modelValue.editAria ? `${modelValue.editAria}.${c.name}` : `custom.edit.${c.name}`" @click="emit('edit', c)">✎</button>
+      <button v-if="modelValue.showDelete" class="inline-btn cancel" :aria-label="modelValue.deleteAria ? `${modelValue.deleteAria}.${c.name}` : `custom.delete.${c.name}`" @click="emit('delete', c)">删除</button>
     </div>
     <div v-if="modelValue.rows.length === 0" class="block-empty">{{ modelValue.emptyText ?? '暂无数据' }}</div>
   </div>
@@ -25,14 +32,15 @@ export interface CustomRow {
 }
 
 withDefaults(defineProps<{
-  modelValue?: { rows?: CustomRow[]; showCurrent?: boolean; emptyText?: string }
+  modelValue?: { rows?: CustomRow[]; showCurrent?: boolean; showActivate?: boolean; showEdit?: boolean; showDelete?: boolean; editAria?: string; deleteAria?: string; emptyText?: string }
 }>(), {
-  modelValue: () => ({ rows: [] }),
+  modelValue: () => ({ rows: [], showActivate: true, showEdit: true, showDelete: false }),
 })
 
 const emit = defineEmits<{
   (e: 'activate', row: CustomRow): void
   (e: 'edit', row: CustomRow): void
+  (e: 'delete', row: CustomRow): void
 }>()
 </script>
 
@@ -87,6 +95,17 @@ const emit = defineEmits<{
   color: #1989fa;
 }
 
+.custom-main.static {
+  cursor: default;
+}
+
+.custom-note {
+  font-size: 11px;
+  color: var(--k-text-tertiary, #c7c7cb);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .custom-edit {
   width: 32px;
   height: 32px;
@@ -95,6 +114,23 @@ const emit = defineEmits<{
   color: var(--k-text-tertiary, #c7c7cb);
   font-size: 13px;
   cursor: pointer;
+}
+
+.inline-btn {
+  width: 44px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--k-divider, #c6c6c8);
+  border-radius: 6px;
+  background: none;
+  color: #1989fa;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+
+.inline-btn.cancel {
+  color: #ee0a24;
 }
 
 .block-empty {

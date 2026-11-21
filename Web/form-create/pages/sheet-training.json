@@ -1,0 +1,128 @@
+{
+  "rule": [
+    { "type": "k-sec-title", "props": { "text": "分类" } },
+    {
+      "type": "k-chip-group",
+      "field": "trainCategory",
+      "value": "全部",
+      "props": { "options": [
+        { "label": "全部", "value": "全部" },
+        { "label": "沪深主板", "value": "沪深主板" },
+        { "label": "ETF 指数", "value": "ETF 指数" },
+        { "label": "自选", "value": "自选" },
+        { "label": "我的分组", "value": "我的分组" }
+      ] }
+    },
+    { "type": "k-sec-title", "name": "groupTitle", "props": { "text": "分组" } },
+    {
+      "type": "k-chip-group",
+      "name": "groupChips",
+      "field": "trainGroupID",
+      "value": "",
+      "props": { "options": [] }
+    },
+    { "type": "k-sec-title", "props": { "text": "训练账户" } },
+    {
+      "type": "k-chip-group",
+      "field": "trainAccountType",
+      "value": "percent",
+      "props": { "aria-label": "trainingSetup.accountType", "options": [
+        { "label": "百分比账户", "value": "percent" },
+        { "label": "仓位金额账户", "value": "fixedAmount" }
+      ] }
+    },
+    { "type": "k-sec-title", "name": "accountNote", "props": { "text": "不占用资金，按仓位比例（1/4、1/3、1/2、全仓）买卖，任何标的都买得起", "plain": true } },
+    {
+      "type": "van-cell",
+      "name": "capitalRow",
+      "props": { "title": "本金", "titleWidth": "44px", "center": true, "border": false, "aria-label": "trainingSetup.capital" },
+      "children": [
+        { "type": "van-field", "field": "trainCapitalText", "value": "100000", "props": { "type": "number", "center": true, "style": { "width": "170px", "padding": "0", "background": "transparent" } } },
+        { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "交易模式" } },
+    {
+      "type": "k-chip-group",
+      "field": "trainTradeMode",
+      "value": "sameDayClose",
+      "props": { "aria-label": "trainingSetup.tradeMode", "options": [
+        { "label": "当日收盘价成交", "value": "sameDayClose" },
+        { "label": "隔日委托", "value": "nextDayClose" }
+      ] }
+    },
+    { "type": "k-sec-title", "name": "tradeModeNote", "props": { "text": "点下单立刻以当前训练日收盘价成交（成交日 = 当前训练日）", "plain": true } },
+    { "type": "k-sec-title", "props": { "text": "标的" } },
+    {
+      "type": "van-cell",
+      "props": { "title": "未选择", "center": true, "titleStyle": { "fontSize": "14px" }, "border": false },
+      "children": [
+        { "type": "van-button", "props": { "size": "small", "plain": true, "type": "primary", "data-act": "pickRandom", "aria-label": "trainingSetup.random" }, "children": ["随机抽取"], "emit": [{ "name": "click", "inject": ["pickRandom"] }], "emitPrefix": "act" }
+      ]
+    },
+    {
+      "type": "van-field",
+      "field": "trainKeyword",
+      "value": "",
+      "props": { "placeholder": "输入名称 / 代码搜索", "clearable": true, "center": true }
+    },
+    {
+      "type": "k-result-row-list",
+      "field": "trainResults",
+      "value": { "rows": [] },
+      "emit": [{ "name": "pick", "inject": ["selectTarget"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "props": { "text": "起始日期" } },
+    {
+      "type": "van-cell",
+      "name": "startDateRow",
+      "props": { "title": "未选择", "center": true, "titleStyle": { "fontSize": "14px" }, "border": false, "isLink": true, "clickable": true, "data-act": "openDatePicker" },
+      "emit": [{ "name": "click", "inject": ["openDatePicker"] }],
+      "emitPrefix": "act",
+      "children": [
+        { "type": "van-button", "name": "randomDateBtn", "props": { "size": "small", "plain": true, "type": "primary", "disabled": true, "data-act": "randomDate", "aria-label": "trainingSetup.randomDate" }, "children": ["随机"], "emit": [{ "name": "click", "inject": ["randomDate"] }], "emitPrefix": "act" }
+      ]
+    },
+    { "type": "k-sec-title", "name": "dateRangeNote", "props": { "text": "", "plain": true } },
+    {
+      "type": "datePicker",
+      "field": "trainDate",
+      "value": "",
+      "props": { "title": "选择起始日期" }
+    },
+    { "type": "k-sec-title", "name": "warnLine", "props": { "text": "", "plain": true, "warn": true } },
+    { "type": "k-sec-title", "name": "trainError", "props": { "text": "", "plain": true, "danger": true } },
+    {
+      "type": "van-row",
+      "props": { "gutter": 12 },
+      "style": { "marginTop": "14px" },
+      "children": [
+        {
+          "type": "van-col",
+          "props": { "span": 12 },
+          "children": [
+            { "type": "van-button", "props": { "block": true, "data-act": "close", "aria-label": "trainingSetup.cancel" }, "children": ["取消"], "emit": [{ "name": "click", "inject": ["close"] }], "emitPrefix": "act" }
+          ]
+        },
+        {
+          "type": "van-col",
+          "props": { "span": 12 },
+          "children": [
+            { "type": "van-button", "name": "startBtn", "props": { "block": true, "type": "primary", "disabled": true, "data-act": "startTraining", "aria-label": "trainingSetup.start" }, "children": ["开始训练"], "emit": [{ "name": "click", "inject": ["startTraining"] }], "emitPrefix": "act" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "van-dialog",
+      "field": "reselectOpen",
+      "value": false,
+      "name": "reselectDialog",
+      "props": { "title": "标的需要重新选择", "message": "", "showCancelButton": true, "confirmButtonText": "重新选择标的", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["clearTarget"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

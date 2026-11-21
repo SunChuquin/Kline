@@ -1,0 +1,95 @@
+{
+  "rule": [
+    { "type": "k-sec-title", "name": "noAccountNote", "props": { "text": "请先选择有效的模拟账户（模拟页新建）", "plain": true } },
+    {
+      "type": "k-text-row",
+      "name": "detailMeta",
+      "props": { "left": "", "leftClickable": true, "leftAria": "quick.account", "center": "", "right": "" },
+      "emit": [{ "name": "left", "inject": ["openAccPicker"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-quote-list",
+      "name": "detailQuote",
+      "field": "detailQuote",
+      "value": { "rows": [] },
+      "props": {}
+    },
+    { "type": "k-sec-title", "name": "detailQuoteTitle", "props": { "text": "当前标的", "plain": true } },
+    {
+      "type": "k-ticket",
+      "name": "ticketField",
+      "field": "ticket",
+      "value": { "direction": "buy", "priceType": "limit", "priceText": "", "qtyText": "" },
+      "emit": [
+        { "name": "submit", "inject": ["submitTicket"] },
+        { "name": "position", "inject": ["applyPosition"] }
+      ],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-text-row",
+      "name": "posBlock",
+      "props": { "left": "", "center": "", "right": "" }
+    },
+    {
+      "type": "k-actions-row",
+      "name": "detailActions",
+      "props": { "buttons": [{ "label": "一键清仓", "act": "closeAll", "tone": "danger", "ariaLabel": "quick.closeAll" }] },
+      "emit": [{ "name": "act", "inject": ["dispatchAction"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-text-row",
+      "name": "listMeta",
+      "props": { "left": "", "leftClickable": true, "leftAria": "quick.account", "center": "", "right": "" },
+      "emit": [{ "name": "left", "inject": ["openAccPicker"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-actions-row",
+      "name": "listActions",
+      "props": { "buttons": [
+        { "label": "切换账户", "act": "openAccPicker" },
+        { "label": "一键撤单", "act": "cancelAll", "tone": "danger", "ariaLabel": "quick.cancelAll" },
+        { "label": "关闭面板", "act": "closePanel" }
+      ] },
+      "emit": [{ "name": "act", "inject": ["dispatchAction"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "watchlistTitle", "props": { "text": "自选" } },
+    {
+      "type": "k-quote-list",
+      "name": "watchlist",
+      "field": "watchlist",
+      "value": { "rows": [], "buySell": true, "emptyText": "暂无自选" },
+      "emit": [{ "name": "pick", "inject": ["pickTicket"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "ordersTitle", "props": { "text": "在途委托" } },
+    {
+      "type": "k-mini-order-list",
+      "name": "orders",
+      "field": "orders",
+      "value": { "rows": [], "emptyText": "暂无在途委托" }
+    },
+    {
+      "type": "van-action-sheet",
+      "field": "accPickerOpen",
+      "value": false,
+      "props": { "actions": [], "cancelText": "取消", "closeOnClickAction": true },
+      "emit": [{ "name": "select", "inject": ["accSelect"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "sellConfirmOpen",
+      "value": false,
+      "name": "sellConfirmDialog",
+      "props": { "title": "确认卖出", "showCancelButton": true, "confirmButtonText": "确认卖出", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["doSubmit"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

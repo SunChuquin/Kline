@@ -1,0 +1,55 @@
+{
+  "rule": [
+    {
+      "type": "k-ind-tile-grid",
+      "field": "mainTiles",
+      "value": { "sections": [], "checkable": true },
+      "emit": [{ "name": "toggle", "inject": ["toggleMain"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-param-entry",
+      "props": { "label": "⚙ 公式编辑 · 技术指标公式 ›", "aria-label": "chart.indicator.systemEditor" },
+      "emit": [{ "name": "act", "inject": ["openSystemEditorMain"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "自定义技术指标（主图）" }
+    },
+    {
+      "type": "k-param-entry",
+      "props": { "label": "＋ 新增/管理 ›" },
+      "emit": [{ "name": "act", "inject": ["openCustomMain"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-custom-row-list",
+      "field": "mainCustoms",
+      "value": { "rows": [], "showCurrent": false, "emptyText": "暂无主图自定义技术指标" },
+      "emit": [
+        { "name": "activate", "inject": ["activateMainCustom"] },
+        { "name": "edit", "inject": ["openCustomMain"] }
+      ],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "重置内置指标", "center": true, "titleStyle": { "color": "#ee0a24", "width": "100%", "textAlign": "center", "fontWeight": "500" }, "data-act": "resetBuiltinAsk" },
+      "emit": [{ "name": "click", "inject": ["resetBuiltinAsk"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "resetBuiltinConfirm",
+      "value": false,
+      "props": { "title": "重置内置指标", "showCancelButton": true, "confirmButtonText": "重置", "confirmButtonColor": "#ee0a24" },
+      "children": [
+        { "type": "html", "native": true, "children": ["<div class=\"dialog-note\">将把所有内置指标恢复为编译时的内容，确定重置吗？</div>"], "style": { "display": "block", "width": "100%" } }
+      ],
+      "emit": [{ "name": "confirm", "inject": ["doResetBuiltin"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

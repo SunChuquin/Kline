@@ -32,6 +32,8 @@ export interface HostContext {
   domain: 'page' | 'sheet' | 'tab'
   /** 注册名（如 sheet-settings / page-cacheManage） */
   pageName: string
+  /** 打开时的 payload（如 subIndicators 的 slot 定向） */
+  openPayload?: Record<string, unknown>
   /** 关闭页面（parent 按域发 page.close / sheet.close 并清 activeName） */
   close(): void
 }

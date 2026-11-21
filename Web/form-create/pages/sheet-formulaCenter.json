@@ -1,0 +1,42 @@
+{
+  "rule": [
+    {
+      "type": "k-sec-title",
+      "name": "periodTitle",
+      "props": { "text": "技术指标" }
+    },
+    {
+      "type": "k-formula-row-list",
+      "field": "system",
+      "value": { "sections": [] },
+      "emit": [{ "name": "edit", "inject": ["editSystem"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "自定义技术指标" }
+    },
+    {
+      "type": "k-param-entry",
+      "props": { "label": "＋ 新建 / 管理 ›", "aria-label": "formulaCenter.new" },
+      "emit": [{ "name": "act", "inject": ["openNew"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-custom-row-list",
+      "field": "customs",
+      "value": { "rows": [], "showActivate": false, "showDelete": true, "deleteAria": "formulaCenter.deleteCustom", "emptyText": "暂无自定义技术指标" },
+      "emit": [
+        { "name": "edit", "inject": ["editCustom"] },
+        { "name": "delete", "inject": ["deleteCustom"] }
+      ],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div class=\"fc-note\">编辑与新建在 Web 公式编辑器完成（保存后重新打开本面板即见最新）。</div>"]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

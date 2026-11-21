@@ -1,0 +1,38 @@
+{
+  "rule": [
+    {
+      "type": "van-row",
+      "props": { "gutter": 6 },
+      "style": { "alignItems": "center" },
+      "children": [
+        {
+          "type": "van-col",
+          "props": { "span": 3 },
+          "children": [
+            {
+              "type": "van-button",
+              "props": { "data-act": "close", "aria-label": "chart.search.close", "plain": true, "size": "small", "icon": "cross" },
+              "emit": [{ "name": "click", "inject": ["close"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-col",
+          "props": { "span": 21 },
+          "children": [
+            { "type": "van-search", "field": "keyword", "value": "", "props": { "placeholder": "搜索代码/名称", "shape": "round" } }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "k-result-row-list",
+      "field": "results",
+      "value": { "rows": [] },
+      "emit": [{ "name": "pick", "inject": ["pickResult"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

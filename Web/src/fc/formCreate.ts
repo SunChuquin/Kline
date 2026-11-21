@@ -15,6 +15,7 @@ import {
   Field,
   Form as VanForm,
   Row,
+  Search,
   Switch,
 } from 'vant'
 import { kComponents } from './components'
@@ -34,6 +35,7 @@ const vantComponents: Record<string, unknown> = {
   'van-row': Row,
   'van-col': Col,
   'van-form': VanForm,
+  'van-search': Search,
 }
 
 /** vant 组件样式（动态渲染无 unplugin 注入，手动引入） */
@@ -48,6 +50,7 @@ const vantStyles: Record<string, () => void> = {
   'van-row': () => import('vant/es/row/style/index'),
   'van-col': () => import('vant/es/col/style/index'),
   'van-form': () => import('vant/es/form/style/index'),
+  'van-search': () => import('vant/es/search/style/index'),
 }
 
 /** 弹层组件 v-model 字段是 show（非 modelValue） */

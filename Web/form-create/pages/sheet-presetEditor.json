@@ -1,0 +1,111 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "name": "peNav",
+      "props": { "title": "组合编辑", "backLabel": "‹ 返回", "backAria": "presetEditor.back", "rightText": "保存", "rightAria": "presetEditor.save" },
+      "emit": [
+        { "name": "back", "inject": ["onBack"] },
+        { "name": "right", "inject": ["save"] }
+      ],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-chip-sections",
+      "field": "presetTabs",
+      "value": { "value": "p1", "sections": [{ "title": "", "options": [] }] },
+      "props": { "ariaLabel": "presetEditor.presetTabs" },
+      "emit": [{ "name": "select", "inject": ["selectPreset"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-field",
+      "field": "presetName",
+      "value": "",
+      "name": "nameField",
+      "props": { "label": "名称", "labelWidth": "44px", "center": true, "border": false }
+    },
+    {
+      "type": "k-chip-sections",
+      "field": "periodTabs",
+      "value": { "value": "日线", "sections": [{ "title": "", "options": [] }] },
+      "props": { "ariaLabel": "presetEditor.periodTabs" },
+      "emit": [{ "name": "select", "inject": ["selectPeriod"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "props": { "text": "主图指标（可多选）" } },
+    {
+      "type": "k-chip-sections",
+      "field": "mainMulti",
+      "value": { "value": [], "sections": [{ "title": "", "options": [] }], "multiple": true },
+      "emit": [{ "name": "select", "inject": ["toggleMain"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "props": { "text": "主图自定义（单选）" } },
+    {
+      "type": "k-chip-sections",
+      "field": "mainCustom",
+      "value": { "value": "", "sections": [{ "title": "", "options": [] }] },
+      "emit": [{ "name": "select", "inject": ["selectMainCustom"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "slot0Title", "props": { "text": "副图一" } },
+    {
+      "type": "van-cell",
+      "name": "slot0Current",
+      "props": { "title": "当前：", "isLink": true, "clickable": true, "center": true, "titleStyle": { "fontSize": "13px", "color": "#6c6c70" }, "data-act": "toggleSlot0" },
+      "emit": [{ "name": "click", "inject": ["toggleSlot0"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-chip-sections",
+      "name": "slot0Opts",
+      "field": "slot0",
+      "value": { "value": "", "sections": [] },
+      "emit": [{ "name": "select", "inject": ["selectSub0"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "slot1Title", "props": { "text": "副图二" } },
+    {
+      "type": "van-cell",
+      "name": "slot1Current",
+      "props": { "title": "当前：", "isLink": true, "clickable": true, "center": true, "titleStyle": { "fontSize": "13px", "color": "#6c6c70" }, "data-act": "toggleSlot1" },
+      "emit": [{ "name": "click", "inject": ["toggleSlot1"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-chip-sections",
+      "name": "slot1Opts",
+      "field": "slot1",
+      "value": { "value": "", "sections": [] },
+      "emit": [{ "name": "select", "inject": ["selectSub1"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "slot2Title", "props": { "text": "副图三" } },
+    {
+      "type": "van-cell",
+      "name": "slot2Current",
+      "props": { "title": "当前：", "isLink": true, "clickable": true, "center": true, "titleStyle": { "fontSize": "13px", "color": "#6c6c70" }, "data-act": "toggleSlot2" },
+      "emit": [{ "name": "click", "inject": ["toggleSlot2"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-chip-sections",
+      "name": "slot2Opts",
+      "field": "slot2",
+      "value": { "value": "", "sections": [] },
+      "emit": [{ "name": "select", "inject": ["selectSub2"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "confirmOpen",
+      "value": false,
+      "props": { "title": "存在修改未保存，是否取消修改？", "showCancelButton": true, "cancelButtonText": "继续编辑", "confirmButtonText": "取消修改", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["reallyClose"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

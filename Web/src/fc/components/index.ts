@@ -14,6 +14,10 @@ import KStatCards from './KStatCards.vue'
 import KSecTitle from './KSecTitle.vue'
 import KNavRow from './KNavRow.vue'
 import KParamEntry from './KParamEntry.vue'
+import KFormulaRowList from './KFormulaRowList.vue'
+import KChipSections from './KChipSections.vue'
+import KTextRow from './KTextRow.vue'
+import KActionsRow from './KActionsRow.vue'
 
 export const kComponents: Record<string, Component> = {
   'k-chip-group': KChipGroup,
@@ -29,4 +33,8 @@ export const kComponents: Record<string, Component> = {
   'k-sec-title': KSecTitle,
   'k-nav-row': KNavRow,
   'k-param-entry': KParamEntry,
+  'k-formula-row-list': KFormulaRowList,
+  'k-chip-sections': KChipSections,
+  'k-text-row': KTextRow,
+  'k-actions-row': KActionsRow,
 }

@@ -27,8 +27,11 @@ import type { FcApi, FcInject, HostContext } from './types'
 const props = withDefaults(defineProps<{
   name: string
   domain: 'page' | 'sheet' | 'tab'
+  /** 打开时的 payload（透传 adapter，如 subIndicators 的 slot 定向） */
+  payload?: Record<string, unknown> | null
 }>(), {
   domain: 'page',
+  payload: null,
 })
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -56,6 +59,7 @@ let disposeSub: (() => void) | null = null
 const ctx: HostContext = {
   domain: props.domain,
   pageName: props.name,
+  openPayload: props.payload ?? undefined,
   close: () => emit('close'),
 }
 
