@@ -117,6 +117,12 @@ struct ContentView: View {
             // App 启动即实例化行情行缓存，触发行情数值预热（无需等行情页首次打开）
             _ = MarketRowCache.shared
             MarketRowCache.shared.prewarmMarketData()
+            // page 域 WebView 预热（3s 后主界面/引擎就绪）：消除首次打开个人中心等
+            // 全屏 Web 页的懒创建白屏（真机实测首帧白屏数秒）
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                WebPageBridge.prewarmPageWebView()
+            }
             // 混合架构：Web 侧请求切 Tab（nav.switchTab）→ 原生 selectedTab；
             // @State 投影跨 struct 拷贝共享存储，闭包写 selectedTab 即生效
             WebMessageRouter.shared.switchTabHandler = { index in

@@ -20,6 +20,16 @@
 
 import Combine
 import SwiftUI
+import WebKit
+
+/// 预热实例的导航代理：didFinish（文档加载完成）即入复用池（key="page"）——
+/// JS mounted 的 page.ready 由 Router/宿主兜底（activePage 已设则补推 page.open）。
+private final class PrewarmNavigationDelegate: NSObject, WKNavigationDelegate {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        WebViewContainer.reusePool["page"] = webView
+        DebugLogger.shared.log("[WebPageBridge] page 域 WebView 预热完成入池")
+    }
+}
 
 @MainActor
 final class WebPageBridge: ObservableObject {
@@ -31,6 +41,34 @@ final class WebPageBridge: ObservableObject {
 
     /// 各页关闭钩子（页名 → 返回 false 拒绝关闭；LANSyncBridge 注册传输中拒绝）
     var closeHooks: [String: () -> Bool] = [:]
+
+    /// 预热是否已执行（每启动一次）
+    private static var didPrewarm = false
+    /// 预热实例的导航代理（static 持有——WKWebView.navigationDelegate 是弱引用）
+    private static let prewarmDelegate = PrewarmNavigationDelegate()
+
+    /// page 域 WebView 预热（App 启动 3s 后后台调用）：懒创建的白屏消除——提前创建并加载
+    /// kline://app/index.html#/page，didFinish 即入复用池（key="page"）。用户首次点开
+    /// 个人中心等 page 页时宿主 makeUIView 直接命中已加载实例（零白屏）。
+    /// 事件时序兜底：预热实例的 JS mounted 晚于 page.open 事件也不丢——Web 端 mounted 调
+    /// page.ready，宿主检测 activePage 非空即补推 page.open（首开时序坑的既有兜底通道）。
+    static func prewarmPageWebView() {
+        guard !didPrewarm, WebViewContainer.reusePool["page"] == nil else { return }
+        didPrewarm = true
+        let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(WebUISchemeHandler(), forURLScheme: WebBridgeConst.scheme)
+        let controller = WKUserContentController()
+        controller.add(WebMessageRouter.shared, name: WebBridgeConst.channel)
+        config.userContentController = controller
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.backgroundColor = .systemBackground
+        webView.isOpaque = true
+        webView.navigationDelegate = prewarmDelegate
+        if let url = URL(string: "\(WebBridgeConst.scheme)://app/index.html#/page") {
+            DebugLogger.shared.log("[WebPageBridge] page 域 WebView 预热启动")
+            webView.load(URLRequest(url: url))
+        }
+    }
 
     /// 打开全屏 Web 页（同页 no-op 防环）
     func open(_ name: String) {
