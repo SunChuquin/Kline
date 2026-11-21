@@ -703,8 +703,9 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         throw lastError ?? SyncError(message: "\(action)失败：\(label)")
     }
 
-    /// 流式下载（URLSession.bytes 逐块写盘直落 <rel>.part）——不经系统临时文件，
-    /// 绕开 downloadTask 对 5GB 级文件的真机 ENOMEM；进度/速率沿用 noteBytes 采样。
+    /// 流式下载（dataTask delegate 逐块回调直接写盘 <rel>.part）——不经系统临时文件
+    /// （绕开 downloadTask 对 5GB 级文件的真机 ENOMEM），也不逐字节迭代
+    /// （AsyncBytes 吞吐仅 34KB/s），delegate 回调批量写盘保持 downloadTask 级吞吐。
     private func downloadStreaming(request: URLRequest, toPart partPath: String) async throws {
         guard let session = session else { throw SyncError(message: "会话已结束") }
         FileManager.default.createFile(atPath: partPath, contents: nil)
@@ -712,27 +713,13 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             throw SyncError(message: "落盘文件创建失败：\(partPath)")
         }
         defer { try? fh.close() }
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw SyncError(message: "下载失败 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
-        }
-        var buffer = Data()
-        buffer.reserveCapacity(1 << 20)
-        do {
-            for try await byte in bytes {
-                buffer.append(byte)
-                if buffer.count >= (1 << 20) {
-                    try fh.write(contentsOf: buffer)
-                    noteBytes(Int64(buffer.count))
-                    buffer.removeAll(keepingCapacity: true)
-                }
+        try await withCheckedThrowingContinuation { cont in
+            let box = TransferBox(continuation: cont, downloadDest: partPath, streamingHandle: fh) { [weak self] delta in
+                self?.noteBytes(delta)
             }
-            if !buffer.isEmpty {
-                try fh.write(contentsOf: buffer)
-                noteBytes(Int64(buffer.count))
-            }
-        } catch {
-            throw SyncError(message: "传输中断：\(error.localizedDescription)")
+            let task = session.dataTask(with: request)
+            register(box, for: task)
+            task.resume()
         }
     }
 
@@ -847,15 +834,44 @@ private final class TransferBox {
     let onProgress: (Int64) -> Void
     /// 下载任务的目标路径（<rel>.part）
     let downloadDest: String
+    /// dataTask 流式模式（非 nil）：didReceive data 逐块直接写盘——不经系统临时文件
+    /// （downloadTask 对 5GB 级文件真机收尾报 Cannot allocate memory）也不逐字节迭代
+    /// （AsyncBytes 吞吐仅 34KB/s），delegate 回调批量写盘兼顾两端
+    let streamingHandle: FileHandle?
+    /// 流式模式的响应状态码与收尾错误（didCompleteWithError 统一收口）
+    var streamingStatusCode = -1
+    var streamingError: Error? = nil
     /// didFinishDownloadingTo 的处理结果，didCompleteWithError 时统一 resume
     var pendingResult: Result<Void, Error>?
 
     init(continuation: CheckedContinuation<Void, Error>,
          downloadDest: String,
+         streamingHandle: FileHandle? = nil,
          onProgress: @escaping (Int64) -> Void) {
         self.continuation = continuation
         self.downloadDest = downloadDest
+        self.streamingHandle = streamingHandle
         self.onProgress = onProgress
+    }
+
+    /// dataTask 流式：响应头（状态码校验，非 2xx 标记失败待收尾）
+    func handleResponse(_ response: URLResponse) {
+        streamingStatusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(streamingStatusCode) else {
+            streamingError = SyncError(message: "下载失败 HTTP \(streamingStatusCode)")
+            return
+        }
+    }
+
+    /// dataTask 流式：数据块直接写盘（写失败标记失败待收尾，后续块跳过）
+    func handleData(_ data: Data) {
+        guard streamingError == nil, let fh = streamingHandle else { return }
+        do {
+            try fh.write(contentsOf: data)
+            onProgress(Int64(data.count))
+        } catch {
+            streamingError = SyncError(message: "落盘失败：\(error.localizedDescription)")
+        }
     }
 
     /// 下载落盘：把系统临时文件搬到 <rel>.part。
@@ -906,6 +922,19 @@ extension LANSyncTransfer: URLSessionDelegate, URLSessionTaskDelegate, URLSessio
         boxFor(downloadTask)?.finishDownload(from: location, response: downloadTask.response)
     }
 
+    /// dataTask 流式：响应头（状态码进 box 待收尾校验）
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        boxFor(dataTask)?.handleResponse(response)
+        completionHandler(.allow)
+    }
+
+    /// dataTask 流式：数据块写盘 + 进度
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        boxFor(dataTask)?.handleData(data)
+    }
+
     /// 任务收尾：统一 resume（每个 delegate 任务恰好一次）
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let box = takeBox(task) else { return }
@@ -913,11 +942,15 @@ extension LANSyncTransfer: URLSessionDelegate, URLSessionTaskDelegate, URLSessio
         if let error = error, box.pendingResult == nil {
             box.pendingResult = .failure(SyncError(message: "传输中断：\(error.localizedDescription)"))
         }
+        // 流式模式：写盘/状态码错误收口
+        if box.pendingResult == nil, let se = box.streamingError {
+            box.pendingResult = .failure(se)
+        }
         if let result = box.pendingResult {
             box.continuation.resume(with: result)
             return
         }
-        // 兜底：无 error 且 didFinishDownloadingTo 未到（理论不发生），按 HTTP 状态收口
+        // 兜底：无 error 且内容未走专用收尾（理论不发生），按 HTTP 状态收口
         let status = (task.response as? HTTPURLResponse)?.statusCode ?? -1
         if (200..<300).contains(status) {
             box.continuation.resume(returning: ())
