@@ -208,6 +208,7 @@ final class KlineHTTPServer {
         var pairToken = ""
         /// 请求头 X-Kline-Client: pipeline（PC 流水线脚本标识，沙盒写门禁豁免用）
         var pipelineClient = false
+        var rangeHeader: String? = nil
         var uploadHandle: FileHandle?
         var bodyBuffer = Data()
         var done = false
@@ -244,7 +245,8 @@ final class KlineHTTPServer {
                     state.done = true
                     let requestLine = state.method + " " + state.path + " HTTP/1.1"
                     dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken,
-                             pipelineClient: state.pipelineClient, connection: connection)
+                             rangeHeader: state.rangeHeader, pipelineClient: state.pipelineClient,
+                             connection: connection)
                 }
             }
         }
@@ -288,6 +290,8 @@ final class KlineHTTPServer {
                                 state.pairToken = value
                             } else if key == "x-kline-client", value.lowercased() == "pipeline" {
                                 state.pipelineClient = true
+                            } else if key == "range" {
+                                state.rangeHeader = value
                             }
                         }
 
@@ -348,7 +352,8 @@ final class KlineHTTPServer {
                         if state.received >= contentLength {
                             state.done = true
                             dispatch(requestLine: requestLine, body: state.bodyBuffer, pairToken: state.pairToken,
-                                     pipelineClient: state.pipelineClient, connection: connection)
+                                     rangeHeader: state.rangeHeader, pipelineClient: state.pipelineClient,
+                                     connection: connection)
                             return
                         }
                         readLoop()
@@ -406,6 +411,7 @@ final class KlineHTTPServer {
     // MARK: - 路由
 
     private func dispatch(requestLine: String, body: Data, pairToken: String,
+                          rangeHeader: String? = nil,
                           pipelineClient: Bool = false, connection: NWConnection) {
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else {
@@ -557,7 +563,8 @@ final class KlineHTTPServer {
                 // 沙盒读文件门禁：未暴露且无有效会话/流水线标识 → 403
                 //（/download/<file> 公共下载保持开放，供 PC 脚本取 IPA/导出，不含敏感配置）
                 guard allowSandboxRead(pairToken: pairToken, pipelineHeader: pipelineClient, connection: connection) else { return }
-                serveSandboxPath(String(path.dropFirst("/sandbox/".count)), connection: connection)
+                serveSandboxPath(String(path.dropFirst("/sandbox/".count)), connection: connection,
+                                 rangeHeader: rangeHeader)
             } else if method == "GET", path == "/web" {
                 // Web UI 调试通道（混合架构 P1）：PC 浏览器直开真机页面，对着真数据调样式布局。
                 // 纯静态 dist 资源（不含沙盒/用户数据），与 /download/<file> 同级免门禁。
@@ -613,8 +620,9 @@ final class KlineHTTPServer {
                 body: String(data: json, encoding: .utf8) ?? "[]")
     }
 
-    /// GET /sandbox/<path>：目录则列出，文件则返回内容
-    private func serveSandboxPath(_ rel: String, connection: NWConnection) {
+    /// GET /sandbox/<path>：目录则列出，文件则返回内容。带 Range 头时返回对应区间
+    /// （206 + Content-Range + seek——LAN 同步大库 5GB 级客户端分块拉取用）
+    private func serveSandboxPath(_ rel: String, connection: NWConnection, rangeHeader: String? = nil) {
         guard let target = Self.resolveSandboxPath(rel, sandboxRoot: sandboxRoot) else {
             respond(connection, status: 400, body: "bad path")
             return
@@ -634,6 +642,20 @@ final class KlineHTTPServer {
             respond(connection, status: 500, body: "read failed")
             return
         }
+        let totalSize = Int(((try? FileManager.default.attributesOfItem(atPath: target))?[.size] as? NSNumber)?.int64Value ?? 0)
+        // Range 分块：bytes=start-end → 206 + seek 到 start，只发送区间长度
+        if let rangeHeader, let (start, end) = Self.parseRangeHeader(rangeHeader, totalSize: Int64(totalSize)) {
+            let length = end - start + 1
+            handle.seek(toFileOffset: UInt64(start))
+            let head = "HTTP/1.1 206 Partial Content\r\n"
+                + "Content-Type: application/octet-stream\r\n"
+                + "Content-Length: \(length)\r\n"
+                + "Content-Range: bytes \(start)-\(end)/\(totalSize)\r\n"
+                + "Connection: close\r\n\r\n"
+            DebugLogger.shared.log("沙盒GET Range [\(start)-\(end)] size=\(length)")
+            streamFileLocked(handle: handle, connection: connection, header: Data(head.utf8), limit: length)
+            return
+        }
         // 大文件（如 1.4GB 主库 tdx.db）**流式**返回：先发 header（带 Content-Length），
         // 再分块 FileHandle 读 + send，避免整份读进内存。
         // 原实现 `readDataToEndOfFile()` 把整个 1.4GB 读进内存再一次性 send →
@@ -649,20 +671,23 @@ final class KlineHTTPServer {
 
     /// 分块把 FileHandle 内容写进 socket（每块 1MB），全部写完后以 finalMessage 收尾并关连接。
     /// 与 `/upload` 的流式**写**对称：这里只保留一块在内存，不做整份缓冲。
-    private func streamFileLocked(handle: FileHandle, connection: NWConnection, header: Data) {
+    private func streamFileLocked(handle: FileHandle, connection: NWConnection, header: Data,
+                                  limit: Int64? = nil) {
         connection.send(content: header, completion: .contentProcessed { [weak self] error in
             guard let self = self, error == nil else {
                 try? handle.close()
                 connection.cancel()
                 return
             }
-            self.sendNextChunkLocked(handle: handle, connection: connection)
+            self.sendNextChunkLocked(handle: handle, connection: connection, remaining: limit)
         })
     }
 
-    /// 读下一块（1MB）并发送；读到 EOF 则发一个 isComplete 的 finalMessage 关闭流。
-    private func sendNextChunkLocked(handle: FileHandle, connection: NWConnection) {
-        let chunk = handle.readData(ofLength: 1 << 20)
+    /// 读下一块（1MB，Range 模式下不超过剩余区间）并发送；读到 EOF 或发满区间
+    /// 则发一个 isComplete 的 finalMessage 关闭流。
+    private func sendNextChunkLocked(handle: FileHandle, connection: NWConnection, remaining: Int64? = nil) {
+        let want = remaining.map { Int(min(Int64(1 << 20), max(0, $0))) } ?? (1 << 20)
+        let chunk = want > 0 ? handle.readData(ofLength: want) : Data()
         guard !chunk.isEmpty else {
             try? handle.close()
             // Content-Length 已给出，这里显式标记流结束（TCP 半关），客户端据此判定下载完成
@@ -670,14 +695,36 @@ final class KlineHTTPServer {
                             completion: .contentProcessed { _ in connection.cancel() })
             return
         }
+        let next = remaining.map { $0 - Int64(chunk.count) }
         connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
             guard let self = self, error == nil else {
                 try? handle.close()
                 connection.cancel()
                 return
             }
-            self.sendNextChunkLocked(handle: handle, connection: connection)
+            // 发满区间（还没到 EOF）也要显式收尾：Content-Length/Range 已约定长度
+            if let n = next, n <= 0 {
+                try? handle.close()
+                connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                                completion: .contentProcessed { _ in connection.cancel() })
+                return
+            }
+            self.sendNextChunkLocked(handle: handle, connection: connection, remaining: next)
         })
+    }
+
+    /// Range 头解析："bytes=start-end" / "bytes=start-" → 区间（end 缺省 = 到文件尾，越界截断）
+    static func parseRangeHeader(_ value: String, totalSize: Int64) -> (start: Int64, end: Int64)? {
+        guard value.hasPrefix("bytes=") else { return nil }
+        let spec = value.dropFirst("bytes=".count)
+        let parts = spec.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let start = Int64(parts[0].trimmingCharacters(in: .whitespaces)),
+              start >= 0, start < totalSize else { return nil }
+        let endPart = parts[1].trimmingCharacters(in: .whitespaces)
+        let end: Int64 = endPart.isEmpty ? totalSize - 1 : min(Int64(endPart) ?? totalSize - 1, totalSize - 1)
+        guard end >= start else { return nil }
+        return (start, end)
     }
 
     /// DELETE /sandbox/<path>：删除沙盒内文件/目录（FileManager.removeItem 自带目录递归删除）。

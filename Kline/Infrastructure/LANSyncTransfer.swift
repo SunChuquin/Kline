@@ -374,10 +374,14 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         return outcome
     }
 
+    /// 分块拉取阈值：超过则按 Range 逐块拉（每块独立 dataTask——单请求长传输在真机上
+    /// 会被系统资源压力终止（99% 处 jetsam，2026-11-21 实测），分块分散状态周期）
+    static let chunkedThreshold: Int64 = 512 * 1024 * 1024
+
     /// 拉取单文件：GET /sandbox/<rel> → 本地 <rel>.part → 与对端 /sync/sha 声明值比对
     /// → 相符后原子替换覆盖本地（备份已在步骤 3 完成）。
-    /// 下载失败 / sha 不符都重试 ≤2 次（指数退避 1s / 2s）；sha 失败时 .part 已清理、
-    /// 本机原文件保持不动。
+    /// 大文件（> chunkedThreshold）自动分块：每块 Range 请求（512MB）独立 dataTask，
+    /// 块级重试（已完成块保留——断点续传语义）；sha 校验/原子替换在整文件完成后执行。
     private func pullFile(peer: LANSyncPeer, file: PlanFile, token: String) async throws {
         let dstPath = docsPath + "/" + file.rel
         let partPath = dstPath + ".part"
@@ -385,13 +389,33 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         defer { try? fm.removeItem(atPath: partPath) }
         try await withRetry(file.rel, "下载") {
             try? self.fm.removeItem(atPath: partPath)   // 上次尝试的残留
-            // ① 流式下载到 <rel>.part（URLSession.bytes 逐块写盘——不经系统临时文件：
-            //   downloadTask 对 5GB 级文件在真机 didFinishDownloadingTo 阶段报
-            //   Cannot allocate memory（POSIX 12），2026-11-21 实测）
-            let req = try self.makeRequest(peer, method: "GET",
-                                           path: "/sandbox/" + Self.encodePathSegments(file.rel),
-                                           token: token)
-            try await self.downloadStreaming(request: req, toPart: partPath)
+            FileManager.default.createFile(atPath: partPath, contents: nil)   // 分块 seek 写的载体
+            // ① 流式下载到 <rel>.part
+            if file.size > Self.chunkedThreshold {
+                // 大文件分块：每块 Range 请求独立 dataTask（失败只重拉当前块）
+                var offset: Int64 = 0
+                while offset < file.size {
+                    let end = min(offset + Self.chunkedThreshold, file.size) - 1
+                    try await withRetry("\(file.rel) [\(offset)-\(end)]", "下载") {
+                        guard var req = try? self.makeRequest(peer, method: "GET",
+                                                       path: "/sandbox/" + Self.encodePathSegments(file.rel),
+                                                       token: token) else {
+                            throw SyncError(message: "请求构造失败")
+                        }
+                        req.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
+                        req.timeoutInterval = 600
+                        try await self.downloadStreaming(request: req, toPart: partPath,
+                                                         seekOffset: offset)
+                    }
+                    offset = end + 1
+                }
+            } else {
+                var req = try self.makeRequest(peer, method: "GET",
+                                               path: "/sandbox/" + Self.encodePathSegments(file.rel),
+                                               token: token)
+                req.timeoutInterval = 600
+                try await self.downloadStreaming(request: req, toPart: partPath)
+            }
             // ② 本文件 sha 与对端声明值比对（防传输损坏）
             let localSha = try Self.streamSHA256(path: partPath)
             let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: file.rel, token: token)
@@ -706,12 +730,14 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     /// 流式下载（dataTask delegate 逐块回调直接写盘 <rel>.part）——不经系统临时文件
     /// （绕开 downloadTask 对 5GB 级文件的真机 ENOMEM），也不逐字节迭代
     /// （AsyncBytes 吞吐仅 34KB/s），delegate 回调批量写盘保持 downloadTask 级吞吐。
-    private func downloadStreaming(request: URLRequest, toPart partPath: String) async throws {
+    /// seekOffset > 0 = Range 分块模式：写盘前 seek 到块起点（块区间由服务端 Range 截断）。
+    private func downloadStreaming(request: URLRequest, toPart partPath: String,
+                                   seekOffset: Int64 = 0) async throws {
         guard let session = session else { throw SyncError(message: "会话已结束") }
-        FileManager.default.createFile(atPath: partPath, contents: nil)
         guard let fh = FileHandle(forWritingAtPath: partPath) else {
-            throw SyncError(message: "落盘文件创建失败：\(partPath)")
+            throw SyncError(message: "落盘文件打开失败：\(partPath)")
         }
+        if seekOffset > 0 { fh.seek(toFileOffset: UInt64(seekOffset)) }
         defer { try? fh.close() }
         try await withCheckedThrowingContinuation { cont in
             let box = TransferBox(continuation: cont, downloadDest: partPath, streamingHandle: fh) { [weak self] delta in
