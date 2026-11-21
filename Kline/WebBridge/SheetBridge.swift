@@ -53,6 +53,15 @@ final class SheetBridge: ObservableObject {
     /// picker/strategy 段（选股/策略公式）本版仍整体桥接原生中心（Web 仅实装 tech 段）。
     @Published var formulaCenterRequest: String? = nil
 
+    /// 指标组合编辑页（P2 指标组合体系）：Web 设置面板点「编辑五套组合」→ 同 WebView
+    /// 切 sheet 面板（activeSheet 覆盖 → 关闭编辑页后设置面板一并关闭，回图表页）
+    func openPresetEditor() {
+        guard activeSheet != "presetEditor" else { return }
+        activeSheet = "presetEditor"
+        WebMessageRouter.shared.pushEvent("sheet.open", payload: ["name": "presetEditor"], route: "sheet")
+        DebugLogger.shared.log("[SheetBridge] open presetEditor")
+    }
+
     /// 各页公式中心入口 → Web tech 段面板（picker/strategy 直接桥原生中心）
     func openFormulaCenter(_ kind: FormulaKind) {
         if kind == .tech {

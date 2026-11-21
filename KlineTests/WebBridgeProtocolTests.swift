@@ -758,9 +758,20 @@ final class WebBridgeProtocolTests: XCTestCase {
             ($0["id"] as? String) == "req_preset_snapshot"
         }, "fixtures 缺 preset.snapshot 响应样例")
         let data = try XCTUnwrap(snap["data"] as? [String: Any])
-        for key in ["mode", "modeOptions", "presets"] {
+        for key in ["mode", "modeOptions", "presets", "catalog"] {
             XCTAssertNotNil(data[key], "preset.snapshot 缺 \(key)")
         }
+        let catalog = try XCTUnwrap(data["catalog"] as? [String: Any])
+        let periods = try XCTUnwrap(catalog["periods"] as? [[String: Any]])
+        for p in periods {
+            for key in ["period", "mainDefs", "subGroups", "customs"] {
+                XCTAssertNotNil(p[key], "组合目录周期项缺 \(key)")
+            }
+        }
+        let requests = try XCTUnwrap(fixture["requests"] as? [[String: Any]])
+        XCTAssertNotNil(requests.first {
+            ($0["module"] as? String) == "preset" && ($0["action"] as? String) == "openEditor"
+        }, "fixtures 缺 preset.openEditor 样例")
         let presets = try XCTUnwrap(data["presets"] as? [[String: Any]])
         XCTAssertEqual(presets.count, 5, "指标组合固定 5 槽")
         for p in presets {

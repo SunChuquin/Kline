@@ -30,7 +30,6 @@
             <div class="g-divider"></div>
             <button
               class="sel-row"
-              :class="{ disabled: !presetEditorAvailable }"
               aria-label="chart.preset.editor"
               @click="openPresetEditor"
             >
@@ -397,6 +396,11 @@
       </div>
     </div>
 
+    <!-- 指标组合编辑页（P2 指标组合：全屏卡片形态，五组合 × 五周期编辑） -->
+    <div v-if="activeName === 'presetEditor'" class="editor-full">
+      <PresetEditorPanel @close="close" />
+    </div>
+
     <!-- 训练设置浮层（P2-6c-3：居中卡片形态，对齐原生 TrainingSetupSheet） -->
     <div v-if="activeName === 'training'" class="panel-mask" @click="close">
       <div class="train-card" @click.stop>
@@ -558,6 +562,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { klineBus } from '../bridge/klineBus'
 import { showToast } from 'vant'
+import PresetEditorPanel from '../components/sheet/PresetEditorPanel.vue'
 import type {
   ChartOption,
   ChartSearchResult,
@@ -643,10 +648,9 @@ const presetLabel = computed(() => {
   return s.presetOptions.find((o) => o.value === s.activeMode)?.label ?? s.activeMode
 })
 
-/** 组合编辑页（期2 接通 presetEditor 弹层面板；当前占位禁用） */
-const presetEditorAvailable = false
+/** 组合编辑页（presetEditor，sheet 域面板切换由原生 activeSheet 驱动） */
 function openPresetEditor(): void {
-  if (!presetEditorAvailable) return
+  void klineBus.request('preset', 'openEditor', {}).catch((e) => console.error('preset.openEditor 失败', e))
 }
 
 // ===== 指标面板（P2-5b） =====
@@ -1268,6 +1272,8 @@ onMounted(async () => {
   await klineBus.detect()
   klineBus.on('sheet.open', (ev) => void handleSheetOpen(ev.payload))
   klineBus.on('training.changed', (ev) => handleTrainingChanged(ev.payload))
+  // 指标组合变化（编辑页提交改名/模式切换）：刷新设置面板下拉选项与生效态
+  klineBus.on('preset.changed', (ev) => void refreshPresetState(ev.payload))
   // 浮层就绪拉取：sheet.open 事件可能早于本 WebView 创建/加载完成发出（首次打开时序）
   // → 事件丢失面板永不渲染；就绪后主动向宿主拉取当前待展示弹层
   try {
@@ -1276,6 +1282,27 @@ onMounted(async () => {
     console.error('sheet.ready 失败', e)
   }
 })
+
+/** preset.changed：编辑提交（presets）重拉 settings 快照；模式切换（mode）本地同步即可 */
+async function refreshPresetState(payload: Record<string, unknown> | undefined): Promise<void> {
+  const reason = String(payload?.['reason'] ?? '')
+  if (reason === 'mode') {
+    const mode = String(payload?.['mode'] ?? '')
+    if (settings.value) settings.value.activeMode = mode
+    return
+  }
+  if (reason === 'presets') {
+    try {
+      const s = ((await klineBus.request('chart', 'settings.snapshot')) ?? {}) as Record<string, unknown>
+      if (settings.value) {
+        settings.value.activeMode = String(s.activeMode ?? 'local')
+        settings.value.presetOptions = (s.presetOptions ?? []) as ChartOption[]
+      }
+    } catch (e) {
+      console.error('preset.changed 刷新失败', e)
+    }
+  }
+}
 </script>
 
 <style scoped>
@@ -1616,6 +1643,14 @@ onMounted(async () => {
 
 .sel-row.disabled .sel-value {
   color: var(--k-text-tertiary);
+}
+
+/* 指标组合编辑页：全屏不透明容器（盖住设置面板，返回即关整个弹层链） */
+.editor-full {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: var(--k-bg);
 }
 
 .sel-value {

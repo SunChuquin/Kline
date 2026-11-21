@@ -26,6 +26,7 @@ declare module 'vue' {
     LocalUpdatePanel: typeof import('./src/components/page/LocalUpdatePanel.vue')['default']
     PickerEditPanel: typeof import('./src/components/page/PickerEditPanel.vue')['default']
     PickRunPanel: typeof import('./src/components/page/PickRunPanel.vue')['default']
+    PresetEditorPanel: typeof import('./src/components/sheet/PresetEditorPanel.vue')['default']
     ProfilePanel: typeof import('./src/components/page/ProfilePanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

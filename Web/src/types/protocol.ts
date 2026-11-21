@@ -82,9 +82,10 @@
 //   chart.indicators.resetBuiltin {} → {}                    重置内置指标（restoreAllBuiltin）
 //   chart.indicators.openSystemEditor {isMain, subId?} → {}  关面板 + 桥接原生系统指标公式编辑器
 //   chart.indicators.openCustomEditor {target} → {}          关面板 + 桥接原生自定义指标编辑器
-//   preset.snapshot {} → PresetSnapshot                       指标组合快照（生效模式 + 五套组合完整按周期配置）
+//   preset.snapshot {} → PresetSnapshot                       指标组合快照（生效模式 + 五套组合完整按周期配置 + 指标目录）
 //   preset.setMode {id} → {}                                  切换生效组合（"local"=局部独立配置 / "p1".."p5"；幂等；图表即时重算）
 //   preset.editCommit {presets:[5套]} → {}                    组合编辑页整包提交（生效中组合被改即重算）
+//   preset.openEditor {} → {}                                 设置面板「编辑五套组合」→ 切 sheet 面板到 presetEditor
 //   chart.formula.snapshot {} → FormulaSnapshot                          tech 段三节快照（系统主图/副图分组/自定义）
 //   chart.formula.deleteCustom {id} → {}                                 删除自定义指标
 //   chart.formula.openCenter {} → {}                                     （回退链路）关面板 + 桥接原生公式中心
@@ -442,12 +443,22 @@ export interface ChartPresetSnap {
   subSelectionsByPeriod: Record<string, { kind: string; customID: string }[]>
 }
 
+/** preset.snapshot：单周期指标目录（编辑页渲染可选项；配置只存启用集合不含参数） */
+export interface PresetCatalogPeriod {
+  /** KlinePeriod rawValue（"日线"等） */
+  period: string
+  mainDefs: { id: string; name: string }[]
+  subGroups: { group: string; kinds: string[] }[]
+  customs: { id: string; name: string; colorHex: string; scope: 'main' | 'sub' }[]
+}
+
 /** preset.snapshot 响应（设置面板下拉 + 组合编辑页） */
 export interface PresetSnapshot {
   /** 当前生效模式："local" / "p1".."p5" */
   mode: string
   modeOptions: ChartOption[]
   presets: ChartPresetSnap[]
+  catalog: { periods: PresetCatalogPeriod[] }
 }
 
 /** chart.search.query 结果行 */
@@ -1062,7 +1073,7 @@ export const KnownActions = {
           'indicators.activateMainCustom', 'indicators.resetBuiltin',
           'indicators.openSystemEditor', 'indicators.openCustomEditor',
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
-  preset: ['snapshot', 'setMode', 'editCommit'],
+  preset: ['snapshot', 'setMode', 'editCommit', 'openEditor'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
   strategyDetail: ['snapshot', 'edit', 'backtest', 'runPick', 'cancelPick', 'generate', 'toggleEntry', 'confirmGenerate'],

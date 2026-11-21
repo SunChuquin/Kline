@@ -27,6 +27,10 @@ final class PresetBridge {
             return setMode(request)
         case "editCommit":
             return editCommit(request)
+        case "openEditor":
+            // 设置面板「编辑五套组合」→ 切 sheet 面板到 presetEditor（SheetPage activeName 切换）
+            SheetBridge.shared.openPresetEditor()
+            return WebBridgeResponse.ok(request.id)
         default:
             return WebBridgeResponse.fail(request.id, code: "unknown_action",
                                           message: "preset.\(request.action) 未实现")
@@ -35,7 +39,7 @@ final class PresetBridge {
 
     // MARK: 快照
 
-    /// preset.snapshot：生效模式 + 五套组合完整配置（编辑页按周期渲染主图/副图编辑器）
+    /// preset.snapshot：生效模式 + 五套组合完整配置 + 指标目录（编辑页按周期渲染可选项）
     private static func snapshot(_ request: WebBridgeRequest) -> [String: Any] {
         let store = ChartPresetStore.shared
         let presetsAny: [[String: Any]] = store.presets.map { presetAny($0) }
@@ -43,7 +47,41 @@ final class PresetBridge {
             "mode": store.activeMode,
             "modeOptions": modeOptions(),
             "presets": presetsAny,
+            "catalog": catalog(),
         ])
+    }
+
+    /// 指标目录：全周期 × 可选主图指标 / 副图分组 / 自定义指标（编辑页渲染选项用，配置只存启用集合）
+    private static func catalog() -> [String: Any] {
+        let sys = SystemIndicatorStore.shared
+        let customs = CustomIndicatorStore.shared
+        var periodsAny: [[String: Any]] = []
+        for period in KlinePeriod.allCases {
+            let mainDefs: [[String: Any]] = sys.mainIndicatorDefs(period: period).map {
+                ["id": $0.id, "name": $0.name]
+            }
+            var subMap: [String: [String]] = ["量能": ["VOL", "AMO"]]
+            for def in sys.subIndicatorDefs(period: period) {
+                let g = def.group.isEmpty ? "其他" : def.group
+                subMap[g, default: []].append(def.id)
+            }
+            var groups: [[String: Any]] = []
+            for g in SystemIndicatorStore.subGroupOrder where subMap[g] != nil {
+                groups.append(["group": g, "kinds": subMap[g]!])
+            }
+            for (g, kinds) in subMap where !SystemIndicatorStore.subGroupOrder.contains(g) {
+                groups.append(["group": g, "kinds": kinds])
+            }
+            let customsAny: [[String: Any]] = customs.indicators
+                .filter { CustomIndicatorStore.applicablePeriods(of: $0).contains(period) }
+                .map {
+                    ["id": $0.id.uuidString, "name": $0.name, "colorHex": $0.colorHex,
+                     "scope": $0.scope == .main ? "main" : "sub"]
+                }
+            periodsAny.append(["period": period.rawValue, "mainDefs": mainDefs,
+                               "subGroups": groups, "customs": customsAny])
+        }
+        return ["periods": periodsAny]
     }
 
     private static func modeOptions() -> [[String: Any]] {
