@@ -52,6 +52,20 @@ final class ChartPresetStore: ObservableObject {
         let mode = UserDefaults.standard.string(forKey: Self.activeModeKey) ?? Self.localMode
         // 兜底：落盘 mode 必须是合法槽位（组合 id 不会变，防脏数据）
         activeMode = (mode == Self.localMode || ChartPresetSlots.ids.contains(mode)) ? mode : Self.localMode
+        // USB/PC 快速通道配套：Documents/SyncCache/presets.json 存在即导入（幂等——与本地
+        // 内容一致时槽位替换为零变化）。该文件由 LAN 同步 status 懒生成，或从别的设备经
+        // devicectl 直接拷入（devicectl copy to 不带 UserDefaults，组合定义靠这个文件落地）
+        let presetsDoc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("SyncCache/presets.json")
+        if let data = try? Data(contentsOf: presetsDoc),
+           let remote = try? JSONDecoder().decode([ChartPreset].self, from: data),
+           remote.count == ChartPresetSlots.ids.count {
+            var updated = presets
+            for (i, local) in updated.enumerated() {
+                if let peer = remote.first(where: { $0.id == local.id }) { updated[i] = peer }
+            }
+            presets = updated
+        }
     }
 
     // MARK: - 查询

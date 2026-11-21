@@ -350,6 +350,17 @@ final class IndicatorCacheDB {
 
     // MARK: - LAN 同步整库替换（第 7 类 indicatorCache：对端整库文件 → 本机原子替换）
 
+    /// 整库拉取前置：关闭本机连接并置空（调用方随后删除旧文件、拉取新库）。
+    /// 关闭后缓存查询返回 nil（调用方走重算），重开由 reloadExternal（失败恢复/成功生效）。
+    func closeForExternalReplace() {
+        queue.async { [weak self] in
+            guard let self, self.db != nil else { return }
+            sqlite3_close(self.db)
+            self.db = nil
+            DebugLogger.shared.log("[IndicatorCache] 已关闭本机缓存库（外部整库拉取中）")
+        }
+    }
+
     /// 外部整库替换后重载：关闭旧连接（旧 inode，通用 pullFile 已用 replaceItemAt 覆盖
     /// Documents/indicator_cache.db 本体）→ 重开新文件 → 建表 → 回调（主线程清内存 LRU）。
     /// 须在 queue 上串行执行；reload 完成前的窗口内本机读写仍走旧 inode（毫秒级，可接受）。
