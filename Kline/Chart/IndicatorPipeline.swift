@@ -1380,7 +1380,10 @@ extension KlineChartView {
     /// 用户交互（拖动/缩放）或切换周期/标的/指标时 token 失效，任务自动停止。
     /// 增量状态机与 Swift 分块降级已删除（2026-10-15 用户决策）：图表指标计算唯一路径 = Python 引擎
     func startPrefetch() {
-        guard !sortedData.isEmpty, !mainFullscreen, computation.prefetchToken == nil else { return }
+        guard !sortedData.isEmpty, !mainFullscreen, computation.prefetchToken == nil else {
+            DebugLogger.shared.log("[Prefetch] start 未触发 guard：empty=\(sortedData.isEmpty) full=\(mainFullscreen) busy=\(computation.prefetchToken != nil)")
+            return
+        }
         // 本实例（= 一个 (标的,周期)）已按**当前配置**跑完一次全量 → 直接复用：
         // 联动态（metaId=nil）没有 ChartCacheStore 短路，靠这条内存指纹保证「同一配置只跑一次全量」；
         // 配置变化后指纹不一致 → 放行重跑一次。单图模式下与下面缓存短路互为双保险。
@@ -1417,7 +1420,9 @@ extension KlineChartView {
         // 单次全量调用：引擎就绪 → 一次 bin 调用算整段 [0..targetEnd]
         // （启用缠论时 targetEnd = 可见右缘，非全量）
         let dataFull = hasChanRows ? Array(sortedData[0...targetEnd]) : sortedData
+        DebugLogger.shared.log("[Prefetch] start meta=\(metaId.map(String.init) ?? "nil") \(period.rawValue) 根数=\(dataFull.count) targetEnd=\(targetEnd) chan=\(hasChanRows)")
         guard let req = Self.makeFullRequest(data: dataFull, period: period) else {
+            DebugLogger.shared.log("[Prefetch] makeFullRequest 失败（无可用公式）")
             computation.prefetchToken = nil
             if let metaId = metaId {
                 ChartCacheStore.shared.entry(for: metaId, period: period).isPrefetching = false
