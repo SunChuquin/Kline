@@ -1,0 +1,164 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "name": "nav",
+      "props": { "title": "测试页面", "backAria": "testPage.back" },
+      "emit": [{ "name": "back", "inject": ["navBack"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-subpage",
+      "name": "detailPage",
+      "field": "detailVisible",
+      "value": false,
+      "style": { "display": "flex", "flexDirection": "column", "minHeight": "calc(100vh - 48px)" },
+      "children": [
+        { "type": "k-empty-block", "field": "detailState", "value": { "icon": "ⓘ", "title": "", "sub": "", "size": "lg" } }
+      ]
+    },
+    {
+      "type": "k-subpage",
+      "name": "listPage",
+      "field": "listVisible",
+      "value": true,
+      "children": [
+        {
+          "type": "k-mock-industry-card",
+          "field": "industryCard",
+          "value": {
+            "title": "热门行业",
+            "showMore": true,
+            "updateTime": null,
+            "items": [
+              { "title": "半导体", "subtitle": "+5.23%", "isUp": true },
+              { "title": "证券", "subtitle": "+3.85%", "isUp": true },
+              { "title": "保险", "subtitle": "+2.12%", "isUp": true },
+              { "title": "银行", "subtitle": "+1.56%", "isUp": true },
+              { "title": "医药", "subtitle": "-1.23%", "isUp": false },
+              { "title": "房地产", "subtitle": "-0.85%", "isUp": false }
+            ]
+          },
+          "emit": [{ "name": "pick", "inject": ["openDetail"] }],
+          "emitPrefix": "act"
+        },
+        {
+          "type": "van-row",
+          "props": { "gutter": 12 },
+          "style": { "alignItems": "flex-start" },
+          "children": [
+            {
+              "type": "van-col",
+              "props": { "span": 12 },
+              "style": { "maxHeight": "calc(100vh - 220px)", "overflowY": "auto" },
+              "children": [
+                {
+                  "type": "k-mock-column",
+                  "field": "leftColumn",
+                  "value": { "cards": [
+                    {
+                      "kind": "icons", "title": "应用推荐", "showMore": true, "updateTime": null, "iconBg": true,
+                      "items": [
+                        { "icon": "🛍", "title": "我的持仓" }, { "icon": "📈", "title": "资金流向" },
+                        { "icon": "✨", "title": "技术选股" }, { "icon": "🏢", "title": "新股IPO" },
+                        { "icon": "🔄", "title": "强弱分析" }, { "icon": "🏆", "title": "龙虎榜" },
+                        { "icon": "📅", "title": "潜伏日历" }, { "icon": "💬", "title": "意见反馈" }
+                      ]
+                    },
+                    {
+                      "kind": "list", "title": "今日热点", "showMore": false, "updateTime": "更新于 19:44",
+                      "items": [
+                        { "rank": 1, "title": "第二批公募业绩基准调整全面铺开，最...", "badge": "热", "badgeTone": "red" },
+                        { "rank": 2, "title": "史上最重！证监会出手，两家私募合计...", "badge": "热", "badgeTone": "red" },
+                        { "rank": 3, "title": "闪电开户，0元领L2>>", "badge": null, "badgeTone": "gray" },
+                        { "rank": 4, "title": "新能源赛道迎来重大利好，机构纷纷加仓", "badge": null, "badgeTone": "gray" },
+                        { "rank": 5, "title": "科技股集体爆发，半导体领涨市场", "badge": "热", "badgeTone": "red" }
+                      ]
+                    },
+                    {
+                      "kind": "icons", "title": "市场动态", "showMore": true, "updateTime": "刚刚更新", "iconBg": true,
+                      "items": [
+                        { "icon": "📈", "title": "涨幅榜" }, { "icon": "📉", "title": "跌幅榜" },
+                        { "icon": "⭐", "title": "人气榜" }, { "icon": "🕐", "title": "今日复盘" },
+                        { "icon": "📰", "title": "财经资讯" }, { "icon": "🥧", "title": "板块轮动" }
+                      ]
+                    },
+                    {
+                      "kind": "list", "title": "财经要闻", "showMore": true, "updateTime": "5分钟前更新",
+                      "items": [
+                        { "rank": 1, "title": "央行宣布下调存款准备金率0.5个百分点", "badge": "重要", "badgeTone": "orange" },
+                        { "rank": 2, "title": "新能源汽车销量创新高，产业链迎机遇", "badge": "热", "badgeTone": "red" },
+                        { "rank": 3, "title": "半导体行业迎来政策利好，龙头企业受益", "badge": null, "badgeTone": "gray" },
+                        { "rank": 4, "title": "医药板块持续调整，机构建议关注低估值标的", "badge": null, "badgeTone": "gray" },
+                        { "rank": 5, "title": "消费复苏态势明显，零售板块有望反弹", "badge": "新", "badgeTone": "green" },
+                        { "rank": 6, "title": "人工智能应用加速落地，相关概念股走强", "badge": "热", "badgeTone": "red" },
+                        { "rank": 7, "title": "光伏产业景气度高企，组件价格企稳回升", "badge": null, "badgeTone": "gray" },
+                        { "rank": 8, "title": "银行板块估值修复，中长期投资价值显现", "badge": null, "badgeTone": "gray" }
+                      ]
+                    }
+                  ] },
+                  "emit": [{ "name": "pick", "inject": ["openDetail"] }],
+                  "emitPrefix": "act"
+                }
+              ]
+            },
+            {
+              "type": "van-col",
+              "props": { "span": 12 },
+              "style": { "maxHeight": "calc(100vh - 220px)", "overflowY": "auto" },
+              "children": [
+                {
+                  "type": "k-mock-column",
+                  "field": "rightColumn",
+                  "value": { "cards": [
+                    {
+                      "kind": "icons", "title": "数据中心", "showMore": true, "updateTime": null, "iconBg": false,
+                      "items": [
+                        { "icon": "📅", "title": "打新日历" }, { "icon": "📄", "title": "研报" },
+                        { "icon": "🔥", "title": "涨停聚焦" }, { "icon": "📈", "title": "投资机会" }
+                      ]
+                    },
+                    {
+                      "kind": "icons", "title": "工具中心", "showMore": false, "updateTime": null, "iconBg": true,
+                      "items": [
+                        { "icon": "🧮", "title": "计算器" }, { "icon": "📏", "title": "度量工具" },
+                        { "icon": "🧭", "title": "指南针" }, { "icon": "⏱", "title": "倒计时" },
+                        { "icon": "🎯", "title": "目标设置" }
+                      ]
+                    },
+                    {
+                      "kind": "list", "title": "财经要闻", "showMore": true, "updateTime": "5分钟前更新",
+                      "items": [
+                        { "rank": 1, "title": "央行宣布下调存款准备金率0.5个百分点", "badge": "重要", "badgeTone": "orange" },
+                        { "rank": 2, "title": "新能源汽车销量创新高，产业链迎机遇", "badge": "热", "badgeTone": "red" },
+                        { "rank": 3, "title": "半导体行业迎来政策利好，龙头企业受益", "badge": null, "badgeTone": "gray" },
+                        { "rank": 4, "title": "医药板块持续调整，机构建议关注低估值标的", "badge": null, "badgeTone": "gray" },
+                        { "rank": 5, "title": "消费复苏态势明显，零售板块有望反弹", "badge": "新", "badgeTone": "green" },
+                        { "rank": 6, "title": "人工智能应用加速落地，相关概念股走强", "badge": "热", "badgeTone": "red" },
+                        { "rank": 7, "title": "光伏产业景气度高企，组件价格企稳回升", "badge": null, "badgeTone": "gray" },
+                        { "rank": 8, "title": "银行板块估值修复，中长期投资价值显现", "badge": null, "badgeTone": "gray" }
+                      ]
+                    },
+                    {
+                      "kind": "icons", "title": "应用推荐", "showMore": true, "updateTime": null, "iconBg": true,
+                      "items": [
+                        { "icon": "🛍", "title": "我的持仓" }, { "icon": "📈", "title": "资金流向" },
+                        { "icon": "✨", "title": "技术选股" }, { "icon": "🏢", "title": "新股IPO" },
+                        { "icon": "🔄", "title": "强弱分析" }, { "icon": "🏆", "title": "龙虎榜" },
+                        { "icon": "📅", "title": "潜伏日历" }, { "icon": "💬", "title": "意见反馈" }
+                      ]
+                    }
+                  ] },
+                  "emit": [{ "name": "pick", "inject": ["openDetail"] }],
+                  "emitPrefix": "act"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

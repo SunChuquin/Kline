@@ -1,72 +1,55 @@
 <template>
   <div class="web-page">
-    <!-- :key = pageSeq：WebView 常驻复用后，同名页面重开（如连续两次公式编辑器）时
-         组件不再天然重挂载，强制重建以重新执行 mounted 快照拉取 -->
-    <LanSyncPanel v-if="activeName === 'lanSync'" :key="`lan-${pageSeq}`" @close="closePage" />
-    <LocalUpdatePanel v-else-if="activeName === 'localUpdate'" :key="`upd-${pageSeq}`" @close="closePage" />
-    <EngineLabPanel v-else-if="activeName === 'pythonLab'" :key="`lab-${pageSeq}`" @close="closePage" />
-    <BacktestPanel v-else-if="activeName === 'backtest'" :key="`bt-${pageSeq}`" @close="closePage" />
-    <TrainingRecordsPanel v-else-if="activeName === 'trainingRecords'" :key="`tr-${pageSeq}`" @close="closePage" />
-    <FormulaEditorPanel v-else-if="activeName === 'formulaEditor'" :key="`fe-${pageSeq}`" @close="closePage" />
-    <StrategyEditorPanel v-else-if="activeName === 'strategyEditor'" :key="`se-${pageSeq}`" @close="closePage" />
-    <PickerEditPanel v-else-if="activeName === 'pickerEditor'" :key="`pe-${pageSeq}`" @close="closePage" />
-    <StrategyDetailPanel v-else-if="activeName === 'strategyDetail'" :key="`sd-${pageSeq}`" @close="closePage" />
-    <PickRunPanel v-else-if="activeName === 'pickRun'" :key="`pr-${pageSeq}`" @close="closePage" />
-    <TestPagePanel v-else-if="activeName === 'testPage'" :key="`tp-${pageSeq}`" @close="closePage" />
-    <!-- P1 规则化迁移：缓存管理页由 FcPageHost 按规则 JSON 渲染 -->
-    <FcPageHost v-else-if="activeName === 'cacheManage'" name="page-cacheManage" domain="page" :key="`cm-${pageSeq}`" @close="closePage" />
-    <TicketPanel v-else-if="activeName === 'ticket'" :key="`tk-${pageSeq}`" @close="closePage" />
-    <CondManagePanel v-else-if="activeName === 'condManage'" :key="`cm-${pageSeq}`" @close="closePage" />
-    <CondEditorPanel v-else-if="activeName === 'condEditor'" :key="`ce-${pageSeq}`" @close="closePage" />
-    <ProfilePanel v-else-if="activeName === 'profile'" :key="`pf-${pageSeq}`" @close="closePage" />
-    <SearchPanel v-else-if="activeName === 'search'" :key="`sh-${pageSeq}`" @close="closePage" />
+    <FcPageHost
+      v-if="ruleName"
+      :name="ruleName"
+      domain="page"
+      :key="`${ruleName}-${pageSeq}`"
+      :payload="openPayload ?? undefined"
+      @close="closePage"
+    />
     <div v-else class="page-empty"></div>
   </div>
 </template>
 
 <script setup lang="ts">
-// 全屏 Web 页壳（P2-6c-1/c-2）：page.open 事件路由到对应面板；mounted 时调 page.ready
-// 就绪拉取（page.open 可能早于本 WebView 创建/加载完成发出——sheet.ready 同款时序坑）。
-// P2-9：宿主 WebView 常驻复用（关闭仅隐藏），pageSeq 驱动面板重挂载拉最新快照。
-import { onMounted, ref } from 'vue'
+// 全屏 Web 页壳（规则化终态）：page.open 路由到 page-<name> 规则页（FcPageHost 按
+// JSON 渲染 + adapter 接线）；WebView 常驻复用，pageSeq 驱动重挂载拉最新快照。
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { klineBus } from '../bridge/klineBus'
 import FcPageHost from '../fc/FcPageHost.vue'
-import LanSyncPanel from '../components/page/LanSyncPanel.vue'
-import LocalUpdatePanel from '../components/page/LocalUpdatePanel.vue'
-import EngineLabPanel from '../components/page/EngineLabPanel.vue'
-import BacktestPanel from '../components/page/BacktestPanel.vue'
-import TrainingRecordsPanel from '../components/page/TrainingRecordsPanel.vue'
-import FormulaEditorPanel from '../components/page/FormulaEditorPanel.vue'
-import StrategyEditorPanel from '../components/page/StrategyEditorPanel.vue'
-import PickerEditPanel from '../components/page/PickerEditPanel.vue'
-import StrategyDetailPanel from '../components/page/StrategyDetailPanel.vue'
-import PickRunPanel from '../components/page/PickRunPanel.vue'
-import TestPagePanel from '../components/page/TestPagePanel.vue'
-import TicketPanel from '../components/page/TicketPanel.vue'
-import CondManagePanel from '../components/page/CondManagePanel.vue'
-import CondEditorPanel from '../components/page/CondEditorPanel.vue'
-import ProfilePanel from '../components/page/ProfilePanel.vue'
-import SearchPanel from '../components/page/SearchPanel.vue'
 
+const route = useRoute()
 const activeName = ref<string | null>(null)
 const pageSeq = ref(0)
+const openPayload = ref<Record<string, unknown> | null>(null)
+
+const ruleName = computed(() => (activeName.value ? `page-${activeName.value}` : null))
 
 function closePage(): void {
   // busy 时 Swift 侧 fail 拒绝（LAN 传输中），页面保持打开
   void klineBus.request('page', 'close').catch((e) => console.error('page.close 失败', e))
 }
 
+// dev/PC 调试循环：非 native 通道时支持 #/page?open=name 直开面板（watch query
+// 以支持 SPA 内 hash 直变；native 通道由 page.open 事件驱动，忽略 query）
+watch(() => route.query.open, (open) => {
+  if (klineBus.transport === 'native') return
+  const name = typeof open === 'string' ? open : ''
+  if (name && name !== activeName.value) {
+    activeName.value = name
+    pageSeq.value += 1
+  }
+}, { immediate: true })
+
 onMounted(async () => {
   await klineBus.detect()
   klineBus.on('page.open', (ev) => {
     activeName.value = String(ev.payload?.['name'] ?? '')
     pageSeq.value += 1
+    openPayload.value = (ev.payload ?? null) as Record<string, unknown> | null
   })
-  // dev/PC 调试循环：非 native 通道时支持 #/page?open=name 直开面板，便于规则页迭代验证
-  if (klineBus.transport !== 'native') {
-    const open = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('open')
-    if (open) activeName.value = open
-  }
   try {
     await klineBus.request('page', 'ready')
   } catch (e) {

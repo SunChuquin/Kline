@@ -89,10 +89,12 @@
 <script setup lang="ts">
 // 弹层浮层壳（P2 规则化收尾）：8 个面板内容区全部由 FcPageHost 按规则 JSON 渲染；
 // 本壳仅保留遮罩/定位/标题 chrome 与 sheet.open 路由 + 就绪拉取。
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { klineBus } from '../bridge/klineBus'
 import FcPageHost from '../fc/FcPageHost.vue'
 
+const route = useRoute()
 const activeName = ref<string | null>(null)
 const openPayload = ref<Record<string, unknown> | null>(null)
 
@@ -106,17 +108,20 @@ async function handleSheetOpen(name: string, payload: Record<string, unknown> | 
   openPayload.value = payload ?? null
 }
 
+// dev/PC 调试循环：非 native 通道时支持 #/sheet?open=name 直开弹层（watch query
+// 以支持 SPA 内 hash 直变；native 通道由 sheet.open 事件驱动）
+watch(() => route.query.open, (open) => {
+  if (klineBus.transport === 'native') return
+  const name = typeof open === 'string' ? open : ''
+  if (name && name !== activeName.value) void handleSheetOpen(name, undefined)
+}, { immediate: true })
+
 onMounted(async () => {
   await klineBus.detect()
   klineBus.on('sheet.open', (ev) => {
     const name = typeof ev.payload?.name === 'string' ? ev.payload.name : ''
     if (name) void handleSheetOpen(name, ev.payload)
   })
-  // dev/PC 调试循环：非 native 通道时支持 #/sheet?open=name 直开弹层，便于规则页迭代验证
-  if (klineBus.transport !== 'native') {
-    const open = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('open')
-    if (open) await handleSheetOpen(open, undefined)
-  }
   // 浮层就绪拉取：sheet.open 事件可能早于本 WebView 创建/加载完成发出（首次打开时序）
   // → 事件丢失面板永不渲染；就绪后主动向宿主拉取当前待展示弹层
   try {

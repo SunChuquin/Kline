@@ -1,0 +1,69 @@
+{
+  "rule": [
+    {
+      "type": "k-editor-nav",
+      "name": "navRow",
+      "props": { "title": "选股公式", "backLabel": "‹ 返回", "backAria": "pickerEdit.back", "rightLabel": "保存", "rightAria": "pickerEdit.save", "rightDisabled": true },
+      "emit": [{ "name": "back", "inject": ["onBack"] }, { "name": "right", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-chip-group",
+      "name": "toolChips",
+      "props": {
+        "aria-label": "pickerEdit.toolbar",
+        "options": [
+          { "label": "全选", "value": "selectAll" },
+          { "label": "清空", "value": "clearPick" },
+          { "label": "测试公式", "value": "runTest", "ariaLabel": "pickerEdit.test" }
+        ],
+        "data-act": "pickTool"
+      },
+      "emit": [{ "name": "select", "inject": ["pickTool"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "6px" }
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "名称", "titleWidth": "68px", "center": true, "border": false },
+      "children": [
+        { "type": "van-field", "field": "name", "props": { "placeholder": "例如：放量突破", "center": true, "style": { "padding": "0", "background": "transparent" } } }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "选股公式" } },
+    { "type": "k-formula-input", "name": "pickInput", "field": "pickBody", "value": "", "props": { "ariaLabel": "pickerEdit.formula", "minHeight": "180px", "rows": 7 } },
+    { "type": "html", "native": true, "children": ["<div class=\"fc-note\">支持：MA/EMA/SMA/REF/HHV/LLV/ABS/MAX/MIN/SUM/STD/COUNT/IF/CROSS/BARSLAST/AND/OR/NOT，数据 C/H/L/O/V/AMOUNT，运算符 + - * / &lt; &gt; &lt;= &gt;= == !=</div>"] },
+    { "type": "html", "native": true, "children": ["<div class=\"fc-note\">最后一根输出值 &gt; 0 视为命中（公式选股口径）</div>"] },
+    { "type": "k-sec-title", "props": { "text": "常用符号" } },
+    {
+      "type": "k-chip-group",
+      "name": "symbolsChips",
+      "props": {
+        "options": [
+          { "label": ":=", "value": ":=" }, { "label": ";", "value": ";" }, { "label": ",", "value": "," },
+          { "label": "：", "value": "：" }, { "label": "（", "value": "（" }, { "label": "）", "value": "）" },
+          { "label": "{", "value": "{" }, { "label": "}", "value": "}" }, { "label": "=", "value": "=" },
+          { "label": "+", "value": "+" }, { "label": "-", "value": "-" }, { "label": "!", "value": "!" },
+          { "label": "*", "value": "*" }, { "label": "/", "value": "/" }, { "label": "<", "value": "<" },
+          { "label": ">", "value": ">" }, { "label": "AND", "value": "AND" }, { "label": "OR", "value": "OR" }
+        ],
+        "data-act": "insertSymbol"
+      },
+      "emit": [{ "name": "select", "inject": ["insertSymbol"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "testMsg", "props": { "text": "", "plain": true }, "style": { "display": "none" } },
+    { "type": "html", "native": true, "children": ["<div style=\"height:24px\"></div>"] },
+    {
+      "type": "van-dialog",
+      "field": "confirmOpen",
+      "value": false,
+      "name": "confirmDialog",
+      "props": { "title": "存在修改未保存，是否取消修改？", "showCancelButton": true, "cancelButtonText": "继续编辑", "confirmButtonText": "取消修改", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["close"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

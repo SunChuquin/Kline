@@ -1,0 +1,161 @@
+{
+  "rule": [
+    {
+      "type": "k-subpage",
+      "name": "paramsPage",
+      "field": "paramsVisible",
+      "value": true,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "name": "paramsNav",
+          "props": { "title": "历史回测", "backAria": "page.back", "rightText": "开始回测", "rightDisabled": false },
+          "emit": [
+            { "name": "back", "inject": ["close"] },
+            { "name": "right", "inject": ["run"] }
+          ],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        { "type": "html", "native": true, "children": ["<div style=\"height: 14px\"></div>"] },
+        { "type": "k-sec-title", "name": "tradeWarn", "props": { "text": "建议先在编辑里配置交易指令（方向 / 数量）", "warn": true } },
+        { "type": "k-sec-title", "props": { "text": "回测参数" } },
+        {
+          "type": "van-cell-group",
+          "props": { "inset": true },
+          "style": { "background": "var(--k-bg-secondary, #f2f2f7)", "borderRadius": "12px", "padding": "4px 12px", "marginBottom": "12px" },
+          "children": [
+            {
+              "type": "van-cell",
+              "props": { "title": "回测区间", "titleWidth": "60px", "center": true, "border": false },
+              "children": [
+                { "type": "k-chip-group", "field": "days", "value": "250", "props": { "options": [
+                  { "label": "60", "value": "60" },
+                  { "label": "120", "value": "120" },
+                  { "label": "250", "value": "250" },
+                  { "label": "500", "value": "500" }
+                ] } }
+              ]
+            },
+            {
+              "type": "van-cell",
+              "props": { "title": "初始资金", "titleWidth": "60px", "center": true },
+              "children": [
+                { "type": "van-field", "field": "capitalText", "value": "100000", "props": { "type": "number", "center": true, "placeholder": "100000", "style": { "width": "120px", "padding": "0", "background": "transparent" } } },
+                { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+              ]
+            },
+            {
+              "type": "van-cell",
+              "props": { "title": "快捷", "titleWidth": "60px", "center": true, "border": false },
+              "children": [
+                { "type": "k-chip-group", "props": { "options": [
+                  { "label": "10 万", "value": "100000" },
+                  { "label": "50 万", "value": "500000" },
+                  { "label": "100 万", "value": "1000000" }
+                ] }, "emit": [{ "name": "select", "inject": ["capitalChip"] }], "emitPrefix": "act" }
+              ]
+            },
+            {
+              "type": "van-cell",
+              "props": { "title": "候选池", "titleWidth": "60px", "center": true },
+              "children": [
+                { "type": "k-chip-group", "field": "pool", "value": "market", "props": { "options": [
+                  { "label": "全市场", "value": "market" },
+                  { "label": "自选", "value": "favorites" }
+                ] } }
+              ]
+            },
+            {
+              "type": "van-cell",
+              "props": { "title": "信号次日开盘成交", "titleWidth": "140px", "center": true, "border": false },
+              "children": [
+                { "type": "van-switch", "field": "executeNextOpen", "value": true, "props": { "size": "22px" } }
+              ]
+            },
+            { "type": "k-sec-title", "props": { "text": "关闭则按信号当日收盘价成交；开启更贴近实盘，避免用当日收盘决定当日成交的前视偏差", "plain": true } },
+            {
+              "type": "van-cell",
+              "props": { "title": "把选股命中当作买入信号", "titleWidth": "140px", "center": true, "border": false },
+              "children": [
+                { "type": "van-switch", "field": "includeEntry", "value": true, "props": { "size": "22px" } }
+              ]
+            },
+            { "type": "k-sec-title", "props": { "text": "关闭则只回测已有持仓上的规则（本策略无持仓来源时结果会为空）", "plain": true } }
+          ]
+        },
+        { "type": "k-sec-title", "props": { "text": "回测基于本地日线库；不还原盘中路径，回落卖出按 bar 内先高后低假设；条件单实盘只吃行情快照，触发必然晚于回测", "plain": true } }
+      ]
+    },
+    {
+      "type": "k-subpage",
+      "name": "progressPage",
+      "field": "progressVisible",
+      "value": false,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "props": { "title": "历史回测", "backAria": "page.back" },
+          "emit": [{ "name": "back", "inject": ["cancelAndClose"] }],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        { "type": "html", "native": true, "children": ["<div style=\"height: 14px\"></div>"] },
+        { "type": "k-backtest-progress", "name": "backtestProgress", "field": "backtestProgress", "value": { "state": "idle", "done": 0, "total": 0 } },
+        { "type": "k-sec-title", "name": "failLine", "props": { "text": "回测失败", "warn": true } },
+        {
+          "type": "van-button",
+          "name": "cancelRunBtn",
+          "props": { "size": "small", "plain": true, "type": "primary", "data-act": "cancelAndClose", "aria-label": "backtest.cancel" },
+          "children": ["取消"],
+          "emit": [{ "name": "click", "inject": ["cancelAndClose"] }],
+          "emitPrefix": "act",
+          "style": { "marginTop": "10px" }
+        },
+        {
+          "type": "van-button",
+          "name": "failBackBtn",
+          "props": { "size": "small", "plain": true, "type": "primary", "data-act": "closePage", "aria-label": "backtest.back" },
+          "children": ["返回"],
+          "emit": [{ "name": "click", "inject": ["closePage"] }],
+          "emitPrefix": "act",
+          "style": { "marginTop": "10px" }
+        }
+      ]
+    },
+    {
+      "type": "k-subpage",
+      "name": "resultPage",
+      "field": "resultVisible",
+      "value": false,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "props": { "title": "回测结果", "backAria": "page.back" },
+          "emit": [{ "name": "back", "inject": ["close"] }],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        { "type": "html", "native": true, "children": ["<div style=\"height: 14px\"></div>"] },
+        { "type": "k-sec-title", "props": { "text": "指标" } },
+        { "type": "k-metric-grid", "field": "resultStats", "value": { "cells": [] } },
+        { "type": "k-sec-title", "props": { "text": "净值曲线" } },
+        { "type": "k-net-chart", "field": "netChart", "value": { "equity": [], "initialCapital": 0, "maxDrawdownRange": null } },
+        { "type": "k-subpage", "name": "emptyBlock", "field": "emptyVisible", "value": false, "children": [
+          { "type": "k-card-lines", "field": "emptyCard", "value": { "lines": [
+            { "text": "本次区间内没有产生任何成交", "tone": "text" },
+            { "text": "请检查候选池 / 回测区间 / 入场信号开关", "tone": "sub" }
+          ] } }
+        ] },
+        { "type": "k-subpage", "name": "tradesBlock", "field": "tradesVisible", "value": false, "children": [
+          { "type": "k-sec-title", "props": { "text": "交易明细" } },
+          { "type": "k-trade-table", "field": "tradeTable", "value": { "rows": [] } }
+        ] },
+        { "type": "k-sec-title", "props": { "text": "提示" } },
+        { "type": "k-notice-card", "field": "noticeCard", "value": { "warnings": [], "skipped": [] } },
+        { "type": "html", "native": true, "children": ["<div style=\"height: 16px\"></div>"] }
+      ]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

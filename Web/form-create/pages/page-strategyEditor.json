@@ -1,0 +1,236 @@
+{
+  "rule": [
+    {
+      "type": "k-editor-nav",
+      "name": "navRow",
+      "props": { "title": "策略公式", "backLabel": "取消", "backAria": "strategyEditor.cancel", "rightLabel": "保存", "rightAria": "strategyEditor.save", "rightDisabled": true },
+      "emit": [{ "name": "back", "inject": ["close"] }, { "name": "right", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "名称", "titleWidth": "68px", "center": true, "border": false },
+      "children": [
+        { "type": "van-field", "field": "name", "props": { "placeholder": "例如：趋势回踩策略", "center": true, "style": { "padding": "0", "background": "transparent" } } }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "选股条件" } },
+    {
+      "type": "k-chip-group",
+      "name": "modeChips",
+      "props": { "options": [{ "label": "内嵌公式", "value": "inline" }, { "label": "引用选股公式", "value": "reference" }], "data-act": "setMode" },
+      "emit": [{ "name": "select", "inject": ["setMode"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-cell-group",
+      "name": "inlineBlock",
+      "children": [
+        { "type": "k-formula-input", "name": "pickInput", "field": "pickBody", "value": "", "props": { "ariaLabel": "strategyEditor.pickBody", "minHeight": "140px", "rows": 5 } },
+        {
+          "type": "k-chip-group",
+          "name": "toolChips",
+          "props": {
+            "options": [
+              { "label": "全选", "value": "selectAll" },
+              { "label": "清空", "value": "clearPick" },
+              { "label": "测试选股公式", "value": "runTest", "ariaLabel": "strategyEditor.testPick" }
+            ],
+            "data-act": "pickTool"
+          },
+          "emit": [{ "name": "select", "inject": ["pickTool"] }],
+          "emitPrefix": "act",
+          "style": { "marginTop": "8px" }
+        },
+        { "type": "k-sec-title", "name": "dataNote", "props": { "text": "样例行情未就绪，语法校验待行情到达后进行", "warn": true }, "style": { "display": "none" } },
+        { "type": "k-sec-title", "name": "testMsg", "props": { "text": "", "plain": true }, "style": { "display": "none" } }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "refBlock",
+      "style": { "display": "none" },
+      "children": [
+        {
+          "type": "k-ref-row-list",
+          "name": "pickerList",
+          "field": "pickerList",
+          "value": { "rows": [], "emptyText": "公式库还没有选股公式，请先到「选股指标」段新建" },
+          "emit": [{ "name": "toggle", "inject": ["pickRefToggle"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "交易指令" } },
+    {
+      "type": "van-cell-group",
+      "name": "tradeCard",
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "方向", "titleWidth": "68px", "center": true, "border": false },
+          "children": [
+            { "type": "k-sec-title", "name": "dirWarn", "props": { "text": "请选择", "warn": true }, "style": { "display": "none" } },
+            {
+              "type": "k-chip-group",
+              "name": "dirChips",
+              "props": { "options": [{ "label": "买入", "value": "buy" }, { "label": "卖出", "value": "sell" }], "data-act": "toggleDir" },
+              "emit": [{ "name": "select", "inject": ["toggleDir"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "数量 / 金额", "titleWidth": "68px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "sizeModeChips",
+              "props": { "options": [{ "label": "按数量", "value": "qty" }, { "label": "按金额", "value": "amount" }], "data-act": "pickSizeMode" },
+              "emit": [{ "name": "select", "inject": ["pickSizeMode"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "qtyInline",
+          "props": { "titleWidth": "68px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "qtyText", "props": { "type": "number", "placeholder": "100", "center": true, "style": { "width": "84px", "padding": "0", "background": "transparent" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">股</span>"] },
+            {
+              "type": "k-chip-group",
+              "name": "qtyChips",
+              "props": { "options": [{ "label": "100", "value": "100" }, { "label": "500", "value": "500" }, { "label": "1000", "value": "1000" }], "data-act": "setQty" },
+              "emit": [{ "name": "select", "inject": ["setQty"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell-group",
+          "name": "amountBlock",
+          "style": { "display": "none" },
+          "children": [
+            {
+              "type": "van-cell",
+              "props": { "titleWidth": "68px", "center": true, "border": false },
+              "children": [
+                { "type": "van-field", "field": "amountText", "props": { "type": "number", "placeholder": "50000", "center": true, "style": { "width": "140px", "padding": "0", "background": "transparent" } } },
+                { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+              ]
+            },
+            { "type": "k-sec-title", "props": { "text": "生成条件单时按最新价折算并向下取整到 100 股", "plain": true } }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "报价方式", "titleWidth": "68px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "priceTypeChips",
+              "props": { "options": [{ "label": "市价", "value": "market" }, { "label": "限价", "value": "limit" }], "data-act": "pickPriceType" },
+              "emit": [{ "name": "select", "inject": ["pickPriceType"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell-group",
+          "name": "offsetInline",
+          "style": { "display": "none" },
+          "children": [
+            {
+              "type": "van-cell",
+              "props": { "titleWidth": "68px", "center": true, "border": false },
+              "children": [
+                { "type": "van-field", "field": "offsetText", "props": { "type": "number", "placeholder": "0", "center": true, "style": { "width": "96px", "padding": "0", "background": "transparent" } } },
+                { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">档</span>"] }
+              ]
+            },
+            { "type": "k-sec-title", "props": { "text": "触达触发价 ± N 档委托", "plain": true } }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "有效期", "titleWidth": "68px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "validityChips",
+              "props": { "options": [{ "label": "当日", "value": "day" }, { "label": "长期", "value": "longTerm" }, { "label": "指定日期", "value": "untilDate" }], "data-act": "pickValidity" },
+              "emit": [{ "name": "select", "inject": ["pickValidity"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "expiryInline",
+          "props": { "title": "到期日", "titleWidth": "68px", "center": true, "border": false },
+          "style": { "display": "none" },
+          "children": [
+            { "type": "van-field", "field": "expiryText", "props": { "type": "date", "center": true, "style": { "padding": "0", "background": "transparent" } } }
+          ]
+        }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "绑定账户（可多选）" } },
+    { "type": "k-sec-title", "name": "staleWarn", "props": { "text": "", "warn": true }, "style": { "display": "none" } },
+    {
+      "type": "k-ref-row-list",
+      "name": "accountList",
+      "field": "accountList",
+      "value": { "rows": [], "emptyText": "还没有模拟账户，请先到模拟页创建" },
+      "emit": [{ "name": "toggle", "inject": ["toggleAccount"] }],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "props": { "text": "生成条件单时会为每个账户各生成一套；多账户并行执行", "plain": true } },
+    {
+      "type": "van-cell",
+      "props": { "title": "交易规则（RULES）", "titleWidth": "68px", "center": true, "border": false, "titleStyle": { "fontWeight": "600" } },
+      "children": [
+        {
+          "type": "k-chip-group",
+          "name": "addChip",
+          "props": { "options": [{ "label": "＋ 添加规则", "value": "add", "ariaLabel": "strategyEditor.addRule" }], "data-act": "addRule" },
+          "emit": [{ "name": "select", "inject": ["addRule"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    { "type": "k-sec-title", "name": "parseErrs", "props": { "text": "", "danger": true }, "style": { "display": "none", "whiteSpace": "pre-line" } },
+    {
+      "type": "k-rule-row-list",
+      "name": "ruleRows",
+      "field": "ruleRows",
+      "value": { "rows": [], "catalog": [] },
+      "emit": [
+        { "name": "kindchange", "inject": ["ruleKind"] },
+        { "name": "param", "inject": ["ruleParam"] },
+        { "name": "del", "inject": ["ruleDel"] }
+      ],
+      "emitPrefix": "act"
+    },
+    { "type": "k-sec-title", "name": "pvTrade", "props": { "text": "", "plain": true }, "style": { "display": "none" } },
+    { "type": "k-sec-title", "name": "pvSummary", "props": { "text": "" }, "style": { "display": "none" } },
+    { "type": "k-sec-title", "name": "pvNotice", "props": { "text": "", "plain": true }, "style": { "display": "none" } },
+    { "type": "k-sec-title", "name": "pendingNote", "props": { "text": "Python 引擎计算中 校验中", "plain": true } },
+    { "type": "k-sec-title", "name": "issuesLine", "props": { "text": "", "danger": true }, "style": { "display": "none", "whiteSpace": "pre-line" } },
+    {
+      "type": "van-button",
+      "name": "saveBtn",
+      "props": { "color": "#1989fa", "block": true, "round": false, "disabled": true, "data-act": "save" },
+      "children": ["保存策略公式"],
+      "emit": [{ "name": "click", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "10px" }
+    },
+    { "type": "html", "native": true, "children": ["<div style=\"height:16px\"></div>"] }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

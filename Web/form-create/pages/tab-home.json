@@ -1,0 +1,49 @@
+{
+  "rule": [
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div style=\"font-size:12px;color:var(--k-text-secondary,#6c6c70);padding:6px 16px 0;\">首页 · Web 版（P2-3）</div>"]
+    },
+    {
+      "type": "html",
+      "native": true,
+      "name": "bridgeWarn",
+      "style": { "display": "none" },
+      "children": ["<div style=\"margin:8px 16px 0;background:var(--k-bg-secondary,#f2f2f7);border-radius:12px;padding:12px 16px;font-size:13px;color:#b25000;\">桥接不可达：显示占位界面</div>"]
+    },
+    {
+      "type": "k-home-header",
+      "emit": [{ "name": "open", "inject": ["openEntry"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-home-entries",
+      "field": "entries",
+      "value": { "entries": [] },
+      "emit": [{ "name": "open", "inject": ["openEntry"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-home-cards",
+      "field": "cards",
+      "value": {
+        "indices": [],
+        "breadth": null,
+        "favorites": [],
+        "sim": { "totalAssets": 0, "dayProfit": 0, "dayProfitPct": 0, "positionPct": 0 },
+        "simPositions": [],
+        "gainers": [],
+        "loaded": false,
+        "hasMainBoard": true,
+        "gainersReady": false
+      },
+      "emit": [
+        { "name": "openDetail", "inject": ["openDetail"] },
+        { "name": "switchTab", "inject": ["switchTab"] }
+      ],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

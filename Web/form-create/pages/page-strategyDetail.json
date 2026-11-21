@@ -1,0 +1,55 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "name": "nav",
+      "props": { "title": "策略详情", "backAria": "strategyDetail.back", "rightText": "编辑", "rightAria": "strategyDetail.edit" },
+      "emit": [
+        { "name": "back", "inject": ["close"] },
+        { "name": "right", "inject": ["edit"] }
+      ],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    { "type": "k-toast-bar", "field": "toastText", "value": "" },
+    {
+      "type": "k-card-lines",
+      "name": "pickCard",
+      "field": "pickCard",
+      "value": { "title": "选股条件", "lines": [{ "text": "…", "tone": "text" }] },
+      "props": { "ariaLabel": "strategyDetail.pickCard" }
+    },
+    {
+      "type": "k-card-lines",
+      "name": "tradeCard",
+      "field": "tradeCard",
+      "value": { "title": "交易指令与绑定账户", "lines": [{ "text": "…", "tone": "text" }] },
+      "props": { "ariaLabel": "strategyDetail.tradeCard" }
+    },
+    {
+      "type": "k-card-lines",
+      "name": "rulesCard",
+      "field": "rulesCard",
+      "value": { "title": "交易规则", "lines": [{ "text": "…", "tone": "sec" }] },
+      "props": { "ariaLabel": "strategyDetail.rulesCard" }
+    },
+    {
+      "type": "k-card-lines",
+      "name": "execCard",
+      "field": "execCard",
+      "value": { "title": "执行", "lines": [] },
+      "props": { "ariaLabel": "strategyDetail.actions" },
+      "children": [
+        {
+          "type": "k-actions-row",
+          "field": "execButtons",
+          "value": { "buttons": [] },
+          "emit": [{ "name": "act", "inject": ["dispatchExec"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    { "type": "html", "native": true, "children": ["<div style=\"height: 24px\"></div>"] }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

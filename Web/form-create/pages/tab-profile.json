@@ -1,0 +1,141 @@
+{
+  "rule": [
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div style=\"font-size:12px;color:var(--k-text-secondary,#6c6c70);padding:8px 0 14px;\">Web 试点：只读快照 + 组件库验收（P1）</div>"]
+    },
+    {
+      "type": "html",
+      "native": true,
+      "name": "bridgeWarn",
+      "style": { "display": "none" },
+      "children": ["<div style=\"background:var(--k-bg-secondary,#f2f2f7);border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:13px;color:#b25000;\">非桥接环境（PC 浏览器开发调试）：以下为占位数据，桥接探针不可用</div>"]
+    },
+    { "type": "k-sec-title", "props": { "text": "版本信息" } },
+    {
+      "type": "van-cell",
+      "name": "cellVersion",
+      "props": { "title": "App 版本", "value": "— (—)", "center": true }
+    },
+    {
+      "type": "van-cell",
+      "name": "cellBuild",
+      "props": { "title": "Web 构建", "value": "—", "center": true }
+    },
+    { "type": "k-sec-title", "props": { "text": "显示主题" } },
+    {
+      "type": "van-cell",
+      "props": { "title": "主题偏好", "center": true },
+      "children": [
+        {
+          "type": "k-chip-group",
+          "field": "themePreference",
+          "value": "system",
+          "props": {
+            "options": [
+              { "label": "跟随系统", "value": "system" },
+              { "label": "日间模式", "value": "light" },
+              { "label": "夜间模式", "value": "dark" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "name": "cellThemeMode",
+      "props": { "title": "实际外观", "value": "—", "center": true }
+    },
+    { "type": "k-sec-title", "props": { "text": "行情自动更新" } },
+    {
+      "type": "van-cell",
+      "name": "cellSyncEnabled",
+      "props": { "title": "状态", "value": "—", "center": true }
+    },
+    {
+      "type": "van-cell",
+      "name": "cellSchedule",
+      "props": { "title": "时刻表", "value": "—", "center": true }
+    },
+    {
+      "type": "van-cell",
+      "name": "cellTradingDays",
+      "props": { "title": "仅交易日", "value": "—", "center": true }
+    },
+    { "type": "k-sec-title", "props": { "text": "数据库" } },
+    {
+      "type": "van-cell",
+      "name": "cellDbNotLoaded",
+      "props": { "title": "主库状态", "center": true },
+      "children": [
+        { "type": "html", "native": true, "children": ["<b style=\"font-weight:500;color:var(--k-text,#000)\">未加载</b>"] }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "name": "cellDbLoaded",
+      "style": { "display": "none" },
+      "props": { "title": "主库状态", "center": true },
+      "children": [
+        { "type": "html", "native": true, "children": ["<b style=\"font-weight:500;color:var(--k-ok,#34c759)\">已加载</b>"] }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "桥接探针" } },
+    {
+      "type": "van-cell",
+      "name": "cellBridge",
+      "props": { "title": "桥接通道", "value": "不可用", "center": true }
+    },
+    {
+      "type": "van-cell",
+      "name": "cellRtt",
+      "props": { "title": "往返延迟", "value": "—", "center": true }
+    },
+    {
+      "type": "van-cell",
+      "name": "cellMem",
+      "props": { "title": "内存足迹", "value": "—", "center": true }
+    },
+    { "type": "k-sec-title", "props": { "text": "Vant 组件验收（不落 Store）" } },
+    {
+      "type": "van-cell",
+      "props": { "title": "van-switch", "center": true },
+      "children": [
+        { "type": "van-switch", "field": "vSwitch", "value": true, "props": { "size": "22px" } }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "van-button + Toast", "center": true },
+      "children": [
+        {
+          "type": "van-button",
+          "props": { "size": "small", "type": "primary", "data-act": "vantToast" },
+          "children": ["轻提示"],
+          "emit": [{ "name": "click", "inject": ["vantToast"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "van-dialog", "center": true },
+      "children": [
+        {
+          "type": "van-button",
+          "props": { "size": "small", "type": "default", "data-act": "vantDialog" },
+          "children": ["确认框"],
+          "emit": [{ "name": "click", "inject": ["vantDialog"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div style=\"text-align:center;font-size:11px;color:var(--k-text-secondary,#6c6c70);padding-top:8px;\">Kline 混合架构 · Swift 原生宿主 + Vue3 视图层 · 协议 v2</div>"]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

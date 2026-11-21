@@ -1,0 +1,485 @@
+{
+  "rule": [
+    {
+      "type": "k-editor-nav",
+      "name": "navRow",
+      "props": { "title": "新建条件单", "backLabel": "取消", "backAria": "condEditor.cancel", "rightLabel": "保存", "rightAria": "condEditor.save", "rightDisabled": true },
+      "emit": [{ "name": "back", "inject": ["close"] }, { "name": "right", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "van-cell",
+      "name": "headCard",
+      "props": { "title": "", "label": "", "value": "", "center": true, "border": false }
+    },
+    {
+      "type": "van-cell",
+      "name": "dirRow",
+      "props": { "center": true, "border": false },
+      "children": [
+        {
+          "type": "k-chip-group",
+          "name": "dirChips",
+          "props": { "options": [{ "label": "买入", "value": "buy" }, { "label": "卖出", "value": "sell" }], "data-act": "pickDir" },
+          "emit": [{ "name": "select", "inject": ["pickDir"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "k-sec-title",
+      "name": "gridDirNote",
+      "props": { "text": "网格交易按档位自动双向：下跌买入、上涨卖出", "plain": true },
+      "style": { "display": "none" }
+    },
+    {
+      "type": "k-chip-group",
+      "name": "kindChips",
+      "props": {
+        "options": [
+          { "label": "价格条件", "value": "price" },
+          { "label": "止盈止损", "value": "stopLoss" },
+          { "label": "回落卖出", "value": "trailing" },
+          { "label": "时间条件", "value": "time" },
+          { "label": "涨跌幅", "value": "changePct" },
+          { "label": "均线条件", "value": "maCross" },
+          { "label": "网格交易", "value": "grid" },
+          { "label": "分批建仓", "value": "batch" }
+        ],
+        "data-act": "selectKind"
+      },
+      "emit": [{ "name": "select", "inject": ["selectKind"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "6px" }
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpPrice",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "触发方向", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "compareUpChips",
+              "props": { "options": [{ "label": "现价 ≥", "value": "1" }, { "label": "现价 ≤", "value": "0" }], "data-act": "setCompareUp" },
+              "emit": [{ "name": "select", "inject": ["setCompareUp"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "触发价", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "triggerPrice", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpStop",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "基准价", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "basePrice", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "涨跌基准", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "baseModeChips",
+              "props": { "options": [{ "label": "按价格", "value": "price" }, { "label": "按百分比", "value": "percent" }, { "label": "按差价", "value": "diff" }], "data-act": "setBaseMode" },
+              "emit": [{ "name": "select", "inject": ["setBaseMode"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "止盈", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "name": "tpInput", "field": "takeProfitPrice", "props": { "type": "number", "center": true, "style": { "width": "96px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] },
+            {
+              "type": "k-chip-group",
+              "name": "tpOnChips",
+              "props": { "options": [{ "label": "开", "value": "1" }, { "label": "关", "value": "0" }], "data-act": "toggleTp" },
+              "emit": [{ "name": "select", "inject": ["toggleTp"] }],
+              "emitPrefix": "act",
+              "style": { "marginLeft": "6px" }
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "止损", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "name": "slInput", "field": "stopLossPrice", "props": { "type": "number", "center": true, "style": { "width": "96px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] },
+            {
+              "type": "k-chip-group",
+              "name": "slOnChips",
+              "props": { "options": [{ "label": "开", "value": "1" }, { "label": "关", "value": "0" }], "data-act": "toggleSl" },
+              "emit": [{ "name": "select", "inject": ["toggleSl"] }],
+              "emitPrefix": "act",
+              "style": { "marginLeft": "6px" }
+            }
+          ]
+        },
+        { "type": "k-sec-title", "props": { "text": "两条同时设置时以先触发为准，另一条自动失效", "plain": true } }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpTrail",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "突破价", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "breakoutPrice", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "trailRow",
+          "props": { "title": "回落幅度", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "trailPct", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">%</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "保底价触发", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "floorChips",
+              "props": { "options": [{ "label": "开", "value": "1" }, { "label": "关", "value": "0" }], "data-act": "setFloor" },
+              "emit": [{ "name": "select", "inject": ["setFloor"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "保底价", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "name": "floorInput", "field": "floorPrice", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpTime",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "触发时间", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "fireLocal", "props": { "type": "datetime-local", "center": true, "style": { "padding": "0", "background": "transparent" } } }
+          ]
+        },
+        { "type": "k-sec-title", "props": { "text": "仅在交易日时段内提交，非交易时段会落为待报", "plain": true } }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpChange",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "触发幅度", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "changeThreshold", "props": { "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">%</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "方向", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "changeDirChips",
+              "props": { "options": [{ "label": "日涨幅 ≥", "value": "up" }, { "label": "日跌幅 ≤", "value": "down" }], "data-act": "setChangeDir" },
+              "emit": [{ "name": "select", "inject": ["setChangeDir"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpMa",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "均线周期", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "maPeriodChips",
+              "props": { "options": [{ "label": "MA5", "value": "5" }, { "label": "MA10", "value": "10" }, { "label": "MA20", "value": "20" }, { "label": "MA60", "value": "60" }], "data-act": "setMaPeriod" },
+              "emit": [{ "name": "select", "inject": ["setMaPeriod"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "穿越方向", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "maAboveChips",
+              "props": { "options": [{ "label": "上穿", "value": "1" }, { "label": "下破", "value": "0" }], "data-act": "setMaAbove" },
+              "emit": [{ "name": "select", "inject": ["setMaAbove"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpGrid",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "基准价", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "gridBase", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "价格区间", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "gridLower", "props": { "type": "number", "center": true, "style": { "width": "72px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">~</span>"] },
+            { "type": "van-field", "field": "gridUpper", "props": { "type": "number", "center": true, "style": { "width": "72px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "网格间距", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "gridStepPct", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">%</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "每格数量", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "name": "gridQtyInput", "field": "gridQtyPerLevel", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">股</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "multiplierRow",
+          "props": { "title": "倍数委托", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "multiplierChips",
+              "props": { "options": [{ "label": "1×", "value": "1" }, { "label": "2×", "value": "2" }, { "label": "3×", "value": "3" }, { "label": "5×", "value": "5" }], "data-act": "setMultiplier" },
+              "emit": [{ "name": "select", "inject": ["setMultiplier"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        { "type": "k-sec-title", "name": "gridLevelsHint", "props": { "text": "", "plain": true }, "style": { "display": "none" } }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "grpBatch",
+      "style": { "display": "none", "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "总数量", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "name": "batchQtyInput", "field": "batchTotalQty", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">股</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "分批笔数", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "batchCountChips",
+              "props": { "options": [{ "label": "2 笔", "value": "2" }, { "label": "3 笔", "value": "3" }, { "label": "4 笔", "value": "4" }, { "label": "5 笔", "value": "5" }], "data-act": "setBatchCount" },
+              "emit": [{ "name": "select", "inject": ["setBatchCount"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "首批价格", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "batchFirstPrice", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">元</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "title": "每批价差", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "batchStepPct", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">%</span>"] }
+          ]
+        },
+        { "type": "k-sec-title", "name": "batchHint", "props": { "text": "填齐参数后显示每批数量与末批目标价", "plain": true } }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "props": { "title": "仅提醒（不下单）", "center": true, "border": false },
+      "style": { "marginTop": "8px" },
+      "children": [{ "type": "van-switch", "field": "alertOnly", "props": { "size": "22px" } }]
+    },
+    { "type": "k-sec-title", "name": "alertHint", "props": { "text": "关闭时触发后按下方委托指令下单（数量与可卖持仓会被校验）", "plain": true } },
+    {
+      "type": "van-cell-group",
+      "name": "orderCard",
+      "style": { "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "触发后报价", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "priceTypeChips",
+              "props": { "options": [{ "label": "市价", "value": "market" }, { "label": "触发价限价", "value": "limit" }], "data-act": "pickPriceType" },
+              "emit": [{ "name": "select", "inject": ["pickPriceType"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "offsetRow",
+          "props": { "title": "价格偏移", "titleWidth": "84px", "center": true, "border": false },
+          "style": { "display": "none" },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "offsetChips",
+              "props": { "options": [{ "label": "−2 档", "value": "-2" }, { "label": "−1 档", "value": "-1" }, { "label": "触发价", "value": "0" }, { "label": "+1 档", "value": "1" }, { "label": "+2 档", "value": "2" }], "data-act": "pickOffset" },
+              "emit": [{ "name": "select", "inject": ["pickOffset"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        { "type": "k-sec-title", "name": "gridOrderHint", "props": { "text": "", "plain": true }, "style": { "display": "none" } },
+        {
+          "type": "van-cell",
+          "name": "qtyRow",
+          "props": { "title": "数量", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            { "type": "van-field", "field": "qtyText", "props": { "type": "number", "center": true, "style": { "width": "110px", "padding": "0", "background": "transparent", "fontWeight": "700" } } },
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">股</span>"] }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "posRow",
+          "props": { "title": "仓位快捷", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "posChips",
+              "props": { "options": [{ "label": "25%", "value": "0.25" }, { "label": "50%", "value": "0.5" }, { "label": "75%", "value": "0.75" }, { "label": "100%", "value": "1" }], "data-act": "applyPosition" },
+              "emit": [{ "name": "select", "inject": ["applyPosition"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "style": { "marginTop": "8px" },
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "有效期", "titleWidth": "84px", "center": true, "border": false },
+          "children": [
+            {
+              "type": "k-chip-group",
+              "name": "validityChips",
+              "props": { "options": [{ "label": "当日", "value": "day" }, { "label": "指定日期", "value": "untilDate" }, { "label": "长期", "value": "longTerm" }], "data-act": "pickValidity" },
+              "emit": [{ "name": "select", "inject": ["pickValidity"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "name": "expiryRow",
+          "props": { "title": "到期日期", "titleWidth": "84px", "center": true, "border": false },
+          "style": { "display": "none" },
+          "children": [
+            { "type": "van-field", "field": "expiryLocal", "props": { "type": "date", "center": true, "style": { "padding": "0", "background": "transparent" } } }
+          ]
+        }
+      ]
+    },
+    { "type": "k-sec-title", "props": { "text": "预览" }, "style": { "marginTop": "4px" } },
+    { "type": "k-sec-title", "name": "previewText", "props": { "text": "—", "plain": true } },
+    { "type": "k-sec-title", "name": "errLine", "props": { "text": "", "danger": true }, "style": { "display": "none" } },
+    {
+      "type": "van-button",
+      "name": "createBtn",
+      "props": { "color": "#00b578", "block": true, "round": false, "disabled": true, "aria-label": "condEditor.submit", "data-act": "save" },
+      "children": ["创建条件单"],
+      "emit": [{ "name": "click", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "10px" }
+    },
+    {
+      "type": "van-button",
+      "name": "saveBtn",
+      "props": { "color": "#00b578", "block": true, "round": false, "disabled": true, "aria-label": "condEditor.submit", "data-act": "save" },
+      "children": ["保存修改"],
+      "emit": [{ "name": "click", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "display": "none", "marginTop": "10px" }
+    },
+    { "type": "html", "native": true, "children": ["<div style=\"height:14px\"></div>"] }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

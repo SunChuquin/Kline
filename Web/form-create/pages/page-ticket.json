@@ -1,0 +1,37 @@
+{
+  "rule": [
+    {
+      "type": "k-ticket-form",
+      "name": "ticketForm",
+      "field": "ticket",
+      "value": { "direction": "buy", "priceType": "limit", "priceText": "", "qtyText": "" },
+      "props": {
+        "loaded": false,
+        "metaText": "",
+        "acctName": "",
+        "acctCashText": "",
+        "showAvail": false,
+        "availText": "",
+        "feeText": "",
+        "cashAfterText": "",
+        "error": ""
+      },
+      "emit": [
+        { "name": "submit", "inject": ["submit"] },
+        { "name": "position", "inject": ["applyPosition"] },
+        { "name": "close", "inject": ["close"] }
+      ],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "sellConfirm",
+      "value": false,
+      "name": "sellDialog",
+      "props": { "title": "确认卖出", "showCancelButton": true, "confirmButtonText": "确认卖出", "confirmButtonColor": "#00b578" },
+      "emit": [{ "name": "confirm", "inject": ["doSubmit"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

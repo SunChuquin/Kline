@@ -1,0 +1,109 @@
+{
+  "rule": [
+    {
+      "type": "k-subpage",
+      "name": "listPage",
+      "field": "listVisible",
+      "value": true,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "name": "listNav",
+          "props": { "title": "跑选股", "backAria": "pickRun.back", "rightText": "生成条件单", "rightAria": "pickRun.generate", "rightDisabled": true },
+          "emit": [
+            { "name": "back", "inject": ["close"] },
+            { "name": "right", "inject": ["generate"] }
+          ],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        {
+          "type": "van-row",
+          "props": { "gutter": 8 },
+          "style": { "padding": "10px 16px 6px", "alignItems": "center", "flexWrap": "nowrap" },
+          "children": [
+            {
+              "type": "van-col",
+              "props": { "span": 16 },
+              "children": [
+                { "type": "k-chip-group", "name": "poolChips", "field": "pool", "value": "market", "props": { "options": [
+                  { "label": "全市场", "value": "market" },
+                  { "label": "自选", "value": "favorites" }
+                ] } }
+              ]
+            },
+            {
+              "type": "van-col",
+              "props": { "span": 8 },
+              "style": { "textAlign": "right" },
+              "children": [
+                { "type": "k-tool-link", "name": "toggleAllLink", "field": "toggleAllText", "value": "全选", "props": { "ariaLabel": "pickRun.toggleAll", "disabled": true }, "emit": [{ "name": "act", "inject": ["toggleAll"] }], "emitPrefix": "act" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "k-pick-progress",
+          "field": "pickProgress",
+          "value": { "state": "idle" },
+          "emit": [
+            { "name": "start", "inject": ["start"] },
+            { "name": "cancel", "inject": ["cancelPick"] }
+          ],
+          "emitPrefix": "act"
+        },
+        { "type": "k-sec-title", "name": "timeoutNote", "props": { "text": "部分标的行情未就绪，本次结果可能遗漏命中（可稍后重跑）", "warn": true } },
+        { "type": "k-subpage", "name": "listEmpty", "field": "listEmptyVisible", "value": true, "style": { "display": "flex", "flexDirection": "column", "minHeight": "50vh" }, "children": [
+          { "type": "k-empty-block", "field": "emptyState", "value": { "title": "点击开始跑选股", "size": "sm" } }
+        ] },
+        {
+          "type": "k-hit-list",
+          "field": "hitList",
+          "value": { "rows": [], "selected": [] },
+          "emit": [{ "name": "toggle", "inject": ["toggleHit"] }],
+          "emitPrefix": "act"
+        },
+        { "type": "html", "native": true, "children": ["<div class=\"fc-note\" style=\"border-top: 0.5px solid var(--k-divider, #c6c6c8); padding: 10px 0; margin-top: 8px;\">命中基于本地日线库最后一根，非实时盘中</div>"] }
+      ]
+    },
+    {
+      "type": "k-subpage",
+      "name": "confirmPage",
+      "field": "confirmVisible",
+      "value": false,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "props": { "title": "生成条件单", "backAria": "pickRun.back" },
+          "emit": [{ "name": "back", "inject": ["backToList"] }],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        { "type": "k-subpage", "name": "confirmBody", "field": "confirmBodyVisible", "value": true, "style": { "padding": "14px 0 70px" }, "children": [
+          { "type": "k-sec-title", "name": "limitWarn", "props": { "text": "本次已达生成上限（单次 200 条 / 单账户监控 1000 条），超出部分未生成", "warn": true } },
+          { "type": "k-card-lines", "name": "overviewCard", "field": "overviewCard", "value": { "title": "概览", "lines": [] } },
+          { "type": "k-card-lines", "name": "entryCard", "field": "entryCard", "value": { "title": "入场单", "lines": [{ "text": "命中清单本身就是今日已命中，入场单会按 TRADE 段的报价方式在盘中触发", "tone": "sub" }], "linesBefore": true }, "children": [
+            {
+              "type": "van-cell",
+              "props": { "title": "同时生成入场单（PRICE ≥ 最新价）", "center": true, "border": false },
+              "children": [
+                { "type": "van-switch", "field": "entryOn", "value": false, "props": { "size": "22px" } }
+              ]
+            }
+          ] },
+          { "type": "k-draft-groups", "field": "draftGroups", "value": { "groups": [] } },
+          { "type": "k-skip-list", "field": "skipList", "value": { "rows": [] } }
+        ] },
+        {
+          "type": "k-confirm-bar",
+          "field": "confirmBar",
+          "value": { "error": "", "label": "确认生成（0 条）", "disabled": true },
+          "props": { "ariaLabel": "pickRun.confirm" },
+          "emit": [{ "name": "confirm", "inject": ["confirmGenerate"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

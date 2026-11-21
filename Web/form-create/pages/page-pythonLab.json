@@ -1,0 +1,53 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "props": { "title": "Python 引擎实验室", "backLabel": "‹", "data-act": "close" },
+      "emit": [{ "name": "back", "inject": ["close"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "引擎状态" }
+    },
+    {
+      "type": "k-snap-card",
+      "field": "cardStatus",
+      "value": { "rows": [] },
+      "emit": [{ "name": "act", "inject": ["rowAct"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-lab-busy",
+      "field": "busy",
+      "value": { "show": false, "text": "", "pct": null }
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "操作" }
+    },
+    {
+      "type": "k-snap-card",
+      "field": "cardOps",
+      "value": { "rows": [] },
+      "emit": [{ "name": "act", "inject": ["rowAct"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div style=\"font-size:12px;color:var(--k-text-secondary,#6c6c70);line-height:1.5;padding:10px 4px;\">流程：① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）→ ② 用 TrollStore 安装（安装时整包授信代码签名，装成 Engine.app）→ ③ 回本页「刷新状态」确认已安装后即可跑实验①②③。实验经 pyrunner 独立子进程执行 Python（root 拉起、进程隔离），引擎崩溃只死子进程，绝不影响本 App；超时多为子进程崩溃，stderr 见 Documents/py_runner_stderr.log。「加载引擎」仅为测量进程内 dlopen/Py_Initialize 计时，跑实验无需它。Engine.app 的卸载请在 TrollStore 内操作；「清理下载文件」只删除已下载的 tipa。</div>"]
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "结果输出" }
+    },
+    {
+      "type": "k-out-console",
+      "field": "output",
+      "value": { "lines": [] }
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

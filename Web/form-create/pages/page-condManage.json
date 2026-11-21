@@ -1,0 +1,59 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "name": "navRow",
+      "props": { "title": "条件单管理", "backLabel": "‹ 返回", "backAria": "condManage.back", "rightText": "＋ 新建", "rightAria": "condManage.new" },
+      "emit": [{ "name": "back", "inject": ["close"] }, { "name": "right", "inject": ["createNew"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-sec-title",
+      "name": "engineBanner",
+      "props": { "text": "Python 引擎未就绪，条件单暂停结算；引擎就绪后自动恢复", "warn": true },
+      "style": { "display": "none" }
+    },
+    {
+      "type": "k-chip-group",
+      "name": "segBar",
+      "field": "segment",
+      "value": "monitoring",
+      "props": {
+        "options": [
+          { "label": "监控中", "value": "monitoring" },
+          { "label": "已触发", "value": "triggered" },
+          { "label": "已失效", "value": "invalid" }
+        ]
+      }
+    },
+    {
+      "type": "k-cond-order-list",
+      "name": "condList",
+      "field": "condList",
+      "value": { "rows": [] },
+      "emit": [
+        { "name": "open", "inject": ["editOrder"] },
+        { "name": "cancel", "inject": ["cancelOrder"] }
+      ],
+      "emitPrefix": "act",
+      "style": { "marginTop": "10px" }
+    },
+    {
+      "type": "k-sec-title",
+      "name": "emptyNote",
+      "props": { "text": "暂无监控中的条件单", "plain": true },
+      "style": { "display": "none" }
+    },
+    {
+      "type": "van-button",
+      "name": "emptyNewBtn",
+      "props": { "type": "primary", "plain": true, "block": true, "data-act": "createNew" },
+      "children": ["新建条件单"],
+      "emit": [{ "name": "click", "inject": ["createNew"] }],
+      "emitPrefix": "act",
+      "style": { "display": "none", "marginTop": "8px" }
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

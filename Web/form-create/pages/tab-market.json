@@ -1,0 +1,38 @@
+{
+  "rule": [
+    {
+      "type": "div",
+      "name": "marketShell",
+      "style": {
+        "height": "100vh",
+        "display": "flex",
+        "flexDirection": "column",
+        "overflow": "hidden",
+        "background": "var(--k-bg)",
+        "color": "var(--k-text)"
+      },
+      "children": [
+        {
+          "type": "html",
+          "native": true,
+          "children": ["<div style=\"font-size:12px;color:var(--k-text-secondary,#6c6c70);padding:6px 12px 8px;flex-shrink:0;\">行情 · Web 版（P2-2）</div>"]
+        },
+        {
+          "type": "html",
+          "native": true,
+          "name": "marketWarn",
+          "style": { "display": "none" },
+          "children": ["<div style=\"margin:0 12px 10px;background:var(--k-bg-secondary,#f2f2f7);border-radius:12px;padding:12px 16px;font-size:13px;color:#b25000;\">桥接不可达：显示占位界面</div>"]
+        },
+        {
+          "type": "k-market-view",
+          "name": "marketView",
+          "props": { "data-act": "view" },
+          "col": { "show": false },
+          "wrap": { "show": false }
+        }
+      ]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

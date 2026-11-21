@@ -17,7 +17,7 @@
 export interface ActionButton {
   label: string
   act: string
-  tone?: 'primary' | 'danger'
+  tone?: 'primary' | 'danger' | 'tint'
   disabled?: boolean
   ariaLabel?: string
 }
@@ -61,6 +61,11 @@ const emit = defineEmits<{
 .act-btn.danger {
   background: rgba(238, 10, 36, 0.08);
   color: #ee0a24;
+}
+
+.act-btn.tint {
+  background: rgba(25, 137, 250, 0.12);
+  color: #1989fa;
 }
 
 .act-btn:disabled {

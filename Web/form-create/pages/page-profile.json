@@ -1,0 +1,65 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "props": { "title": "个人中心", "backAria": "profile.back", "data-act": "close" },
+      "emit": [{ "name": "back", "inject": ["close"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-profile-header",
+      "field": "header",
+      "value": { "version": "", "build": "" }
+    },
+    {
+      "type": "k-snap-card",
+      "field": "info",
+      "value": { "rows": [] }
+    },
+    {
+      "type": "van-cell",
+      "name": "themeRow",
+      "props": { "title": "显示主题", "value": "", "center": true, "border": false },
+      "children": [
+        {
+          "type": "k-chip-sections",
+          "field": "theme",
+          "value": {
+            "value": "system",
+            "multiple": false,
+            "sections": [
+              {
+                "title": "",
+                "options": [
+                  { "label": "跟随系统", "value": "system" },
+                  { "label": "日间", "value": "light" },
+                  { "label": "夜间", "value": "dark" }
+                ]
+              }
+            ]
+          },
+          "props": { "ariaLabel": "profile.theme" },
+          "emit": [{ "name": "select", "inject": ["setTheme"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "k-entry-list",
+      "field": "entries",
+      "value": {
+        "rows": [
+          { "title": "公式管理", "aria": "profile.formulaCenter", "act": "formulaCenter" },
+          { "title": "本地更新", "aria": "profile.localUpdate.entry", "act": "openLocalUpdate" },
+          { "title": "缓存管理", "aria": "profile.cacheManage.entry", "act": "openCacheManage" },
+          { "title": "联机同步", "aria": "profile.lansync.entry", "act": "openLanSync" },
+          { "title": "Python 引擎实验室", "aria": "profile.pythonLab.entry", "act": "openPythonLab" }
+        ]
+      },
+      "emit": [{ "name": "act", "inject": ["entryAct"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

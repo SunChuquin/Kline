@@ -1,0 +1,72 @@
+{
+  "rule": [
+    {
+      "type": "van-row",
+      "props": { "wrap": false },
+      "style": { "display": "flex", "alignItems": "center", "gap": "6px", "padding": "6px 8px", "borderBottom": "0.5px solid var(--k-divider,#c6c6c8)", "margin": "0 -16px", "flexShrink": 0 },
+      "children": [
+        {
+          "type": "van-col",
+          "props": { "span": 3 },
+          "children": [
+            {
+              "type": "van-button",
+              "name": "searchCloseBtn",
+              "props": {
+                "plain": true,
+                "size": "small",
+                "customStyle": { "border": "none", "background": "none", "color": "var(--k-text,#000)", "fontSize": "14px", "fontWeight": "600", "width": "32px", "height": "32px", "padding": "0" },
+                "aria-label": "search.close",
+                "data-act": "close"
+              },
+              "children": ["✕"],
+              "emit": [{ "name": "click", "inject": ["close"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-col",
+          "props": { "span": 18 },
+          "children": [
+            {
+              "type": "van-search",
+              "field": "keyword",
+              "value": "",
+              "props": { "placeholder": "搜索代码/名称", "shape": "round", "clearable": true }
+            }
+          ]
+        },
+        {
+          "type": "van-col",
+          "props": { "span": 3 },
+          "children": [
+            {
+              "type": "van-button",
+              "name": "searchClearBtn",
+              "props": {
+                "plain": true,
+                "size": "small",
+                "customStyle": { "border": "none", "background": "none", "color": "var(--k-text-tertiary,#c7c7cb)", "fontSize": "14px", "width": "28px", "padding": "0" },
+                "data-act": "clearSearch"
+              },
+              "children": ["⊗"],
+              "emit": [{ "name": "click", "inject": ["clearSearch"] }],
+              "emitPrefix": "act",
+              "style": { "display": "none" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "k-search-result-list",
+      "field": "results",
+      "value": { "rows": [], "emptyText": "" },
+      "emit": [{ "name": "pick", "inject": ["pick"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "8px" }
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

@@ -1,0 +1,64 @@
+{
+  "rule": [
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div style=\"font-size:12px;color:var(--k-text-secondary,#6c6c70);padding:6px 12px 8px;\" aria-label=\"favorites.title\">自选 · Web 版（P2-1）</div>"]
+    },
+    {
+      "type": "html",
+      "native": true,
+      "name": "bridgeWarn",
+      "style": { "display": "none" },
+      "children": ["<div style=\"margin:0 12px 10px;background:var(--k-bg-secondary,#f2f2f7);border-radius:12px;padding:12px 16px;font-size:13px;color:#b25000;\">桥接不可达：显示占位界面</div>"]
+    },
+    {
+      "type": "k-chip-group",
+      "field": "activeGroup",
+      "name": "groupChips",
+      "value": "",
+      "props": { "options": [] },
+      "style": { "padding": "0 12px 10px" }
+    },
+    {
+      "type": "k-favorites-view",
+      "field": "favoritesView",
+      "value": { "rows": [], "canEdit": false, "loaded": false, "refreshing": false },
+      "emit": [
+        { "name": "open", "inject": ["openRow"] },
+        { "name": "menu", "inject": ["openMenu"] },
+        { "name": "pin", "inject": ["togglePin"] },
+        { "name": "remove", "inject": ["removeRow"] },
+        { "name": "refresh", "inject": ["onRefresh"] }
+      ],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-action-sheet",
+      "field": "menuOpen",
+      "value": false,
+      "name": "menuSheet",
+      "props": { "actions": [], "cancelText": "取消", "closeOnClickAction": true },
+      "emit": [{ "name": "select", "inject": ["menuSelect"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "noteOpen",
+      "value": false,
+      "name": "noteDialog",
+      "props": { "title": "备注", "showCancelButton": true },
+      "children": [
+        {
+          "type": "van-field",
+          "field": "noteDraft",
+          "value": "",
+          "props": { "type": "textarea", "rows": 2, "maxlength": 100, "placeholder": "备注内容（空 = 删除）" }
+        }
+      ],
+      "emit": [{ "name": "confirm", "inject": ["saveNote"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

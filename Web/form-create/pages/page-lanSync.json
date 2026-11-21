@@ -1,0 +1,85 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "name": "lanNav",
+      "props": { "title": "联机同步", "backLabel": "‹", "backDisabled": false, "data-act": "navBack" },
+      "emit": [{ "name": "back", "inject": ["navBack"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-lan-devices",
+      "field": "devices",
+      "value": {
+        "serverOnline": false,
+        "probing": false,
+        "port": null,
+        "deviceName": "",
+        "isExposed": false,
+        "isBrowsing": false,
+        "connecting": false,
+        "peers": [],
+        "manualAddress": ""
+      },
+      "emit": [
+        { "name": "probe", "inject": ["probe"] },
+        { "name": "setExposed", "inject": ["setExposed"] },
+        { "name": "scan", "inject": ["scan"] },
+        { "name": "connect", "inject": ["connect"] },
+        { "name": "connectManual", "inject": ["connectManual"] }
+      ],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-lan-configure",
+      "name": "lanConfigure",
+      "field": "configure",
+      "value": {
+        "peer": { "name": "", "host": "", "port": 0, "appVersion": "" },
+        "categories": [],
+        "picks": {},
+        "expanded": {}
+      },
+      "emit": [
+        { "name": "toggleCategory", "inject": ["toggleCategory"] },
+        { "name": "toggleChild", "inject": ["toggleChild"] },
+        { "name": "toggleExpand", "inject": ["toggleExpand"] },
+        { "name": "start", "inject": ["startSync"] }
+      ],
+      "emitPrefix": "act",
+      "style": { "display": "none" }
+    },
+    {
+      "type": "k-lan-running",
+      "name": "lanRunning",
+      "field": "transfer",
+      "value": {
+        "phase": "idle",
+        "progress": 0,
+        "bytesPerSecond": 0,
+        "currentFile": "",
+        "currentStage": "",
+        "directionText": "",
+        "resultSummary": "",
+        "backupDir": null,
+        "needsRestart": false,
+        "failMessage": null
+      },
+      "emit": [
+        { "name": "done", "inject": ["transferDone"] },
+        { "name": "retry", "inject": ["transferRetry"] }
+      ],
+      "emitPrefix": "act",
+      "style": { "display": "none" }
+    },
+    {
+      "type": "van-dialog",
+      "name": "alertDlg",
+      "field": "alertShow",
+      "value": false,
+      "props": { "title": "", "message": "", "confirmButtonText": "好" }
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

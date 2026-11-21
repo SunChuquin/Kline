@@ -1,0 +1,64 @@
+{
+  "rule": [
+    {
+      "type": "div",
+      "name": "simShell",
+      "style": {
+        "height": "100vh",
+        "display": "flex",
+        "flexDirection": "column",
+        "overflow": "hidden",
+        "background": "var(--k-bg)",
+        "color": "var(--k-text)"
+      },
+      "children": [
+        {
+          "type": "html",
+          "native": true,
+          "children": ["<div style=\"font-size:12px;color:var(--k-text-secondary,#6c6c70);padding:6px 12px 0;flex-shrink:0;\" aria-label=\"simulation.subtitle\">模拟交易 · Web 版（P2-4）</div>"]
+        },
+        {
+          "type": "html",
+          "native": true,
+          "name": "simWarn",
+          "style": { "display": "none" },
+          "children": ["<div style=\"margin:8px 12px 0;background:var(--k-bg-secondary,#f2f2f7);border-radius:12px;padding:12px 16px;font-size:13px;color:#b25000;\">桥接不可达：显示占位界面</div>"]
+        },
+        {
+          "type": "k-simulation-view",
+          "name": "simView",
+          "field": "view",
+          "value": {
+            "bridgeOk": false,
+            "selectedID": null,
+            "accountName": "全部账户汇总",
+            "accounts": [],
+            "summary": {
+              "totalAssets": 0,
+              "cash": 0,
+              "marketValue": 0,
+              "positionPct": 0,
+              "dayProfit": 0,
+              "dayProfitPct": 0,
+              "totalProfit": 0,
+              "totalProfitPct": 0
+            },
+            "netValue": [],
+            "module": "position",
+            "positions": [],
+            "orders": [],
+            "fills": [],
+            "ledger": [],
+            "logs": []
+          },
+          "props": { "data-act": "view" },
+          "col": { "show": false },
+          "wrap": { "show": false },
+          "emit": [{ "name": "action", "inject": ["view"] }],
+          "emitPrefix": "act"
+        }
+      ]
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

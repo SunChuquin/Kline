@@ -1,0 +1,146 @@
+{
+  "rule": [
+    {
+      "type": "k-editor-nav",
+      "name": "navRow",
+      "props": { "title": "公式编辑器", "backLabel": "‹ 返回", "backAria": "formulaEditor.back", "rightLabel": "保存", "rightAria": "formulaEditor.save", "rightDisabled": true },
+      "emit": [{ "name": "back", "inject": ["onBack"] }, { "name": "right", "inject": ["save"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-chip-group",
+      "name": "toolChips",
+      "props": {
+        "aria-label": "formulaEditor.toolbar",
+        "options": [
+          { "label": "全选", "value": "selectAll" },
+          { "label": "清空", "value": "clearPick" },
+          { "label": "测试公式", "value": "runTest", "ariaLabel": "formulaEditor.test" },
+          { "label": "恢复编译时内容", "value": "restore" }
+        ],
+        "data-act": "pickTool"
+      },
+      "emit": [{ "name": "select", "inject": ["pickTool"] }],
+      "emitPrefix": "act",
+      "style": { "marginTop": "6px" }
+    },
+    {
+      "type": "van-cell",
+      "name": "nameRow",
+      "props": { "title": "名称", "titleWidth": "68px", "center": true, "border": false },
+      "children": [
+        { "type": "van-field", "field": "name", "props": { "placeholder": "例如：双均线", "center": true, "style": { "padding": "0", "background": "transparent" } } }
+      ]
+    },
+    {
+      "type": "van-cell",
+      "name": "scopeRow",
+      "props": { "title": "作用域", "titleWidth": "68px", "center": true, "border": false },
+      "children": [
+        { "type": "k-chip-group", "field": "scope", "props": { "options": [{ "label": "主图指标", "value": "main" }, { "label": "副图指标", "value": "sub" }] } }
+      ]
+    },
+    {
+      "type": "van-cell-group",
+      "name": "periodRow",
+      "children": [
+        {
+          "type": "van-cell",
+          "props": { "title": "适用范围", "titleWidth": "68px", "center": true, "border": false },
+          "children": [
+            { "type": "k-chip-group", "name": "periodChips", "field": "periodChips", "props": { "multiple": true, "options": [{ "label": "全周期", "value": "__all__" }] } }
+          ]
+        },
+        { "type": "k-sec-title", "props": { "text": "选择该指标可用的周期。不同周期各有一份独立参数副本（USER_<名称>.tdx），可单独编辑", "plain": true } }
+      ]
+    },
+    { "type": "k-sec-title", "name": "formulaCap", "props": { "text": "公式", "plain": false } },
+    { "type": "k-formula-input", "name": "formulaInput", "field": "formula", "value": "", "props": { "ariaLabel": "formulaEditor.formula", "minHeight": "180px", "rows": 7 } },
+    { "type": "html", "native": true, "children": ["<div class=\"fc-note\">支持：MA/EMA/SMA/REF/HHV/LLV/ABS/MAX/MIN/SUM/STD/COUNT/IF/CROSS/BARSLAST/AND/OR/NOT，数据 C/H/L/O/V/AMOUNT，运算符 + - * / &lt; &gt; &lt;= &gt;= == !=</div>"] },
+    { "type": "k-sec-title", "props": { "text": "常用符号" } },
+    {
+      "type": "k-chip-group",
+      "name": "symbolsChips",
+      "props": {
+        "options": [
+          { "label": ":=", "value": ":=" }, { "label": ";", "value": ";" }, { "label": ",", "value": "," },
+          { "label": "：", "value": "：" }, { "label": "（", "value": "（" }, { "label": "）", "value": "）" },
+          { "label": "{", "value": "{" }, { "label": "}", "value": "}" }, { "label": "=", "value": "=" },
+          { "label": "+", "value": "+" }, { "label": "-", "value": "-" }, { "label": "!", "value": "!" },
+          { "label": "*", "value": "*" }, { "label": "/", "value": "/" }, { "label": "<", "value": "<" },
+          { "label": ">", "value": ">" }, { "label": "AND", "value": "AND" }, { "label": "OR", "value": "OR" }
+        ],
+        "data-act": "insertSymbol"
+      },
+      "emit": [{ "name": "select", "inject": ["insertSymbol"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-cell-group",
+      "name": "styleSection",
+      "style": { "marginTop": "8px" },
+      "children": [
+        { "type": "k-sec-title", "props": { "text": "输出线条样式（通达信选项）" } },
+        {
+          "type": "van-cell",
+          "props": { "titleWidth": "44px", "center": true, "border": false },
+          "children": [
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">样式</span>"] },
+            {
+              "type": "k-chip-group",
+              "name": "styleChips",
+              "props": {
+                "options": [
+                  { "label": "实线", "value": "solid" },
+                  { "label": "虚线", "value": "dotline" },
+                  { "label": "圆点", "value": "pointdot" },
+                  { "label": "柱状", "value": "stick" },
+                  { "label": "不绘制", "value": "nodraw" }
+                ],
+                "data-act": "pickStyle"
+              },
+              "emit": [{ "name": "select", "inject": ["pickStyle"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "van-cell",
+          "props": { "titleWidth": "44px", "center": true, "border": false },
+          "children": [
+            { "type": "html", "native": true, "children": ["<span class=\"fc-unit\">粗细</span>"] },
+            {
+              "type": "k-chip-group",
+              "name": "thicknessChips",
+              "props": { "options": [{ "label": "×1", "value": "1" }, { "label": "×2", "value": "2" }, { "label": "×3", "value": "3" }, { "label": "×4", "value": "4" }], "data-act": "pickThickness" },
+              "emit": [{ "name": "select", "inject": ["pickThickness"] }],
+              "emitPrefix": "act"
+            }
+          ]
+        },
+        {
+          "type": "k-color-grid",
+          "name": "colorGrid",
+          "field": "colorGrid",
+          "value": { "colors": [] },
+          "emit": [{ "name": "pick", "inject": ["colorPick"] }],
+          "emitPrefix": "act"
+        },
+        { "type": "k-sec-title", "props": { "text": "点击样式/粗细/颜色会在光标处插入对应关键字，例如插入 DOTLINE / LINETHICK2 / COLORRED", "plain": true } }
+      ]
+    },
+    { "type": "k-sec-title", "name": "testMsg", "props": { "text": "", "plain": true }, "style": { "display": "none" } },
+    { "type": "html", "native": true, "children": ["<div style=\"height:24px\"></div>"] },
+    {
+      "type": "van-dialog",
+      "field": "confirmOpen",
+      "value": false,
+      "name": "confirmDialog",
+      "props": { "title": "存在修改未保存，是否取消修改？", "showCancelButton": true, "cancelButtonText": "继续编辑", "confirmButtonText": "取消修改", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["close"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

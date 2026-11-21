@@ -1,0 +1,92 @@
+{
+  "rule": [
+    {
+      "type": "k-subpage",
+      "name": "listPage",
+      "field": "listVisible",
+      "value": true,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "name": "listNav",
+          "props": { "title": "训练记录", "backAria": "trainingRecord.back", "rightText": "清空", "rightAria": "trainingRecord.clearAll", "rightTone": "danger", "rightDisabled": true },
+          "emit": [
+            { "name": "back", "inject": ["close"] },
+            { "name": "right", "inject": ["openClear"] }
+          ],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        { "type": "k-subpage", "name": "listEmpty", "field": "listEmptyVisible", "value": true, "style": { "display": "flex", "flexDirection": "column", "minHeight": "calc(100vh - 44px)" }, "children": [
+          { "type": "k-empty-block", "field": "listEmpty", "value": { "icon": "📈", "title": "暂无训练记录", "sub": "在 K 线图页发起「单人训练」，创建会话后训练记录会显示在这里", "size": "sm" } }
+        ] },
+        {
+          "type": "k-session-rows",
+          "field": "sessionRows",
+          "value": { "rows": [] },
+          "emit": [
+            { "name": "open", "inject": ["openDetail"] },
+            { "name": "del", "inject": ["openDelete"] }
+          ],
+          "emitPrefix": "act"
+        }
+      ]
+    },
+    {
+      "type": "k-subpage",
+      "name": "detailPage",
+      "field": "detailVisible",
+      "value": false,
+      "children": [
+        {
+          "type": "k-nav-row",
+          "name": "detailNav",
+          "props": { "title": "交易明细", "backAria": "trainingRecord.detailBack", "rightText": "", "rightTone": "plain" },
+          "emit": [{ "name": "back", "inject": ["backToList"] }],
+          "emitPrefix": "act",
+          "style": { "margin": "0 -16px" }
+        },
+        { "type": "k-sec-title", "name": "summaryLine", "props": { "text": "", "plain": true } },
+        {
+          "type": "k-seg-tabs",
+          "field": "detailTabs",
+          "value": { "value": "trades", "tabs": [
+            { "value": "trades", "title": "成交", "count": 0 },
+            { "value": "conditions", "title": "条件单", "count": 0 },
+            { "value": "alerts", "title": "预警", "count": 0 }
+          ] },
+          "emit": [{ "name": "select", "inject": ["switchTab"] }],
+          "emitPrefix": "act"
+        },
+        { "type": "k-subpage", "name": "tabTrades", "field": "tabTradesVisible", "value": true, "children": [
+          { "type": "k-training-trade-table", "field": "tradeTable", "value": { "rows": [] } }
+        ] },
+        { "type": "k-subpage", "name": "tabConds", "field": "tabCondsVisible", "value": false, "children": [
+          { "type": "k-cond-cards", "field": "condCards", "value": { "rows": [] } }
+        ] },
+        { "type": "k-subpage", "name": "tabAlerts", "field": "tabAlertsVisible", "value": false, "children": [
+          { "type": "k-alert-cards", "field": "alertCards", "value": { "rows": [] } }
+        ] }
+      ]
+    },
+    {
+      "type": "van-dialog",
+      "field": "deleteOpen",
+      "value": false,
+      "name": "deleteDialog",
+      "props": { "title": "删除这条训练记录？", "showCancelButton": true, "confirmButtonText": "删除", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["confirmDelete"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "field": "clearOpen",
+      "value": false,
+      "name": "clearDialog",
+      "props": { "title": "清空全部训练记录？", "showCancelButton": true, "confirmButtonText": "清空全部", "confirmButtonColor": "#ee0a24" },
+      "emit": [{ "name": "confirm", "inject": ["confirmClear"] }],
+      "emitPrefix": "act"
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

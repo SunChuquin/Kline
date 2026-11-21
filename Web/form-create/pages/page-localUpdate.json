@@ -1,0 +1,64 @@
+{
+  "rule": [
+    {
+      "type": "k-nav-row",
+      "props": { "title": "本地更新", "backLabel": "‹", "data-act": "close" },
+      "emit": [{ "name": "back", "inject": ["close"] }],
+      "emitPrefix": "act",
+      "style": { "margin": "0 -16px" }
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "本地更新" }
+    },
+    {
+      "type": "k-snap-card",
+      "field": "cardRemote",
+      "value": { "rows": [] },
+      "emit": [{ "name": "act", "inject": ["rowAct"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "清单标的自动更新" }
+    },
+    {
+      "type": "k-snap-card",
+      "field": "cardWatchlist",
+      "value": { "rows": [] },
+      "emit": [{ "name": "act", "inject": ["rowAct"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "k-sec-title",
+      "props": { "text": "补缺口（主库最新日 → 今天）" }
+    },
+    {
+      "type": "k-snap-card",
+      "field": "cardGap",
+      "value": { "rows": [] },
+      "emit": [{ "name": "act", "inject": ["rowAct"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "html",
+      "native": true,
+      "children": ["<div style=\"height:16px\"></div>"]
+    },
+    {
+      "type": "k-baseline-sheet",
+      "field": "baseline",
+      "value": { "show": false, "summary": "", "items": [] },
+      "emit": [{ "name": "close", "inject": ["baselineClose"] }],
+      "emitPrefix": "act"
+    },
+    {
+      "type": "van-dialog",
+      "name": "alertDlg",
+      "field": "alertShow",
+      "value": false,
+      "props": { "title": "基准缺失名单", "message": "", "confirmButtonText": "好" }
+    }
+  ],
+  "config": { "submitBtn": false, "resetBtn": false }
+}

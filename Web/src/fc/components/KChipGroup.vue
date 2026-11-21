@@ -6,6 +6,7 @@
       class="chip"
       :class="{ on: isOn(o.value) }"
       :aria-label="o.ariaLabel ?? o.label"
+      :disabled="disabled"
       @click="select(o.value)"
     >{{ o.label }}</button>
   </div>
@@ -18,8 +19,10 @@ const props = withDefaults(defineProps<{
   modelValue?: string | string[] | null
   options: { label: string; value: string; ariaLabel?: string }[]
   multiple?: boolean
+  disabled?: boolean
 }>(), {
   modelValue: '',
+  disabled: false,
 })
 const emit = defineEmits<{
   (e: 'update:modelValue', v: string | string[]): void
@@ -32,6 +35,7 @@ function isOn(v: string): boolean {
 }
 
 function select(v: string): void {
+  if (props.disabled) return
   if (props.multiple) {
     const cur = Array.isArray(props.modelValue) ? [...props.modelValue] : []
     const idx = cur.indexOf(v)
@@ -67,5 +71,10 @@ function select(v: string): void {
   background: var(--k-accent, #007aff);
   color: #ffffff;
   font-weight: 600;
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>
