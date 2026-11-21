@@ -117,7 +117,7 @@ final class ChartCacheStore {
         guard let data = IndicatorCacheDB.shared.load(
             comboKey: combo, metaId: metaId, period: period,
             fingerprint: fingerprint, lastBarDate: lastBarDate, sourceBarCount: barCount),
-            let env = try? JSONDecoder().decode(IndicatorCacheEnvelope.self, from: data) else {
+            let env = try? JSONDecoder.indicatorCache.decode(IndicatorCacheEnvelope.self, from: data) else {
             return false
         }
         let main = env.main.compactMap { $0.toLine() }
@@ -156,7 +156,7 @@ final class ChartCacheStore {
             coverageStart: entry.coverageStart,
             coverageEnd: entry.coverageEnd,
             bgCoverageEnd: entry.bgCoverageEnd)
-        guard let data = try? JSONEncoder().encode(env) else { return }
+        guard let data = try? JSONEncoder.indicatorCache.encode(env) else { return }
         IndicatorCacheDB.shared.save(comboKey: combo, metaId: metaId, period: period,
                                      fingerprint: fingerprint, genMode: "runtime",
                                      lastBarDate: lastBarDate, sourceBarCount: barCount,

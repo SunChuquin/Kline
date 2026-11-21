@@ -150,7 +150,7 @@ final class ChartPresetWarmupRunner: ObservableObject {
                 failLog("warmEnvelope nil（求值空/长度不齐 sliceLen=\(slice.count)）", metaId: metaId)
                 return false
             }
-            let payload = try? JSONEncoder().encode(env)
+            let payload = try? JSONEncoder.indicatorCache.encode(env)
             guard let payload else {
                 failLog("encode 失败", metaId: metaId)
                 return false
@@ -171,7 +171,7 @@ final class ChartPresetWarmupRunner: ObservableObject {
                 failLog("fullEnvelope nil（求值空/长度不齐 n=\(data.count)）", metaId: metaId)
                 return false
             }
-            let payload = try? JSONEncoder().encode(env)
+            let payload = try? JSONEncoder.indicatorCache.encode(env)
             guard let payload else {
                 failLog("encode 失败", metaId: metaId)
                 return false

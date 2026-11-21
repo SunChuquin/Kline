@@ -113,6 +113,26 @@ struct IndicatorCacheEnvelope: Codable {
     var bgCoverageEnd: Int
 }
 
+// NaN/Infinity 序列化：指标曲线天然含 NaN（缺失值/边界），JSON 默认拒绝非有限浮点。
+// 统一用字符串转换策略（"nan"/"inf"/"-inf"），encode/decode 必须成对使用。
+extension JSONEncoder {
+    static var indicatorCache: JSONEncoder {
+        let e = JSONEncoder()
+        e.nonConformingFloatEncodingStrategy =
+            .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        return e
+    }
+}
+
+extension JSONDecoder {
+    static var indicatorCache: JSONDecoder {
+        let d = JSONDecoder()
+        d.nonConformingFloatDecodingStrategy =
+            .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        return d
+    }
+}
+
 // MARK: - 磁盘仓库
 
 final class IndicatorCacheDB {
