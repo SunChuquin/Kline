@@ -141,7 +141,12 @@ final class ChartPresetWarmupRunner: ObservableObject {
 
     private static func generateOne(metaId: Int, comboKey: String, period: KlinePeriod,
                                     mode: String, warmupN: Int) async -> Bool {
-        let data = DatabaseManager.shared.fetchBars(metaId: metaId, period: period)
+        let fetched = DatabaseManager.shared.fetchBars(metaId: metaId, period: period)
+        // fetchBars 返回表物理序（rowid），部分标的的物理序与时间序错位（实测鲁抗医药
+        // 末行停在 1997 年而根数正确）——统一升序排序与运行时 sortedData 同口径：
+        // lastBarDate / warm 切片 suffix / 求值输入全部基于时间升序，否则行级校验的
+        // 末根日期错值导致生成的缓存永久「过期」、注水永不命中。
+        let data = fetched.sorted { $0.date < $1.date }
         guard !data.isEmpty else {
             failLog("bars 为空", metaId: metaId)
             return false
