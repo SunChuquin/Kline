@@ -67,15 +67,23 @@ final class ChartPresetWarmupRunner: ObservableObject {
             if onlyStale {
                 let periodNames = Set(periods.map(\.rawValue))
                 let targetKeys = Set(targets.map(\.comboKey))
-                // 过期基准 = 主库实际末根（与注水校验/stats 徽标同口径，meta.last_date 是
-                // 声明值、个别标的与实际有偏差，作基准会把正确的行永久判过期）
+                // 过期基准 = 主库实际末根**快照**（后台预计算；与注水校验/stats 徽标同口径）。
+                // 快照未就绪时退回 meta.last_date 声明值口径（个别标的声明值有偏差 → 可能
+                // 多选少量标的重跑，无害）。现场聚合 1380 万行曾在主线程卡死页面——已废弃。
                 let actualLast = DatabaseManager.shared.actualDailyLastDates()
+                let metaByID = Dictionary(uniqueKeysWithValues: metas.map { ($0.id, $0) })
                 var staleIDs = Set<Int>()
                 for row in IndicatorCacheDB.shared.rowsDetail()
                 where targetKeys.contains(row.comboKey) && periodNames.contains(row.period) {
-                    if let actual = actualLast[row.metaID], row.lastBarDate != actual {
-                        staleIDs.insert(row.metaID)
+                    let stale: Bool
+                    if let actual = actualLast?[row.metaID] {
+                        stale = row.lastBarDate != actual
+                    } else if let meta = metaByID[row.metaID], let lastDate = meta.lastDate {
+                        stale = row.lastBarDate != lastDate
+                    } else {
+                        stale = false
                     }
+                    if stale { staleIDs.insert(row.metaID) }
                 }
                 metas = metas.filter { staleIDs.contains($0.id) }
             }

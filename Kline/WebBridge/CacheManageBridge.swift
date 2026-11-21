@@ -73,9 +73,11 @@ final class CacheManageBridge: ObservableObject {
         let store = ChartPresetStore.shared
         let db = IndicatorCacheDB.shared
         let rows = db.rowsDetail()
-        // 过期基准 = 主库实际末根（与注水校验同口径；meta.last_date 是声明值，
-        // 个别标的与实际数据有数日偏差，作基准会永久误报过期）
+        // 过期基准 = 主库实际末根**快照**（后台预计算；与注水校验同口径）。快照未就绪时
+        // 退回 meta.last_date 声明值口径兜底（个别标的声明值有偏差 → 可能误报，就绪后刷新）。
+        // 现场（主线程）聚合 1380 万行曾导致缓存管理页打开卡死——已改后台快照。
         let actualLast = DatabaseManager.shared.actualDailyLastDates()
+        let metaByID = Dictionary(uniqueKeysWithValues: DatabaseManager.shared.metaList.map { ($0.id, $0) })
 
         // 行按 comboKey 聚合
         var byCombo: [String: (count: Int, bytes: Int, stale: Int)] = [:]
@@ -83,10 +85,17 @@ final class CacheManageBridge: ObservableObject {
             var agg = byCombo[row.comboKey] ?? (0, 0, 0)
             agg.count += 1
             agg.bytes += row.bytes
-            // 过期判定（日线行）：缓存末根 ≠ 主库实际末根（补缺口/日更后未重新生成）
-            if row.period == "日线", let actual = actualLast[row.metaID],
-               row.lastBarDate != actual {
-                agg.stale += 1
+            // 过期判定（日线行）：缓存末根 ≠ 数据末根（补缺口/日更后未重新生成）
+            if row.period == "日线" {
+                let mismatch: Bool
+                if let actual = actualLast?[row.metaID] {
+                    mismatch = row.lastBarDate != actual
+                } else if let meta = metaByID[row.metaID], let lastDate = meta.lastDate {
+                    mismatch = row.lastBarDate != lastDate
+                } else {
+                    mismatch = false
+                }
+                if mismatch { agg.stale += 1 }
             }
             byCombo[row.comboKey] = agg
         }
