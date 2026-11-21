@@ -1645,7 +1645,7 @@ extension KlineChartView {
         let config = ChartConfigStore.shared
         let customStore = CustomIndicatorStore.shared
         let store = SystemIndicatorStore.shared
-        var parts: [String] = ["mode=" + ChartPresetStore.shared.activeMode]
+        var parts: [String] = ["mode=" + ChartPresetStore.shared.effectiveMode]
         // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按 id+公式 参与指纹
         let customID = config.activeCustomIndicatorID(for: period)
         let custom = customStore.indicators.first { $0.id == customID }
