@@ -864,11 +864,16 @@ private final class TransferBox {
     }
 
     /// dataTask 流式：数据块直接写盘（写失败标记失败待收尾，后续块跳过）
+    var dataBlockCount = 0
     func handleData(_ data: Data) {
         guard streamingError == nil, let fh = streamingHandle else { return }
         do {
             try fh.write(contentsOf: data)
             onProgress(Int64(data.count))
+            dataBlockCount += 1
+            if dataBlockCount == 1 || dataBlockCount % 200 == 0 {
+                DebugLogger.shared.log("[LANSyncTransfer] 流式接收 块#\(dataBlockCount)")
+            }
         } catch {
             streamingError = SyncError(message: "落盘失败：\(error.localizedDescription)")
         }
@@ -907,7 +912,7 @@ private final class TransferBox {
 // 仅 delegate 型下载任务进入这里（登记过 box）；
 // JSON 任务走 completion handler，不经会话 delegate，按 taskIdentifier 查不到即忽略。
 
-extension LANSyncTransfer: URLSessionDelegate, URLSessionTaskDelegate, URLSessionDownloadDelegate {
+extension LANSyncTransfer: URLSessionDelegate, URLSessionTaskDelegate, URLSessionDataDelegate, URLSessionDownloadDelegate {
 
     /// 下载进度（urlSessionDownloadTask）
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
@@ -926,6 +931,7 @@ extension LANSyncTransfer: URLSessionDelegate, URLSessionTaskDelegate, URLSessio
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        DebugLogger.shared.log("[LANSyncTransfer] 流式响应头 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
         boxFor(dataTask)?.handleResponse(response)
         completionHandler(.allow)
     }
