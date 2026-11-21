@@ -325,6 +325,8 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             try fm.copyItem(atPath: docs + "/" + f.rel, toPath: dst)
         }
         for d in mirrorRoots {
+            // files 循环已按相对路径拷了目录下的文件（目录树已存在）→ 整目录复制前清目标防 516
+            try? fm.removeItem(atPath: root + "/" + d)
             try fm.createDirectory(atPath: root + "/" + d, withIntermediateDirectories: true)
             try fm.copyItem(atPath: docs + "/" + d, toPath: root + "/" + d)
         }
@@ -383,11 +385,13 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         defer { try? fm.removeItem(atPath: partPath) }
         try await withRetry(file.rel, "下载") {
             try? self.fm.removeItem(atPath: partPath)   // 上次尝试的残留
-            // ① 下载到 <rel>.part（downloadTask 流式落盘，防内存暴涨）
+            // ① 流式下载到 <rel>.part（URLSession.bytes 逐块写盘——不经系统临时文件：
+            //   downloadTask 对 5GB 级文件在真机 didFinishDownloadingTo 阶段报
+            //   Cannot allocate memory（POSIX 12），2026-11-21 实测）
             let req = try self.makeRequest(peer, method: "GET",
                                            path: "/sandbox/" + Self.encodePathSegments(file.rel),
                                            token: token)
-            try await self.download(request: req, toPart: partPath)
+            try await self.downloadStreaming(request: req, toPart: partPath)
             // ② 本文件 sha 与对端声明值比对（防传输损坏）
             let localSha = try Self.streamSHA256(path: partPath)
             let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: file.rel, token: token)
@@ -482,7 +486,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             let req = try self.makeRequest(peer, method: "GET",
                                            path: "/sandbox/" + Self.encodePathSegments(rel),
                                            token: token)
-            try await self.download(request: req, toPart: tempPath)
+            try await self.downloadStreaming(request: req, toPart: tempPath)
             let localSha = try Self.streamSHA256(path: tempPath)
             let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: rel, token: token)
             guard localSha == remoteSha else {
@@ -699,16 +703,36 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         throw lastError ?? SyncError(message: "\(action)失败：\(label)")
     }
 
-    /// delegate 型流式下载（downloadTask 落系统临时文件，didFinishDownloadingTo 里搬到 <rel>.part）
-    private func download(request: URLRequest, toPart partPath: String) async throws {
+    /// 流式下载（URLSession.bytes 逐块写盘直落 <rel>.part）——不经系统临时文件，
+    /// 绕开 downloadTask 对 5GB 级文件的真机 ENOMEM；进度/速率沿用 noteBytes 采样。
+    private func downloadStreaming(request: URLRequest, toPart partPath: String) async throws {
         guard let session = session else { throw SyncError(message: "会话已结束") }
-        try await withCheckedThrowingContinuation { cont in
-            let box = TransferBox(continuation: cont, downloadDest: partPath) { [weak self] delta in
-                self?.noteBytes(delta)
+        FileManager.default.createFile(atPath: partPath, contents: nil)
+        guard let fh = FileHandle(forWritingAtPath: partPath) else {
+            throw SyncError(message: "落盘文件创建失败：\(partPath)")
+        }
+        defer { try? fh.close() }
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw SyncError(message: "下载失败 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        }
+        var buffer = Data()
+        buffer.reserveCapacity(1 << 20)
+        do {
+            for try await byte in bytes {
+                buffer.append(byte)
+                if buffer.count >= (1 << 20) {
+                    try fh.write(contentsOf: buffer)
+                    noteBytes(Int64(buffer.count))
+                    buffer.removeAll(keepingCapacity: true)
+                }
             }
-            let task = session.downloadTask(with: request)
-            register(box, for: task)
-            task.resume()
+            if !buffer.isEmpty {
+                try fh.write(contentsOf: buffer)
+                noteBytes(Int64(buffer.count))
+            }
+        } catch {
+            throw SyncError(message: "传输中断：\(error.localizedDescription)")
         }
     }
 
