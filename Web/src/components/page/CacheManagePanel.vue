@@ -21,10 +21,7 @@
             @click="toggle(c.comboKey)"
           >
             <span class="check">{{ selected.has(c.comboKey) ? '●' : '○' }}</span>
-            <span class="combo-name">
-              {{ c.label }}
-              <span v-if="c.staleCount > 0" class="stale-badge">过期 {{ c.staleCount }}</span>
-            </span>
+            <span class="combo-name">{{ c.label }}</span>
             <span class="combo-stat">{{ c.count }} 项 · {{ fmtBytes(c.bytes) }}</span>
           </button>
         </div>
@@ -33,9 +30,8 @@
           <button class="act-btn danger" :disabled="selected.size === 0" @click="clearSelected">
             清除选中（{{ selected.size }}）
           </button>
-          <button class="act-btn" :disabled="selected.size === 0" @click="clearStaleHint">刷新过期</button>
         </div>
-        <div class="note">提示：点行勾选；「刷新过期」按选中组合重新生成（覆盖过期数据）。生成可选 6 个组合：局部独立配置 + 组合1~5。</div>
+        <div class="note">提示：点行勾选后清除对应组合的缓存。生成可选 6 个组合：局部独立配置 + 组合1~5。</div>
 
         <!-- 生成表单 -->
         <div class="sec-title" style="margin-top: 18px">生成指标缓存</div>
@@ -184,18 +180,6 @@ async function clearSelected(): Promise<void> {
   }
 }
 
-/** 刷新过期：只重新生成选中组合下「过期行」的标的（预热覆盖，口径与徽标一致） */
-function clearStaleHint(): void {
-  if (selected.value.size === 0) return
-  void klineBus.request('cacheManage', 'generate', {
-    combos: [...selected.value],
-    mode: 'warm',
-    periods: ['日线'],
-    warmupN: warmupNInput.value,
-    onlyStale: true,
-  }).catch((e) => console.error('cacheManage.generate(onlyStale) 失败', e))
-}
-
 function generate(): void {
   if (genSelected.value.size === 0) return
   // 本地立即反馈：不等 changed 推送（事件链路偶发丢失时按钮应有可见变化）
@@ -332,11 +316,6 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-.stale-badge {
-  font-size: 11px;
-  color: #ff9500;
-  margin-left: 6px;
-}
 
 .combo-stat {
   font-size: 12px;

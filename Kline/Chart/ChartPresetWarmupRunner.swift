@@ -41,10 +41,8 @@ final class ChartPresetWarmupRunner: ObservableObject {
 
     /// 启动生成：combos = 组合 id 列表（"local"=局部独立配置——按当前局部配置解析，
     /// 指纹 mode=local 与运行时同源；"p1".."p5"=全局组合）；mode = "full" | "warm"；
-    /// periods 默认仅日线；
-    /// onlyStale = true 时只处理该组合下「过期行」的标的（口径与管理页徽标一致：
-    /// 缓存末根日期 ≠ meta 表最新日期，补缺口/日更后未重新生成）。
-    func start(combos: [String], mode: String, periods: [KlinePeriod], onlyStale: Bool = false) {
+    /// periods 默认仅日线。
+    func start(combos: [String], mode: String, periods: [KlinePeriod]) {
         // 重入保护：新任务等待旧任务完全退出（旧任务在求值完成后回到循环头检查标志退出），
         // 避免「重跑先取消旧轮」缺位导致两个任务并发抢引擎队列（2026-11-21 实测：连续两次
         // 点生成，local 与 p1 任务交错求值，进度日志互相覆盖）。
@@ -63,38 +61,15 @@ final class ChartPresetWarmupRunner: ObservableObject {
                 self.phase = .finished
                 return
             }
-            var metas = DatabaseManager.shared.metaList
-            if onlyStale {
-                let periodNames = Set(periods.map(\.rawValue))
-                let targetKeys = Set(targets.map(\.comboKey))
-                // 过期基准 = 主库实际末根**快照**（后台预计算；与注水校验/stats 徽标同口径）。
-                // 快照未就绪时退回 meta.last_date 声明值口径（个别标的声明值有偏差 → 可能
-                // 多选少量标的重跑，无害）。现场聚合 1380 万行曾在主线程卡死页面——已废弃。
-                let actualLast = DatabaseManager.shared.actualDailyLastDates()
-                let metaByID = Dictionary(uniqueKeysWithValues: metas.map { ($0.id, $0) })
-                var staleIDs = Set<Int>()
-                for row in IndicatorCacheDB.shared.rowsDetail()
-                where targetKeys.contains(row.comboKey) && periodNames.contains(row.period) {
-                    let stale: Bool
-                    if let actual = actualLast?[row.metaID] {
-                        stale = row.lastBarDate != actual
-                    } else if let meta = metaByID[row.metaID], let lastDate = meta.lastDate {
-                        stale = row.lastBarDate != lastDate
-                    } else {
-                        stale = false
-                    }
-                    if stale { staleIDs.insert(row.metaID) }
-                }
-                metas = metas.filter { staleIDs.contains($0.id) }
-            }
+            let metas = DatabaseManager.shared.metaList
             guard !metas.isEmpty else {
                 self.phase = .finished
-                DebugLogger.shared.log("[Warmup] 无\(onlyStale ? "过期" : "")标的需要生成")
+                DebugLogger.shared.log("[Warmup] 无标的需要生成")
                 return
             }
             let total = targets.count * periods.count * metas.count
             self.phase = .running(done: 0, total: total, comboLabel: targets[0].label)
-            DebugLogger.shared.log("[Warmup] 生成启动 combos=\(combos) mode=\(mode) onlyStale=\(onlyStale) periods=\(periods.map(\.rawValue)) 标的=\(metas.count) total=\(total)")
+            DebugLogger.shared.log("[Warmup] 生成启动 combos=\(combos) mode=\(mode) periods=\(periods.map(\.rawValue)) 标的=\(metas.count) total=\(total)")
 
             var done = 0
             var failed = 0

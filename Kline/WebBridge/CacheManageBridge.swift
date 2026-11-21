@@ -6,7 +6,7 @@
 //  呈现域：page（入口在个人中心 → page.open("cacheManage")，shell 层全屏页）。
 //
 //  动作：
-//  - stats：六组合占用统计（条目数/字节/过期数）+ 生成运行态 + 预热根数偏好
+//  - stats：六组合占用统计（条目数/字节）+ 生成运行态 + 预热根数偏好
 //  - clear {ids}：按组合清除磁盘缓存（幂等目标态）
 //  - generate {combos, mode, periods, warmupN}：启动生成引擎（全市场批量，进度随 changed 推送）
 //  - cancelGenerate {}：取消生成（幂等）
@@ -67,36 +67,19 @@ final class CacheManageBridge: ObservableObject {
 
     // MARK: 统计
 
-    /// 六组合（local + p1..p5）占用统计：条目数/字节/过期数（末根日期≠meta 最新日 = 过期）。
+    /// 六组合（local + p1..p5）占用统计：条目数/字节。
     /// local 的磁盘缓存同样统计（图表运行时全量预计算落盘也带 comboKey=local）。
+    /// 数据正确性由注水时的行级校验（指纹/源根数/末根日期）保证，此处不做「过期」标记。
     private static func statsData() -> [String: Any] {
         let store = ChartPresetStore.shared
-        let db = IndicatorCacheDB.shared
-        let rows = db.rowsDetail()
-        // 过期基准 = 主库实际末根**快照**（后台预计算；与注水校验同口径）。快照未就绪时
-        // 退回 meta.last_date 声明值口径兜底（个别标的声明值有偏差 → 可能误报，就绪后刷新）。
-        // 现场（主线程）聚合 1380 万行曾导致缓存管理页打开卡死——已改后台快照。
-        let actualLast = DatabaseManager.shared.actualDailyLastDates()
-        let metaByID = Dictionary(uniqueKeysWithValues: DatabaseManager.shared.metaList.map { ($0.id, $0) })
+        let rows = IndicatorCacheDB.shared.rowsDetail()
 
         // 行按 comboKey 聚合
-        var byCombo: [String: (count: Int, bytes: Int, stale: Int)] = [:]
+        var byCombo: [String: (count: Int, bytes: Int)] = [:]
         for row in rows {
-            var agg = byCombo[row.comboKey] ?? (0, 0, 0)
+            var agg = byCombo[row.comboKey] ?? (0, 0)
             agg.count += 1
             agg.bytes += row.bytes
-            // 过期判定（日线行）：缓存末根 ≠ 数据末根（补缺口/日更后未重新生成）
-            if row.period == "日线" {
-                let mismatch: Bool
-                if let actual = actualLast?[row.metaID] {
-                    mismatch = row.lastBarDate != actual
-                } else if let meta = metaByID[row.metaID], let lastDate = meta.lastDate {
-                    mismatch = row.lastBarDate != lastDate
-                } else {
-                    mismatch = false
-                }
-                if mismatch { agg.stale += 1 }
-            }
             byCombo[row.comboKey] = agg
         }
 
@@ -104,9 +87,10 @@ final class CacheManageBridge: ObservableObject {
         // local 在前，p1..p5 依次
         for (key, label) in [(ChartPresetStore.localMode, "局部独立配置")]
             + store.presets.map { ($0.id, $0.name) } {
-            let agg = byCombo[key] ?? (0, 0, 0)
+            let agg = byCombo[key] ?? (0, 0)
             combos.append(["comboKey": key, "label": label,
-                           "count": agg.count, "bytes": agg.bytes, "staleCount": agg.stale])
+                           "count": agg.count, "bytes": agg.bytes])
+
         }
 
         let runner = ChartPresetWarmupRunner.shared
@@ -144,10 +128,9 @@ final class CacheManageBridge: ObservableObject {
 
     // MARK: 生成
 
-    /// cacheManage.generate {combos, mode, periods?, warmupN?, onlyStale?}：启动生成引擎。
+    /// cacheManage.generate {combos, mode, periods?, warmupN?}：启动生成引擎。
     /// combos = ["local"] + ["p1".."p5"] 子集（local=局部独立配置，按当前局部配置解析）；
     /// mode = "full" | "warm"；periods 缺省 ["日线"]；
-    /// onlyStale = true 时只重跑该组合下过期标的（管理页「刷新过期」便捷动作）；
     /// 同一时刻只跑一个任务（单例 Runner，重跑先取消旧轮）。
     private static func generate(_ request: WebBridgeRequest) -> [String: Any] {
         let combos = (request.payload["combos"] as? [String]) ?? []
@@ -171,9 +154,7 @@ final class CacheManageBridge: ObservableObject {
         if let n = (request.payload["warmupN"] as? NSNumber)?.intValue, n >= 20, n <= 1000 {
             ChartPresetWarmupRunner.shared.warmupN = n
         }
-        let onlyStale = (request.payload["onlyStale"] as? Bool) ?? false
-        ChartPresetWarmupRunner.shared.start(combos: validCombos, mode: mode, periods: periods,
-                                             onlyStale: onlyStale)
+        ChartPresetWarmupRunner.shared.start(combos: validCombos, mode: mode, periods: periods)
         return WebBridgeResponse.ok(request.id, data: ["queued": true])
     }
 }

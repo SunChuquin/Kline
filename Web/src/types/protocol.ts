@@ -88,8 +88,8 @@
 //   preset.openEditor {} → {}                                 设置面板「编辑五套组合」→ 切 sheet 面板到 presetEditor
 //   cacheManage.stats {} → CacheStatsSnapshot                 指标缓存占用统计（六组合条目数/字节/过期数 + 生成运行态）
 //   cacheManage.clear {ids?} → {}                             按组合清除磁盘缓存（ids 缺省清全部）
-//   cacheManage.generate {combos, mode, periods?, warmupN?, onlyStale?} → {queued}
-//                                                             启动生成引擎（combos 可含 "local" 与 "p1".."p5"；mode full=完整计算 / warm=最新N根近似；onlyStale=只重跑过期标的；进度随 changed 推送）
+//   cacheManage.generate {combos, mode, periods?, warmupN?} → {queued}
+//                                                             启动生成引擎（combos 可含 "local" 与 "p1".."p5"；mode full=完整计算 / warm=最新N根近似；进度随 changed 推送）
 //   cacheManage.cancelGenerate {} → {}                        取消生成（幂等）
 //   chart.formula.snapshot {} → FormulaSnapshot                          tech 段三节快照（系统主图/副图分组/自定义）
 //   chart.formula.deleteCustom {id} → {}                                 删除自定义指标
@@ -514,14 +514,13 @@ export interface IndicatorsSnapshot {
 
 // ===== 指标缓存管理（cacheManage） =====
 
-/** cacheManage.stats 单组合占用（staleCount = 末根日期≠meta 最新日 的日线行数，过期待更新） */
+/** cacheManage.stats 单组合占用 */
 export interface CacheComboStats {
   /** "local" / "p1".."p5" */
   comboKey: string
   label: string
   count: number
   bytes: number
-  staleCount: number
 }
 
 /** cacheManage.stats 响应（占用统计 + 生成运行态 + 预热根数偏好） */

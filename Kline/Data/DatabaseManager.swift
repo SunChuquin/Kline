@@ -54,8 +54,6 @@ class DatabaseManager: ObservableObject {
                 guard let self = self, summary.contentChanged else { return }
                 self.bumpDataVersion(summary: summary)
             }
-        // 日线实际末根快照后台预建（dbQueue 串行：排在 loadDatabase 之后执行，db 已打开）
-        rebuildActualLastDatesAsync()
     }
 
     /// 数据版本自增（主线程）：增量库内容变化后由 liveReloadCancellable 触发。
@@ -72,8 +70,6 @@ class DatabaseManager: ObservableObject {
         dataVersion += 1
         // 底层行情数据整体更新 → 丢弃图表指标曲线缓存（否则指标仍是旧数据算出来的）
         ChartCacheStore.shared.clearAll()
-        // 数据变化 → 日线实际末根快照后台重算（缓存管理页过期判定的基准）
-        rebuildActualLastDatesAsync()
         DebugLogger.shared.log("[DB] dataVersion → \(dataVersion)（增量库内容变化 · \(summary.reason) · 覆盖=\(summary.metaCountAfter)只/日线\(summary.dailyCountAfter)行 · 最新=\(summary.latestDateAfter) · fp=\(key)）")
     }
 
@@ -226,8 +222,6 @@ class DatabaseManager: ObservableObject {
         guard isLoaded else { return }
         dataVersion += 1
         ChartCacheStore.shared.clearAll()
-        // 主库被改写 → 日线实际末根快照后台重算
-        rebuildActualLastDatesAsync()
         DebugLogger.shared.log("[DB] dataVersion → \(dataVersion)（主库被内部合并改写）")
     }
 
@@ -483,58 +477,6 @@ class DatabaseManager: ObservableObject {
         case .quarterly: return fetchPeriodTable(metaId: metaId, table: "quarterly")
         case .yearly: return fetchPeriodTable(metaId: metaId, table: "yearly")
         }
-    }
-
-    /// 各标的日线实际末根（旧实现：queue.sync 全表聚合）——**已废弃**，改为后台快照
-    /// rebuildActualLastDatesAsync() + actualDailyLastDates()（见上）。删除现场聚合：
-    /// 1380 万行无索引聚合数十秒且曾在主线程执行，缓存管理页打开卡死主因。
-
-    /// 各标的日线**实际**末根——**后台预计算快照**（nil = 尚未就绪）。
-    /// 为什么不用 meta.last_date：那是声明值，个别标的与实际数据存在数日偏差（种子快照差异，
-    /// 实测英力特声明 20261109 而实际末根 20261112）——指标缓存的「过期」判定必须与注水校验
-    /// 同口径（注水用的正是 fetchBars 实际数据末根），否则会误报过期/误判可命中。
-    /// 为什么是快照而非现场查询：daily 表 1380 万行，无索引聚合数十秒——此前在主线程现场
-    /// 聚合是缓存管理页打开卡死的主因（2026-11-21 实测）。后台建覆盖索引后聚合毫秒级。
-    private(set) var actualLastDatesSnapshot: [Int: Int]? = nil
-    /// 后台重建去重标志（触发点均在主线程，主线程读写）
-    private var actualDatesRebuilding = false
-
-    /// 后台重建日线实际末根快照（幂等）：先建覆盖索引（idx_daily_meta_date；主库整文件
-    /// 替换后新文件无索引，此步一次性补齐，1380 万行数十秒），再聚合（有索引后毫秒级）。
-    /// 触发：init（dbQueue 串行保证在 loadDatabase 之后执行）/ 增量重载 / 主库合并改写。
-    func rebuildActualLastDatesAsync() {
-        guard !actualDatesRebuilding else { return }
-        actualDatesRebuilding = true
-        dbQueue.async { [weak self] in
-            defer {
-                DispatchQueue.main.async { self?.actualDatesRebuilding = false }
-            }
-            guard let self, let db = self.db else { return }
-            var err: UnsafeMutablePointer<CChar>?
-            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_daily_meta_date ON daily(meta_id, date);",
-                            nil, nil, &err) != SQLITE_OK {
-                DebugLogger.shared.log("[DB] daily 末根索引创建失败: \(err.map { String(cString: $0) } ?? "?")")
-                return
-            }
-            var statement: OpaquePointer?
-            defer { sqlite3_finalize(statement) }
-            guard sqlite3_prepare_v2(db, "SELECT meta_id, MAX(date) FROM daily GROUP BY meta_id;", -1,
-                                     &statement, nil) == SQLITE_OK else { return }
-            var result: [Int: Int] = [:]
-            while sqlite3_step(statement) == SQLITE_ROW {
-                result[Int(sqlite3_column_int64(statement, 0))] = Int(sqlite3_column_int64(statement, 1))
-            }
-            let count = result.count
-            DispatchQueue.main.async {
-                self.actualLastDatesSnapshot = result
-                DebugLogger.shared.log("[DB] 日线实际末根快照就绪 \(count) 标的")
-            }
-        }
-    }
-
-    /// 读取实际末根快照（nil = 尚未就绪；调用方以 meta.last_date 口径兜底，就绪后随轮询刷新）
-    func actualDailyLastDates() -> [Int: Int]? {
-        actualLastDatesSnapshot
     }
 
     /// 通用：读取指定标的某张周期表的数据；字段与日/周线一致，表不存在时 prepare 失败返回空。

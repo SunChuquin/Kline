@@ -786,7 +786,7 @@ final class WebBridgeProtocolTests: XCTestCase {
         XCTAssertNotNil(editCommit["ok"], "editCommit 响应缺 ok 信封")
     }
 
-    /// cacheManage.stats 响应形状锁定（P2 指标组合期4）：组合占用/过期数 + 生成运行态
+    /// cacheManage.stats 响应形状锁定（P2 指标组合期4）：组合占用 + 生成运行态
     func testCacheStatsShape() throws {
         let fixture = try loadFixture()
         let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
@@ -799,7 +799,7 @@ final class WebBridgeProtocolTests: XCTestCase {
         }
         let combos = try XCTUnwrap(data["combos"] as? [[String: Any]])
         for c in combos {
-            for key in ["comboKey", "label", "count", "bytes", "staleCount"] {
+            for key in ["comboKey", "label", "count", "bytes"] {
                 XCTAssertNotNil(c[key], "组合占用行缺 \(key)")
             }
         }
