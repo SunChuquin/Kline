@@ -153,6 +153,7 @@
             <span class="progress-speed">{{ fmtSpeed(tr.bytesPerSecond) }}</span>
           </div>
           <div class="progress-file">当前文件：{{ tr.currentFile || '—' }}</div>
+          <div class="progress-stage">当前阶段：{{ tr.currentStage || '—' }}</div>
         </div>
 
         <div v-else-if="tr.phase === 'done'" class="card done-card">
@@ -775,6 +776,11 @@ function fmtSpeed(bps: number): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.progress-stage {
+  font-size: 12px;
+  color: var(--k-text-secondary);
+  margin-top: 2px;
 }
 
 .done-card,

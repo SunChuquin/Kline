@@ -83,6 +83,9 @@ final class LANSyncTransfer: NSObject, ObservableObject {
     @Published var progress: Double = 0
     /// 正在拉取的文件（Documents 相对路径）
     @Published var currentFile: String = ""
+    /// 当前阶段文案（下载完成后的收尾环节：sha 校验/替换/重载——进度条已 100% 时
+    /// 用户仍需知道 App 在做什么，2026-11-21 真机反馈）
+    @Published var currentStage: String = ""
     /// 拉取速率（最近 ~1s 采样窗口），字节/秒
     @Published var bytesPerSecond: Int64 = 0
     /// 结果页文案（完成后汇总）
@@ -153,6 +156,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             self.bytesPerSecond = 0
             self.resultSummary = ""
             self.backupDir = nil
+            self.currentStage = ""
         }
 
         // 每次传输独立会话：单请求 60s（局域网足够），资源总超时 3600s（1.4GB 慢速 WiFi）。
@@ -198,7 +202,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             }
 
             // ---- 步骤 4：逐文件拉取 ----
-            publishOnMain { self.phase = .transferring }
+            publishOnMain { self.phase = .transferring; self.currentStage = "传输数据" }
             let outcome = try await transferFiles(plan: plan, peer: peer, token: token)
 
             // ---- 步骤 5：完成后本机生效 ----
@@ -417,12 +421,15 @@ final class LANSyncTransfer: NSObject, ObservableObject {
                 try await self.downloadStreaming(request: req, toPart: partPath)
             }
             // ② 本文件 sha 与对端声明值比对（防传输损坏）
+            publishOnMain { self.currentStage = "校验 sha256（本机，大文件需数十秒）" }
             let localSha = try Self.streamSHA256(path: partPath)
+            publishOnMain { self.currentStage = "校验 sha256（对端计算中）" }
             let remoteSha = try await self.fetchPeerSHA(peer: peer, rel: file.rel, token: token)
             guard localSha == remoteSha else {
                 throw SyncError(message: "sha256 校验不符：\(file.rel)（本地 \(localSha.prefix(8))… / 对端 \(remoteSha.prefix(8))…）")
             }
             // ③ 校验通过 → 原子替换覆盖本地
+            publishOnMain { self.currentStage = "覆盖本机文件" }
             try Self.atomicReplace(partPath: partPath, dstPath: dstPath)
         }
     }
@@ -581,6 +588,7 @@ final class LANSyncTransfer: NSObject, ObservableObject {
             .filter { !$0.files.isEmpty || ($0.category == .indicatorCache && !$0.skipped) }
             .map(\.category)
         guard !cats.isEmpty else { return }
+        publishOnMain { self.currentStage = "应用配置与重载" }
 
         let configScopes = cats.filter(\.needsConfigReload)
         if !configScopes.isEmpty {

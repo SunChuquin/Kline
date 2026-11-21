@@ -297,6 +297,7 @@ final class LANSyncBridge: ObservableObject {
             "progress": t.progress,
             "bytesPerSecond": t.bytesPerSecond,
             "currentFile": t.currentFile,
+            "currentStage": t.currentStage,
             "resultSummary": t.resultSummary,
             "backupDir": t.backupDir ?? NSNull(),
             "needsRestart": t.needsRestart,
