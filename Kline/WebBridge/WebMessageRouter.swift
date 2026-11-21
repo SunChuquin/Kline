@@ -101,6 +101,7 @@ final class WebMessageRouter: NSObject, WKScriptMessageHandler {
         case "sim":        return SimulationBridge.handle(request)
         case "sheet":      return SheetBridge.handle(request)
         case "chart":      return SheetBridge.handleChart(request)
+        case "preset":     return PresetBridge.handle(request)
         case "quick":      return QuickBridge.handle(request)
         case "trade":      return QuickBridge.handleTrade(request)
         case "page":       return WebPageBridge.handle(request)

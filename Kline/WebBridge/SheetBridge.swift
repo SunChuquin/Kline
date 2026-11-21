@@ -215,7 +215,19 @@ final class SheetBridge: ObservableObject {
             "showLatestPriceLine": config.displaySettings.showLatestPriceLine,
             "indicatorNotSqueezeKline": config.displaySettings.indicatorNotSqueezeKline,
             "showBareK": config.showBareK,
+            "activeMode": ChartPresetStore.shared.activeMode,
+            "presetOptions": presetOptions(),
         ]
+    }
+
+    /// 指标组合下拉选项（第一项恒为局部独立配置；label 取组合当前名）
+    private static func presetOptions() -> [[String: Any]] {
+        let store = ChartPresetStore.shared
+        var options: [[String: Any]] = [["value": ChartPresetStore.localMode, "label": "局部独立配置"]]
+        for p in store.presets {
+            options.append(["value": p.id, "label": p.name])
+        }
+        return options
     }
 
     /// 当前详情页标的（search.pick / linkedViewCount 需要；由 KlineDetailView 注入）
@@ -250,6 +262,12 @@ final class SheetBridge: ObservableObject {
         if ds != config.displaySettings { config.displaySettings = ds }
 
         if let v = p["showBareK"] as? Bool { config.showBareK = v }
+
+        // 指标组合切换（幂等目标态；非法槽位忽略——下拉只出现合法选项，此处兜底）
+        if let raw = p["activeMode"] as? String,
+           raw == ChartPresetStore.localMode || ChartPresetStore.shared.preset(id: raw) != nil {
+            ChartPresetStore.shared.setActiveMode(raw)
+        }
 
         return WebBridgeResponse.ok(request.id)
     }

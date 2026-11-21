@@ -79,7 +79,7 @@ final class WebBridgeProtocolTests: XCTestCase {
                                         "page.open", "lan.changed", "update.changed", "lab.changed",
                                         "backtest.changed", "training.changed", "formulaEdit.changed",
                                         "strategyEdit.changed", "pickerEdit.changed",
-                                        "strategyDetail.changed", "cond.changed"]
+                                        "strategyDetail.changed", "cond.changed", "preset.changed"]
         for ev in events {
             let name = try XCTUnwrap(ev["event"] as? String)
             XCTAssertTrue(knownEvents.contains(name), "未知事件 \(name)（协议 v2 事件清单外）")
@@ -107,7 +107,8 @@ final class WebBridgeProtocolTests: XCTestCase {
         let data = try XCTUnwrap(snap["data"] as? [String: Any])
         for key in ["period", "periodOptions", "chartStyle", "styleOptions", "linkedViewCount",
                     "viewCountOptions", "showGap", "gapDisappearAfterFill",
-                    "showLatestPriceLine", "indicatorNotSqueezeKline", "showBareK"] {
+                    "showLatestPriceLine", "indicatorNotSqueezeKline", "showBareK",
+                    "activeMode", "presetOptions"] {
             XCTAssertNotNil(data[key], "chart.settings.snapshot 缺 \(key)")
         }
         for key in ["periodOptions", "styleOptions", "viewCountOptions"] {
@@ -747,6 +748,30 @@ final class WebBridgeProtocolTests: XCTestCase {
         }, "fixtures 缺 pickerEdit.save 响应样例")
         let data = try XCTUnwrap(resp["data"] as? [String: Any])
         XCTAssertNotNil(data["id"], "pickerEdit.save 响应缺 id（新建落盘后的 PICK_<n>）")
+    }
+
+    /// preset.snapshot 响应形状锁定（P2 指标组合）：mode/modeOptions/五套组合按周期配置
+    func testPresetSnapshotShape() throws {
+        let fixture = try loadFixture()
+        let responses = try XCTUnwrap(fixture["responses"] as? [[String: Any]])
+        let snap = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_preset_snapshot"
+        }, "fixtures 缺 preset.snapshot 响应样例")
+        let data = try XCTUnwrap(snap["data"] as? [String: Any])
+        for key in ["mode", "modeOptions", "presets"] {
+            XCTAssertNotNil(data[key], "preset.snapshot 缺 \(key)")
+        }
+        let presets = try XCTUnwrap(data["presets"] as? [[String: Any]])
+        XCTAssertEqual(presets.count, 5, "指标组合固定 5 槽")
+        for p in presets {
+            for key in ["id", "name", "mainIndicatorsByPeriod", "activeCustomByPeriod", "subSelectionsByPeriod"] {
+                XCTAssertNotNil(p[key], "组合条目缺 \(key)")
+            }
+        }
+        let editCommit = try XCTUnwrap(responses.first {
+            ($0["id"] as? String) == "req_preset_edit_commit"
+        }, "fixtures 缺 preset.editCommit 响应样例")
+        XCTAssertNotNil(editCommit["ok"], "editCommit 响应缺 ok 信封")
     }
 
     /// strategyDetail.snapshot 响应形状锁定（P2-9c 策略详情页）：基础信息同步直出七字段

@@ -1621,13 +1621,15 @@ extension KlineChartView {
 
     // MARK: - 后台预计算其它周期（写入全局缓存，不触碰可见视图）
 
-    /// 当前指标配置指纹：主图开关/参数 + 三个副图指标与参数（含自定义指标公式）。
+    /// 当前指标配置指纹：组合模式 + 主图开关/参数 + 三个副图指标与参数（含自定义指标公式）。
     /// 用于判断某 (标的, 周期) 的缓存是否仍与当前配置一致：配置变了 → 缓存视为无效、重算。
+    /// P2 指标组合：mode/presetId 参与指纹——切换组合或编辑生效中组合即缓存失效重算
+    /// （resolver 返回值已隐含组合内容，mode 前缀确保同内容跨组合不复用、编辑即重算）。
     static func currentConfigFingerprint(period: KlinePeriod) -> String {
         let config = ChartConfigStore.shared
         let customStore = CustomIndicatorStore.shared
         let store = SystemIndicatorStore.shared
-        var parts: [String] = []
+        var parts: [String] = ["mode=" + ChartPresetStore.shared.activeMode]
         // 主图：数据驱动，条目来自 .tdx（SCOPE=main）+ 自定义，按 id+公式 参与指纹
         let customID = config.activeCustomIndicatorID(for: period)
         let custom = customStore.indicators.first { $0.id == customID }

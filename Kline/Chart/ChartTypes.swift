@@ -101,7 +101,8 @@ final class SubChartModel: ObservableObject {
 }
 
 /// 单个副图槽位的一次选择记忆（指标类型 + 所属自定义指标 id）
-struct SubChartSelection {
+/// Codable：ChartPreset（指标组合）按周期落盘需要序列化（kind/customID 均为可序列化标量）
+struct SubChartSelection: Codable, Equatable {
     var kind: String
     var customID: UUID?
 }

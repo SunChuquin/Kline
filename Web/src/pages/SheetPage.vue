@@ -21,6 +21,24 @@
             </button>
           </div>
 
+          <div class="sec-title">指标组合</div>
+          <div class="grouped">
+            <button class="sel-row" @click="pickerKind = 'preset'" aria-label="chart.preset.mode">
+              <span>生效组合</span>
+              <span class="sel-value">{{ presetLabel }} ›</span>
+            </button>
+            <div class="g-divider"></div>
+            <button
+              class="sel-row"
+              :class="{ disabled: !presetEditorAvailable }"
+              aria-label="chart.preset.editor"
+              @click="openPresetEditor"
+            >
+              <span>编辑五套组合</span>
+              <span class="sel-value">›</span>
+            </button>
+          </div>
+
           <div class="sec-title danger">重置</div>
           <div class="grouped">
             <button class="sel-row destructive" @click="resetConfirm = true">重置当前标的联动视图配置</button>
@@ -604,7 +622,7 @@ function profitClass(v: number): string {
   return v < 0 ? 'down' : 'up'
 }
 
-const pickerKind = ref<'period' | 'chartStyle' | 'viewCount' | null>(null)
+const pickerKind = ref<'period' | 'chartStyle' | 'viewCount' | 'preset' | null>(null)
 const pickerOpen = computed({
   get: () => pickerKind.value !== null,
   set: (v: boolean) => { if (!v) pickerKind.value = null },
@@ -616,6 +634,20 @@ const viewCountLabel = computed(() => {
   const n = settings.value?.linkedViewCount ?? 2
   return `${n} 个视图`
 })
+
+// ===== 指标组合（P2 指标组合体系） =====
+/** 生效组合展示名（下拉选项里按当前 mode 反查 label） */
+const presetLabel = computed(() => {
+  const s = settings.value
+  if (!s) return ''
+  return s.presetOptions.find((o) => o.value === s.activeMode)?.label ?? s.activeMode
+})
+
+/** 组合编辑页（期2 接通 presetEditor 弹层面板；当前占位禁用） */
+const presetEditorAvailable = false
+function openPresetEditor(): void {
+  if (!presetEditorAvailable) return
+}
 
 // ===== 指标面板（P2-5b） =====
 const indicatorsTitle = computed(() =>
@@ -694,6 +726,7 @@ const pickerActions = computed(() => {
     opts.map((o) => ({ name: o.label, value: String(o.value) }))
   if (pickerKind.value === 'period') return toActions(s.periodOptions)
   if (pickerKind.value === 'chartStyle') return toActions(s.styleOptions)
+  if (pickerKind.value === 'preset') return toActions(s.presetOptions)
   return toActions(s.viewCountOptions)
 })
 
@@ -713,6 +746,12 @@ function onPickerSelect(action: { name: string; value: string }): void {
       const n = Number(action.value)
       s.linkedViewCount = n
       void setSetting('linkedViewCount', n)
+      break
+    }
+    case 'preset': {
+      // 切换生效指标组合（原生 setActiveMode → 图表即时重算）
+      s.activeMode = action.value
+      void setSetting('activeMode', action.value)
       break
     }
   }
@@ -1136,6 +1175,8 @@ async function handleSheetOpen(payload: Record<string, unknown> | undefined): Pr
         showLatestPriceLine: s.showLatestPriceLine === true,
         indicatorNotSqueezeKline: s.indicatorNotSqueezeKline === true,
         showBareK: s.showBareK === true,
+        activeMode: String(s.activeMode ?? 'local'),
+        presetOptions: (s.presetOptions ?? []) as ChartOption[],
       }
     } catch (e) {
       console.error('settings.snapshot 失败', e)
@@ -1566,6 +1607,15 @@ onMounted(async () => {
   color: #ee0a24;
   justify-content: center;
   font-weight: 500;
+}
+
+.sel-row.disabled {
+  color: var(--k-text-tertiary);
+  cursor: default;
+}
+
+.sel-row.disabled .sel-value {
+  color: var(--k-text-tertiary);
 }
 
 .sel-value {

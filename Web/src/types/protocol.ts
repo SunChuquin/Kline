@@ -70,8 +70,8 @@
 //   sim.exportLogs     {keyword, logModule?} → {toast}       导出操作日志 CSV（Documents/Simulation/）
 //   sheet.close        {} → {}                               Web 弹层请求关闭（Swift 侧移除浮层遮罩并回写宿主弹层状态）
 //   sheet.ready        {} → {}                               浮层 WebView 就绪拉取（补推 sheet.open——首次打开时事件早于 WebView 就绪会丢失）
-//   chart.settings.snapshot {} → ChartSettingsSnapshot      K线设置快照（周期/类型/联动视图数/显示组/裸K）
-//   chart.settings.set {period?, chartStyle?, linkedViewCount?, showGap?, ...} → {} 设置写回（幂等目标态，即时生效图表）
+//   chart.settings.snapshot {} → ChartSettingsSnapshot      K线设置快照（周期/类型/联动视图数/显示组/裸K/指标组合模式）
+//   chart.settings.set {period?, chartStyle?, linkedViewCount?, showGap?, ..., activeMode?} → {} 设置写回（幂等目标态，即时生效图表）
 //   chart.settings.resetLinked {} → {}                       重置当前标的联动视图配置
 //   chart.search.query {keyword} → {results}                 图表搜索（DatabaseManager.searchMeta 同口径）
 //   chart.search.pick  {file} → {}                           选中搜索结果（KlineDetailView 切标的并重新加载）
@@ -82,6 +82,9 @@
 //   chart.indicators.resetBuiltin {} → {}                    重置内置指标（restoreAllBuiltin）
 //   chart.indicators.openSystemEditor {isMain, subId?} → {}  关面板 + 桥接原生系统指标公式编辑器
 //   chart.indicators.openCustomEditor {target} → {}          关面板 + 桥接原生自定义指标编辑器
+//   preset.snapshot {} → PresetSnapshot                       指标组合快照（生效模式 + 五套组合完整按周期配置）
+//   preset.setMode {id} → {}                                  切换生效组合（"local"=局部独立配置 / "p1".."p5"；幂等；图表即时重算）
+//   preset.editCommit {presets:[5套]} → {}                    组合编辑页整包提交（生效中组合被改即重算）
 //   chart.formula.snapshot {} → FormulaSnapshot                          tech 段三节快照（系统主图/副图分组/自定义）
 //   chart.formula.deleteCustom {id} → {}                                 删除自定义指标
 //   chart.formula.openCenter {} → {}                                     （回退链路）关面板 + 桥接原生公式中心
@@ -190,6 +193,7 @@
 //   pickerEdit.changed {reason}            选股公式编辑器异步结果（reason: pickTest|dataReady；route:"page" 定向推送）
 //   strategyDetail.changed {reason}        策略详情异步结果（reason: values|pickPhase|pickHits|genConfirm|genResult；route:"page" 定向推送）
 //   cond.changed {reason}                  条件单异步结果（reason: evaluate|saveResult|list|texts|newFailed；route:"page" 定向推送）
+//   preset.changed {reason}                指标组合变化（reason: mode|presets；route:"sheet" 定向推送）
 //
 // ## 预留（后续批次扩展，本版未实现；形状见 fixtures reserved 区块）
 //   sheet.open / sheet.close …（P2-5 图表弹层浮层容器）
@@ -417,6 +421,33 @@ export interface ChartSettingsSnapshot {
   showLatestPriceLine: boolean
   indicatorNotSqueezeKline: boolean
   showBareK: boolean
+  /** 指标组合：当前生效模式（"local"=局部独立配置 / "p1".."p5"） */
+  activeMode: string
+  /** 指标组合下拉选项（第一项恒为局部独立配置） */
+  presetOptions: ChartOption[]
+}
+
+// ===== 指标组合（preset） =====
+
+/** preset.snapshot 组合条目（按周期记录启用集合；不含参数——参数保持全局） */
+export interface ChartPresetSnap {
+  /** 固定槽位 "p1".."p5" */
+  id: string
+  name: string
+  /** period rawValue（如"日线"）→ 主图启用指标 id 列表（缺 key = 默认 MA+CMK） */
+  mainIndicatorsByPeriod: Record<string, string[]>
+  /** period rawValue → 主图自定义指标 uuidString（缺 key = 无） */
+  activeCustomByPeriod: Record<string, string>
+  /** period rawValue → 三副图选择（缺 key 或数量≠3 = 默认 CDJ/COL/MACD） */
+  subSelectionsByPeriod: Record<string, { kind: string; customID: string }[]>
+}
+
+/** preset.snapshot 响应（设置面板下拉 + 组合编辑页） */
+export interface PresetSnapshot {
+  /** 当前生效模式："local" / "p1".."p5" */
+  mode: string
+  modeOptions: ChartOption[]
+  presets: ChartPresetSnap[]
 }
 
 /** chart.search.query 结果行 */
@@ -1031,6 +1062,7 @@ export const KnownActions = {
           'indicators.activateMainCustom', 'indicators.resetBuiltin',
           'indicators.openSystemEditor', 'indicators.openCustomEditor',
           'formula.snapshot', 'formula.deleteCustom', 'formula.openCenter', 'formula.openEditor'],
+  preset: ['snapshot', 'setMode', 'editCommit'],
   formulaEdit: ['snapshot', 'test', 'save', 'restoreBuiltin'],
   strategyEdit: ['snapshot', 'evaluate', 'testPick', 'save'],
   strategyDetail: ['snapshot', 'edit', 'backtest', 'runPick', 'cancelPick', 'generate', 'toggleEntry', 'confirmGenerate'],
@@ -1071,6 +1103,7 @@ export const KnownEvents = {
   strategyDetailChanged: 'strategyDetail.changed',
   pickerEditChanged: 'pickerEdit.changed',
   condChanged: 'cond.changed',
+  presetChanged: 'preset.changed',
 } as const
 
 // 已约定的错误码（协议 v2 错误码表）

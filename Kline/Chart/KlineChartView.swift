@@ -991,6 +991,25 @@ struct KlineChartView: View {
             // 顶部栏裸K按钮切换后立即重算（隐藏/恢复主图指标）
             recomputeMainCurves(force: true)
         }
+        .onChange(of: config.configModeRevision) { _ in
+            // 指标组合切换/编辑（configModeRevision bump）：重新解析三副图选择 +
+            // 主/副图 force 重算（指纹已含 mode，缓存自动失效）。
+            // 非隔离：subTop/subBottom/subThird 即共享实例，applySubKinds 统一应用；
+            // 双联动隔离：独立实例，直接写入新组合选择
+            let store = ChartConfigStore.shared
+            let sels = store.subSelections(for: period)
+            if isolatedSubs {
+                for (m, s) in zip([subTop, subBottom, subThird], sels) {
+                    if m.kind != s.kind || m.activeCustomID != s.customID {
+                        m.kind = s.kind
+                        m.activeCustomID = s.customID
+                    }
+                }
+            } else {
+                store.applySubKinds(for: period)
+            }
+            refreshCurves(force: true)
+        }
         .onChange(of: config.mainMirrored) { _ in
             // 全局多/空镜像（顶部导航栏控制）切换：价格范围取负会改变固定光标的价格映射，
             // 切换时清除固定光标避免错位
