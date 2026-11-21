@@ -365,9 +365,11 @@ final class IndicatorCacheDB {
     }
 
     /// 导出选中组合的全部行为同构临时 sqlite（LAN 同步 /sync/cache-export 的数据源）。
+    /// nonisolated：导出大库（单组合可达 5GB、blob 拷贝数十秒）必须在后台执行——
+    /// 内部 queue.sync 自带线程安全，调用方放 global/utility 队列不阻塞主线程。
     /// queue.sync 内完成开库→建表→逐行 blob 直拷→行数校验→关库；失败删除半成品。
     /// 行数校验：SELECT 计数与 INSERT 计数一致才视为成功。
-    func exportCombos(combos: [String], to url: URL) throws {
+    nonisolated func exportCombos(combos: [String], to url: URL) throws {
         guard let db else { throw SyncExportError(message: "本机缓存库未打开") }
         try? FileManager.default.removeItem(at: url)
         let keys = combos
@@ -448,8 +450,9 @@ final class IndicatorCacheDB {
     }
 
     /// 从对端导出库合并选中组合的行（ATTACH + INSERT OR REPLACE，queue.sync 内完成）。
+    /// nonisolated：大库合并（ATTACH 拷贝数 GB）数十秒，调用方放后台队列不阻塞主线程。
     /// 行级字段（fingerprint/末根/根数）随行带入，本机注水校验自然过滤不一致行。
-    func mergeFrom(path: URL, combos: [String]) throws {
+    nonisolated func mergeFrom(path: URL, combos: [String]) throws {
         guard let db else { throw SyncExportError(message: "本机缓存库未打开") }
         try queue.sync {
             var statement: OpaquePointer?

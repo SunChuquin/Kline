@@ -506,11 +506,19 @@ final class LANSyncTransfer: NSObject, ObservableObject {
         let combos = cat.cacheCombos.joined(separator: ",")
         try await withRetry(combos, "下载") {
             try? self.fm.removeItem(atPath: tmpPath)   // 上次尝试的残留
-            let req = try self.makeRequest(peer, method: "GET", path: "/sync/cache-export",
+            var req = try self.makeRequest(peer, method: "GET", path: "/sync/cache-export",
                                            query: ["combos": combos], token: token)
+            // 服务端导出+sha（单组合可达 5GB）需要数十秒才开始发送字节——放宽单请求超时
+            //（60s 全局配置会让大库在服务端导出阶段就超时，2026-11-21 双模拟器实测）
+            req.timeoutInterval = 600
             try await self.download(request: req, toPart: tmpPath, shaHeader: "X-Kline-Sha")
         }
-        try IndicatorCacheDB.shared.mergeFrom(path: URL(fileURLWithPath: tmpPath), combos: cat.cacheCombos)
+        // 大库合并（ATTACH 拷贝数 GB，数十秒）放后台——阻塞 MainActor 会冻结客户端 UI
+        let mergeURL = URL(fileURLWithPath: tmpPath)
+        let mergeCombos = cat.cacheCombos
+        try await Task.detached(priority: .utility) {
+            try IndicatorCacheDB.shared.mergeFrom(path: mergeURL, combos: mergeCombos)
+        }.value
         var presetNote = ""
         do {
             let data = try await downloadPeerFile(peer: peer, rel: "SyncCache/presets.json", token: token)
