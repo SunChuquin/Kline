@@ -148,10 +148,27 @@ function toggleGen(id: string): void {
   genSelected.value = next
 }
 
+let warmupNInitialized = false
+
+/** 拉取统计并把生成运行态快照同步到进度 UI（事件推送的兜底：即使 changed 事件
+ *  丢失——route 定向推送在 WebView 未就绪时静默丢弃——页面也能 2s 轮询追上真实进度） */
 async function pullStats(): Promise<void> {
   try {
     stats.value = ((await klineBus.request('cacheManage', 'stats')) ?? {}) as CacheStatsSnapshot
-    warmupNInput.value = stats.value.warmupN
+    if (!warmupNInitialized) {
+      warmupNInput.value = stats.value.warmupN
+      warmupNInitialized = true
+    }
+    const r = stats.value.running
+    if (r.state === 'running') {
+      progress.value = { state: 'running', done: r.done ?? 0, total: r.total ?? 0,
+                         comboLabel: r.comboLabel ?? '' }
+    } else if (r.state === 'finished' || r.state === 'cancelled') {
+      progress.value = { state: r.state }
+    } else if (progress.value.state === 'running') {
+      // 快照已 idle 而本地还在 running（错过终态事件）→ 归位
+      progress.value = { state: 'idle' }
+    }
   } catch (e) {
     console.error('cacheManage.stats 失败', e)
   }
@@ -181,12 +198,17 @@ function clearStaleHint(): void {
 
 function generate(): void {
   if (genSelected.value.size === 0) return
+  // 本地立即反馈：不等 changed 推送（事件链路偶发丢失时按钮应有可见变化）
+  progress.value = { state: 'running', done: 0, total: 0, comboLabel: '启动中…' }
   void klineBus.request('cacheManage', 'generate', {
     combos: [...genSelected.value],
     mode: genMode.value,
     periods: ['日线'],
     warmupN: warmupNInput.value,
-  }).catch((e) => console.error('cacheManage.generate 失败', e))
+  }).catch((e) => {
+    console.error('cacheManage.generate 失败', e)
+    progress.value = { state: 'idle' }
+  })
 }
 
 function cancelGenerate(): void {
@@ -208,13 +230,18 @@ function handleChanged(payload: Record<string, unknown> | undefined): void {
   }
 }
 
+let pollTimer: number | undefined
+
 onMounted(async () => {
   klineBus.on('cacheManage.changed', (ev) => handleChanged(ev.payload))
   await pullStats()
+  // 2s 轮询兜底：生成是分钟级后台任务，stats 查询 <5ms，开销可忽略
+  pollTimer = window.setInterval(() => { void pullStats() }, 2000)
 })
 
 onUnmounted(() => {
-  // 页面关闭不自动取消生成（后台继续跑；重新进入即见进度）
+  if (pollTimer !== undefined) window.clearInterval(pollTimer)
+  // 页面关闭不自动取消生成（后台继续跑；重新进入即由快照恢复进度）
 })
 </script>
 

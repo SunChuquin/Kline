@@ -45,49 +45,54 @@ final class ChartPresetWarmupRunner: ObservableObject {
     /// onlyStale = true 时只处理该组合下「过期行」的标的（口径与管理页徽标一致：
     /// 缓存末根日期 ≠ meta 表最新日期，补缺口/日更后未重新生成）。
     func start(combos: [String], mode: String, periods: [KlinePeriod], onlyStale: Bool = false) {
-        cancelFlag = false
-        let presets = ChartPresetStore.shared
-        let targets: [(comboKey: String, label: String)] = combos.map { id in
-            let label = id == ChartPresetStore.localMode
-                ? "局部独立配置"
-                : (presets.preset(id: id)?.name ?? id)
-            return (id, label)
-        }
-        guard !targets.isEmpty, !periods.isEmpty, mode == "full" || mode == "warm" else {
-            phase = .finished
-            return
-        }
-        var metas = DatabaseManager.shared.metaList
-        if onlyStale {
-            let periodNames = Set(periods.map(\.rawValue))
-            let targetKeys = Set(targets.map(\.comboKey))
-            let metaByID = Dictionary(uniqueKeysWithValues: metas.map { ($0.id, $0) })
-            var staleIDs = Set<Int>()
-            for row in IndicatorCacheDB.shared.rowsDetail()
-            where targetKeys.contains(row.comboKey) && periodNames.contains(row.period) {
-                if let meta = metaByID[row.metaID], let lastDate = meta.lastDate,
-                   row.lastBarDate != lastDate {
-                    staleIDs.insert(row.metaID)
-                }
+        // 重入保护：新任务等待旧任务完全退出（旧任务在求值完成后回到循环头检查标志退出），
+        // 避免「重跑先取消旧轮」缺位导致两个任务并发抢引擎队列（2026-11-21 实测：连续两次
+        // 点生成，local 与 p1 任务交错求值，进度日志互相覆盖）。
+        let old = runTask
+        runTask = Task { @MainActor in
+            await old?.value
+            self.cancelFlag = false
+            let presets = ChartPresetStore.shared
+            let targets: [(comboKey: String, label: String)] = combos.map { id in
+                let label = id == ChartPresetStore.localMode
+                    ? "局部独立配置"
+                    : (presets.preset(id: id)?.name ?? id)
+                return (id, label)
             }
-            metas = metas.filter { staleIDs.contains($0.id) }
-        }
-        guard !metas.isEmpty else {
-            phase = .finished
-            DebugLogger.shared.log("[Warmup] 无\(onlyStale ? "过期" : "")标的需要生成")
-            return
-        }
-        let total = targets.count * periods.count * metas.count
-        phase = .running(done: 0, total: total, comboLabel: targets[0].label)
-        DebugLogger.shared.log("[Warmup] 生成启动 combos=\(combos) mode=\(mode) onlyStale=\(onlyStale) periods=\(periods.map(\.rawValue)) 标的=\(metas.count) total=\(total)")
+            guard !targets.isEmpty, !periods.isEmpty, mode == "full" || mode == "warm" else {
+                self.phase = .finished
+                return
+            }
+            var metas = DatabaseManager.shared.metaList
+            if onlyStale {
+                let periodNames = Set(periods.map(\.rawValue))
+                let targetKeys = Set(targets.map(\.comboKey))
+                let metaByID = Dictionary(uniqueKeysWithValues: metas.map { ($0.id, $0) })
+                var staleIDs = Set<Int>()
+                for row in IndicatorCacheDB.shared.rowsDetail()
+                where targetKeys.contains(row.comboKey) && periodNames.contains(row.period) {
+                    if let meta = metaByID[row.metaID], let lastDate = meta.lastDate,
+                       row.lastBarDate != lastDate {
+                        staleIDs.insert(row.metaID)
+                    }
+                }
+                metas = metas.filter { staleIDs.contains($0.id) }
+            }
+            guard !metas.isEmpty else {
+                self.phase = .finished
+                DebugLogger.shared.log("[Warmup] 无\(onlyStale ? "过期" : "")标的需要生成")
+                return
+            }
+            let total = targets.count * periods.count * metas.count
+            self.phase = .running(done: 0, total: total, comboLabel: targets[0].label)
+            DebugLogger.shared.log("[Warmup] 生成启动 combos=\(combos) mode=\(mode) onlyStale=\(onlyStale) periods=\(periods.map(\.rawValue)) 标的=\(metas.count) total=\(total)")
 
-        Task { @MainActor in
             var done = 0
             var failed = 0
-            batch: for (ti, target) in targets.enumerated() {
+            for target in targets {
                 for period in periods {
                     for meta in metas {
-                        if cancelFlag {
+                        if self.cancelFlag || Task.isCancelled {
                             self.phase = .cancelled
                             DebugLogger.shared.log("[Warmup] 已取消 done=\(done)/\(total)")
                             return
@@ -110,19 +115,20 @@ final class ChartPresetWarmupRunner: ObservableObject {
                         }
                     }
                 }
-                _ = ti
             }
             self.phase = .finished
             DebugLogger.shared.log("[Warmup] 完成 done=\(done)/\(total) 失败=\(failed)")
         }
     }
 
-    /// 取消当前生成（幂等）
+    /// 取消当前生成（幂等；协作取消加速退出）
     func cancel() {
         cancelFlag = true
+        runTask?.cancel()
     }
 
     private var cancelFlag = false
+    private var runTask: Task<Void, Never>? = nil
 
     /// 单标的生成：主线程组装请求 → 后台 Python 求值 → 组装 envelope → 落盘。
     /// 失败原因限次落日志（前 8 次，防止 3354 只全刷屏）。
