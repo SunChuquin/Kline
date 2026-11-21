@@ -235,15 +235,18 @@ final class LANSyncTransfer: NSObject, ObservableObject {
                 return PlanCategory(category: sel.category, mode: .children, files: files,
                                     skipped: files.isEmpty, favoriteGroupNames: sel.childKeys,
                                     cacheCombos: [], cacheEstimatedBytes: 0)
-            case (.indicatorCache, .children):
-                // 指标缓存子项模式：无文件计划，走专用 /sync/cache-export 通道（按组合导出）。
+            case (.indicatorCache, .children), (.indicatorCache, .all):
+                // 指标缓存模式：无文件计划，走专用 /sync/cache-export 通道（按组合导出）。
+                // 整类勾选（all）= 对端全部组合；子项模式 = 对端 children 里选中的组合。
                 // 对端 children 里选中的组合存在（行数>0）才不 skipped；
                 // 进度估算 = 选中组合的 payload 字节总和（导出库含页开销略大）。
                 let remoteChildren = sourceItems.first { $0.key == sel.category.rawValue }?.children ?? []
-                let selected = remoteChildren.filter { sel.childKeys.contains($0.key) }
-                return PlanCategory(category: sel.category, mode: .children, files: [],
+                let selected = sel.mode == .all
+                    ? remoteChildren
+                    : remoteChildren.filter { sel.childKeys.contains($0.key) }
+                return PlanCategory(category: sel.category, mode: sel.mode, files: [],
                                     skipped: selected.isEmpty, favoriteGroupNames: [],
-                                    cacheCombos: sel.childKeys.sorted(),
+                                    cacheCombos: selected.map(\.key).sorted(),
                                     cacheEstimatedBytes: selected.reduce(0) { $0 + $1.size })
             case (.layouts, .children), (.indicators, .children):
                 // 文件类子项模式：按子项 key（Documents 相对路径）过滤对端清单
