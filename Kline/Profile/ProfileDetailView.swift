@@ -27,6 +27,8 @@ struct ProfileDetailView: View {
     @State private var showLayoutEditor = false
     /// Python 引擎实验室（Phase-0 调试页；引擎不进 IPA，按需下载加载，不点不动作）
     @State private var showPythonLab = false
+    /// 行情指数卡片样张（临时视觉验收页；接入真实数据后移除）
+    @State private var showIndexCardGallery = false
     /// 联机同步（局域网设备间同步，全屏 overlay）
     @State private var showLANSync = false
     @ObservedObject private var themeStore = KlineThemeStore.shared
@@ -167,6 +169,38 @@ struct ProfileDetailView: View {
                     .buttonStyle(.plain)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(12)
+
+                    // 行情指数卡片样张（临时入口：本阶段只验收卡片视觉，模拟数据）
+                    Button(action: {
+                        showThemePanel = false
+                        showPanelLayoutPanel = false
+                        showSimulationLayoutPanel = false
+                        showFavoritesLayoutPanel = false
+                        showMarketLayoutPanel = false
+                        showHomeLayoutPanel = false
+                        showFormulaCenter = false
+                        showLayoutEditor = false
+                        showPythonLab = false
+                        showLANSync = false
+                        showIndexCardGallery = true
+                    }) {
+                        HStack(spacing: 10) {
+                            Text("行情卡片样张（临时）")
+                                .font(.system(size: 16))
+                                .foregroundColor(Color.primary)
+                            Spacer(minLength: 12)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color(.tertiaryLabel))
+                        }
+                        .padding(16)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .accessibilityIdentifier("profile.indexCardGallery.entry")
                 }
                 .padding()
             }
@@ -288,6 +322,12 @@ struct ProfileDetailView: View {
             // 联机同步：全屏页面（铺满，无遮罩），关闭走页内「返回」
             if showLANSync {
                 ZStack { LANSyncView(onClose: { showLANSync = false }) }
+                    .transition(.opacity)
+                    .zIndex(1000)
+            }
+            // 行情卡片样张：临时视觉验收页（模拟数据）
+            if showIndexCardGallery {
+                ZStack { MarketIndexCardGalleryView(onClose: { showIndexCardGallery = false }) }
                     .transition(.opacity)
                     .zIndex(1000)
             }
