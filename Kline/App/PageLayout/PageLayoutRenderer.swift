@@ -22,6 +22,19 @@ struct PageLayoutRenderer<Context> {
         let children = node.children ?? []
         switch node.type {
         case "vstack":
+            // 响应式：direction / overflow 已配置时按可用宽度决定横竖与溢出策略
+            if node.direction != nil || node.overflow != nil {
+                return AnyView(
+                    ResponsiveStack(items: children.map { view(for: $0) },
+                                    direction: node.direction,
+                                    legacyAxis: .vertical,
+                                    breakpoint: CGFloat(node.breakpoint ?? 600),
+                                    overflow: node.overflow ?? "compress",
+                                    spacing: CGFloat(node.spacing ?? 8),
+                                    hAlignment: .center,
+                                    vAlignment: horizontalAlignment(node.alignment))
+                )
+            }
             return AnyView(
                 VStack(alignment: horizontalAlignment(node.alignment),
                        spacing: CGFloat(node.spacing ?? 8)) {
@@ -29,6 +42,37 @@ struct PageLayoutRenderer<Context> {
                 }
             )
         case "hstack":
+            // Flex 模式优先（2026-11-23）：子节点配置了 widthMode（hug/fill/flex/fixed）时，
+            // 改走 FlexRow 精确计算宽度（固定/hug/权重混排）。
+            // 未配置时保持旧行为（AdaptiveStack：竖屏自动竖排）。
+            if children.contains(where: { $0.widthMode != nil }) {
+                return AnyView(
+                    FlexRow(items: children.map { view(for: $0) },
+                            specs: children.map {
+                                FlexItemSpec(widthMode: $0.widthMode,
+                                             fixedWidth: $0.widthValue,
+                                             weight: $0.flexWeight,
+                                             minWidth: $0.sizeMinWidth,
+                                             maxWidth: $0.sizeMaxWidth)
+                            },
+                            spacing: CGFloat(node.spacing ?? 8),
+                            alignment: verticalAlignment(node.alignment))
+                )
+            }
+            // 响应式：direction / overflow 已配置时按可用宽度决定横竖与溢出策略
+            // （Flex 宽度模式与响应式互斥：配置了 widthMode 时走上面的 FlexRow）
+            if node.direction != nil || node.overflow != nil {
+                return AnyView(
+                    ResponsiveStack(items: children.map { view(for: $0) },
+                                    direction: node.direction,
+                                    legacyAxis: .horizontal,
+                                    breakpoint: CGFloat(node.breakpoint ?? 600),
+                                    overflow: node.overflow ?? "compress",
+                                    spacing: CGFloat(node.spacing ?? 8),
+                                    hAlignment: verticalAlignment(node.alignment),
+                                    vAlignment: .leading)
+                )
+            }
             // 竖屏垂直堆栈规则（2026-10-20 收口）：配置里的 hstack 统一走
             // AdaptiveStack，按宿主注入的实测可用宽（< 600）自动切换 VStack / HStack。
             // 与模拟页、首页硬编码布局共用同一判定入口，不再单独读 sizeClass。

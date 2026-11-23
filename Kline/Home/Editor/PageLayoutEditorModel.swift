@@ -661,6 +661,64 @@ final class PageLayoutEditorModel: ObservableObject {
         touchDraft()
     }
 
+    // MARK: - 子组件尺寸（Flex：hug / fill / flex / fixed）
+
+    /// 节点的父容器类型（尺寸模式只在父为 hstack 时生效；根节点返回 nil）
+    func parentType(of node: PageLayoutNode) -> String? {
+        layoutRoot?.firstParent(of: node.uuid)?.parent.type
+    }
+
+    /// 设置宽度模式；nil = 清除（回到旧行为 hug）。
+    /// 切到 fixed / flex 时补默认值，避免出现 0 宽不可见或权重缺失。
+    func setWidthMode(_ value: String?, on node: PageLayoutNode) {
+        node.widthMode = value
+        if value == "fixed", node.widthValue == nil { node.widthValue = 120 }
+        if value == "flex", node.flexWeight == nil { node.flexWeight = 1 }
+        touchDraft()
+    }
+
+    func setWidthValue(_ value: Double, on node: PageLayoutNode) {
+        node.widthValue = value
+        touchDraft()
+    }
+
+    func setFlexWeight(_ value: Double, on node: PageLayoutNode) {
+        node.flexWeight = value
+        touchDraft()
+    }
+
+    /// 0 = 清除约束
+    func setSizeMinWidth(_ value: Double, on node: PageLayoutNode) {
+        node.sizeMinWidth = value > 0 ? value : nil
+        touchDraft()
+    }
+
+    /// 0 = 清除约束
+    func setSizeMaxWidth(_ value: Double, on node: PageLayoutNode) {
+        node.sizeMaxWidth = value > 0 ? value : nil
+        touchDraft()
+    }
+
+    // MARK: - 响应式布局（hstack / vstack 通用）
+
+    /// 排列方向：nil = 跟随节点类型 / auto / horizontal / vertical
+    func setDirection(_ value: String?, on node: PageLayoutNode) {
+        node.direction = value
+        if value == "auto", node.breakpoint == nil { node.breakpoint = 600 }
+        touchDraft()
+    }
+
+    func setBreakpoint(_ value: Double, on node: PageLayoutNode) {
+        node.breakpoint = value
+        touchDraft()
+    }
+
+    /// 空间不足处理：nil / compress / wrap / scroll
+    func setOverflow(_ value: String?, on node: PageLayoutNode) {
+        node.overflow = value
+        touchDraft()
+    }
+
     // MARK: - JSON 页签
 
     /// 由当前树生成规范化 JSON（与保存到沙盒的文本同口径）

@@ -64,6 +64,23 @@ final class PageLayoutNode: Codable, Identifiable {
     /// widget 节点的控件名
     var name: String?
     var params: WidgetParams?
+    // MARK: 子组件尺寸模型（Flex，任意节点都可携带；nil = 旧行为 = hug）
+    /// 宽度模式：hug 内容自适应 / fill 填充剩余 / flex 按权重分配 / fixed 固定宽度
+    var widthMode: String?
+    /// fixed 模式的固定宽度（pt）
+    var widthValue: Double?
+    /// flex 模式的权重（缺省 1）
+    var flexWeight: Double?
+    /// 尺寸约束：最小 / 最大宽度（pt，nil = 不约束）
+    var sizeMinWidth: Double?
+    var sizeMaxWidth: Double?
+    // MARK: 响应式布局（hstack / vstack 通用；nil = 旧行为）
+    /// 排列方向：auto 按可用宽度自动横竖切换 / horizontal 始终横向 / vertical 始终纵向
+    var direction: String?
+    /// auto 模式的断点宽度（pt，缺省 600）
+    var breakpoint: Double?
+    /// 横向空间不足时的处理：wrap 自动换行 / scroll 横向滚动 / compress 优先压缩
+    var overflow: String?
     var children: [PageLayoutNode]?
     var child: PageLayoutNode?
 
@@ -78,6 +95,8 @@ final class PageLayoutNode: Codable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case type, spacing, alignment, axis, padding, showsIndicators
         case maxWidth, minHeight, title, compact, name, params, children, child
+        case widthMode, widthValue, flexWeight, sizeMinWidth, sizeMaxWidth
+        case direction, breakpoint, overflow
     }
 
     // MARK: 初始化
@@ -95,6 +114,14 @@ final class PageLayoutNode: Codable, Identifiable {
          compact: Bool? = nil,
          name: String? = nil,
          params: WidgetParams? = nil,
+         widthMode: String? = nil,
+         widthValue: Double? = nil,
+         flexWeight: Double? = nil,
+         sizeMinWidth: Double? = nil,
+         sizeMaxWidth: Double? = nil,
+         direction: String? = nil,
+         breakpoint: Double? = nil,
+         overflow: String? = nil,
          children: [PageLayoutNode]? = nil,
          child: PageLayoutNode? = nil) {
         self.uuid = UUID()
@@ -110,6 +137,14 @@ final class PageLayoutNode: Codable, Identifiable {
         self.compact = compact
         self.name = name
         self.params = params
+        self.widthMode = widthMode
+        self.widthValue = widthValue
+        self.flexWeight = flexWeight
+        self.sizeMinWidth = sizeMinWidth
+        self.sizeMaxWidth = sizeMaxWidth
+        self.direction = direction
+        self.breakpoint = breakpoint
+        self.overflow = overflow
         self.children = children
         self.child = child
     }
@@ -136,6 +171,14 @@ final class PageLayoutNode: Codable, Identifiable {
         compact = try c.decodeIfPresent(Bool.self, forKey: .compact)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         params = try c.decodeIfPresent(WidgetParams.self, forKey: .params)
+        widthMode = try c.decodeIfPresent(String.self, forKey: .widthMode)
+        widthValue = try c.decodeIfPresent(Double.self, forKey: .widthValue)
+        flexWeight = try c.decodeIfPresent(Double.self, forKey: .flexWeight)
+        sizeMinWidth = try c.decodeIfPresent(Double.self, forKey: .sizeMinWidth)
+        sizeMaxWidth = try c.decodeIfPresent(Double.self, forKey: .sizeMaxWidth)
+        direction = try c.decodeIfPresent(String.self, forKey: .direction)
+        breakpoint = try c.decodeIfPresent(Double.self, forKey: .breakpoint)
+        overflow = try c.decodeIfPresent(String.self, forKey: .overflow)
         children = try c.decodeIfPresent([PageLayoutNode].self, forKey: .children)
         child = try c.decodeIfPresent(PageLayoutNode.self, forKey: .child)
     }
@@ -185,6 +228,18 @@ final class PageLayoutNode: Codable, Identifiable {
             // divider / spacer：无字段，只写 type
             break
         }
+
+        // 子组件尺寸（Flex）：任意节点类型都可携带，nil 不写（旧配置往返一致）
+        try c.encodeIfPresent(widthMode, forKey: .widthMode)
+        try c.encodeIfPresent(widthValue, forKey: .widthValue)
+        try c.encodeIfPresent(flexWeight, forKey: .flexWeight)
+        try c.encodeIfPresent(sizeMinWidth, forKey: .sizeMinWidth)
+        try c.encodeIfPresent(sizeMaxWidth, forKey: .sizeMaxWidth)
+
+        // 响应式布局（hstack / vstack 通用），nil 不写
+        try c.encodeIfPresent(direction, forKey: .direction)
+        try c.encodeIfPresent(breakpoint, forKey: .breakpoint)
+        try c.encodeIfPresent(overflow, forKey: .overflow)
     }
 
     // MARK: - 节点工厂

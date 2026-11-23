@@ -14,12 +14,19 @@
 //  参数（与 HomeWidgetEditorSchema 的 home.dashboardGroup 一一对应）：
 //  · title / subtitle  分组标题 / 副标题（留空不显示）
 //  · content           shortcuts / indices / custom
-//  · columns           每行列数 1~100
+//  · columns           每行列数：0 = 自适应（先保证子组件最小可用宽度再定列数），1~100 = 列数上限
 //  · rowsPerPage       每页行数 1~5（开启分页时生效）
 //  · paging            横向分页：每页容量 = 列数 × 每页行数，最多 10 页（与内容类型无关）
 //  · entries / hotEntries / badgeText   快捷入口项 / 加角标的入口 / 角标文字
 //  · indices           指数卡片类型展示哪些指数（个数不限，缺省 = 前 4 只）
 //  · items             自定义条目，每行「标题|副标题|角标」
+//
+//  尺寸规范（2026-11-23）：
+//  · 容器统一：圆角 20 / 内边距 15 / 网格横向 10、纵向 16 / 分页点 5pt；
+//  · 子组件按类型独立：快捷入口最小宽 72、单元高 68（图标 44 / 图标实际 28 / 标题 13，
+//    角标为浮层不占位）；指数卡片最小宽 150、单行 156；自定义条目最小宽 130、单行 56；
+//  · **先保证子组件最小可用尺寸，再决定每行几列**：容器实测内容区宽度后按最小宽算列数，
+//    绝不为了填满宽度把子组件压小；配置的列数只作上限。
 //
 
 import SwiftUI
@@ -71,20 +78,90 @@ private struct DashboardGroupPalette {
     }
 }
 
+// MARK: - 尺寸规范（容器统一 / 子组件按类型独立）
+
+private enum DashboardMetrics {
+    /// 外层容器：圆角 20 / 内边距 15
+    static let cardRadius: CGFloat = 20
+    static let cardPadding: CGFloat = 15
+    static let headerSpacing: CGFloat = 12
+
+    /// 网格间距
+    static let hSpacing: CGFloat = 10
+    static let vSpacing: CGFloat = 16
+
+    /// 快捷入口：图标 44、图标实际 28、标题 13、最小可用宽 72；
+    /// 单元高 = 图标 44 + 间距 7 + 标题行高约 17 = 68（角标为浮层，不额外预留高度）
+    static let shortcutMinWidth: CGFloat = 72
+    static let shortcutHeight: CGFloat = 68
+    static let shortcutIconTile: CGFloat = 44
+    static let shortcutIconSize: CGFloat = 28
+
+    /// 指数卡片：最小可用宽 150、单行高 156（紧凑卡约 153）、行间距 12
+    static let indexMinWidth: CGFloat = 150
+    static let indexRowHeight: CGFloat = 156
+    static let indexVSpacing: CGFloat = 12
+
+    /// 自定义条目：最小可用宽 130、单行高 56、行间距 10
+    static let customMinWidth: CGFloat = 130
+    static let customRowHeight: CGFloat = 56
+    static let customVSpacing: CGFloat = 10
+
+    /// 可用宽度 → 能放下的列数：**先保证子组件最小可用尺寸，再决定每行放几列**
+    static func fitColumns(minItemWidth: CGFloat, availableWidth: CGFloat) -> Int {
+        guard availableWidth > 0, minItemWidth > 0 else { return 0 }
+        let count = Int((availableWidth + hSpacing) / (minItemWidth + hSpacing))
+        return max(1, count)
+    }
+
+    /// 生效列数：configured = 0 → 全自适应；>0 → 作为上限，且仍不压破最小宽度
+    static func effectiveColumns(configured: Int,
+                                 minItemWidth: CGFloat,
+                                 availableWidth: CGFloat) -> Int {
+        let fit = fitColumns(minItemWidth: minItemWidth, availableWidth: availableWidth)
+        if configured <= 0 { return fit > 0 ? fit : 1 }
+        guard fit > 0 else { return max(configured, 1) }
+        return max(1, min(configured, fit))
+    }
+}
+
+// MARK: - 内容区实测宽度（由容器注入给子网格）
+
+private struct DashboardContentWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// 功能卡片组内容区实测可用宽度（pt）；0 = 尚未测量
+    fileprivate var dashboardContentWidth: CGFloat {
+        get { self[DashboardContentWidthKey.self] }
+        set { self[DashboardContentWidthKey.self] = newValue }
+    }
+}
+
+private struct DashboardWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - 统一容器
 
 /// 功能卡片组容器：标题 + 副标题 + 任意内容，统一底色 / 圆角 / 内边距 / 描边。
+/// 容器负责测量自身内容区宽度并注入环境，子网格据此按「最小可用尺寸」计算列数。
 struct DashboardCardGroup<Content: View>: View {
     var title: String?
     var subtitle: String?
     @ViewBuilder let content: Content
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var measuredWidth: CGFloat = 0
 
     private var palette: DashboardGroupPalette { .resolve(colorScheme) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DashboardMetrics.headerSpacing) {
             if hasHeader {
                 VStack(alignment: .leading, spacing: 3) {
                     if let title, !title.isEmpty {
@@ -103,16 +180,27 @@ struct DashboardCardGroup<Content: View>: View {
             }
             content
         }
-        .padding(14)
+        .padding(DashboardMetrics.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: DashboardMetrics.cardRadius, style: .continuous)
                 .fill(palette.groupFill)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: DashboardMetrics.cardRadius, style: .continuous)
                         .stroke(palette.border, lineWidth: 0.5)
                 )
         )
+        // 实测「内边距之后」的内容区宽度：背景测量的是含内边距的外框，故减两倍内边距
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: DashboardWidthPreferenceKey.self,
+                    value: max(geo.size.width - DashboardMetrics.cardPadding * 2, 0)
+                )
+            }
+        )
+        .onPreferenceChange(DashboardWidthPreferenceKey.self) { measuredWidth = $0 }
+        .environment(\.dashboardContentWidth, measuredWidth)
     }
 
     private var hasHeader: Bool {
@@ -161,25 +249,31 @@ private struct DashboardShortcutGrid: View {
     let entries: [HomeEntryKind]
     let hotEntries: Set<HomeEntryKind>
     let badgeText: String
-    let columns: Int
+    /// 配置列数：0 = 自适应；>0 = 列数上限（仍不压破最小可用宽度）
+    let configuredColumns: Int
     let rowsPerPage: Int
     let paging: Bool
     let onTap: (HomeEntryKind) -> Void
 
-    /// 固定行高：分页高度必须可预算，不允许子项高度浮动
-    private let cellHeight: CGFloat = 78
-    private let spacing: CGFloat = 12
+    @Environment(\.dashboardContentWidth) private var contentWidth
+
+    /// 生效列数：先保证 72pt 最小可用宽度，再决定列数
+    private var columns: Int {
+        DashboardMetrics.effectiveColumns(configured: configuredColumns,
+                                          minItemWidth: DashboardMetrics.shortcutMinWidth,
+                                          availableWidth: contentWidth)
+    }
 
     var body: some View {
         if entries.isEmpty {
             DashboardEmptyHint(text: "未选择快捷入口")
         } else if paging {
             let rows = max(rowsPerPage, 1)
-            let perPage = max(columns, 1) * rows
+            let perPage = columns * rows
             let pages = Array(chunked(entries, size: perPage).prefix(DashboardPaging.maxPages))
             DashboardPager(pageCount: pages.count,
-                           pageHeight: CGFloat(rows) * cellHeight
-                                      + CGFloat(rows - 1) * spacing) { index in
+                           pageHeight: CGFloat(rows) * DashboardMetrics.shortcutHeight
+                                      + CGFloat(rows - 1) * DashboardMetrics.vSpacing) { index in
                 grid(pages[index])
             }
         } else {
@@ -188,24 +282,23 @@ private struct DashboardShortcutGrid: View {
     }
 
     private func grid(_ items: [HomeEntryKind]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: spacing),
-                                 count: max(columns, 1)),
-                  spacing: spacing) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(),
+                                                     spacing: DashboardMetrics.hSpacing),
+                                 count: columns),
+                  spacing: DashboardMetrics.vSpacing) {
             ForEach(items) { kind in
                 DashboardShortcutCell(kind: kind,
                                       badge: hotEntries.contains(kind) ? badgeText : nil,
-                                      cellHeight: cellHeight,
                                       action: { onTap(kind) })
             }
         }
     }
 }
 
-/// 单个快捷入口：图标（入口色）+ 名称 + 可选角标
+/// 单个快捷入口：图标（入口色）+ 名称 + 可选角标；**不加独立卡片背景**，保持整体宫格观感
 private struct DashboardShortcutCell: View {
     let kind: HomeEntryKind
     let badge: String?
-    let cellHeight: CGFloat
     let action: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -214,36 +307,41 @@ private struct DashboardShortcutCell: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                ZStack(alignment: .topTrailing) {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(kind.tint.opacity(palette.isDark ? 0.18 : 0.12))
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Image(systemName: kind.icon)
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundColor(kind.tint)
-                        )
-
-                    if let badge, !badge.isEmpty {
-                        Text(badge)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(palette.badgeFill)
-                            .clipShape(Capsule())
-                            .offset(x: 8, y: -5)
+            VStack(spacing: 7) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(kind.tint.opacity(palette.isDark ? 0.18 : 0.12))
+                    .frame(width: DashboardMetrics.shortcutIconTile,
+                           height: DashboardMetrics.shortcutIconTile)
+                    .overlay(
+                        Image(systemName: kind.icon)
+                            .font(.system(size: DashboardMetrics.shortcutIconSize,
+                                          weight: .medium))
+                            .foregroundColor(kind.tint)
+                    )
+                    // 角标纯浮层：不参与布局尺寸，无角标时零占位
+                    .overlay(alignment: .topTrailing) {
+                        if let badge, !badge.isEmpty {
+                            Text(badge)
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(palette.badgeFill)
+                                .clipShape(Capsule())
+                                .offset(x: 8, y: -5)
+                        }
                     }
-                }
+
                 Text(kind.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundColor(palette.primaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: cellHeight)
+            .frame(height: DashboardMetrics.shortcutHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -262,7 +360,8 @@ private struct DashboardShortcutCell: View {
 
 private struct DashboardIndexGrid: View {
     let rows: [MarketRow]
-    let columns: Int
+    /// 配置列数：0 = 自适应；>0 = 列数上限（仍不压破最小可用宽度）
+    let configuredColumns: Int
     let rowsPerPage: Int
     let paging: Bool
     let onOpen: (MetaItem, [MetaItem]) -> Void
@@ -271,9 +370,14 @@ private struct DashboardIndexGrid: View {
     @ObservedObject private var rowCache = MarketRowCache.shared
     @ObservedObject private var db = DatabaseManager.shared
 
-    private let spacing: CGFloat = 12
-    /// 单行高度（紧凑卡约 153pt，留出动态字体余量）
-    private let rowHeight: CGFloat = 172
+    @Environment(\.dashboardContentWidth) private var contentWidth
+
+    /// 生效列数：先保证 150pt 最小可用宽度，再决定列数
+    private var columns: Int {
+        DashboardMetrics.effectiveColumns(configured: configuredColumns,
+                                          minItemWidth: DashboardMetrics.indexMinWidth,
+                                          availableWidth: contentWidth)
+    }
 
     private var quotes: [MarketIndexQuote] { rows.map { MarketIndexQuote(row: $0) } }
 
@@ -282,9 +386,10 @@ private struct DashboardIndexGrid: View {
             DashboardEmptyHint(text: db.isLoaded ? "暂无指数数据" : "指数加载中")
         } else if paging {
             let rowsPer = max(rowsPerPage, 1)
-            let perPage = max(columns, 1) * rowsPer
+            let perPage = columns * rowsPer
             let pages = Array(chunked(quotes, size: perPage).prefix(DashboardPaging.maxPages))
-            let pageHeight = CGFloat(rowsPer) * rowHeight + CGFloat(rowsPer - 1) * spacing
+            let pageHeight = CGFloat(rowsPer) * DashboardMetrics.indexRowHeight
+                              + CGFloat(rowsPer - 1) * DashboardMetrics.indexVSpacing
             DashboardPager(pageCount: pages.count, pageHeight: pageHeight) { index in
                 grid(pages[index])
                     .frame(height: pageHeight, alignment: .top)
@@ -296,9 +401,10 @@ private struct DashboardIndexGrid: View {
 
     private func grid(_ items: [MarketIndexQuote]) -> some View {
         let metas = rows.map { $0.meta }
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: spacing),
-                                        count: max(columns, 1)),
-                         spacing: spacing) {
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(),
+                                                           spacing: DashboardMetrics.hSpacing),
+                                       count: columns),
+                         spacing: DashboardMetrics.indexVSpacing) {
             ForEach(items) { quote in
                 MarketIndexCard(quote: quote,
                                 style: .compact,
@@ -318,66 +424,73 @@ private struct DashboardIndexGrid: View {
 
 private struct DashboardCustomList: View {
     let items: [DashboardCustomItem]
+    /// 配置列数：0 = 自适应；>0 = 列数上限（仍不压破最小可用宽度）
+    let configuredColumns: Int
     let rowsPerPage: Int
     let paging: Bool
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dashboardContentWidth) private var contentWidth
 
     private var palette: DashboardGroupPalette { .resolve(colorScheme) }
 
-    private let rowHeight: CGFloat = 52
-    private let rowSpacing: CGFloat = 10
+    /// 生效列数：先保证 130pt 最小可用宽度，再决定列数
+    private var columns: Int {
+        DashboardMetrics.effectiveColumns(configured: configuredColumns,
+                                          minItemWidth: DashboardMetrics.customMinWidth,
+                                          availableWidth: contentWidth)
+    }
 
     var body: some View {
         if items.isEmpty {
             DashboardEmptyHint(text: "未配置条目：在检查器里填写「自定义条目」（每行：标题|副标题|角标）")
         } else if paging {
             let rows = max(rowsPerPage, 1)
-            let pages = Array(chunked(items, size: rows).prefix(DashboardPaging.maxPages))
+            let perPage = columns * rows
+            let pages = Array(chunked(items, size: perPage).prefix(DashboardPaging.maxPages))
             DashboardPager(pageCount: pages.count,
-                           pageHeight: CGFloat(rows) * rowHeight
-                                      + CGFloat(rows - 1) * rowSpacing) { index in
-                list(pages[index])
+                           pageHeight: CGFloat(rows) * DashboardMetrics.customRowHeight
+                                      + CGFloat(rows - 1) * DashboardMetrics.customVSpacing) { index in
+                grid(pages[index])
             }
         } else {
-            list(items)
+            grid(items)
         }
     }
 
-    private func list(_ items: [DashboardCustomItem]) -> some View {
-        VStack(spacing: 0) {
+    private func grid(_ items: [DashboardCustomItem]) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(),
+                                                     spacing: DashboardMetrics.hSpacing),
+                                 count: columns),
+                  spacing: DashboardMetrics.customVSpacing) {
             ForEach(items) { item in
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
                         Text(item.title)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(palette.primaryText)
                             .lineLimit(1)
-                        if let subtitle = item.subtitle, !subtitle.isEmpty {
-                            Text(subtitle)
-                                .font(.system(size: 11))
-                                .foregroundColor(palette.secondaryText)
-                                .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let badge = item.badge, !badge.isEmpty {
+                            Text(badge)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(palette.badgeFill)
+                                .clipShape(Capsule())
                         }
                     }
-                    Spacer(minLength: 8)
-                    if let badge = item.badge, !badge.isEmpty {
-                        Text(badge)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(palette.badgeFill)
-                            .clipShape(Capsule())
+                    if let subtitle = item.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(palette.secondaryText)
+                            .lineLimit(1)
                     }
                 }
-                .frame(height: rowHeight)
-
-                if item.id != items.last?.id {
-                    Rectangle()
-                        .fill(palette.divider)
-                        .frame(height: 0.5)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: DashboardMetrics.customRowHeight, alignment: .leading)
+                .contentShape(Rectangle())
             }
         }
     }
@@ -436,8 +549,8 @@ struct HomeDashboardCardGroup: View {
     var kind: ContentKind = .shortcuts
     var title: String?
     var subtitle: String?
-    /// 每行列数（1~100）
-    var columns: Int = 2
+    /// 每行列数：0 = 自适应（按子组件最小可用宽度算），1~100 = 列数上限
+    var columns: Int = 0
     /// 每页行数（1~5）
     var rowsPerPage: Int = 2
     /// 横向分页（最多 10 页，与内容类型无关）
@@ -454,8 +567,9 @@ struct HomeDashboardCardGroup: View {
     var onEntry: (HomeEntryKind) -> Void = { _ in }
     var onOpenIndex: (MetaItem, [MetaItem]) -> Void = { _, _ in }
 
+    /// 配置列数（0 保留 = 自适应；上限 100）
     private var safeColumns: Int {
-        min(max(columns, 1), DashboardPaging.maxColumns)
+        min(max(columns, 0), DashboardPaging.maxColumns)
     }
 
     private var safeRowsPerPage: Int {
@@ -469,18 +583,19 @@ struct HomeDashboardCardGroup: View {
                 DashboardShortcutGrid(entries: entries,
                                       hotEntries: hotEntries,
                                       badgeText: badgeText,
-                                      columns: safeColumns,
+                                      configuredColumns: safeColumns,
                                       rowsPerPage: safeRowsPerPage,
                                       paging: paging,
                                       onTap: onEntry)
             case .indices:
                 DashboardIndexGrid(rows: indexRows,
-                                   columns: safeColumns,
+                                   configuredColumns: safeColumns,
                                    rowsPerPage: safeRowsPerPage,
                                    paging: paging,
                                    onOpen: onOpenIndex)
             case .custom:
                 DashboardCustomList(items: customItems,
+                                    configuredColumns: safeColumns,
                                     rowsPerPage: safeRowsPerPage,
                                     paging: paging)
             }

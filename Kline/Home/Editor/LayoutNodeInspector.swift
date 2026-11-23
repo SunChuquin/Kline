@@ -52,6 +52,16 @@ struct LayoutNodeInspector: View {
                     default:
                         noFieldsRow("该节点无可调字段")
                     }
+                    // 尺寸（Flex）：仅当父容器是水平堆栈时生效
+                    if editor.parentType(of: node) == "hstack" {
+                        Divider()
+                        sizeFields(node)
+                    }
+                    // 响应式布局：水平 / 垂直堆栈通用
+                    if node.type == "hstack" || node.type == "vstack" {
+                        Divider()
+                        responsiveFields(node)
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) { deleteBar }
@@ -149,6 +159,136 @@ struct LayoutNodeInspector: View {
             doubleStepper({ node.minHeight ?? 0 }, range: 0...400, step: 4) { editor.setMinHeight($0, on: node) }
         }
     }
+
+    // MARK: - 子组件尺寸（Flex）
+
+    /// 宽度模式：Hug 内容自适应 / Fill 填充剩余 / Flex 按权重 / Fixed 固定宽度
+    @ViewBuilder
+    private func sizeFields(_ node: PageLayoutNode) -> some View {
+        row("宽度模式") {
+            Menu {
+                ForEach(Self.flexWidthModes) { mode in
+                    Button(mode.title) { editor.setWidthMode(mode.id, on: node) }
+                }
+            } label: {
+                menuLabel(widthModeTitle(node.widthMode))
+            }
+        }
+
+        if node.widthMode == "fixed" {
+            row("固定宽度") {
+                doubleStepper({ node.widthValue ?? 120 }, range: 0...2000, step: 4) {
+                    editor.setWidthValue($0, on: node)
+                }
+            }
+        }
+
+        if node.widthMode == "flex" {
+            row("弹性权重") {
+                doubleStepper({ node.flexWeight ?? 1 }, range: 0.1...10, step: 0.5) {
+                    editor.setFlexWeight($0, on: node)
+                }
+            }
+        }
+
+        row("最小宽度") {
+            doubleStepper({ node.sizeMinWidth ?? 0 }, range: 0...1000, step: 4) {
+                editor.setSizeMinWidth($0, on: node)
+            }
+        }
+        row("最大宽度") {
+            doubleStepper({ node.sizeMaxWidth ?? 0 }, range: 0...2000, step: 4) {
+                editor.setSizeMaxWidth($0, on: node)
+            }
+        }
+    }
+
+    private func widthModeTitle(_ raw: String?) -> String {
+        Self.flexWidthModes.first { $0.id == (raw ?? "hug") }?.title ?? "内容自适应 (Hug)"
+    }
+
+    /// 宽度模式选项（Hug / Fill / Flex / Fixed）
+    private struct FlexWidthModeOption: Identifiable {
+        let id: String
+        let title: String
+    }
+
+    private static let flexWidthModes: [FlexWidthModeOption] = [
+        FlexWidthModeOption(id: "hug", title: "内容自适应 (Hug)"),
+        FlexWidthModeOption(id: "fill", title: "填充剩余 (Fill)"),
+        FlexWidthModeOption(id: "flex", title: "比例分配 (Flex)"),
+        FlexWidthModeOption(id: "fixed", title: "固定宽度 (Fixed)")
+    ]
+
+    // MARK: - 响应式布局（水平 / 垂直堆栈通用）
+
+    @ViewBuilder
+    private func responsiveFields(_ node: PageLayoutNode) -> some View {
+        row("排列方向") {
+            Menu {
+                ForEach(Self.layoutDirections) { option in
+                    Button(option.title) {
+                        editor.setDirection(option.id.isEmpty ? nil : option.id, on: node)
+                    }
+                }
+            } label: {
+                menuLabel(directionTitle(node.direction))
+            }
+        }
+
+        if node.direction == "auto" {
+            row("断点宽度") {
+                doubleStepper({ node.breakpoint ?? 600 }, range: 200...1600, step: 20) {
+                    editor.setBreakpoint($0, on: node)
+                }
+            }
+        }
+
+        if node.direction != "vertical" {
+            row("空间不足") {
+                Menu {
+                    ForEach(Self.layoutOverflows) { option in
+                        Button(option.title) {
+                            editor.setOverflow(option.id.isEmpty ? nil : option.id, on: node)
+                        }
+                    }
+                } label: {
+                    menuLabel(overflowTitle(node.overflow))
+                }
+            }
+        }
+    }
+
+    private func directionTitle(_ raw: String?) -> String {
+        Self.layoutDirections.first { $0.id == (raw ?? "") }?.title ?? "跟随节点类型"
+    }
+
+    private func overflowTitle(_ raw: String?) -> String {
+        Self.layoutOverflows.first { $0.id == (raw ?? "") }?.title ?? "优先压缩"
+    }
+
+    private struct LayoutDirectionOption: Identifiable {
+        let id: String
+        let title: String
+    }
+
+    private static let layoutDirections: [LayoutDirectionOption] = [
+        LayoutDirectionOption(id: "", title: "跟随节点类型"),
+        LayoutDirectionOption(id: "auto", title: "自动（按宽度横竖切换）"),
+        LayoutDirectionOption(id: "horizontal", title: "始终横向"),
+        LayoutDirectionOption(id: "vertical", title: "始终纵向")
+    ]
+
+    private struct LayoutOverflowOption: Identifiable {
+        let id: String
+        let title: String
+    }
+
+    private static let layoutOverflows: [LayoutOverflowOption] = [
+        LayoutOverflowOption(id: "", title: "优先压缩"),
+        LayoutOverflowOption(id: "wrap", title: "自动换行"),
+        LayoutOverflowOption(id: "scroll", title: "横向滚动")
+    ]
 
     // MARK: - 控件字段
 

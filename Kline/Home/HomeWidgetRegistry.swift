@@ -100,7 +100,8 @@ struct HomeWidgetRegistry {
                     )
                 }
 
-            let columns = min(max(p.int("columns", default: 2), 1), 100)
+            // columns：0 = 自适应（按子组件最小可用宽度算列数）；1~100 = 列数上限
+            let columns = min(max(p.int("columns", default: 0), 0), 100)
             let rowsPerPage = min(max(p.int("rowsPerPage", default: 2), 1), 5)
             // 指数个数不限：显式选择时全量展示；未配置时仍回落默认前 4 只
             let selectedIDs = p.strings("indices")
