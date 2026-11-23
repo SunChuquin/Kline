@@ -3,7 +3,7 @@
 //  Kline
 //
 //  首页控件注册表：把 JSON 配置里的控件名映射到具体视图。
-//  6 个 home.* 控件名与内置默认配置（HomeLayoutDefaults.swift）中的 name 一一对应；
+//  home.* 控件名与内置默认配置（HomeLayoutDefaults.swift）中的 name 一一对应；
 //  末尾另并入页面无关的通用控件（common.*，见 CommonLayoutWidgets.swift）；
 //  未注册的控件名由 PageLayoutRenderer 渲染可诊断占位（不崩溃、不静默空白）。
 //
@@ -44,6 +44,87 @@ struct HomeWidgetRegistry {
             AnyView(HomeMarketOverviewStrip(rows: ctx.model.indexRows(selectedIDs: p.strings("indices")),
                                             breadth: ctx.model.breadth,
                                             compact: p.bool("compact", default: false)))
+        }
+
+        r.register("home.marketIndexCards") { ctx, p in
+            // columns 2~6：首卡单独展示时其余指数按此列数排紧凑卡
+            let columns = min(max(p.int("columns", default: 2), 2), 6)
+            // lead：首卡形态（standard 标准卡 / chart 图表卡 / none 全部按列排紧凑卡）
+            let leadRaw = p.string("lead", default: "standard")
+            let lead: HomeMarketIndexCards.LeadStyle =
+                leadRaw == "chart" ? .chart : (leadRaw == "none" ? .none : .standard)
+            // indices 缺省 = 默认前 4；最多 6 只（与编辑器上限一致）
+            let rows = ctx.model.indexRows(selectedIDs: p.strings("indices"), limit: 6)
+            return AnyView(HomeMarketIndexCards(rows: rows,
+                                                columnCount: columns,
+                                                lead: lead,
+                                                onOpen: { meta, context in
+                                                    HomeWidgetRegistry.openDetail(meta, in: context)
+                                                }))
+        }
+
+        r.register("home.dashboardGroup") { ctx, p in
+            // content：shortcuts 快捷入口 / indices 指数卡片 / custom 自定义条目
+            let contentRaw = p.string("content", default: "shortcuts")
+            let kind: HomeDashboardCardGroup.ContentKind =
+                contentRaw == "indices" ? .indices
+                    : (contentRaw == "custom" ? .custom : .shortcuts)
+
+            // 快捷入口：缺省 = 全部入口；显式空数组 = 空态提示（与快捷入口行同口径）
+            let entries: [HomeEntryKind]
+            if let rawIDs = p.strings("entries") {
+                var seen = Set<String>()
+                entries = rawIDs.compactMap { raw in
+                    guard let kind = HomeEntryKind(rawValue: raw),
+                          seen.insert(raw).inserted else { return nil }
+                    return kind
+                }
+            } else {
+                entries = HomeEntryKind.allCases
+            }
+            let hotEntries = Set((p.strings("hotEntries") ?? [])
+                .compactMap { HomeEntryKind(rawValue: $0) })
+
+            // 自定义条目：每行「标题|副标题|角标」（后两段可省略）
+            let customItems: [DashboardCustomItem] = (p.strings("items") ?? [])
+                .enumerated()
+                .compactMap { index, line in
+                    let parts = line.split(separator: "|", omittingEmptySubsequences: false)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                    guard let title = parts.first, !title.isEmpty else { return nil }
+                    return DashboardCustomItem(
+                        id: index,
+                        title: title,
+                        subtitle: parts.count > 1 && !parts[1].isEmpty ? parts[1] : nil,
+                        badge: parts.count > 2 && !parts[2].isEmpty ? parts[2] : nil
+                    )
+                }
+
+            let columns = min(max(p.int("columns", default: 2), 1), 100)
+            let rowsPerPage = min(max(p.int("rowsPerPage", default: 2), 1), 5)
+            // 指数个数不限：显式选择时全量展示；未配置时仍回落默认前 4 只
+            let selectedIDs = p.strings("indices")
+            let explicitSelection = (selectedIDs?.isEmpty == false)
+            let rows = ctx.model.indexRows(selectedIDs: selectedIDs,
+                                           limit: explicitSelection ? 200 : 4)
+
+            return AnyView(HomeDashboardCardGroup(
+                kind: kind,
+                title: p.optionalString("title"),
+                subtitle: p.optionalString("subtitle"),
+                columns: columns,
+                rowsPerPage: rowsPerPage,
+                paging: p.bool("paging", default: false),
+                entries: entries,
+                hotEntries: hotEntries,
+                badgeText: p.string("badgeText", default: "HOT"),
+                indexRows: rows,
+                customItems: customItems,
+                onEntry: { ctx.onEntry($0) },
+                onOpenIndex: { meta, context in
+                    HomeWidgetRegistry.openDetail(meta, in: context)
+                }
+            ))
         }
 
         r.register("home.favorites") { ctx, p in

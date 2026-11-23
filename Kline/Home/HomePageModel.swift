@@ -206,12 +206,23 @@ final class HomePageModel: ObservableObject {
 
     // MARK: - 布局控件参数化取数（编辑器配置 → 数据；nil/失效一律回落默认口径）
 
-    /// 大盘概览指数行：
-    /// - selectedIDs 缺省（nil）或显式空数组 = 默认前 4 只指数（沪深京优先，无则回退扩展行情）；
-    /// - 显式选择：按配置顺序返回，未知 / 非指数 id 过滤，防御性上限 4（编辑器已限）；
-    /// - 有效 id 为 0 个（全部失效）时整体回落默认前 4（规格：空选不清空本控件）。
-    func indexRows(selectedIDs: [String]?) -> [MarketRow] {
-        guard let selectedIDs, !selectedIDs.isEmpty else { return indexQuotes }
+    /// 大盘概览 / 指数卡片指数行：
+    /// - selectedIDs 缺省（nil）或显式空数组 = 默认前 `limit` 只指数（沪深京优先，无则回退扩展行情）；
+    /// - 显式选择：按配置顺序返回，未知 / 非指数 id 过滤，防御性上限 `limit`（编辑器已限）；
+    /// - 有效 id 为 0 个（全部失效）时整体回落默认前 `limit` 只（规格：空选不清空本控件）。
+    /// - `limit` 默认 4（大盘概览条口径）；指数卡片控件按列数上限传 6。
+    func indexRows(selectedIDs: [String]?, limit: Int = 4) -> [MarketRow] {
+        let cap = max(limit, 1)
+        guard let selectedIDs, !selectedIDs.isEmpty else {
+            let primary = db.metaList.lazy.filter { $0.type == Self.indexType }
+            let pool = primary.isEmpty
+                ? db.metaList.lazy.filter { $0.type == Self.extendedIndexType }
+                : primary
+            let metas = Array(pool.prefix(cap))
+            guard !metas.isEmpty else { return indexQuotes }
+            // 指数 bars 归启动预热统一管，这里不触发预取
+            return rowsReadyOnly(metas, prefetch: false)
+        }
         var lookup: [Int: MetaItem] = [:]
         for meta in db.metaList where Self.indexTypes.contains(meta.type) {
             lookup[meta.id] = meta
@@ -221,9 +232,9 @@ final class HomePageModel: ObservableObject {
         for raw in selectedIDs {
             guard let id = Int(raw), let meta = lookup[id] else { continue }
             if seen.insert(id).inserted { metas.append(meta) }
-            if metas.count >= 4 { break }
+            if metas.count >= cap { break }
         }
-        guard !metas.isEmpty else { return indexQuotes }
+        guard !metas.isEmpty else { return indexRows(selectedIDs: nil, limit: cap) }
         // 指数 bars 归启动预热统一管，这里不触发预取
         return rowsReadyOnly(metas, prefetch: false)
     }
