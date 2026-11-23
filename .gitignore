@@ -34,3 +34,6 @@ Kline/tdx.db
 
 # Python 引擎缓存（prepare_engine_cache.sh 产物，不入库）
 EngineCache/
+
+# IDE 本地配置
+.vscode/
