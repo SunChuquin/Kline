@@ -100,7 +100,13 @@ final class LANSyncUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["个人中心"].firstMatch.waitForExistence(timeout: 10),
                       "个人中心未打开")
 
-        // 2) 滚到「联机同步」入口并点击（个人中心较长，入口在本地更新卡片之后）
+        // 1.1) 双栏设置面板：先切到「数据与同步」分类（联机同步入口在该分类下）
+        let syncCategory = app.buttons["profile.category.sync"].firstMatch
+        XCTAssertTrue(syncCategory.waitForExistence(timeout: 5),
+                      "个人中心左导航未找到「数据与同步」分类")
+        syncCategory.tap()
+
+        // 2) 滚到「联机同步」入口并点击（入口在本地更新卡片之后）
         let entry = reveal("profile.lansync.entry", in: app) {
             $0.buttons["profile.lansync.entry"].firstMatch
         }
@@ -230,6 +236,12 @@ final class LANSyncUITests: XCTestCase {
         profileButton.tap()
         XCTAssertTrue(app.staticTexts["个人中心"].firstMatch.waitForExistence(timeout: 10),
                       "个人中心未打开")
+
+        // 双栏设置面板：先切到「数据与同步」分类，再找联机同步入口
+        let syncCategory = app.buttons["profile.category.sync"].firstMatch
+        XCTAssertTrue(syncCategory.waitForExistence(timeout: 5),
+                      "个人中心左导航未找到「数据与同步」分类")
+        syncCategory.tap()
 
         let entry = reveal("profile.lansync.entry", in: app) {
             $0.buttons["profile.lansync.entry"].firstMatch

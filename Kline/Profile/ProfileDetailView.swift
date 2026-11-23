@@ -4,11 +4,70 @@
 //
 //  Created by 孙楚昆 on 2026/6/24.
 //
+//  个人中心 = 桌面级双栏设置面板：
+//    Header  ：返回 + 标题
+//    Sidebar ：左侧分类导航（账户 / 主题外观 / 页面布局 / 公式与策略 / 数据与同步 / 调试工具）
+//    Content ：右侧当前分类的设置内容，独立滚动
+//    Footer  ：即时生效提示 + 当前构建号
+//  左导航只切换右侧内容，不重建整个页面；所有原有功能入口与浮层逻辑保持不变。
+//
 
 import SwiftUI
 
 struct ProfileDetailView: View {
     @Binding var isPresented: Bool
+
+    // MARK: - 左侧分类导航
+
+    /// 个人中心的分类分域（顺序即左导航展示顺序）
+    private enum Category: String, CaseIterable, Identifiable {
+        case account
+        case appearance
+        case layout
+        case formula
+        case sync
+        case debug
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .account:    return "账户"
+            case .appearance: return "主题外观"
+            case .layout:     return "页面布局"
+            case .formula:    return "公式与策略"
+            case .sync:       return "数据与同步"
+            case .debug:      return "调试工具"
+            }
+        }
+
+        /// 右侧内容区标题下的一句话说明
+        var subtitle: String {
+            switch self {
+            case .account:    return "账户信息与当前构建"
+            case .appearance: return "日间 / 夜间 / 跟随系统"
+            case .layout:     return "首页、自选、行情、模拟与快捷面板的布局方案"
+            case .formula:    return "技术指标、选股指标与交易策略"
+            case .sync:       return "本地服务、版本更新与局域网联机同步"
+            case .debug:      return "引擎实验室与行情卡片样张"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .account:    return "person.crop.circle"
+            case .appearance: return "circle.lefthalf.filled"
+            case .layout:     return "rectangle.split.3x1"
+            case .formula:    return "function"
+            case .sync:       return "arrow.triangle.2.circlepath"
+            case .debug:      return "hammer"
+            }
+        }
+    }
+
+    /// 当前选中的分类
+    @State private var selectedCategory: Category = .account
+
     /// 主题选择弹窗开合（弹窗本身在页面容器层呈现，避免被 ScrollView 裁剪）
     @State private var showThemePanel = false
     /// 快捷面板布局选择弹窗开合
@@ -37,173 +96,20 @@ struct ProfileDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部导航栏 - 参考搜索页面样式
-            HStack {
-                // 返回按钮
-                Button(action: {
-                    isPresented = false
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 24))
-                }
-                .padding(.leading, 16)
-
-                // 标题
-                Text("个人中心")
-                    .font(.title)
-                    .fontWeight(.bold)
-
-                Spacer()
-            }
-            .background(Color(.systemBackground))
-            .frame(height: 56)
-            .padding(.top, -5)
-
-            // 分隔线
+            header
             Divider()
 
-            // 主内容区域 - ScrollView 支持滚动
-            ScrollView {
-                VStack(spacing: 24) {
-                    // 用户头像
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 100))
-                        .foregroundColor(.blue)
-
-                    // 用户名称
-                    Text("用户名")
-                        .font(.title)
-                        .fontWeight(.bold)
-
-                    // 用户ID
-                    Text("ID: 123456")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-
-                    // Kline 显示主题（日间 / 夜间 / 跟随系统）：点右侧下拉弹出选择面板
-                    KlineThemeSettingRow(isOpen: $showThemePanel)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 快捷面板布局（A / B / C 三套方案）：点右侧下拉弹出选择面板
-                    QuickPanelLayoutSettingRow(isOpen: $showPanelLayoutPanel)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 模拟页布局（A / B / C 三套方案）：点右侧下拉弹出选择面板
-                    SimulationLayoutSettingRow(isOpen: $showSimulationLayoutPanel)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 自选页布局（A / B / C / D 四套方案）：点右侧下拉弹出选择面板
-                    FavoritesLayoutSettingRow(isOpen: $showFavoritesLayoutPanel)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 行情页布局（A / B / C / D 四套方案）：点右侧下拉弹出选择面板
-                    MarketLayoutSettingRow(isOpen: $showMarketLayoutPanel)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 首页布局（A / B / C / D 四套方案，默认 B）：点右侧下拉弹出选择面板
-                    HomeLayoutSettingRow(isOpen: $showHomeLayoutPanel)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 布局编辑器（全屏页面）：编辑首页 JSON 布局配置
-                    LayoutEditorSettingRow { showLayoutEditor = true }
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 公式管理（技术指标 / 选股指标 / 交易策略 三类公式分域入口）
-                    FormulaCenterSettingRow { showFormulaCenter = true }
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-
-                    // 本地更新面板（TrollStore 版可扫描 Downloads/*.ipa 并共享到 TrollStore）
-                    LocalUpdateView()
-
-                    // 联机同步（局域网设备间同步：自选/模拟交易/布局/指标/增量库/主库）
-                    Button(action: { showLANSync = true }) {
-                        HStack(spacing: 10) {
-                            Text("联机同步")
-                                .font(.system(size: 16))
-                                .foregroundColor(Color.primary)
-                            Spacer(minLength: 12)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color(.tertiaryLabel))
-                        }
-                        .padding(16)
-                        .frame(minHeight: 48)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(12)
-                    .accessibilityIdentifier("profile.lansync.entry")
-
-                    // Python 引擎实验室（低调调试入口；引擎不进 IPA，按需下载加载）
-                    Button(action: { showPythonLab = true }) {
-                        HStack(spacing: 10) {
-                            Text("Python 引擎实验室")
-                                .font(.system(size: 16))
-                                .foregroundColor(Color.primary)
-                            Spacer(minLength: 12)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color(.tertiaryLabel))
-                        }
-                        .padding(16)
-                        .frame(minHeight: 48)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(12)
-
-                    // 行情指数卡片样张（临时入口：本阶段只验收卡片视觉，模拟数据）
-                    Button(action: {
-                        showThemePanel = false
-                        showPanelLayoutPanel = false
-                        showSimulationLayoutPanel = false
-                        showFavoritesLayoutPanel = false
-                        showMarketLayoutPanel = false
-                        showHomeLayoutPanel = false
-                        showFormulaCenter = false
-                        showLayoutEditor = false
-                        showPythonLab = false
-                        showLANSync = false
-                        showIndexCardGallery = true
-                    }) {
-                        HStack(spacing: 10) {
-                            Text("行情卡片样张（临时）")
-                                .font(.system(size: 16))
-                                .foregroundColor(Color.primary)
-                            Spacer(minLength: 12)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color(.tertiaryLabel))
-                        }
-                        .padding(16)
-                        .frame(minHeight: 48)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(12)
-                    .accessibilityIdentifier("profile.indexCardGallery.entry")
+            // 双栏主体：左侧分类导航固定宽，右侧内容独立滚动
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    sidebar(width: sidebarWidth(for: geo.size.width))
+                    Divider()
+                    content
                 }
-                .padding()
             }
+
+            Divider()
+            footer
         }
         // 内容延伸到物理屏幕底边 + 背景铺满（否则 2018 等机型底部 20pt 露出下层导航栏）
         .background(Color(.systemBackground).ignoresSafeArea())
@@ -357,6 +263,283 @@ struct ProfileDetailView: View {
         .onChange(of: showLayoutEditor) { newValue in
             if newValue { showThemePanel = false; showPanelLayoutPanel = false; showSimulationLayoutPanel = false; showFavoritesLayoutPanel = false; showMarketLayoutPanel = false; showHomeLayoutPanel = false; showFormulaCenter = false }
         }
+    }
+
+    // MARK: - 顶部栏
+
+    private var header: some View {
+        HStack(spacing: 4) {
+            // 返回按钮：保持原有「关闭个人中心」行为
+            Button(action: {
+                isPresented = false
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("返回")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("个人中心")
+                    .font(.system(size: 20, weight: .bold))
+                Text("设置")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(.secondaryLabel))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 16)
+        .frame(height: 56)
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - 左侧分类导航
+
+    /// 侧栏宽度：随可用宽自适应（iPhone 竖屏 132pt，iPad 约 200~240pt）
+    private func sidebarWidth(for totalWidth: CGFloat) -> CGFloat {
+        min(240, max(132, totalWidth * 0.26))
+    }
+
+    private func sidebar(width: CGFloat) -> some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 4) {
+                ForEach(Category.allCases) { category in
+                    sidebarItem(category)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+        }
+        .frame(width: width)
+        .background(Color(.secondarySystemBackground))
+    }
+
+    /// 单个分类项：图标 + 名称，选中态用主题色文字 + 淡色圆角底
+    private func sidebarItem(_ category: Category) -> some View {
+        let selected = selectedCategory == category
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { selectedCategory = category }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: category.icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 22)
+                Text(category.title)
+                    .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(selected ? .accentColor : Color(.label))
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("profile.category.\(category.rawValue)")
+    }
+
+    // MARK: - 右侧内容
+
+    private var content: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 20) {
+                // 分类标题 + 说明（对齐桌面设置面板的内容区标题）
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selectedCategory.title)
+                        .font(.system(size: 22, weight: .bold))
+                    Text(selectedCategory.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(.secondaryLabel))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                categoryContent
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+    }
+
+    @ViewBuilder
+    private var categoryContent: some View {
+        switch selectedCategory {
+        case .account:    accountSection
+        case .appearance: appearanceSection
+        case .layout:     layoutSection
+        case .formula:    formulaSection
+        case .sync:       syncSection
+        case .debug:      debugSection
+        }
+    }
+
+    // MARK: - 分类内容
+
+    /// 账户：头像 / 用户名 / ID（保留原占位信息）
+    private var accountSection: some View {
+        settingsCard("账户信息") {
+            VStack(spacing: 10) {
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: 84))
+                    .foregroundColor(.accentColor)
+                Text("用户名")
+                    .font(.system(size: 20, weight: .semibold))
+                Text("ID: 123456")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(.secondaryLabel))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        }
+    }
+
+    /// 主题外观：Kline 显示主题
+    private var appearanceSection: some View {
+        settingsCard("显示") {
+            settingRow { KlineThemeSettingRow(isOpen: $showThemePanel) }
+        }
+    }
+
+    /// 页面布局：五套布局方案 + 布局编辑器
+    private var layoutSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            settingsCard("布局方案") {
+                settingRow { QuickPanelLayoutSettingRow(isOpen: $showPanelLayoutPanel) }
+                insetDivider
+                settingRow { SimulationLayoutSettingRow(isOpen: $showSimulationLayoutPanel) }
+                insetDivider
+                settingRow { FavoritesLayoutSettingRow(isOpen: $showFavoritesLayoutPanel) }
+                insetDivider
+                settingRow { MarketLayoutSettingRow(isOpen: $showMarketLayoutPanel) }
+                insetDivider
+                settingRow { HomeLayoutSettingRow(isOpen: $showHomeLayoutPanel) }
+            }
+
+            settingsCard("自定义") {
+                settingRow { LayoutEditorSettingRow { showLayoutEditor = true } }
+            }
+        }
+    }
+
+    /// 公式与策略：公式管理中心入口
+    private var formulaSection: some View {
+        settingsCard("公式") {
+            settingRow { FormulaCenterSettingRow { showFormulaCenter = true } }
+        }
+    }
+
+    /// 数据与同步：本地更新 / 清单标的自动更新 / 补缺口（LocalUpdateView 原样保留）+ 联机同步
+    private var syncSection: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            LocalUpdateView()
+
+            settingsCard("局域网") {
+                linkRow("联机同步") { showLANSync = true }
+                    .accessibilityIdentifier("profile.lansync.entry")
+            }
+        }
+    }
+
+    /// 调试工具：Python 引擎实验室 + 行情卡片样张（临时）
+    private var debugSection: some View {
+        settingsCard("调试入口") {
+            linkRow("Python 引擎实验室") { showPythonLab = true }
+            insetDivider
+            linkRow("行情卡片样张（临时）") {
+                // 与原实现一致：打开样张前先关掉其它浮层
+                showThemePanel = false
+                showPanelLayoutPanel = false
+                showSimulationLayoutPanel = false
+                showFavoritesLayoutPanel = false
+                showMarketLayoutPanel = false
+                showHomeLayoutPanel = false
+                showFormulaCenter = false
+                showLayoutEditor = false
+                showPythonLab = false
+                showLANSync = false
+                showIndexCardGallery = true
+            }
+            .accessibilityIdentifier("profile.indexCardGallery.entry")
+        }
+    }
+
+    // MARK: - 底部状态栏
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.seal")
+                .font(.system(size: 12))
+            Text("主题与布局修改即时生效")
+                .font(.system(size: 12))
+            Spacer(minLength: 12)
+            if let build = GitHubUpdateService.currentBuildNumber {
+                Text("构建 #\(build)")
+                    .font(.system(size: 12, design: .monospaced))
+            }
+        }
+        .foregroundColor(Color(.secondaryLabel))
+        .padding(.horizontal, 16)
+        .frame(height: 40)
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - 通用行与卡片
+
+    /// 内容卡片：13pt semibold 灰标题 + secondarySystemBackground 圆角 12 容器
+    /// （与「本地更新」卡片组同规格）
+    private func settingsCard<Content: View>(_ title: String,
+                                             @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.85))
+            VStack(spacing: 0) {
+                content()
+            }
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+    }
+
+    /// 设置行容器：左右 16pt、最小行高 48pt（保留各设置行原有的点击区域）
+    private func settingRow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .padding(.horizontal, 16)
+            .frame(minHeight: 48)
+    }
+
+    /// 卡片内分隔线（左侧缩进 16pt，不画到卡片圆角边缘）
+    private var insetDivider: some View {
+        Divider().padding(.leading, 16)
+    }
+
+    /// 整行可点的跳转行（标题 + 右侧 chevron，命中区 48pt）
+    private func linkRow(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.system(size: 16))
+                    .foregroundColor(Color.primary)
+                Spacer(minLength: 12)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color(.tertiaryLabel))
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

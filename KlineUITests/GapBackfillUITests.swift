@@ -101,6 +101,12 @@ final class GapBackfillUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["个人中心"].firstMatch.waitForExistence(timeout: 10),
                       "个人中心未打开")
 
+        // 1.1) 个人中心为双栏设置面板：先切到「数据与同步」分类（补缺口 / 本地更新在该分类下）
+        let syncCategory = app.buttons["profile.category.sync"].firstMatch
+        XCTAssertTrue(syncCategory.waitForExistence(timeout: 5),
+                      "个人中心左导航未找到「数据与同步」分类")
+        syncCategory.tap()
+
         // 2) 滚到底部「补缺口」卡片，点「补一次缺口」
         let runButton = revealBackfillButton(app)
         snap(app, "gapBackfill.before")
