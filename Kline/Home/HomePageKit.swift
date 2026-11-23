@@ -9,7 +9,7 @@
 //  - 入口与底部导航栏重复的三项（自选 / 行情 / 模拟）已按用户反馈剔除，只留首页独有的入口；
 //  - 入口控件只接收闭包（onTap / onProfile），不持任何状态、不发命令，
 //    状态与跳转（搜索 / 公式分段 / 条件单 / 个人中心）统一由容器 HomeView 注入；
-//  - 颜色全部走语义色（Color(.systemBackground) / Color(.secondarySystemBackground) / .primary / .secondary），
+//  - 颜色全部走语义色（AppColors.pageBackground / AppColors.cardBackground / AppColors.textPrimary / AppColors.textSecondary），
 //    深色模式自动适配；可点击元素命中区均 ≥ 44pt，且高度固定（点击与切档不抖动）。
 //
 
@@ -93,14 +93,14 @@ enum HomeEntryKind: String, CaseIterable, Identifiable {
     /// 语义色（自适应深浅色，不写死具体色值）
     var tint: Color {
         switch self {
-        case .search: return .blue
+        case .search: return AppColors.accent
         case .tech: return .purple
         case .picker: return .orange
         case .strategy: return .teal
-        case .condOrder: return .red
-        case .profile: return .blue
+        case .condOrder: return AppColors.statusWarning
+        case .profile: return AppColors.accent
         case .alertRecords: return .pink
-        case .training: return .green
+        case .training: return AppColors.statusSuccess
         case .layoutEditor: return .indigo
         case .lanSync: return .cyan
         case .pythonLab: return .mint

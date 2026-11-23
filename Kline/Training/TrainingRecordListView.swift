@@ -49,7 +49,7 @@ struct TrainingRecordListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .onAppear { store.refresh() }
         .confirmationDialog("删除这条训练记录？", isPresented: deleteConfirmBinding,
                             titleVisibility: .visible, presenting: deleteTarget) { session in
@@ -91,7 +91,7 @@ struct TrainingRecordListView: View {
                     Text("返回")
                         .font(.system(size: 15))
                 }
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -104,7 +104,7 @@ struct TrainingRecordListView: View {
             Button(action: { showClearConfirm = true }) {
                 Text("清空")
                     .font(.system(size: 15))
-                    .foregroundColor(Color(.systemRed))
+                    .foregroundColor(AppColors.marketUp)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
@@ -119,11 +119,11 @@ struct TrainingRecordListView: View {
         .overlay {
             Text("训练记录")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -147,20 +147,20 @@ struct TrainingRecordListView: View {
                 HStack(spacing: 5) {
                     Text(session.name)
                         .font(.system(size: 15))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text(session.code)
                         .font(.system(size: 12))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 Text(subline(session))
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Text(Self.createdFormatter.string(from: session.createdAt))
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
                     .lineLimit(1)
             }
 
@@ -188,7 +188,7 @@ struct TrainingRecordListView: View {
         } label: {
             Image(systemName: "chevron.right")
                 .font(.system(size: 15))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -203,7 +203,7 @@ struct TrainingRecordListView: View {
         } label: {
             Image(systemName: "trash")
                 .font(.system(size: 15))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -217,13 +217,13 @@ struct TrainingRecordListView: View {
         VStack(spacing: 10) {
             Image(systemName: "chart.line.uptrend.xyaxis")
                 .font(.system(size: 34))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text("暂无训练记录")
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             Text("在 K 线图页发起「单人训练」，创建会话后训练记录会显示在这里")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -282,7 +282,7 @@ private struct TrainingTradeDetailView: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .onAppear {
             loadAll()
             SimRulesProjection.shared.request(conditions.map { $0.order })
@@ -332,7 +332,7 @@ private struct TrainingTradeDetailView: View {
                     Text("返回")
                         .font(.system(size: 15))
                 }
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -344,7 +344,7 @@ private struct TrainingTradeDetailView: View {
             // 右侧显示标的名称
             Text(session.name)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 16)
@@ -353,11 +353,11 @@ private struct TrainingTradeDetailView: View {
         .overlay {
             Text("交易明细")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -366,13 +366,13 @@ private struct TrainingTradeDetailView: View {
     private var summaryRow: some View {
         Text("\(session.name) \(session.code) · 起始 \(session.startDateText) ~ \(session.endDateText) · 共 \(session.tradeCount) 笔")
             .font(.system(size: 12))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .padding(.horizontal, 16)
             .frame(height: 34)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
     }
 
     // MARK: 成交表（横向 ScrollView 承载表头 + 列）
@@ -407,28 +407,28 @@ private struct TrainingTradeDetailView: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 34)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
     }
 
     /// 单笔成交行（行高固定 44）
     private func tradeRow(_ trade: TrainTradeRecord) -> some View {
         HStack(spacing: 4) {
-            cell("\(trade.seq)", width: Col.seq, color: Color(.secondaryLabel), mono: true)
+            cell("\(trade.seq)", width: Col.seq, color: AppColors.textSecondary, mono: true)
             cell(trade.direction.title, width: Col.dir,
-                 color: trade.direction.isBuy ? Color(.systemRed) : Color(.systemGreen),
+                 color: trade.direction.isBuy ? AppColors.marketUp : AppColors.marketDown,
                  weight: .semibold)
             cell(trade.mark.rawValue, width: Col.mark, color: markColor(trade.mark), weight: .heavy)
-            cell(trade.tradeDateText, width: Col.date, color: Color(.secondaryLabel), mono: true)
+            cell(trade.tradeDateText, width: Col.date, color: AppColors.textSecondary, mono: true)
             cell(String(format: "%.2f", trade.price), width: Col.price, alignment: .trailing, mono: true)
             cell("\(trade.qty)", width: Col.qty, alignment: .trailing, mono: true)
             cell(String(format: "%.2f", trade.amount), width: Col.amount, alignment: .trailing, mono: true)
             cell(String(format: "%.2f", trade.fee), width: Col.fee, alignment: .trailing,
-                 color: Color(.secondaryLabel), mono: true)
+                 color: AppColors.textSecondary, mono: true)
             cell(pnlText(trade.pnl), width: Col.pnl, alignment: .trailing,
                  color: pnlColor(trade.pnl), mono: true)
             cell(triggerText(trade), width: Col.trigger, alignment: .leading,
-                 color: trade.trigger == .cond ? Color.blue : Color(.secondaryLabel))
-            cell(trade.note, width: Col.note, alignment: .leading, color: Color(.secondaryLabel))
+                 color: trade.trigger == .cond ? AppColors.accent : AppColors.textSecondary)
+            cell(trade.note, width: Col.note, alignment: .leading, color: AppColors.textSecondary)
         }
         .padding(.horizontal, 8)
         .frame(height: 44)
@@ -443,9 +443,9 @@ private struct TrainingTradeDetailView: View {
 
     private func markColor(_ mark: TrainTradeMark) -> Color {
         switch mark {
-        case .buy:      return Color(.systemRed)
-        case .sell:     return Color(.systemGreen)
-        case .dayTrade: return Color.blue
+        case .buy:      return AppColors.marketUp
+        case .sell:     return AppColors.marketDown
+        case .dayTrade: return AppColors.accent
         }
     }
 
@@ -455,13 +455,13 @@ private struct TrainingTradeDetailView: View {
                             alignment: Alignment = .center) -> some View {
         Text(text)
             .font(.system(size: 11.5, weight: .semibold))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .lineLimit(1)
             .frame(width: width, alignment: alignment)
     }
 
     private func cell(_ text: String, width: CGFloat, alignment: Alignment = .center,
-                      color: Color = Color.primary, weight: Font.Weight = .regular,
+                      color: Color = AppColors.textPrimary, weight: Font.Weight = .regular,
                       mono: Bool = false) -> some View {
         Text(text)
             .font(.system(size: 12.5, weight: weight, design: mono ? .monospaced : .default))
@@ -478,20 +478,20 @@ private struct TrainingTradeDetailView: View {
     }
 
     private func pnlColor(_ pnl: Double?) -> Color {
-        guard let pnl = pnl else { return Color(.secondaryLabel) }
-        if pnl > 0 { return Color(.systemRed) }
-        if pnl < 0 { return Color(.systemGreen) }
-        return Color(.secondaryLabel)
+        guard let pnl = pnl else { return AppColors.textSecondary }
+        if pnl > 0 { return AppColors.marketUp }
+        if pnl < 0 { return AppColors.marketDown }
+        return AppColors.textSecondary
     }
 
     private func emptyHint(_ text: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: "tray")
                 .font(.system(size: 30))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text(text)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -508,7 +508,7 @@ private struct TrainingTradeDetailView: View {
                             SimCondKindChip(kind: order.kind)
                             Text(SimRulesProjection.shared.conditionSummary(order))
                                 .font(.system(size: 12.5))
-                                .foregroundColor(Color.primary)
+                                .foregroundColor(AppColors.textPrimary)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 6)
@@ -518,18 +518,18 @@ private struct TrainingTradeDetailView: View {
                         Text("创建训练日 \(TrainSessionRecord.dateText(record.createdDate))"
                              + " · \(SimRulesProjection.shared.validitySummary(order))")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                         if !order.runtime.lastMessage.isEmpty {
                             Text(order.runtime.lastMessage)
                                 .font(.system(size: 11))
-                                .foregroundColor(Color(.secondaryLabel))
+                                .foregroundColor(AppColors.textSecondary)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                    .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
                 }
             }
             .padding(.horizontal, 12)
@@ -545,24 +545,24 @@ private struct TrainingTradeDetailView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "bell.badge")
                                 .font(.system(size: 12))
-                                .foregroundColor(Color.blue)
+                                .foregroundColor(AppColors.accent)
                             Text("训练日 \(alert.tradeDateText)")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Color.primary)
+                                .foregroundColor(AppColors.textPrimary)
                             Spacer(minLength: 6)
                             Text(SimFormat.price(alert.price))
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Color.primary)
+                                .foregroundColor(AppColors.textPrimary)
                         }
                         Text(alert.message)
                             .font(.system(size: 12.5))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                    .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
                 }
             }
             .padding(.horizontal, 12)

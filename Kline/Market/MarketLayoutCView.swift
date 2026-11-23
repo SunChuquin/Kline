@@ -30,7 +30,7 @@ struct MarketLayoutCView: View {
             }
             .frame(height: 44)
             // 胶囊可见时灰底由 MarketSecondLevelBar 自带（避免半透明灰叠出深色带）；胶囊移到 header 后本行补同款灰底
-            .background(model.secondLevelVisible ? Color(.systemGray6).opacity(0.4) : Color.clear)
+            .background(model.secondLevelVisible ? AppColors.sidebarBackground.opacity(0.4) : Color.clear)
 
             content
         }
@@ -53,7 +53,7 @@ struct MarketLayoutCView: View {
         } else {
             VStack(spacing: 16) {
                 ProgressView()
-                Text("加载中...").foregroundColor(.gray)
+                Text("加载中...").foregroundColor(AppColors.textTertiary)
             }
             .frame(maxHeight: .infinity)
         }
@@ -105,18 +105,18 @@ struct MarketTileCard: View {
 
     /// 涨跌方向着色（无有效涨跌幅时用主色）
     private var tint: Color {
-        guard let pct = row.number(.changePct) else { return .primary }
-        if pct > 0 { return .red }
-        if pct < 0 { return .green }
-        return .primary
+        guard let pct = row.number(.changePct) else { return AppColors.textPrimary }
+        if pct > 0 { return AppColors.marketUp }
+        if pct < 0 { return AppColors.marketDown }
+        return AppColors.textPrimary
     }
 
     /// 涨跌幅胶囊底色（平盘 / 无值时用系统灰，避免暗示方向）
     private var pillColor: Color {
-        guard let pct = row.number(.changePct) else { return Color(.systemGray) }
-        if pct > 0 { return .red }
-        if pct < 0 { return .green }
-        return Color(.systemGray)
+        guard let pct = row.number(.changePct) else { return AppColors.textTertiary }
+        if pct > 0 { return AppColors.marketUp }
+        if pct < 0 { return AppColors.marketDown }
+        return AppColors.textTertiary
     }
 
     var body: some View {
@@ -125,11 +125,11 @@ struct MarketTileCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(meta.name)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(isFaved ? .red : .primary)
+                        .foregroundColor(isFaved ? AppColors.accent : AppColors.textPrimary)
                         .lineLimit(1)
                     Text(meta.displayCode)
                         .font(.system(size: 10.5))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 Text(row.text(.latestPrice))
@@ -160,7 +160,7 @@ struct MarketTileCard: View {
                 } label: {
                     Image(systemName: isFaved ? "star.fill" : "star")
                         .font(.system(size: 15))
-                        .foregroundColor(isFaved ? .orange : Color.secondary.opacity(0.6))
+                        .foregroundColor(isFaved ? AppColors.statusWarning : AppColors.textSecondary.opacity(0.6))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -173,7 +173,7 @@ struct MarketTileCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(height: 108)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
         .contentShape(Rectangle())
         .accessibilityIdentifier("market.rowCard")
@@ -217,7 +217,7 @@ struct MarketSparkline: View {
                         }
                     }
                 }
-                .stroke(up ? Color.red : Color.green, lineWidth: 1.5)
+                .stroke(up ? AppColors.marketUp : AppColors.marketDown, lineWidth: 1.5)
             } else {
                 Color.clear
             }
@@ -236,7 +236,7 @@ private struct MarketTileModeSwitch: View {
             segment("磁贴", active: model.showsTileMode) { model.toggleTileMode(true) }
             segment("表格", active: !model.showsTileMode) { model.toggleTileMode(false) }
         }
-        .background(Color(.systemGray6))
+        .background(AppColors.sidebarBackground)
         .cornerRadius(10)
     }
 
@@ -245,10 +245,10 @@ private struct MarketTileModeSwitch: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(active ? .white : .secondary)
+                .foregroundColor(active ? .white : AppColors.textSecondary)
                 .frame(width: 54, height: 36)
                 .background(RoundedRectangle(cornerRadius: 8)
-                    .fill(active ? Color.blue : Color.clear))
+                    .fill(active ? AppColors.accent : Color.clear))
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
         }

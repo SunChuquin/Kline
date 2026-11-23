@@ -89,7 +89,7 @@ struct MarketLayoutBView: View {
                 .animation(.easeInOut(duration: 0.2), value: categoryDrawerActive)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 工具条（regular / 紧凑共用一份数据与工具按钮，标题位按形态切换）
@@ -147,7 +147,7 @@ struct MarketLayoutBView: View {
         } else {
             VStack(spacing: 16) {
                 ProgressView()
-                Text("加载中...").foregroundColor(.gray)
+                Text("加载中...").foregroundColor(AppColors.textTertiary)
             }
             .frame(maxHeight: .infinity)
         }
@@ -186,7 +186,7 @@ struct MarketCategorySidebar: View {
             }
             .padding(.vertical, 6)
         }
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
     }
 
     /// 一级分区标题行：小字灰色，非「条目」语义；保留 `market.topMenu.<一级名>` 标识，
@@ -198,7 +198,7 @@ struct MarketCategorySidebar: View {
             HStack(spacing: 0) {
                 Text(field.rawValue)
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -241,22 +241,22 @@ private struct MarketCategoryRow: View {
         HStack(spacing: 8) {
             Image(systemName: Self.icon(for: item))
                 .font(.system(size: 14))
-                .foregroundColor(selected ? .blue : .secondary)
+                .foregroundColor(selected ? AppColors.accent : AppColors.textSecondary)
                 .frame(width: 24)
             Text(item.title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(selected ? .blue : .primary)
+                .foregroundColor(selected ? AppColors.accent : AppColors.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 4)
             Text(item.badge ?? "-")
                 .font(.system(size: 11.5))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 10)
         .frame(height: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Color.blue.opacity(0.12) : Color.clear)
+        .background(selected ? AppColors.accent.opacity(0.12) : Color.clear)
         .cornerRadius(9)
     }
 
@@ -297,14 +297,14 @@ private struct MarketWorkspaceBar: View {
             }
             Text("\(model.displayRows.count) 只")
                 .font(.system(size: 11.5))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             MarketToolBar(model: model)
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 紧凑态「分类」抽屉入口（锚点）：侧栏图标 + 当前分类名 + 下拉箭头，点击开合抽屉。
@@ -318,13 +318,13 @@ private struct MarketWorkspaceBar: View {
             HStack(spacing: 4) {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 Text(model.currentCategoryTitle)
                     .font(.system(size: 15, weight: .bold))
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())

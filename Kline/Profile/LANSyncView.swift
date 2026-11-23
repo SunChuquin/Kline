@@ -102,7 +102,7 @@ struct LANSyncView: View {
             }
         }
         // 内容延伸到物理屏幕底边 + 背景铺满（与个人中心同做法）
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
             KlineHTTPServer.shared.start()   // 确保本机监听在跑（幂等）
@@ -153,7 +153,7 @@ struct LANSyncView: View {
 
             Spacer()
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .frame(height: 56)
     }
 
@@ -204,10 +204,10 @@ struct LANSyncView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("允许对端获取本机内容")
                     .font(.system(size: 16))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Text(pairing.isExposed ? "已暴露：对端可扫描到本机并拉取其内容" : "已隐藏：不广播、不接受同步")
                     .font(.system(size: 12))
-                    .foregroundColor(pairing.isExposed ? .orange : Color(.tertiaryLabel))
+                    .foregroundColor(pairing.isExposed ? AppColors.statusWarning : AppColors.textTertiary)
             }
             Spacer(minLength: 8)
             Toggle("", isOn: Binding(
@@ -218,7 +218,7 @@ struct LANSyncView: View {
             .accessibilityIdentifier("lansync.expose.toggle")
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
     }
 
@@ -232,10 +232,10 @@ struct LANSyncView: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 16)
             .frame(minHeight: 44)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
             .contentShape(Rectangle())
         }
@@ -248,7 +248,7 @@ struct LANSyncView: View {
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(Color.gray.opacity(0.85))
+            .foregroundColor(AppColors.textSecondary)
     }
 
     /// 本机服务卡片：在线状态（真实探测）+ 设备名 + 监听端口 + 前台提示 + 刷新探测
@@ -258,11 +258,11 @@ struct LANSyncView: View {
                 HStack(spacing: 8) {
                     // 在线绿点 / 离线红点
                     Circle()
-                        .fill(serverOnline ? Color.green : Color.red)
+                        .fill(serverOnline ? AppColors.statusSuccess : AppColors.statusError)
                         .frame(width: 10, height: 10)
                     Text(serverOnline ? "在线" : "离线")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                     Spacer(minLength: 8)
                     // 刷新探测（探测中转圈）
                     Button(action: { probeServer() }) {
@@ -274,7 +274,7 @@ struct LANSyncView: View {
                             }
                         }
                         .font(.system(size: 18))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                         .frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain)
@@ -282,14 +282,14 @@ struct LANSyncView: View {
                 }
                 Text("\(UIDevice.current.name) · 端口 \(KlineHTTPServer.shared.port)")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 Text("对端设备需保持 Kline 在前台")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
         .accessibilityIdentifier("lansync.local.status")
     }
@@ -300,12 +300,12 @@ struct LANSyncView: View {
             ProgressView()
             Text("正在搜索同网段设备…")
                 .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             Spacer()
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 48)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
     }
 
@@ -315,15 +315,15 @@ struct LANSyncView: View {
             HStack(spacing: 10) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 16))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(peer.name)
                         .font(.system(size: 16))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text("\(peer.host):\(peer.port)")
                         .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 Spacer(minLength: 12)
                 if connecting {
@@ -331,12 +331,12 @@ struct LANSyncView: View {
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color(.tertiaryLabel))
+                        .foregroundColor(AppColors.textTertiary)
                 }
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 56)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
             .contentShape(Rectangle())
         }
@@ -356,16 +356,16 @@ struct LANSyncView: View {
                     .keyboardType(.asciiCapable)
                     .padding(.horizontal, 12)
                     .frame(height: 40)
-                    .background(Color(.tertiarySystemBackground))
+                    .background(AppColors.cardHoverBackground)
                     .cornerRadius(10)
                     .accessibilityIdentifier("lansync.manual.field")
 
                 Button(action: connectManual) {
                     Text(connecting ? "连接中" : "连接")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(connecting ? Color(.tertiaryLabel) : Color.blue)
+                        .foregroundColor(connecting ? AppColors.textTertiary : AppColors.accent)
                         .frame(width: 76, height: 40)
-                        .background(Color(.tertiarySystemBackground))
+                        .background(AppColors.cardHoverBackground)
                         .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
@@ -374,10 +374,10 @@ struct LANSyncView: View {
             }
             Text("对端未出现在列表时可直接输入其 IP 与端口（缺省端口 5051）")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
         // 解析失败水平抖动（GeometryEffect 动画驱动）
         .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempts)))
@@ -393,21 +393,21 @@ struct LANSyncView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "antenna.radiowaves.left.and.right")
                         .font(.system(size: 16))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(peer.name)
                             .font(.system(size: 16))
-                            .foregroundColor(Color.primary)
+                            .foregroundColor(AppColors.textPrimary)
                             .lineLimit(1)
                         Text("\(peer.host):\(peer.port) · \(remote.device.appVersion)")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                     }
                     Spacer()
                 }
                 .padding(16)
                 .frame(minHeight: 48)
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
 
                 sectionLabel("获取内容（对端 → 本机）")
@@ -425,7 +425,7 @@ struct LANSyncView: View {
                         }
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
 
                 // 主库警示：勾选 main 时出现
@@ -439,7 +439,7 @@ struct LANSyncView: View {
             // 防御：configure 只在连接成功后进入，正常不会出现
             Text("未选择对端设备")
                 .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
     }
 
@@ -455,14 +455,14 @@ struct LANSyncView: View {
                 HStack(spacing: 12) {
                     Image(systemName: pickIconName(pick))
                         .font(.system(size: 20))
-                        .foregroundColor(pick == .none ? Color(.tertiaryLabel) : .blue)
+                        .foregroundColor(pick == .none ? AppColors.textTertiary : AppColors.accent)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(cat.title)
                             .font(.system(size: 16))
-                            .foregroundColor(Color.primary)
+                            .foregroundColor(AppColors.textPrimary)
                         Text("本机 \(sideSummary(local)) ｜ 对端 \(sideSummary(remote))")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 12)
@@ -479,7 +479,7 @@ struct LANSyncView: View {
                 Button(action: { toggleExpanded(cat) }) {
                     Image(systemName: expandedCats.contains(cat) ? "chevron.down" : "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color(.tertiaryLabel))
+                        .foregroundColor(AppColors.textTertiary)
                         .padding(.horizontal, 18)
                         .frame(minHeight: 56)
                         .contentShape(Rectangle())
@@ -497,15 +497,15 @@ struct LANSyncView: View {
             HStack(spacing: 12) {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
-                    .foregroundColor(checked ? .blue : Color(.tertiaryLabel))
+                    .foregroundColor(checked ? AppColors.accent : AppColors.textTertiary)
                 Text(child.name)
                     .font(.system(size: 14))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(childQuantity(child))
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             .padding(.leading, 48)
             .padding(.trailing, 16)
@@ -521,14 +521,14 @@ struct LANSyncView: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 14))
-                .foregroundColor(.yellow)
+                .foregroundColor(AppColors.statusWarning)
                 .padding(.top, 2)
             Text("主库约 GB 级，WiFi 传输耗时较长；替换后需重启 App 生效")
                 .font(.system(size: 13))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
         .padding(12)
-        .background(Color.yellow.opacity(0.15))
+        .background(AppColors.statusWarning.opacity(0.15))
         .cornerRadius(12)
     }
 
@@ -539,7 +539,7 @@ struct LANSyncView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(Color.white)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(hasAnyPick ? Color.blue : Color.blue.opacity(0.35))
+                .background(hasAnyPick ? AppColors.accent : AppColors.accent.opacity(0.35))
                 .cornerRadius(12)
                 .contentShape(Rectangle())
         }
@@ -559,7 +559,7 @@ struct LANSyncView: View {
                 ProgressView()
                 Text("正在准备…")
                     .font(.system(size: 15))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: 160)
 
@@ -570,7 +570,7 @@ struct LANSyncView: View {
                     .font(.system(size: 17, weight: .semibold))
                 Text(directionText)
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: 160)
 
@@ -585,16 +585,16 @@ struct LANSyncView: View {
                     Spacer()
                     Text(String(format: "%.1f MB/s", Double(transfer.bytesPerSecond) / 1_048_576))
                         .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 Text("当前文件：\(transfer.currentFile.isEmpty ? "—" : transfer.currentFile)")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             .padding(16)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
 
         case .done:
@@ -602,28 +602,28 @@ struct LANSyncView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(.green)
+                        .foregroundColor(AppColors.statusSuccess)
                     Text("同步完成")
                         .font(.system(size: 17, weight: .semibold))
                 }
                 Text(transfer.resultSummary)
                     .font(.system(size: 14))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .accessibilityIdentifier("lansync.result.summary")
                 if let backup = transfer.backupDir {
                     Text("已备份本机原文件到 Documents/\(backup)")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 if transfer.needsRestart {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 13))
-                            .foregroundColor(.yellow)
+                            .foregroundColor(AppColors.statusWarning)
                             .padding(.top, 2)
                         Text("主库已替换，请重启 App 生效")
                             .font(.system(size: 13))
-                            .foregroundColor(Color.primary)
+                            .foregroundColor(AppColors.textPrimary)
                     }
                 }
                 // 完成按钮：回设备列表
@@ -632,7 +632,7 @@ struct LANSyncView: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(Color.white)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color.blue)
+                        .background(AppColors.accent)
                         .cornerRadius(12)
                         .contentShape(Rectangle())
                 }
@@ -640,7 +640,7 @@ struct LANSyncView: View {
                 .accessibilityIdentifier("lansync.done.button")
             }
             .padding(16)
-            .background(Color.green.opacity(0.12))
+            .background(AppColors.statusSuccess.opacity(0.12))
             .cornerRadius(12)
 
         case .failed(let message):
@@ -648,31 +648,31 @@ struct LANSyncView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "xmark.octagon.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(.red)
+                        .foregroundColor(AppColors.statusError)
                     Text("同步失败")
                         .font(.system(size: 17, weight: .semibold))
                 }
                 Text(message)
                     .font(.system(size: 14))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .accessibilityIdentifier("lansync.fail.message")
                 Text(directionText)
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 // 重试：回配置页重新发起
                 Button(action: { withAnimation(.easeOut(duration: 0.15)) { page = .configure } }) {
                     Text("重试")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(Color.white)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color.blue)
+                        .background(AppColors.accent)
                         .cornerRadius(12)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
             .padding(16)
-            .background(Color.red.opacity(0.12))
+            .background(AppColors.statusError.opacity(0.12))
             .cornerRadius(12)
         }
     }

@@ -95,7 +95,7 @@ struct SimulationLayoutCView: View {
                                    isCompact: isCompact)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .overlay(alignment: .top) { toastView }
             // 公式管理中心（「交易策略」段）：全屏页面挂在根视图最外层 overlay，
             // 避免被全宽大表 ScrollView / 底部小卡裁剪；关闭走页内「返回」
@@ -132,7 +132,7 @@ struct SimulationLayoutCView: View {
         HStack(spacing: 12) {
             Text("模拟交易")
                 .font(.system(size: 19, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
             Spacer(minLength: 8)
             accountChip
             Spacer(minLength: 8)
@@ -142,9 +142,9 @@ struct SimulationLayoutCView: View {
         .padding(.horizontal, 16)
         .frame(height: 52)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
         // 交易规则详情（与根视图的「修改委托价」弹窗分开挂载，避免同视图多 alert 冲突）
         .alert("交易规则", isPresented: $showRulesAlert) {
@@ -165,15 +165,15 @@ struct SimulationLayoutCView: View {
             HStack(spacing: 6) {
                 Text(store.accountName(id: store.selectedAccountID))
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
             .padding(.horizontal, 14)
             .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color(.secondarySystemBackground)))
+            .background(RoundedRectangle(cornerRadius: 9).fill(AppColors.cardBackground))
         }
         .accessibilityIdentifier("sim.account.menu")
     }
@@ -185,10 +185,10 @@ struct SimulationLayoutCView: View {
                 Image(systemName: icon).font(.system(size: 11))
                 Text(title).font(.system(size: 12))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 8)
             .frame(height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.5), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent.opacity(0.5), lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -206,18 +206,18 @@ struct SimulationLayoutCView: View {
                 // （label 左灰 / value 右着色加粗），不再折行挤压；视觉令牌与宽屏 metricItem 一致
                 VStack(alignment: .leading, spacing: 0) {
                     metricPillContent(SimMetricPill(label: "总资产", value: SimFormat.amount0(summary.totalAssets),
-                                                    color: Color.primary))
+                                                    color: AppColors.textPrimary))
                     metricPillContent(SimMetricPill(label: "可用", value: SimFormat.amount0(summary.cash),
-                                                    color: Color.primary))
+                                                    color: AppColors.textPrimary))
                     metricPillContent(SimMetricPill(label: "市值", value: SimFormat.amount0(summary.marketValue),
-                                                    color: Color.primary))
+                                                    color: AppColors.textPrimary))
                     metricPillContent(SimMetricPill(label: "仓位", value: SimFormat.pct(summary.positionPct * 100),
-                                                    color: Color.primary))
+                                                    color: AppColors.textPrimary))
                     metricPillContent(SimMetricPill(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
                                                     color: profitColor(summary.dayProfit)))
                     metricPillContent(SimMetricPill(label: "累计盈亏", value: SimFormat.signed0(summary.totalProfit),
                                                     color: profitColor(summary.totalProfit)))
-                    metricPillContent(SimMetricPill(label: "在途委托", value: "\(pendingCount)", color: Color.orange))
+                    metricPillContent(SimMetricPill(label: "在途委托", value: "\(pendingCount)", color: AppColors.statusWarning))
                 }
                 .padding(.vertical, 4)
             } else {
@@ -237,16 +237,16 @@ struct SimulationLayoutCView: View {
                     metricItem("累计盈亏", SimFormat.signed0(summary.totalProfit),
                                color: profitColor(summary.totalProfit))
                     metricSeparator
-                    metricItem("在途委托", "\(pendingCount)", color: Color.orange)
+                    metricItem("在途委托", "\(pendingCount)", color: AppColors.statusWarning)
                 }
                 .frame(height: 52)
             }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -264,7 +264,7 @@ struct SimulationLayoutCView: View {
         HStack(spacing: 6) {
             Text(pill.label)
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(pill.value)
@@ -278,11 +278,11 @@ struct SimulationLayoutCView: View {
     }
 
     private func metricItem(_ label: String, _ value: String,
-                            color: Color = Color.primary) -> some View {
+                            color: Color = AppColors.textPrimary) -> some View {
         HStack(spacing: 6) {
             Text(label)
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 2)
             Text(value)
@@ -296,7 +296,7 @@ struct SimulationLayoutCView: View {
     }
 
     private var metricSeparator: some View {
-        Rectangle().fill(Color(.separator)).frame(width: 0.5, height: 26)
+        Rectangle().fill(AppColors.separator).frame(width: 0.5, height: 26)
     }
 
     // MARK: - 模块行
@@ -345,9 +345,9 @@ struct SimulationLayoutCView: View {
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
         // 条件单全屏呈现挂在本行（与根视图的全屏下单页分开宿主，避免同视图多个 fullScreenCover）
         .simCondEntryPresentation($condPresentation, accountID: store.queryAccountID)
@@ -359,7 +359,7 @@ struct SimulationLayoutCView: View {
         return Button(action: { condPresentation = .list(UUID()) }) {
             Text("条件单")
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .overlay(alignment: .topTrailing) {
                     if monitoring > 0 {
                         Text("\(monitoring)")
@@ -367,7 +367,7 @@ struct SimulationLayoutCView: View {
                             .foregroundColor(Color.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color(.systemRed)))
+                            .background(Capsule().fill(AppColors.marketUp))
                             .offset(x: 12, y: -8)
                     }
                 }
@@ -382,15 +382,15 @@ struct SimulationLayoutCView: View {
         HStack(spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             TextField("搜索标的名称/代码", text: $keyword)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(width: 148)
         }
         .padding(.horizontal, 8)
         .frame(height: 26)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(AppColors.cardBackground))
     }
 
     /// 紧凑态搜索框：与 searchBox 同视觉，唯一差别是宽度——固定 148pt 改弹性
@@ -400,16 +400,16 @@ struct SimulationLayoutCView: View {
         HStack(spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             TextField("搜索标的名称/代码", text: $keyword)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 8)
         .frame(height: 26)
         .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(AppColors.cardBackground))
     }
 
     private var refreshButton: some View {
@@ -418,10 +418,10 @@ struct SimulationLayoutCView: View {
                 Image(systemName: "arrow.clockwise").font(.system(size: 11))
                 Text("刷新").font(.system(size: 11.5))
             }
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .padding(.horizontal, 8)
             .frame(height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(.separator), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.separator, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -452,9 +452,9 @@ struct SimulationLayoutCView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 110, alignment: .top)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(.separator), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppColors.separator, lineWidth: 1))
     }
 
     /// 右卡：当日成交（最多 3 行）
@@ -472,25 +472,25 @@ struct SimulationLayoutCView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 110, alignment: .top)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(.separator), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppColors.separator, lineWidth: 1))
     }
 
     private func cardTitleRow(_ title: String, count: Int, unit: String) -> some View {
         HStack(spacing: 5) {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
             Text("\(count)\(unit)")
                 .font(.system(size: 11, weight: .bold))
-                .foregroundColor(Color(.systemRed))
+                .foregroundColor(AppColors.marketUp)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
         .frame(height: 24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
     }
 
     private func pendingRow(_ order: SimOrder) -> some View {
@@ -498,14 +498,14 @@ struct SimulationLayoutCView: View {
             SimDirectionTag(direction: order.direction)
             Text(order.name)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text(pendingDetail(order))
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            SimInlineButton(title: "撤单", tint: Color(.secondaryLabel)) {
+            SimInlineButton(title: "撤单", tint: AppColors.textSecondary) {
                 Task { await store.cancelOrder(id: order.id) }
             }
         }
@@ -527,19 +527,19 @@ struct SimulationLayoutCView: View {
         HStack(spacing: 6) {
             Text(SimFormat.time(fill.tradedAt))
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(width: 52, alignment: .leading)
             Text(fill.name)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text("\(fill.direction.isBuy ? "买" : "卖") \(SimFormat.shares(fill.qty))")
                 .font(.system(size: 10.5))
-                .foregroundColor(fill.direction.isBuy ? Color(.systemRed) : Color(.systemGreen))
+                .foregroundColor(fill.direction.isBuy ? AppColors.marketUp : AppColors.marketDown)
             Spacer(minLength: 4)
             Text(SimFormat.price(fill.price))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
         .padding(.horizontal, 10)
         .frame(height: 26)
@@ -548,7 +548,7 @@ struct SimulationLayoutCView: View {
     private func emptyCardHint(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundColor(Color(.tertiaryLabel))
+            .foregroundColor(AppColors.textTertiary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -649,7 +649,7 @@ struct SimulationLayoutCView: View {
 
     /// 盈亏配色（涨红跌绿）
     private func profitColor(_ value: Double) -> Color {
-        value < 0 ? Color(.systemGreen) : Color(.systemRed)
+        value < 0 ? AppColors.marketDown : AppColors.marketUp
     }
 
     @ViewBuilder
@@ -657,12 +657,12 @@ struct SimulationLayoutCView: View {
         if let text = toast {
             Text(text)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator), lineWidth: 0.5))
+                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardHoverBackground))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppColors.separator, lineWidth: 0.5))
                 .padding(.top, 6)
         }
     }

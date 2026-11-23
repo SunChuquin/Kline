@@ -52,7 +52,7 @@ struct BacktestResultView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
     }
@@ -68,9 +68,9 @@ struct BacktestResultView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -81,7 +81,7 @@ struct BacktestResultView: View {
 
             Text("回测结果")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -90,7 +90,7 @@ struct BacktestResultView: View {
                 .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 指标卡
@@ -100,7 +100,7 @@ struct BacktestResultView: View {
             // 首行：初始资金 → 期末净值 · 平仓笔数
             Text("初始资金 \(SimFormat.amount0(result.stats.initialCapital)) → 期末净值 \(SimFormat.amount0(result.stats.finalEquity)) · 平仓 \(result.stats.roundTrips) 笔")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
@@ -111,13 +111,13 @@ struct BacktestResultView: View {
                 metricCell("年化", pctText(result.stats.annualized),
                            color: changeColor(result.stats.annualized))
                 metricCell("最大回撤", pctText(-abs(result.stats.maxDrawdown)),
-                           color: Color(.systemGreen))
-                metricCell("胜率", pctText(result.stats.winRate), color: Color.primary)
+                           color: AppColors.marketDown)
+                metricCell("胜率", pctText(result.stats.winRate), color: AppColors.textPrimary)
                 metricCell("盈亏比", String(format: "%.2f", result.stats.profitFactor),
-                           color: Color.primary)
+                           color: AppColors.textPrimary)
                 metricCell("成交 / 平均持仓",
                            "\(result.stats.tradeCount) 笔 · \(String(format: "%.1f", result.stats.avgHoldDays)) 天",
-                           color: Color.primary)
+                           color: AppColors.textPrimary)
             }
         }
     }
@@ -127,7 +127,7 @@ struct BacktestResultView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Text(value)
                 .font(.system(size: 16, weight: .bold))
@@ -137,7 +137,7 @@ struct BacktestResultView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardHoverBackground))
     }
 
     // MARK: - 净值曲线卡
@@ -148,7 +148,7 @@ struct BacktestResultView: View {
                 Spacer(minLength: 0)
                 Text("区间 \(dateText(firstDate)) ~ \(dateText(lastDate))")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -169,10 +169,10 @@ struct BacktestResultView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     tradeHeaderRow
-                    Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                    Rectangle().fill(AppColors.separator).frame(height: 0.5)
                     ForEach(rows) { trade in
                         tradeRow(trade)
-                        Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                        Rectangle().fill(AppColors.separator).frame(height: 0.5)
                     }
                 }
             }
@@ -183,7 +183,7 @@ struct BacktestResultView: View {
                 } label: {
                     Text("展开全部（共 \(result.trades.count) 条）")
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(Color.blue)
+                        .foregroundColor(AppColors.accent)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
@@ -205,31 +205,31 @@ struct BacktestResultView: View {
 
     private var tradeHeaderRow: some View {
         HStack(spacing: 6) {
-            tableCell("日期", width: colDate, color: Color(.secondaryLabel), size: 11)
-            tableCell("标的", width: colName, color: Color(.secondaryLabel), size: 11)
-            tableCell("方向", width: colDir, color: Color(.secondaryLabel), size: 11, alignment: .center)
-            tableCell("规则", width: colRule, color: Color(.secondaryLabel), size: 11, alignment: .center)
-            tableCell("数量", width: colQty, color: Color(.secondaryLabel), size: 11, alignment: .trailing)
-            tableCell("成交价", width: colPrice, color: Color(.secondaryLabel), size: 11, alignment: .trailing)
-            tableCell("金额", width: colAmount, color: Color(.secondaryLabel), size: 11, alignment: .trailing)
-            tableCell("盈亏", width: colPnL, color: Color(.secondaryLabel), size: 11, alignment: .trailing)
+            tableCell("日期", width: colDate, color: AppColors.textSecondary, size: 11)
+            tableCell("标的", width: colName, color: AppColors.textSecondary, size: 11)
+            tableCell("方向", width: colDir, color: AppColors.textSecondary, size: 11, alignment: .center)
+            tableCell("规则", width: colRule, color: AppColors.textSecondary, size: 11, alignment: .center)
+            tableCell("数量", width: colQty, color: AppColors.textSecondary, size: 11, alignment: .trailing)
+            tableCell("成交价", width: colPrice, color: AppColors.textSecondary, size: 11, alignment: .trailing)
+            tableCell("金额", width: colAmount, color: AppColors.textSecondary, size: 11, alignment: .trailing)
+            tableCell("盈亏", width: colPnL, color: AppColors.textSecondary, size: 11, alignment: .trailing)
         }
         .padding(.vertical, 6)
     }
 
     private func tradeRow(_ trade: BacktestTrade) -> some View {
         HStack(spacing: 6) {
-            tableCell(dateText(trade.date), width: colDate, color: Color(.secondaryLabel), size: 12)
-            tableCell("\(trade.name) \(trade.code)", width: colName, color: Color.primary, size: 12)
+            tableCell(dateText(trade.date), width: colDate, color: AppColors.textSecondary, size: 12)
+            tableCell("\(trade.name) \(trade.code)", width: colName, color: AppColors.textPrimary, size: 12)
             tableCell(trade.direction.title, width: colDir, color: dirColor(trade.direction),
                       size: 12, alignment: .center)
-            tableCell(trade.ruleKind?.title ?? "—", width: colRule, color: Color(.secondaryLabel),
+            tableCell(trade.ruleKind?.title ?? "—", width: colRule, color: AppColors.textSecondary,
                       size: 12, alignment: .center)
-            tableCell(SimFormat.shares(trade.qty), width: colQty, color: Color.primary,
+            tableCell(SimFormat.shares(trade.qty), width: colQty, color: AppColors.textPrimary,
                       size: 12, alignment: .trailing)
-            tableCell(SimFormat.price(trade.price), width: colPrice, color: Color.primary,
+            tableCell(SimFormat.price(trade.price), width: colPrice, color: AppColors.textPrimary,
                       size: 12, alignment: .trailing)
-            tableCell(SimFormat.amount(trade.amount), width: colAmount, color: Color.primary,
+            tableCell(SimFormat.amount(trade.amount), width: colAmount, color: AppColors.textPrimary,
                       size: 12, alignment: .trailing)
             pnlCell(trade)
         }
@@ -244,7 +244,7 @@ struct BacktestResultView: View {
                       size: 12, alignment: .trailing)
         } else {
             tableCell(trade.direction.isBuy ? "持仓中" : "—", width: colPnL,
-                      color: Color(.secondaryLabel), size: 12, alignment: .trailing)
+                      color: AppColors.textSecondary, size: 12, alignment: .trailing)
         }
     }
 
@@ -263,15 +263,15 @@ struct BacktestResultView: View {
         VStack(spacing: 8) {
             Text("本次区间内没有产生任何成交")
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             Text("请检查候选池 / 回测区间 / 入场信号开关")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 28)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
     }
 
@@ -281,12 +281,12 @@ struct BacktestResultView: View {
         card("提示") {
             Text("扫描 \(result.scannedCount) 只 · 命中 \(result.hitCount) 只")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             ForEach(Array(result.warnings.enumerated()), id: \.offset) { _, warning in
                 Text(warning)
                     .font(.system(size: 12))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -297,10 +297,10 @@ struct BacktestResultView: View {
                     HStack(spacing: 4) {
                         Text("跳过 \(result.skipped.count) 条")
                             .font(.system(size: 12.5, weight: .medium))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                         Image(systemName: showSkips ? "chevron.up" : "chevron.down")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                         Spacer(minLength: 0)
                     }
                     .frame(minHeight: 44)
@@ -313,13 +313,13 @@ struct BacktestResultView: View {
                         ForEach(Array(result.skipped.enumerated()), id: \.offset) { _, item in
                             Text(item)
                                 .font(.system(size: 12))
-                                .foregroundColor(Color(.secondaryLabel))
+                                .foregroundColor(AppColors.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(Color(.secondarySystemBackground))
+                    .background(AppColors.cardBackground)
                     .cornerRadius(12)
                 }
             }
@@ -332,13 +332,13 @@ struct BacktestResultView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             VStack(alignment: .leading, spacing: 10) {
                 content()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }
@@ -355,13 +355,13 @@ struct BacktestResultView: View {
 
     /// A 股语义：盈利红 / 亏损绿（与模拟交易配色一致）
     private func changeColor(_ v: Double) -> Color {
-        if v < 0 { return Color(.systemGreen) }
-        if v > 0 { return Color(.systemRed) }
-        return Color.primary
+        if v < 0 { return AppColors.marketDown }
+        if v > 0 { return AppColors.marketUp }
+        return AppColors.textPrimary
     }
 
     private func dirColor(_ dir: SimOrderDirection) -> Color {
-        dir.isBuy ? Color(.systemRed) : Color(.systemGreen)
+        dir.isBuy ? AppColors.marketUp : AppColors.marketDown
     }
 
     /// Int(YYYYMMDD) → "YYYY-MM-DD"（非法值原样返回）

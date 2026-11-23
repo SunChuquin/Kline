@@ -62,7 +62,7 @@ struct LayoutNodeTreeList: View {
             Divider()
             toolBar
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 行
@@ -76,7 +76,7 @@ struct LayoutNodeTreeList: View {
         let drop: LayoutDropResolution? = isDropTarget ? dropResolution : nil
         let isRoot = (editor.layoutRoot?.uuid == node.uuid)
         let isRejected = drop?.rejection != nil
-        let accent: Color = isRejected ? .red : .accentColor
+        let accent: Color = isRejected ? AppColors.statusError : AppColors.accent
 
         return HStack(spacing: 4) {
             Color.clear.frame(width: CGFloat(depth) * 14, height: 1)
@@ -87,7 +87,7 @@ struct LayoutNodeTreeList: View {
                 } label: {
                     Image(systemName: editor.collapsed.contains(node.uuid) ? "chevron.right" : "chevron.down")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -99,12 +99,12 @@ struct LayoutNodeTreeList: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(primaryTitle(node))
                     .font(.system(size: 14))
-                    .foregroundColor(isSelected ? .blue : .primary)
+                    .foregroundColor(isSelected ? AppColors.accent : AppColors.textPrimary)
                     .lineLimit(1)
                 if !summary.isEmpty {
                     Text(summary)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
             }
@@ -114,10 +114,10 @@ struct LayoutNodeTreeList: View {
         .frame(height: Self.rowHeight)
         .background(
             ZStack {
-                if isSelected { Color.blue.opacity(0.12) }
+                if isSelected { AppColors.accent.opacity(0.12) }
                 // 拖入 / 非法 = 整行底色；前插 / 后插只画边缘线（下面 overlay）
-                if drop == .into { Color.accentColor.opacity(0.2) }
-                if isRejected { Color.red.opacity(0.2) }
+                if drop == .into { AppColors.accent.opacity(0.2) }
+                if isRejected { AppColors.statusError.opacity(0.2) }
             }
         )
         .overlay(alignment: .top) {
@@ -150,7 +150,7 @@ struct LayoutNodeTreeList: View {
     /// 插入意图的边缘指示线（2pt，与行等宽）
     private static var insertionLine: some View {
         Rectangle()
-            .fill(Color.accentColor)
+            .fill(AppColors.accent)
             .frame(height: 2)
             .allowsHitTesting(false)
     }
@@ -202,7 +202,7 @@ struct LayoutNodeTreeList: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     private func toolbarLabel(_ title: String, systemImage: String = "plus") -> some View {
@@ -210,10 +210,10 @@ struct LayoutNodeTreeList: View {
             Image(systemName: systemImage).font(.system(size: 12, weight: .semibold))
             Text(title).font(.system(size: 13))
         }
-        .foregroundColor(.blue)
+        .foregroundColor(AppColors.accent)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.blue.opacity(0.12))
+        .background(AppColors.accent.opacity(0.12))
         .cornerRadius(8)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
@@ -223,7 +223,7 @@ struct LayoutNodeTreeList: View {
     private func iconButtonLabel(_ systemImage: String) -> some View {
         Image(systemName: systemImage)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundColor(editor.canMoveSelected ? .blue : .secondary)
+            .foregroundColor(editor.canMoveSelected ? AppColors.accent : AppColors.textSecondary)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
     }

@@ -52,10 +52,10 @@ struct FavoritesGroupStat: Equatable {
     }
 
     var avgPctColor: Color {
-        guard let v = avgPct else { return .secondary }
-        if v > 0 { return Color(.systemRed) }
-        if v < 0 { return Color(.systemGreen) }
-        return .secondary
+        guard let v = avgPct else { return AppColors.textSecondary }
+        if v > 0 { return AppColors.marketUp }
+        if v < 0 { return AppColors.marketDown }
+        return AppColors.textSecondary
     }
 
     var turnoverText: String {
@@ -109,11 +109,11 @@ struct FavoritesLayoutDView: View {
             FavoritesEditToggleButton(model: model)
             iconButton("slider.horizontal.3") { model.showColumnPanel = true }
             iconButton("folder") { model.showManageSheet = true }
-            iconButton("plus", color: .blue) { model.showAddSheet = true }
+            iconButton("plus", color: AppColors.accent) { model.showAddSheet = true }
                 .padding(.trailing, 4)
         }
         .frame(height: 48)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
     
     /// 刷新按钮
@@ -126,32 +126,32 @@ struct FavoritesLayoutDView: View {
                     // 显示进度：图标 + 进度文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("\(p.done)/\(p.total)")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 } else if watchlistSync.isRunning {
                     // 显示加载中：图标 + 加载文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("刷新中...")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 } else {
                     // 正常状态：图标 + 刷新文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("刷新")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 }
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(Color(.systemGray6))
+            .background(AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -173,7 +173,7 @@ struct FavoritesLayoutDView: View {
     @ObservedObject private var syncConfig = TdxSyncConfig.shared
 
     /// 顶部图标按钮：统一 44x44 命中区
-    private func iconButton(_ systemName: String, color: Color = .secondary,
+    private func iconButton(_ systemName: String, color: Color = AppColors.textSecondary,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -198,7 +198,7 @@ struct FavoritesLayoutDView: View {
             .padding(.vertical, 8)
         }
         .frame(height: 80)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 看板卡（150x64）：组名 + N 只 + 涨/跌家数 + 组内平均涨跌幅；当前分组蓝边高亮
@@ -212,20 +212,20 @@ struct FavoritesLayoutDView: View {
                 HStack(spacing: 6) {
                     Text(g.name)
                         .font(.system(size: 12.5, weight: .bold))
-                        .foregroundColor(active ? .blue : .primary)
+                        .foregroundColor(active ? AppColors.accent : AppColors.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text("\(stat.itemCount) 只")
                         .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 HStack(spacing: 8) {
                     Text("涨 \(stat.upCount)")
                         .font(.system(size: 10.5))
-                        .foregroundColor(Color(.systemRed))
+                        .foregroundColor(AppColors.marketUp)
                     Text("跌 \(stat.downCount)")
                         .font(.system(size: 10.5))
-                        .foregroundColor(Color(.systemGreen))
+                        .foregroundColor(AppColors.marketDown)
                     Spacer(minLength: 0)
                 }
                 Text(stat.avgPctText)
@@ -235,9 +235,9 @@ struct FavoritesLayoutDView: View {
             .padding(.horizontal, 10)
             .frame(width: 150, height: 64, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10)
-                .fill(active ? Color.blue.opacity(0.08) : Color(.systemBackground)))
+                .fill(active ? AppColors.accent.opacity(0.08) : AppColors.pageBackground))
             .overlay(RoundedRectangle(cornerRadius: 10)
-                .stroke(active ? Color.blue : Color(.separator), lineWidth: active ? 1.5 : 0.5))
+                .stroke(active ? AppColors.accent : AppColors.separator, lineWidth: active ? 1.5 : 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -248,29 +248,29 @@ struct FavoritesLayoutDView: View {
     private var statBar: some View {
         let s = groupStats[model.currentGroup.id] ?? FavoritesGroupStat()
         return HStack(spacing: 0) {
-            statItem("自选总数", "\(s.itemCount)", color: .primary)
+            statItem("自选总数", "\(s.itemCount)", color: AppColors.textPrimary)
             statDivider
-            statItem("上涨", "\(s.upCount)", color: Color(.systemRed))
+            statItem("上涨", "\(s.upCount)", color: AppColors.marketUp)
             statDivider
-            statItem("下跌", "\(s.downCount)", color: Color(.systemGreen))
+            statItem("下跌", "\(s.downCount)", color: AppColors.marketDown)
             statDivider
-            statItem("平盘", "\(s.flatCount)", color: .secondary)
+            statItem("平盘", "\(s.flatCount)", color: AppColors.textSecondary)
             statDivider
             statItem("平均涨跌幅", s.avgPctText, color: s.avgPctColor)
             statDivider
-            statItem("组内成交额", s.turnoverText, color: .primary)
+            statItem("组内成交额", s.turnoverText, color: AppColors.textPrimary)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .frame(height: 42)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
     }
 
     private func statItem(_ key: String, _ value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(key)
                 .font(.system(size: 9.5))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             Text(value)
                 .font(.system(size: 13.5, weight: .bold, design: .monospaced))
                 .foregroundColor(color)
@@ -281,7 +281,7 @@ struct FavoritesLayoutDView: View {
 
     private var statDivider: some View {
         Rectangle()
-            .fill(Color(.separator))
+            .fill(AppColors.separator)
             .frame(width: 0.5, height: 22)
             .padding(.trailing, 16)
     }

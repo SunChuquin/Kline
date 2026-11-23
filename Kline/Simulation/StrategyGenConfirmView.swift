@@ -65,7 +65,7 @@ struct StrategyGenConfirmView: View {
                     } else {
                         Text("正在生成…")
                             .font(.system(size: 13))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                     }
                 }
                 .padding(16)
@@ -74,7 +74,7 @@ struct StrategyGenConfirmView: View {
             confirmBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear { recompute() }
@@ -92,9 +92,9 @@ struct StrategyGenConfirmView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -105,7 +105,7 @@ struct StrategyGenConfirmView: View {
 
             Text("生成条件单")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -114,7 +114,7 @@ struct StrategyGenConfirmView: View {
             } label: {
                 Text("确认生成（\(draftCount) 条）")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(draftCount == 0 ? Color(.tertiaryLabel) : Color.blue)
+                    .foregroundColor(draftCount == 0 ? AppColors.textTertiary : AppColors.accent)
                     .padding(.horizontal, 10)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -124,7 +124,7 @@ struct StrategyGenConfirmView: View {
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 内容
@@ -135,7 +135,7 @@ struct StrategyGenConfirmView: View {
             if outcome.truncatedByLimit {
                 Text("本次已达生成上限（单次 200 条 / 单账户监控 1000 条），超出部分未生成")
                     .font(.system(size: 12))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -158,11 +158,11 @@ struct StrategyGenConfirmView: View {
         card("概览") {
             Text("将写入 \(outcome.drafts.count) 条条件单 · 跳过 \(outcome.skips.count) 条")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("目标账户：\(targetAccountText)")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -173,7 +173,7 @@ struct StrategyGenConfirmView: View {
             Toggle(isOn: $includeEntry) {
                 Text("同时生成入场单（PRICE ≥ 最新价）")
                     .font(.system(size: 13))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .toggleStyle(SwitchToggleStyle())
@@ -181,7 +181,7 @@ struct StrategyGenConfirmView: View {
 
             Text("命中清单本身就是今日已命中，入场单会按 TRADE 段的报价方式在盘中触发")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -193,7 +193,7 @@ struct StrategyGenConfirmView: View {
             card("将生成的条件单") {
                 Text("没有可生成的条件单，请看下方跳过原因")
                     .font(.system(size: 13))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         } else {
@@ -211,11 +211,11 @@ struct StrategyGenConfirmView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("\(draft.name) \(draft.code)")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text("\(draft.kind.title) · \(projection.previewSentence(draft.order()))")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,10 +231,10 @@ struct StrategyGenConfirmView: View {
                 HStack(spacing: 4) {
                     Text("跳过 \(skips.count) 条")
                         .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(.orange)
+                        .foregroundColor(AppColors.statusWarning)
                     Image(systemName: showSkips ? "chevron.up" : "chevron.down")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.orange)
+                        .foregroundColor(AppColors.statusWarning)
                     Spacer(minLength: 0)
                 }
                 .frame(minHeight: 44)
@@ -247,13 +247,13 @@ struct StrategyGenConfirmView: View {
                     ForEach(skips) { skip in
                         Text("\(skip.title) —— \(skip.reason)")
                             .font(.system(size: 12))
-                            .foregroundColor(.orange)
+                            .foregroundColor(AppColors.statusWarning)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
             }
         }
@@ -266,7 +266,7 @@ struct StrategyGenConfirmView: View {
             if let errorText = errorText {
                 Text(errorText)
                     .font(.system(size: 12))
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.statusError)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -279,7 +279,7 @@ struct StrategyGenConfirmView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
                     .background(RoundedRectangle(cornerRadius: 10)
-                        .fill(draftCount == 0 ? Color.gray : Color.blue))
+                        .fill(draftCount == 0 ? AppColors.textTertiary : AppColors.accent))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -287,14 +287,14 @@ struct StrategyGenConfirmView: View {
 
             Text("条件单在行情刷新与手动检查时评估，非实时盯盘；与回测的逐 bar 判定口径不同")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -304,13 +304,13 @@ struct StrategyGenConfirmView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             VStack(alignment: .leading, spacing: 10) {
                 content()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }

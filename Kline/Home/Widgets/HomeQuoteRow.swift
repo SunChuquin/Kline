@@ -26,11 +26,11 @@ struct HomeQuoteRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(meta.name)
                     .font(.system(size: 14))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(meta.displayCode)
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
 

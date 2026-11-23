@@ -24,11 +24,11 @@ struct ListCard: View {
                 if let time = data.updateTime {
                     Text(time)
                         .font(.subheadline)
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 } else if data.showMore {
                     Text("更多")
                         .font(.subheadline)
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 }
             }
 
@@ -44,7 +44,7 @@ struct ListCard: View {
                                 Text(String(rank))
                                     .font(.system(size: 14))
                                     .fontWeight(.bold)
-                                    .foregroundColor(rank <= 3 ? .red : .gray)
+                                    .foregroundColor(rank <= 3 ? AppColors.marketUp : AppColors.textTertiary)
                                     .frame(width: 24, alignment: .center)
                             }
 
@@ -70,7 +70,7 @@ struct ListCard: View {
             }
         }
         .padding(16)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }

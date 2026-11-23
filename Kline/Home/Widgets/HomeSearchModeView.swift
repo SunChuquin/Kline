@@ -39,13 +39,13 @@ struct HomeSearchModeView: View {
 
                 HStack {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                     TextField("搜索", text: $searchText)
                         .textFieldStyle(.plain)
                         .focused($searchFocused)
                 }
                 .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                .background(Color(.systemGray5))
+                .background(AppColors.cardHoverBackground)
                 .cornerRadius(8)
                 .padding(.trailing, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,7 +55,7 @@ struct HomeSearchModeView: View {
             // 被 56pt 框居中后上下各留约 8pt 透明带
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: 56)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     searchFocused = true
@@ -70,6 +70,6 @@ struct HomeSearchModeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // 整页铺底：本视图既作为首页搜索态、也作为行情页搜索浮层（MarketSheets overlay）呈现，
         // 无底色时行情表会从搜索区透出、点击还会穿透到背后的行情行上
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 }

@@ -146,7 +146,7 @@ struct PageLayoutRenderer<Context> {
             if let title = node.title {
                 Text(title)
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             if let child = node.child {
                 view(for: child)
@@ -154,7 +154,7 @@ struct PageLayoutRenderer<Context> {
         }
         .padding(isCompact ? 10 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
     }
 
@@ -192,7 +192,7 @@ struct PageLayoutRenderer<Context> {
                     .font(.system(size: 12))
             }
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(8)
         )
     }

@@ -101,7 +101,7 @@ struct StrategyDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
         // 页内浅蓝提示条（3 秒自动消失）
@@ -145,9 +145,9 @@ struct StrategyDetailView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -158,7 +158,7 @@ struct StrategyDetailView: View {
 
             Text("策略详情")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -167,9 +167,9 @@ struct StrategyDetailView: View {
             } label: {
                 Text("编辑")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                    .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -177,7 +177,7 @@ struct StrategyDetailView: View {
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 选股条件卡
@@ -186,7 +186,7 @@ struct StrategyDetailView: View {
         card("选股条件") {
             Text(pickSummaryText)
                 .font(.system(size: 14))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -198,26 +198,26 @@ struct StrategyDetailView: View {
             if isTradeConfigured {
                 Text(tradeSummaryText)
                     .font(.system(size: 14))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if !doc.trade.accountIDs.isEmpty {
                     Text(boundAccountText)
                         .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if missingAccountCount > 0 {
                     Text("\(missingAccountCount) 个账户已失效")
                         .font(.system(size: 12))
-                        .foregroundColor(.orange)
+                        .foregroundColor(AppColors.statusWarning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 Text("尚未配置交易指令与绑定账户，请点右上角编辑")
                     .font(.system(size: 14))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -231,16 +231,16 @@ struct StrategyDetailView: View {
                 if parsed.rules.isEmpty && parsed.errors.isEmpty {
                     Text("还没有交易规则")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 } else {
                     ForEach(Array(parsed.rules.enumerated()), id: \.offset) { index, call in
                         HStack(alignment: .top, spacing: 8) {
                             Text("\(index + 1).")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(AppColors.textSecondary)
                             Text(triggerText(index: index, call: call))
                                 .font(.system(size: 13))
-                                .foregroundColor(.primary)
+                                .foregroundColor(AppColors.textPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
@@ -248,7 +248,7 @@ struct StrategyDetailView: View {
                     ForEach(Array(parsed.errors.enumerated()), id: \.offset) { _, error in
                         Text("✗ \(error)")
                             .font(.system(size: 12))
-                            .foregroundColor(.red)
+                            .foregroundColor(AppColors.statusError)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -256,7 +256,7 @@ struct StrategyDetailView: View {
                 // `.engine` 模式下引擎未就绪 / 取数中：显式占位（不静默用 Swift 兜底）
                 Text(placeholder)
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
         }
     }
@@ -267,7 +267,7 @@ struct StrategyDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("执行")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             HStack(spacing: 10) {
                 // 跑选股不依赖 TRADE 段：未配置交易指令也能跑，只看选股公式
@@ -280,7 +280,7 @@ struct StrategyDetailView: View {
             if !canGenerate {
                 Text("请先在编辑里配置交易指令与绑定账户")
                     .font(.system(size: 11))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -292,11 +292,11 @@ struct StrategyDetailView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(enabled ? Color.blue : Color.gray)
+                .foregroundColor(enabled ? AppColors.accent : AppColors.textTertiary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .background(RoundedRectangle(cornerRadius: 10)
-                    .fill(enabled ? Color.blue.opacity(0.12) : Color(.secondarySystemBackground)))
+                    .fill(enabled ? AppColors.accent.opacity(0.12) : AppColors.cardBackground))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -382,9 +382,9 @@ struct StrategyDetailView: View {
                         Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                         Text("返回").font(.system(size: 15, weight: .medium))
                     }
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                    .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
@@ -395,7 +395,7 @@ struct StrategyDetailView: View {
 
                 Text("历史回测")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
 
                 Spacer()
 
@@ -404,7 +404,7 @@ struct StrategyDetailView: View {
                     .padding(.trailing, 16)
             }
             .padding(.vertical, 8)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
 
             Divider()
 
@@ -413,21 +413,21 @@ struct StrategyDetailView: View {
                 case .preparing(let done, let total):
                     Text("准备行情数据 \(done)/\(total)")
                         .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                     progressTrack(ratio: total > 0 ? Double(done) / Double(total) : 0)
                     cancelRow
 
                 case .simulating:
                     Text("正在逐日回测…")
                         .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                     progressTrack(ratio: nil)
                     cancelRow
 
                 case .failed(let message):
                     Text(message)
                         .font(.system(size: 12.5))
-                        .foregroundColor(.orange)
+                        .foregroundColor(AppColors.statusWarning)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Spacer(minLength: 8)
@@ -440,13 +440,13 @@ struct StrategyDetailView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
             .padding(16)
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .ignoresSafeArea(.container, edges: .bottom)
     }
 
@@ -454,10 +454,10 @@ struct StrategyDetailView: View {
     private func progressTrack(ratio: Double?) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color(.secondaryLabel).opacity(0.2))
+                Capsule().fill(AppColors.textSecondary.opacity(0.2))
                 if let ratio = ratio {
                     Capsule()
-                        .fill(Color.blue)
+                        .fill(AppColors.accent)
                         .frame(width: geo.size.width * CGFloat(min(max(ratio, 0), 1)))
                 }
             }
@@ -477,10 +477,10 @@ struct StrategyDetailView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .padding(.horizontal, 12)
                 .frame(height: 32)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent, lineWidth: 1))
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -511,12 +511,12 @@ struct StrategyDetailView: View {
         if let text = genToast {
             Text(text)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.12)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.accent.opacity(0.12)))
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
                 .transition(.opacity)
@@ -530,13 +530,13 @@ struct StrategyDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             VStack(alignment: .leading, spacing: 10) {
                 content()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }

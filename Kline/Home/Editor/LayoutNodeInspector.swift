@@ -22,7 +22,7 @@ struct LayoutNodeInspector: View {
                     Spacer()
                     Text("在左侧选择节点开始编辑")
                         .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -65,7 +65,7 @@ struct LayoutNodeInspector: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { deleteBar }
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
         }
     }
 
@@ -76,7 +76,7 @@ struct LayoutNodeInspector: View {
             Spacer(minLength: 12)
             Text(String(node.uuid.uuidString.prefix(8)))
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 44)
@@ -330,14 +330,14 @@ struct LayoutNodeInspector: View {
                     HStack(spacing: 8) {
                         Text("\(node.params?.int(param.key, default: defaultValue) ?? defaultValue)")
                             .font(.system(size: 15))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                         Stepper("", value: Binding(get: { node.params?.int(param.key, default: defaultValue) ?? defaultValue },
                                                    set: { editor.setInt(param.key, $0, on: node) }),
                                 in: range, step: 1)
                             .labelsHidden()
                     }
                     if let note = note {
-                        Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+                        Text(note).font(.system(size: 11)).foregroundColor(AppColors.textSecondary)
                     }
                 }
             }
@@ -372,7 +372,7 @@ struct LayoutNodeInspector: View {
                         .multilineTextAlignment(.trailing)
                         .disableAutocorrection(true)
                     if let note = note {
-                        Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+                        Text(note).font(.system(size: 11)).foregroundColor(AppColors.textSecondary)
                     }
                 }
             }
@@ -390,14 +390,14 @@ struct LayoutNodeInspector: View {
             if !editor.canRemoveSelected {
                 Text("根节点不可删除")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             Button {
                 editor.removeSelected()
             } label: {
                 Text("删除本节点")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(editor.canRemoveSelected ? .red : .secondary)
+                    .foregroundColor(editor.canRemoveSelected ? AppColors.statusError : AppColors.textSecondary)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -407,7 +407,7 @@ struct LayoutNodeInspector: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 通用行
@@ -431,7 +431,7 @@ struct LayoutNodeInspector: View {
             HStack {
                 Text(text)
                     .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -454,7 +454,7 @@ struct LayoutNodeInspector: View {
         HStack(spacing: 8) {
             Text("\(Int(get()))")
                 .font(.system(size: 15))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(minWidth: 28, alignment: .trailing)
             Stepper("", value: Binding(get: get, set: set), in: range, step: step)
                 .labelsHidden()
@@ -463,10 +463,10 @@ struct LayoutNodeInspector: View {
 
     private func menuLabel(_ title: String) -> some View {
         HStack(spacing: 3) {
-            Text(title).font(.system(size: 15)).foregroundColor(.blue)
+            Text(title).font(.system(size: 15)).foregroundColor(AppColors.accent)
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())
@@ -575,7 +575,7 @@ private struct DynamicOptionsParamRow: View {
                 if let note {
                     Text(note)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 6)
@@ -641,14 +641,14 @@ private struct OrderedListParamRow: View {
                 HStack(spacing: 8) {
                     Text(param.title)
                         .font(.system(size: 15))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                     Spacer(minLength: 8)
                     Text(summaryText)
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
                 .padding(.horizontal, 16)
@@ -711,7 +711,7 @@ private struct OrderedListParamRow: View {
             } label: {
                 Text("恢复默认")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: 40)
                     .contentShape(Rectangle())
@@ -728,16 +728,16 @@ private struct OrderedListParamRow: View {
             HStack(spacing: 10) {
                 Image(systemName: candidate?.iconName ?? "questionmark.circle")
                     .font(.system(size: 14))
-                    .foregroundColor(candidate == nil ? .secondary : .blue)
+                    .foregroundColor(candidate == nil ? AppColors.textSecondary : AppColors.accent)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(candidate?.title ?? "失效项")
                         .font(.system(size: 14))
-                        .foregroundColor(candidate == nil ? .secondary : .primary)
+                        .foregroundColor(candidate == nil ? AppColors.textSecondary : AppColors.textPrimary)
                     if let subtitle = candidate?.subtitle {
-                        Text(subtitle).font(.system(size: 10)).foregroundColor(.secondary)
+                        Text(subtitle).font(.system(size: 10)).foregroundColor(AppColors.textSecondary)
                     } else if candidate == nil {
-                        Text(id).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                        Text(id).font(.system(size: 10)).foregroundColor(AppColors.textSecondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
@@ -766,7 +766,7 @@ private struct OrderedListParamRow: View {
                 } label: {
                     Image(systemName: "minus.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundColor(.red)
+                        .foregroundColor(AppColors.statusError)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -789,20 +789,20 @@ private struct OrderedListParamRow: View {
             } label: {
                 HStack(spacing: 10) {
                     if let icon = candidate.iconName {
-                        Image(systemName: icon).font(.system(size: 14)).foregroundColor(.blue).frame(width: 22)
+                        Image(systemName: icon).font(.system(size: 14)).foregroundColor(AppColors.accent).frame(width: 22)
                     } else {
-                        Image(systemName: "plus.circle").font(.system(size: 14)).foregroundColor(.blue).frame(width: 22)
+                        Image(systemName: "plus.circle").font(.system(size: 14)).foregroundColor(AppColors.accent).frame(width: 22)
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(candidate.title).font(.system(size: 14))
                         if let subtitle = candidate.subtitle {
-                            Text(subtitle).font(.system(size: 10)).foregroundColor(.secondary)
+                            Text(subtitle).font(.system(size: 10)).foregroundColor(AppColors.textSecondary)
                         }
                     }
                     Spacer(minLength: 8)
                     Image(systemName: "plus.circle")
                         .font(.system(size: 15))
-                        .foregroundColor(disabled ? .secondary : .blue)
+                        .foregroundColor(disabled ? AppColors.textSecondary : AppColors.accent)
                 }
                 .padding(.leading, 20)
                 .padding(.trailing, 16)
@@ -855,17 +855,17 @@ private struct OrderedListParamRow: View {
     private func sectionHeader(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundColor(.secondary)
+            .foregroundColor(AppColors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
     }
 
     private func sectionNote(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundColor(.secondary)
+            .foregroundColor(AppColors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
@@ -874,7 +874,7 @@ private struct OrderedListParamRow: View {
     private func infoLine(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 12))
-            .foregroundColor(.secondary)
+            .foregroundColor(AppColors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -901,14 +901,14 @@ private struct TextListParamRow: View {
             if items.isEmpty {
                 Text("暂无条目，点「添加一条」新增")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             } else {
                 ForEach(items.indices, id: \.self) { index in
                     itemRow(index)
                 }
             }
             if let note = note {
-                Text(note).font(.system(size: 11)).foregroundColor(.secondary)
+                Text(note).font(.system(size: 11)).foregroundColor(AppColors.textSecondary)
             }
         }
         .padding(.horizontal, 16)
@@ -930,7 +930,7 @@ private struct TextListParamRow: View {
                     Image(systemName: "plus.circle").font(.system(size: 13))
                     Text("添加一条").font(.system(size: 13))
                 }
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
             }
             .buttonStyle(.plain)
         }
@@ -941,7 +941,7 @@ private struct TextListParamRow: View {
         HStack(spacing: 8) {
             Text("\(index + 1)")
                 .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(width: 18, alignment: .trailing)
 
             TextField(placeholder, text: Binding(
@@ -963,7 +963,7 @@ private struct TextListParamRow: View {
             } label: {
                 Image(systemName: "minus.circle")
                     .font(.system(size: 14))
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.statusError)
             }
             .buttonStyle(.plain)
         }
@@ -998,10 +998,10 @@ private struct InspectorMenuLabel: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Text(title).font(.system(size: 15)).foregroundColor(.blue)
+            Text(title).font(.system(size: 15)).foregroundColor(AppColors.accent)
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())

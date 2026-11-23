@@ -44,7 +44,7 @@ struct HomeTopGainersBlock: View {
         if rows.isEmpty {
             Text(isReady || (db.isLoaded && !hasMainBoardMetas) ? "暂无数据" : "数据加载中")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: effectiveCompact ? 44 : 48, alignment: .leading)
         } else {
             switch style {
@@ -83,7 +83,7 @@ struct HomeTopGainersBlock: View {
         return VStack(alignment: .leading, spacing: 4) {
             Text(meta.name)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text(row.text(.latestPrice))
                 .font(.system(size: 14, weight: .semibold))
@@ -99,7 +99,7 @@ struct HomeTopGainersBlock: View {
         }
         .padding(.horizontal, 10)
         .frame(width: 150, height: 72, alignment: .leading)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .cornerRadius(10)
         .contentShape(Rectangle())
         .onTapGesture {

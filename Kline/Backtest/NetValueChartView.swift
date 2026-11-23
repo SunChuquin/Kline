@@ -37,7 +37,7 @@ struct NetValueChartView: View {
     private var placeholder: some View {
         Text("暂无净值数据")
             .font(.system(size: 12))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -72,7 +72,7 @@ struct NetValueChartView: View {
                         let x0 = px(i0)
                         let x1 = px(i1)
                         Rectangle()
-                            .fill(Color.red.opacity(0.12))
+                            .fill(AppColors.statusError.opacity(0.12))
                             .frame(width: max(x1 - x0, 2), height: h)
                             .offset(x: x0)
                     }
@@ -80,12 +80,12 @@ struct NetValueChartView: View {
 
                 // 折线下方渐变填充
                 fillPath(n: n, w: w, h: h, px: px, py: py, values: values)
-                    .fill(LinearGradient(colors: [Color.blue.opacity(0.18), Color.blue.opacity(0.0)],
+                    .fill(LinearGradient(colors: [AppColors.accent.opacity(0.18), AppColors.accent.opacity(0.0)],
                                          startPoint: .top, endPoint: .bottom))
 
                 // 折线
                 linePath(n: n, px: px, py: py, values: values)
-                    .stroke(Color.blue, lineWidth: 1.5)
+                    .stroke(AppColors.accent, lineWidth: 1.5)
 
                 // 初始资金基线（水平虚线）
                 Path { p in
@@ -93,7 +93,7 @@ struct NetValueChartView: View {
                     p.move(to: CGPoint(x: 0, y: y))
                     p.addLine(to: CGPoint(x: w, y: y))
                 }
-                .stroke(Color.gray.opacity(0.55),
+                .stroke(AppColors.textTertiary.opacity(0.55),
                         style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             }
         }
@@ -135,7 +135,7 @@ struct NetValueChartView: View {
     private func axisLabel(_ text: String, alignment: Alignment) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .padding(.horizontal, 2)
             .frame(maxWidth: .infinity, alignment: alignment)
     }

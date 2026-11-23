@@ -24,11 +24,11 @@ struct HorizontalScrollCard: View {
                 if let time = data.updateTime {
                     Text(time)
                         .font(.subheadline)
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 } else if data.showMore {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 16))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 }
             }
 
@@ -46,7 +46,7 @@ struct HorizontalScrollCard: View {
             }
         }
         .padding(16)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
@@ -64,7 +64,7 @@ struct HorizontalCardItemView: View {
                     .font(.system(size: item.showBackground ? 28 : 24))
                     .foregroundColor(item.color)
                     .frame(width: item.showBackground ? 56 : nil, height: item.showBackground ? 56 : nil)
-                    .background(item.showBackground ? Color(.systemGray5) : Color.clear)
+                    .background(item.showBackground ? AppColors.cardHoverBackground : Color.clear)
                     .cornerRadius(item.showBackground ? 12 : 0)
                 Text(item.title)
                     .font(.system(size: 12))
@@ -81,7 +81,7 @@ struct HorizontalCardItemView: View {
                 }
             }
             .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
-            .background(Color(.systemGray5))
+            .background(AppColors.cardHoverBackground)
             .cornerRadius(8)
         }
     }

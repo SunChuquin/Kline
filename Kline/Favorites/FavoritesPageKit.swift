@@ -593,10 +593,10 @@ struct FavoritesEditToggleButton: View {
                     // 固定最小宽：文案切换时按钮宽度不跳动
                     .frame(minWidth: 24)
             }
-            .foregroundColor(model.showEditingMode ? .white : .blue)
+            .foregroundColor(model.showEditingMode ? .white : AppColors.accent)
             .padding(.horizontal, 11)
             .frame(height: 28)
-            .background(model.showEditingMode ? Color.blue : Color(.systemGray6))
+            .background(model.showEditingMode ? AppColors.accent : AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -639,32 +639,32 @@ struct FavoritesToolbar: View {
                         // 显示进度：图标 + 进度文字
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                         Text("\(p.done)/\(p.total)")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                     } else if watchlistSync.isRunning {
                         // 显示加载中：图标 + 加载文字
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                         Text("刷新中...")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                     } else {
                         // 正常状态：图标 + 刷新文字
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                         Text("刷新")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                     }
                 }
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .padding(.horizontal, 10)
                 .frame(height: 28)
-                .background(Color(.systemGray6))
+                .background(AppColors.sidebarBackground)
                 .cornerRadius(7)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -688,17 +688,17 @@ struct FavoritesToolbar: View {
                             ProgressView().scaleEffect(0.8)
                             Text("\(p.done)/\(p.total)")
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(AppColors.textSecondary)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(Color(.systemGray6))
+                        .background(AppColors.sidebarBackground)
                         .cornerRadius(8)
                     } else {
                         Label("刷新选股", systemImage: "arrow.clockwise")
                             .font(.system(size: 13, weight: .medium))
                             .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(Color.blue.opacity(0.08))
-                            .foregroundColor(.blue)
+                            .background(AppColors.accent.opacity(0.08))
+                            .foregroundColor(AppColors.accent)
                             .cornerRadius(8)
                     }
                 }
@@ -729,19 +729,19 @@ struct FavoritesToolbar: View {
             topIconButton("folder") {
                 model.showManageSheet = true
             }
-            topIconButton("plus", size: 18, color: .blue) {
+            topIconButton("plus", size: 18, color: AppColors.accent) {
                 model.showAddSheet = true
             }
             .padding(.trailing, 4)
         }
         .frame(height: 48)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 顶部工具条图标按钮：统一 44x44 命中区。
     /// 纯图标按钮若不加 frame，可点范围只有字形大小（约 16x19），真机上很难点中。
     private func topIconButton(_ systemName: String, size: CGFloat = 16,
-                               color: Color = .secondary,
+                               color: Color = AppColors.textSecondary,
                                action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -782,14 +782,14 @@ struct FavoritesGroupTabs: View {
                             Text(" \(model.countOfGroup(g))")
                                 .font(.system(size: 12, design: .monospaced))
                         }
-                        .foregroundColor(active ? .blue : .secondary)
+                        .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 7)
                         // 参考行情页 Tab：选中用底部蓝色横线高亮，不带胶囊背景
                         .overlay(alignment: .bottom) {
                             if active {
                                 Rectangle()
-                                    .fill(Color.blue)
+                                    .fill(AppColors.accent)
                                     .frame(height: 2)
                                     .padding(.horizontal, 9)
                             }
@@ -807,7 +807,7 @@ struct FavoritesGroupTabs: View {
         }
         // 与下方表头之间留出明确间隙（含表头排序热区），避免点表头时误触 Tab
         .padding(.bottom, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 }
 
@@ -850,7 +850,7 @@ struct FavoritesTableBody: View {
             MarketTableRow(page: .favorites, mode: .header, config: model.colCfg, rowCache: model.rowCache,
                            frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
                            heightOverride: rowHeightOverride, fontSizeOverride: fontSizeOverride)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             listBody
         }
     }
@@ -914,14 +914,14 @@ struct FavoritesTableBody: View {
     private var formulaGroupEmptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "function")
-                .font(.system(size: 46)).foregroundColor(.blue)
+                .font(.system(size: 46)).foregroundColor(AppColors.accent)
             Text(model.currentGroup.cachedMatches == nil
                  ? "尚未选股" : "暂无符合条件的股票")
-                .font(.system(size: 15)).foregroundColor(.primary)
+                .font(.system(size: 15)).foregroundColor(AppColors.textPrimary)
             Text(model.currentGroup.cachedMatches == nil
                  ? "点击右上角「刷新选股」即可按公式计算所有股票的最新一期信号"
                  : "可以修改公式阈值或再次刷新查看最新结果")
-                .font(.system(size: 13)).foregroundColor(.secondary)
+                .font(.system(size: 13)).foregroundColor(AppColors.textSecondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 24)
             Button {
                 model.refreshFormulaGroup(id: model.currentGroup.id)
@@ -929,7 +929,7 @@ struct FavoritesTableBody: View {
                 Label("立即刷新选股", systemImage: "arrow.clockwise")
                     .font(.system(size: 14, weight: .medium))
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Color.blue).foregroundColor(.white)
+                    .background(AppColors.accent).foregroundColor(.white)
                     .cornerRadius(10)
             }
             .buttonStyle(.plain)
@@ -940,7 +940,7 @@ struct FavoritesTableBody: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-            Text("自选页面准备中...").foregroundColor(.gray)
+            Text("自选页面准备中...").foregroundColor(AppColors.textTertiary)
         }
         .frame(maxHeight: .infinity)
     }

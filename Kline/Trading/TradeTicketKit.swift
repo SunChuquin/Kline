@@ -5,7 +5,7 @@
 //  共享下单组件（TradeTicketView）的纯展示原子件：seg3 分段控件、方向大分段、
 //  步进按钮、仓位快捷行、「左标签 + 右控件」行容器、五档报价条与费用明细块。
 //  这些视图不持有业务状态，仅由 TradeTicketView 组装，单独成文件以控制主文件体积。
-//  配色约定：买入 Color(.systemRed)、卖出 Color(.systemGreen)，背景一律用语义色。
+//  配色约定：买入 AppColors.marketUp、卖出 AppColors.marketDown，背景一律用语义色。
 //
 
 import SwiftUI
@@ -49,7 +49,7 @@ struct TradeSegmentedRow: View {
         }
         .padding(2)
         .frame(height: height)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardBackground))
     }
 
     private func optionButton(_ option: TradeSegOption) -> some View {
@@ -58,13 +58,13 @@ struct TradeSegmentedRow: View {
         } label: {
             Text(option.title)
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(option.selected ? (option.tint ?? Color.primary) : Color(.secondaryLabel))
+                .foregroundColor(option.selected ? (option.tint ?? AppColors.textPrimary) : AppColors.textSecondary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .frame(height: max(height - 4, 22))
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(option.selected ? Color(.systemBackground) : Color.clear)
+                        .fill(option.selected ? AppColors.pageBackground : Color.clear)
                         .shadow(color: option.selected ? Color.black.opacity(0.12) : Color.clear,
                                 radius: 1.5, y: 1)
                 )
@@ -88,7 +88,7 @@ struct TradeBigDirSegment: View {
         }
         .frame(height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(.separator), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppColors.separator, lineWidth: 0.5))
     }
 
     private func dirButton(_ dir: SimOrderDirection) -> some View {
@@ -98,10 +98,10 @@ struct TradeBigDirSegment: View {
         } label: {
             Text(dir.title)
                 .font(.system(size: 15, weight: .heavy))
-                .foregroundColor(on ? Color.white : Color(.secondaryLabel))
+                .foregroundColor(on ? Color.white : AppColors.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(on ? (dir.isBuy ? Color(.systemRed) : Color(.systemGreen))
-                               : Color(.secondarySystemBackground))
+                .background(on ? (dir.isBuy ? AppColors.marketUp : AppColors.marketDown)
+                               : AppColors.cardBackground)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -123,10 +123,10 @@ struct TradeStepperButton: View {
         Button(action: action) {
             Text(symbol)
                 .font(.system(size: fontSize, weight: .medium))
-                .foregroundColor(enabled ? Color.blue : Color(.tertiaryLabel))
+                .foregroundColor(enabled ? AppColors.accent : AppColors.textTertiary)
                 .frame(width: size, height: size)
                 .background(RoundedRectangle(cornerRadius: size * 0.23)
-                    .fill(Color(.secondarySystemBackground)))
+                    .fill(AppColors.cardBackground))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -153,12 +153,12 @@ struct TradePosChips: View {
                 } label: {
                     Text(items[index].title)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(Color.blue)
+                        .foregroundColor(AppColors.accent)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .frame(height: height)
                         .background(RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(.secondarySystemBackground)))
+                            .fill(AppColors.cardBackground))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -193,7 +193,7 @@ struct TradeLineRow<Content: View>: View {
         HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
                 .frame(width: labelWidth, alignment: .leading)
             Spacer(minLength: 8)
@@ -203,7 +203,7 @@ struct TradeLineRow<Content: View>: View {
         .overlay(alignment: .bottom) {
             if showsDivider {
                 Rectangle()
-                    .fill(Color(.separator))
+                    .fill(AppColors.separator)
                     .frame(height: 0.5)
             }
         }
@@ -228,41 +228,41 @@ struct TradeQuoteBar: View {
         HStack(spacing: 0) {
             cell(title: "涨停",
                  value: limitUpper.map { SimFormat.price($0) } ?? "—",
-                 color: Color(.systemRed),
+                 color: AppColors.marketUp,
                  enabled: limitUpper != nil) {
                 if let upper = limitUpper { onPickPrice(upper) }
             }
             divider
             cell(title: "最新价",
                  value: lastPrice.map { SimFormat.price($0) } ?? "—",
-                 color: Color.primary,
+                 color: AppColors.textPrimary,
                  enabled: false, action: {})
             divider
             cell(title: "跌停",
                  value: limitLower.map { SimFormat.price($0) } ?? "—",
-                 color: Color(.systemGreen),
+                 color: AppColors.marketDown,
                  enabled: limitLower != nil) {
                 if let lower = limitLower { onPickPrice(lower) }
             }
             divider
             cell(title: isBuy ? "可买" : "可卖",
                  value: availQty.map { "\(SimFormat.shares($0)) 股" } ?? "—",
-                 color: Color.primary,
+                 color: AppColors.textPrimary,
                  enabled: false, action: {})
             divider
             cell(title: "持仓",
                  value: "\(SimFormat.shares(holdQty)) 股",
-                 color: Color.primary,
+                 color: AppColors.textPrimary,
                  enabled: false, action: {})
         }
         .frame(height: 46)
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(.separator), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(AppColors.separator, lineWidth: 0.5))
     }
 
     private var divider: some View {
         Rectangle()
-            .fill(Color(.separator))
+            .fill(AppColors.separator)
             .frame(width: 0.5)
     }
 
@@ -272,7 +272,7 @@ struct TradeQuoteBar: View {
             VStack(spacing: 2) {
                 Text(title)
                     .font(.system(size: 10.5))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                 Text(value)
                     .font(.system(size: 10.5, weight: .bold))
                     .foregroundColor(color)
@@ -303,25 +303,25 @@ struct TradeFeeBlock: View {
         VStack(alignment: .leading, spacing: 3) {
             if !ready {
                 Text("费用明细 · 引擎计算中…")
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             } else {
                 (Text("预计成交额 ")
-                    + Text(SimFormat.amount(amount)).fontWeight(.semibold).foregroundColor(Color.primary)
+                    + Text(SimFormat.amount(amount)).fontWeight(.semibold).foregroundColor(AppColors.textPrimary)
                     + Text(" 元 ｜ 佣金（万2.5，最低5元）")
-                    + Text(SimFormat.amount(commission)).fontWeight(.semibold).foregroundColor(Color.primary)
+                    + Text(SimFormat.amount(commission)).fontWeight(.semibold).foregroundColor(AppColors.textPrimary)
                     + Text(" ｜ 印花税（\(isBuy ? "买入免" : "千一")）")
-                    + Text(SimFormat.amount(stampTax)).fontWeight(.semibold).foregroundColor(Color.primary))
+                    + Text(SimFormat.amount(stampTax)).fontWeight(.semibold).foregroundColor(AppColors.textPrimary))
                 (Text("委托后可用资金预计 ")
-                    + Text(SimFormat.amount(cashAfter)).fontWeight(.semibold).foregroundColor(Color.primary)
+                    + Text(SimFormat.amount(cashAfter)).fontWeight(.semibold).foregroundColor(AppColors.textPrimary)
                     + Text(" 元 · 委托冻结，成交后多退少补"))
             }
         }
         .font(.system(size: 11.5))
-        .foregroundColor(Color(.secondaryLabel))
+        .foregroundColor(AppColors.textSecondary)
         .lineSpacing(4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
     }
 }

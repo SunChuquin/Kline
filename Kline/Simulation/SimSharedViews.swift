@@ -6,7 +6,7 @@
 //  五张业务表（持仓 / 委托 / 成交 / 流水 / 日志）、底部买卖条、全屏下单页，
 //  以及方向标签 / 状态标签 / 行内小按钮 / 净值迷你折线等原子件。
 //  约定：iOS 15 兼容（不用 Table / Chart / NavigationStack / @Observable）；
-//  配色买入 Color(.systemRed)、卖出 Color(.systemGreen)，背景一律语义色（支持深色模式）。
+//  配色买入 AppColors.marketUp、卖出 AppColors.marketDown，背景一律语义色（支持深色模式）。
 //
 
 import SwiftUI
@@ -56,16 +56,16 @@ struct SimTicketRequest: Identifiable {
 
 /// 盈亏配色（涨红跌绿）：>= 0 红，< 0 绿
 private func simProfitColor(_ value: Double) -> Color {
-    value < 0 ? Color(.systemGreen) : Color(.systemRed)
+    value < 0 ? AppColors.marketDown : AppColors.marketUp
 }
 
 /// 操作结果文案配色：成功类绿、在途类橙、其余灰
 private func simResultColor(_ text: String) -> Color {
     let success = ["成功", "已成交", "全部成交"]
     let pending = ["部成", "已报", "待报"]
-    if success.contains(where: { text.contains($0) }) { return Color(.systemGreen) }
-    if pending.contains(where: { text.contains($0) }) { return Color(.orange) }
-    return Color(.secondaryLabel)
+    if success.contains(where: { text.contains($0) }) { return AppColors.marketDown }
+    if pending.contains(where: { text.contains($0) }) { return AppColors.statusWarning }
+    return AppColors.textSecondary
 }
 
 // MARK: - 原子件
@@ -74,7 +74,7 @@ private func simResultColor(_ text: String) -> Color {
 struct SimDirectionTag: View {
     let direction: SimOrderDirection
 
-    private var tint: Color { direction.isBuy ? Color(.systemRed) : Color(.systemGreen) }
+    private var tint: Color { direction.isBuy ? AppColors.marketUp : AppColors.marketDown }
 
     var body: some View {
         Text(direction.title)
@@ -91,9 +91,9 @@ struct SimStatusTag: View {
 
     private var tint: Color {
         switch status {
-        case .reported: return Color(.systemRed)
-        case .partial:  return Color(.orange)
-        case .filled, .pending, .cancelled: return Color(.secondaryLabel)
+        case .reported: return AppColors.marketUp
+        case .partial:  return AppColors.statusWarning
+        case .filled, .pending, .cancelled: return AppColors.textSecondary
         }
     }
 
@@ -109,7 +109,7 @@ struct SimStatusTag: View {
 /// 行内小操作按钮（11pt、1pt 描边、圆角 6）
 struct SimInlineButton: View {
     let title: String
-    var tint: Color = .blue
+    var tint: Color = AppColors.accent
     let action: () -> Void
 
     var body: some View {
@@ -199,13 +199,13 @@ struct SimSummaryBand: View {
         let series = store.netValueSeries(accountID: accountID, days: 30)
         let items: [Item] = [
             .metric(label: "总资产", value: SimFormat.amount0(summary.totalAssets),
-                    big: true, color: Color.primary),
+                    big: true, color: AppColors.textPrimary),
             .metric(label: "可用资金", value: SimFormat.amount0(summary.cash),
-                    big: false, color: Color.primary),
+                    big: false, color: AppColors.textPrimary),
             .metric(label: "持仓市值", value: SimFormat.amount0(summary.marketValue),
-                    big: false, color: Color.primary),
+                    big: false, color: AppColors.textPrimary),
             .metric(label: "持仓占比", value: SimFormat.pct(summary.positionPct * 100),
-                    big: false, color: Color.primary),
+                    big: false, color: AppColors.textPrimary),
             .metric(label: "当日盈亏", value: SimFormat.signed0(summary.dayProfit),
                     big: false, color: simProfitColor(summary.dayProfit)),
             .metric(label: "累计盈亏", value: SimFormat.signed0(summary.totalProfit),
@@ -229,9 +229,9 @@ struct SimSummaryBand: View {
         .padding(.horizontal, 4)
         .padding(.vertical, isCompact ? 5 : 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -244,7 +244,7 @@ struct SimSummaryBand: View {
             HStack(spacing: 8) {
                 Text(label)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(value)
@@ -258,9 +258,9 @@ struct SimSummaryBand: View {
             HStack(spacing: 8) {
                 Text("近 30 日净值")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                 Spacer(minLength: 8)
-                SimSparkline(values: series, tint: Color(.systemRed))
+                SimSparkline(values: series, tint: AppColors.marketUp)
                     .frame(width: 172)
             }
             .padding(.horizontal, 10)
@@ -277,7 +277,7 @@ struct SimSummaryBand: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
                     .font(.system(size: 10.5))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Text(value)
                     .font(.system(size: big ? 16 : 14, weight: .bold))
@@ -290,8 +290,8 @@ struct SimSummaryBand: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text("近 30 日净值")
                     .font(.system(size: 10.5))
-                    .foregroundColor(Color(.secondaryLabel))
-                SimSparkline(values: series, tint: Color(.systemRed))
+                    .foregroundColor(AppColors.textSecondary)
+                SimSparkline(values: series, tint: AppColors.marketUp)
                     .frame(width: 172)
             }
             .padding(.leading, 12)
@@ -317,22 +317,22 @@ struct SimModuleSegmentedBar: View {
                     HStack(spacing: 5) {
                         Text(tab.title)
                             .font(.system(size: 12.5, weight: module == tab ? .semibold : .regular))
-                            .foregroundColor(module == tab ? Color.primary : Color(.secondaryLabel))
+                            .foregroundColor(module == tab ? AppColors.textPrimary : AppColors.textSecondary)
                         if let count = badgeCount(tab), count > 0 {
                             Text("\(count)")
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundColor(Color.white)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
-                                .background(Capsule().fill(Color(.systemRed)))
+                                .background(Capsule().fill(AppColors.marketUp))
                         }
                     }
                     .padding(.horizontal, 12)
                     .frame(height: 28)
                     .background(RoundedRectangle(cornerRadius: 6)
-                        .fill(module == tab ? Color(.systemBackground) : Color.clear))
+                        .fill(module == tab ? AppColors.pageBackground : Color.clear))
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(module == tab ? Color(.separator) : Color.clear, lineWidth: 0.5))
+                        .stroke(module == tab ? AppColors.separator : Color.clear, lineWidth: 0.5))
                     .shadow(color: module == tab ? Color.black.opacity(0.08) : Color.clear,
                             radius: 2, x: 0, y: 1)
                     .contentShape(Rectangle())
@@ -341,7 +341,7 @@ struct SimModuleSegmentedBar: View {
             }
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardBackground))
     }
 
     /// 角标数量：持仓数 / 在途委托数（其余模块无角标）
@@ -384,13 +384,13 @@ struct SimLogModuleFilterBar: View {
         return Button(action: { selected = value }) {
             Text(title)
                 .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                .foregroundColor(isSelected ? Color.blue : Color(.secondaryLabel))
+                .foregroundColor(isSelected ? AppColors.accent : AppColors.textSecondary)
                 .padding(.horizontal, 10)
                 .frame(height: 28)
                 .background(RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground)))
+                    .fill(isSelected ? AppColors.accent.opacity(0.08) : AppColors.cardBackground))
                 .overlay(RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? Color.blue : Color(.separator),
+                    .stroke(isSelected ? AppColors.accent : AppColors.separator,
                             lineWidth: isSelected ? 1 : 0.5))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -437,7 +437,7 @@ struct SimModuleTable: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 表格主体（表头 + 列表/空态 + 日志页脚）：宽屏直接呈现；紧凑态由 body 包横向滚动
@@ -451,7 +451,7 @@ struct SimModuleTable: View {
                 // 摆到首屏外（实测 x≈378 出屏），左对齐保证空态首屏可见
                 Text(emptyText)
                     .font(.system(size: 12.5))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: isCompact ? .leading : .center)
                 Spacer(minLength: 0)
             } else {
@@ -460,7 +460,7 @@ struct SimModuleTable: View {
             if module == .log {
                 Text("共 \(logRows.count) 条操作记录 · 滚动加载更早记录")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
@@ -584,9 +584,9 @@ struct SimModuleTable: View {
         .padding(.horizontal, 12)
         .frame(height: 30)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -638,7 +638,7 @@ struct SimModuleTable: View {
             nameCell(position.name, position.code, width: PosCol.name)
             textCell(SimFormat.shares(position.qty), width: PosCol.qty, align: .trailing)
             textCell(SimFormat.shares(position.availableQty), width: PosCol.available, align: .trailing,
-                     color: position.availableQty > 0 ? Color.primary : Color(.secondaryLabel))
+                     color: position.availableQty > 0 ? AppColors.textPrimary : AppColors.textSecondary)
             textCell(SimFormat.price(position.costPrice), width: PosCol.cost, align: .trailing)
             textCell(SimFormat.price(snapshot.lastPrice), width: PosCol.last, align: .trailing, color: lastColor)
             textCell(SimFormat.amount0(snapshot.marketValue), width: PosCol.marketValue, align: .trailing)
@@ -647,9 +647,9 @@ struct SimModuleTable: View {
             textCell(SimFormat.pct(snapshot.profitPct * 100), width: PosCol.profitPct, align: .trailing,
                      color: simProfitColor(snapshot.profit))
             HStack(spacing: 6) {
-                SimInlineButton(title: "买", tint: Color(.systemRed)) { onTrade(position, .buy) }
-                SimInlineButton(title: "卖", tint: Color(.systemGreen)) { onTrade(position, .sell) }
-                SimInlineButton(title: "条件单", tint: .blue) { onCondition(position) }
+                SimInlineButton(title: "买", tint: AppColors.marketUp) { onTrade(position, .buy) }
+                SimInlineButton(title: "卖", tint: AppColors.marketDown) { onTrade(position, .sell) }
+                SimInlineButton(title: "条件单", tint: AppColors.accent) { onCondition(position) }
             }
             .frame(width: PosCol.action, alignment: .trailing)
         }
@@ -658,25 +658,25 @@ struct SimModuleTable: View {
     /// 当日委托：时间 | 名称 | 方向 | 类型 | 委托价 | 委托量 | 已成 | 状态 | 操作
     private func orderRow(_ order: SimOrder) -> some View {
         dataRow {
-            textCell(SimFormat.time(order.createdAt), width: OrdCol.time, color: Color(.secondaryLabel))
+            textCell(SimFormat.time(order.createdAt), width: OrdCol.time, color: AppColors.textSecondary)
             nameCell(order.name, order.code, width: OrdCol.name)
             SimDirectionTag(direction: order.direction)
                 .frame(width: OrdCol.direction, alignment: .leading)
-            textCell(order.priceType.title, width: OrdCol.type, color: Color(.secondaryLabel))
+            textCell(order.priceType.title, width: OrdCol.type, color: AppColors.textSecondary)
             textCell(order.price.map { SimFormat.price($0) } ?? "—",
                      width: OrdCol.price, align: .trailing,
-                     color: order.price == nil ? Color(.secondaryLabel) : Color.primary)
+                     color: order.price == nil ? AppColors.textSecondary : AppColors.textPrimary)
             textCell(SimFormat.shares(order.qty), width: OrdCol.qty, align: .trailing)
             textCell(SimFormat.shares(order.filledQty), width: OrdCol.filled, align: .trailing,
-                     color: order.filledQty > 0 ? Color.primary : Color(.secondaryLabel))
+                     color: order.filledQty > 0 ? AppColors.textPrimary : AppColors.textSecondary)
             SimStatusTag(status: order.status)
                 .frame(width: OrdCol.status, alignment: .leading)
             HStack(spacing: 6) {
                 if order.status.isActive {
-                    SimInlineButton(title: "撤单", tint: Color(.secondaryLabel)) {
+                    SimInlineButton(title: "撤单", tint: AppColors.textSecondary) {
                         Task { await store.cancelOrder(id: order.id) }
                     }
-                    SimInlineButton(title: "改价", tint: .blue) { onAmend(order) }
+                    SimInlineButton(title: "改价", tint: AppColors.accent) { onAmend(order) }
                 }
             }
             .frame(width: OrdCol.action, alignment: .trailing)
@@ -686,7 +686,7 @@ struct SimModuleTable: View {
     /// 当日成交：成交时间 | 名称 | 方向 | 成交价 | 成交量 | 成交额 | 费用 | 合同编号
     private func fillRow(_ fill: SimFill) -> some View {
         dataRow {
-            textCell(SimFormat.time(fill.tradedAt), width: FillCol.time, color: Color(.secondaryLabel))
+            textCell(SimFormat.time(fill.tradedAt), width: FillCol.time, color: AppColors.textSecondary)
             nameCell(fill.name, fill.code, width: FillCol.name)
             SimDirectionTag(direction: fill.direction)
                 .frame(width: FillCol.direction, alignment: .leading)
@@ -694,30 +694,30 @@ struct SimModuleTable: View {
             textCell(SimFormat.shares(fill.qty), width: FillCol.qty, align: .trailing)
             textCell(SimFormat.amount(fill.amount), width: FillCol.amount, align: .trailing)
             textCell(SimFormat.amount(fill.fee), width: FillCol.fee, align: .trailing,
-                     color: Color(.secondaryLabel))
-            textCell(fill.contractNo, width: FillCol.contract, color: Color(.secondaryLabel))
+                     color: AppColors.textSecondary)
+            textCell(fill.contractNo, width: FillCol.contract, color: AppColors.textSecondary)
         }
     }
 
     /// 资金流水：时间 | 类型 | 说明 | 发生额 | 账户余额 | 账户
     private func ledgerRow(_ entry: LedgerEntry) -> some View {
         dataRow {
-            textCell(SimFormat.dateTime(entry.occurredAt), width: CashCol.time, color: Color(.secondaryLabel))
+            textCell(SimFormat.dateTime(entry.occurredAt), width: CashCol.time, color: AppColors.textSecondary)
             textCell(entry.kind.title, width: CashCol.kind)
-            textCell(entry.note, width: CashCol.note, color: Color(.secondaryLabel))
+            textCell(entry.note, width: CashCol.note, color: AppColors.textSecondary)
             textCell(SimFormat.signed(entry.amount), width: CashCol.amount, align: .trailing,
                      color: simProfitColor(entry.amount))
             textCell(SimFormat.amount(entry.balanceAfter), width: CashCol.balance, align: .trailing)
             textCell(store.accountName(id: entry.accountID), width: CashCol.account,
-                     color: Color(.secondaryLabel))
+                     color: AppColors.textSecondary)
         }
     }
 
     /// 操作日志：时间 | 账户 | 模块 | 操作内容 | 结果
     private func logRow(_ log: ActionLog) -> some View {
         dataRow {
-            textCell(SimFormat.dateTime(log.occurredAt), width: LogCol.time, color: Color(.secondaryLabel))
-            textCell(logAccountName(log.accountID), width: LogCol.account, color: Color(.secondaryLabel))
+            textCell(SimFormat.dateTime(log.occurredAt), width: LogCol.time, color: AppColors.textSecondary)
+            textCell(logAccountName(log.accountID), width: LogCol.account, color: AppColors.textSecondary)
             textCell(log.module.title, width: LogCol.module)
             textCell(log.content, width: LogCol.content)
             textCell(log.result, width: LogCol.result, color: simResultColor(log.result))
@@ -738,20 +738,20 @@ struct SimModuleTable: View {
             .frame(height: 44)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                Rectangle().fill(AppColors.separator).frame(height: 0.5)
             }
     }
 
     private func headCell(_ text: String, width: CGFloat, align: Alignment = .leading) -> some View {
         Text(text)
             .font(.system(size: 10.5, weight: .semibold))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .lineLimit(1)
             .frame(width: width, alignment: align)
     }
 
     private func textCell(_ text: String, width: CGFloat, align: Alignment = .leading,
-                          color: Color = Color.primary, size: CGFloat = 12.5,
+                          color: Color = AppColors.textPrimary, size: CGFloat = 12.5,
                           weight: Font.Weight = .regular) -> some View {
         Text(text)
             .font(.system(size: size, weight: weight))
@@ -766,11 +766,11 @@ struct SimModuleTable: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(name)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text(code)
                 .font(.system(size: 10))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
         }
         .frame(width: width, alignment: .leading)
@@ -853,20 +853,20 @@ struct SimBottomActionBar: View {
             if !isCompact {
                 Text(hint)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             Spacer(minLength: 8)
-            actionButton("买入", color: Color(.systemRed)) { onTrade(.buy) }
-            actionButton("卖出", color: Color(.systemGreen)) { onTrade(.sell) }
+            actionButton("买入", color: AppColors.marketUp) { onTrade(.buy) }
+            actionButton("卖出", color: AppColors.marketDown) { onTrade(.sell) }
         }
         .padding(.horizontal, 16)
         .frame(height: 56)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -897,16 +897,16 @@ struct SimFullScreenTicket: View {
             HStack(spacing: 8) {
                 Text("模拟下单")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Text("\(request.name) \(request.code)")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
@@ -916,9 +916,9 @@ struct SimFullScreenTicket: View {
             .padding(.horizontal, 16)
             .frame(height: 52)
             .frame(maxWidth: .infinity)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                Rectangle().fill(AppColors.separator).frame(height: 0.5)
             }
 
             ScrollView {
@@ -936,7 +936,7 @@ struct SimFullScreenTicket: View {
                 .padding(.vertical, 12)
             }
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
     }
 }
 
@@ -1005,7 +1005,7 @@ struct SimStrategyFormulaEntryButton: View {
         Button(action: action) {
             Text("策略公式")
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -1031,7 +1031,7 @@ struct SimTrainingRecordEntryButton: View {
                 Text("训练记录")
                     .font(.system(size: 12.5, weight: .semibold))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
         }

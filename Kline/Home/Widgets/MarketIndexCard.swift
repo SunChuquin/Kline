@@ -149,25 +149,25 @@ private struct MarketIndexCardColors {
         if scheme == .dark {
             return MarketIndexCardColors(
                 isDark: true,
-                up: Color(red: 1.00, green: 0.30, blue: 0.32),      // #FF4D52
-                down: Color(red: 0.18, green: 0.80, blue: 0.44),    // #2ECC71
-                flat: Color(red: 0.61, green: 0.64, blue: 0.69),    // #9CA3AF
-                unavailable: Color(red: 0.42, green: 0.45, blue: 0.50), // #6B7280
-                primaryText: .white,
-                secondaryText: Color.white.opacity(0.55),
-                divider: Color.white.opacity(0.06),
+                up: AppColors.marketUp,
+                down: AppColors.marketDown,
+                flat: AppColors.textTertiary,
+                unavailable: AppColors.textTertiary,
+                primaryText: AppColors.textPrimary,
+                secondaryText: AppColors.textSecondary,
+                divider: AppColors.separator,
                 badgeFillOpacity: 0.14
             )
         }
         return MarketIndexCardColors(
             isDark: false,
-            up: Color(red: 0.890, green: 0.302, blue: 0.302),       // #E34D4D
-            down: Color(red: 0.086, green: 0.639, blue: 0.416),     // #16A36A
-            flat: Color(red: 0.573, green: 0.608, blue: 0.667),     // #929BAA
-            unavailable: Color(red: 0.706, green: 0.737, blue: 0.784), // #B4BCC8
-            primaryText: Color(red: 0.090, green: 0.125, blue: 0.200), // #172033
-            secondaryText: Color(red: 0.573, green: 0.608, blue: 0.667), // #929BAA
-            divider: Color(red: 0.929, green: 0.941, blue: 0.957),  // #EDF0F4
+            up: AppColors.marketUp,
+            down: AppColors.marketDown,
+            flat: AppColors.textTertiary,
+            unavailable: AppColors.textTertiary,
+            primaryText: AppColors.textPrimary,
+            secondaryText: AppColors.textSecondary,
+            divider: AppColors.separator,
             badgeFillOpacity: 0.10
         )
     }
@@ -207,7 +207,7 @@ private struct MarketIndexCardPageBackground: View {
     var body: some View {
         Group {
             if colorScheme == .dark {
-                Color(.systemGroupedBackground)
+                AppColors.pageBackground
             } else {
                 Color(red: 0.945, green: 0.957, blue: 0.973)   // #F1F4F8
             }
@@ -615,7 +615,7 @@ struct MarketIndexCardGrid: View {
         if quotes.isEmpty {
             Text("暂无指数数据")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
         } else {
             VStack(spacing: 12) {
@@ -650,7 +650,7 @@ struct MarketIndexCardGalleryView: View {
                 Button(action: onClose) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 22))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -665,7 +665,7 @@ struct MarketIndexCardGalleryView: View {
             }
             .padding(.horizontal, 4)
             .frame(height: 56)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
 
             Divider()
 
@@ -701,7 +701,7 @@ struct MarketIndexCardGalleryView: View {
 
                     Text("以上行情为模拟数据，仅用于视觉验收；切换「个人中心 → Kline 主题」可对比日间/夜间两套配色。")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .padding(.top, 4)
                 }
                 .padding(16)
@@ -713,7 +713,7 @@ struct MarketIndexCardGalleryView: View {
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.secondary)
+            .foregroundColor(AppColors.textSecondary)
     }
 
     /// 行密度演示：同一批指数按 count 列排一行紧凑卡
@@ -721,7 +721,7 @@ struct MarketIndexCardGalleryView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("每行 \(count) 个")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             MarketIndexCardGrid(quotes: Array(Self.mockDense.prefix(count)),
                                 onSelect: { _ in },
                                 columnCount: count,

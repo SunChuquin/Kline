@@ -49,7 +49,7 @@ struct StrategyPickListView: View {
             bottomNotice
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
         // 结果变化：默认全选（用户已手动改过勾选则不打扰）
@@ -79,9 +79,9 @@ struct StrategyPickListView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -92,7 +92,7 @@ struct StrategyPickListView: View {
 
             Text("跑选股")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -101,7 +101,7 @@ struct StrategyPickListView: View {
             } label: {
                 Text("生成条件单")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(selected.isEmpty ? Color(.tertiaryLabel) : Color.blue)
+                    .foregroundColor(selected.isEmpty ? AppColors.textTertiary : AppColors.accent)
                     .padding(.horizontal, 10)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -111,7 +111,7 @@ struct StrategyPickListView: View {
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 候选池 + 全选
@@ -131,7 +131,7 @@ struct StrategyPickListView: View {
             } label: {
                 Text(isAllSelected ? "取消全选" : "全选")
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundColor(runner.hits.isEmpty ? Color(.tertiaryLabel) : Color.blue)
+                    .foregroundColor(runner.hits.isEmpty ? AppColors.textTertiary : AppColors.accent)
                     .frame(minWidth: 68, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -153,7 +153,7 @@ struct StrategyPickListView: View {
                 HStack(spacing: 8) {
                     Text("点击开始跑选股")
                         .font(.system(size: 12))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                     Spacer(minLength: 8)
                     inlineAction("开始跑选股") { start() }
                 }
@@ -161,7 +161,7 @@ struct StrategyPickListView: View {
             case .preparing(let done, let total):
                 Text("准备行情数据 \(done)/\(total)")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                 progressTrack(ratio: ratio(done, total))
                 HStack(spacing: 8) {
                     Spacer(minLength: 8)
@@ -171,7 +171,7 @@ struct StrategyPickListView: View {
             case .running(let done, let total):
                 Text("已扫描 \(done)/\(total)")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                 progressTrack(ratio: ratio(done, total))
                 HStack(spacing: 8) {
                     Spacer(minLength: 8)
@@ -182,7 +182,7 @@ struct StrategyPickListView: View {
                 HStack(spacing: 8) {
                     Text("命中 \(runner.hits.count) 只")
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                     Spacer(minLength: 8)
                     inlineAction("重新跑选股") { start() }
                 }
@@ -191,7 +191,7 @@ struct StrategyPickListView: View {
                 HStack(spacing: 8) {
                     Text("已取消")
                         .font(.system(size: 12.5, weight: .medium))
-                        .foregroundColor(.orange)
+                        .foregroundColor(AppColors.statusWarning)
                     Spacer(minLength: 8)
                     inlineAction("重新跑选股") { start() }
                 }
@@ -199,7 +199,7 @@ struct StrategyPickListView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -210,7 +210,7 @@ struct StrategyPickListView: View {
         if runner.phase == .finished, runner.prepareTimedOut {
             Text("部分标的行情未就绪，本次结果可能遗漏命中（可稍后重跑）")
                 .font(.system(size: 11))
-                .foregroundColor(.orange)
+                .foregroundColor(AppColors.statusWarning)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
@@ -222,9 +222,9 @@ struct StrategyPickListView: View {
     private func progressTrack(ratio: Double) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color(.secondaryLabel).opacity(0.2))
+                Capsule().fill(AppColors.textSecondary.opacity(0.2))
                 Capsule()
-                    .fill(Color.blue)
+                    .fill(AppColors.accent)
                     .frame(width: geo.size.width * CGFloat(min(max(ratio, 0), 1)))
             }
         }
@@ -236,10 +236,10 @@ struct StrategyPickListView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .padding(.horizontal, 12)
                 .frame(height: 32)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent, lineWidth: 1))
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -268,14 +268,14 @@ struct StrategyPickListView: View {
         VStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 34))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text(emptyText)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             if runner.phase == .finished {
                 Text("命中 = 选股公式最后一条输出线的最新值 > 0")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -299,16 +299,16 @@ struct StrategyPickListView: View {
             HStack(spacing: 10) {
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
-                    .foregroundColor(isOn ? Color.blue : Color(.tertiaryLabel))
+                    .foregroundColor(isOn ? AppColors.accent : AppColors.textTertiary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(hit.name)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text(hit.code)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
 
@@ -317,7 +317,7 @@ struct StrategyPickListView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(hit.lastPrice.map { SimFormat.price($0) } ?? "—")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(hit.lastPrice == nil ? Color(.secondaryLabel) : Color.primary)
+                        .foregroundColor(hit.lastPrice == nil ? AppColors.textSecondary : AppColors.textPrimary)
                         .lineLimit(1)
                     Text(hit.changePct.map { SimFormat.pct($0) } ?? "—")
                         .font(.system(size: 11))
@@ -337,13 +337,13 @@ struct StrategyPickListView: View {
     private var bottomNotice: some View {
         Text("命中基于本地日线库最后一根，非实时盘中")
             .font(.system(size: 11))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .frame(height: 36)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .overlay(alignment: .top) {
-                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                Rectangle().fill(AppColors.separator).frame(height: 0.5)
             }
     }
 
@@ -360,8 +360,8 @@ struct StrategyPickListView: View {
 
     /// 涨红跌绿（与模拟页盈亏配色一致）
     private func changeColor(_ pct: Double?) -> Color {
-        guard let pct = pct else { return Color(.secondaryLabel) }
-        return pct < 0 ? Color(.systemGreen) : Color(.systemRed)
+        guard let pct = pct else { return AppColors.textSecondary }
+        return pct < 0 ? AppColors.marketDown : AppColors.marketUp
     }
 
     // MARK: - 行为

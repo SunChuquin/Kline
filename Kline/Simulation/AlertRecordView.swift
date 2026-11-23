@@ -37,7 +37,7 @@ struct AlertRecordView: View {
         }
         // 空态与有数据态都在同一容器内铺满：切换时不引起布局抖动
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .confirmationDialog("清空全部预警记录？", isPresented: $showClearConfirm,
                             titleVisibility: .visible) {
             Button("清空全部", role: .destructive) { Task { await store.clearAlertRecords() } }
@@ -56,7 +56,7 @@ struct AlertRecordView: View {
                     Text("返回")
                         .font(.system(size: 15))
                 }
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -68,7 +68,7 @@ struct AlertRecordView: View {
             Button(action: { showClearConfirm = true }) {
                 Text("清空全部")
                     .font(.system(size: 15))
-                    .foregroundColor(Color(.systemRed))
+                    .foregroundColor(AppColors.marketUp)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
@@ -82,11 +82,11 @@ struct AlertRecordView: View {
         .overlay {
             Text("预警记录")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -110,7 +110,7 @@ struct AlertRecordView: View {
         HStack(spacing: 10) {
             Text(SimFormat.dateTime(record.occurredAt))
                 .font(.system(size: 13, design: .monospaced))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
                 .frame(width: 76, alignment: .leading)
 
@@ -118,17 +118,17 @@ struct AlertRecordView: View {
                 HStack(spacing: 5) {
                     Text(record.name)
                         .font(.system(size: 15))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text(record.code)
                         .font(.system(size: 12))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 // 文案单行：保证行高固定 56（超出省略）
                 Text(record.message)
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -156,7 +156,7 @@ struct AlertRecordView: View {
         } label: {
             Image(systemName: "trash")
                 .font(.system(size: 15))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -168,8 +168,8 @@ struct AlertRecordView: View {
     private func priceColor(_ record: SimAlertRecord) -> Color {
         guard let condID = record.condID,
               let order = store.condOrder(id: condID),
-              let compareUp = order.params.compareUp else { return Color.primary }
-        return compareUp ? Color(.systemRed) : Color(.systemGreen)
+              let compareUp = order.params.compareUp else { return AppColors.textPrimary }
+        return compareUp ? AppColors.marketUp : AppColors.marketDown
     }
 
     // MARK: - 空态
@@ -178,13 +178,13 @@ struct AlertRecordView: View {
         VStack(spacing: 10) {
             Image(systemName: "bell.slash")
                 .font(.system(size: 34))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text("暂无预警记录")
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             Text("在自选 / 行情页长按标的设置预警，触发后会记录在这里")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }

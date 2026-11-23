@@ -127,7 +127,7 @@ struct SimCondListView: View {
             bottomBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .overlay(alignment: .bottom) { toastView }
         .fullScreenCover(item: coverBinding) { item in
             switch item {
@@ -180,7 +180,7 @@ struct SimCondListView: View {
             Button(action: onClose) {
                 Text("关闭")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -192,7 +192,7 @@ struct SimCondListView: View {
             Button(action: { presentation = .alerts }) {
                 Image(systemName: "bell.badge")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -202,7 +202,7 @@ struct SimCondListView: View {
             Button(action: startCreate) {
                 Text("＋ 新建")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
@@ -215,11 +215,11 @@ struct SimCondListView: View {
         .overlay {
             Text("条件单")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -245,16 +245,16 @@ struct SimCondListView: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 13))
-                .foregroundColor(.orange)
+                .foregroundColor(AppColors.statusWarning)
             Text("Python 引擎未就绪，条件单暂停结算；引擎就绪后自动恢复")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12))
+        .background(AppColors.statusWarning.opacity(0.12))
         .cornerRadius(8)
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
@@ -281,17 +281,17 @@ struct SimCondListView: View {
         VStack(spacing: 12) {
             Image(systemName: "square.stack.3d.up")
                 .font(.system(size: 34))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text(emptyText)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             Button(action: startCreate) {
                 Text("新建条件单")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .padding(.horizontal, 14)
                     .frame(minWidth: 44, minHeight: 44)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent, lineWidth: 1))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -315,11 +315,11 @@ struct SimCondListView: View {
             HStack(spacing: 6) {
                 Text(order.name)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(order.code)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 // 「仅提醒」标记：触发不下单，便于与普通条件单区分（与状态标签同风格）
@@ -327,9 +327,9 @@ struct SimCondListView: View {
                     SimCondAlertBadge()
                 }
                 SimCondStatusTag(status: order.status)
-                inlineButton("编辑", tint: .blue) { openEditor(order) }
+                inlineButton("编辑", tint: AppColors.accent) { openEditor(order) }
                 if order.status == .monitoring {
-                    inlineButton("撤销", tint: Color(.secondaryLabel)) { Task { await cancel(order) } }
+                    inlineButton("撤销", tint: AppColors.textSecondary) { Task { await cancel(order) } }
                 }
             }
 
@@ -337,7 +337,7 @@ struct SimCondListView: View {
                 SimCondKindChip(kind: order.kind)
                 Text(SimRulesProjection.shared.conditionSummary(order))
                     .font(.system(size: 13))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -345,7 +345,7 @@ struct SimCondListView: View {
 
             Text(directiveLine(order))
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -359,20 +359,20 @@ struct SimCondListView: View {
             if !order.runtime.lastMessage.isEmpty, order.status != .monitoring {
                 Text(order.runtime.lastMessage)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
         .contentShape(Rectangle())
         .onTapGesture { presentation = .detail(order) }
     }
 
     /// 行内小按钮（SimInlineButton 本体高 22，这里补足 44×44 命中区）
-    private func inlineButton(_ title: String, tint: Color = .blue,
+    private func inlineButton(_ title: String, tint: Color = AppColors.accent,
                              action: @escaping () -> Void) -> some View {
         SimInlineButton(title: title, tint: tint, action: action)
             .frame(minWidth: 44, minHeight: 44)
@@ -405,17 +405,17 @@ struct SimCondListView: View {
         HStack(spacing: 12) {
             Text("行情刷新与手动检查时评估，非实时盯盘")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button(action: manualCheck) {
                 Text("立即检查")
                     .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .padding(.horizontal, 12)
                     .frame(height: 32)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent, lineWidth: 1))
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -424,9 +424,9 @@ struct SimCondListView: View {
         .padding(.horizontal, 16)
         .frame(height: 52)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
         // 选择标的挂在内层底部条上：与最外层 VStack 的 fullScreenCover 不同宿主，互不影响
         .confirmationDialog("选择标的", isPresented: pickerBinding, titleVisibility: .visible) {
@@ -467,12 +467,12 @@ struct SimCondListView: View {
         if let text = toastText {
             Text(text)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundColor(Color(.systemBackground))
+                .foregroundColor(AppColors.pageBackground)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.label).opacity(0.92)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.textPrimary.opacity(0.92)))
                 .padding(.horizontal, 24)
                 .padding(.bottom, 64)
                 .transition(.opacity)

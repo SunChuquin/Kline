@@ -29,7 +29,7 @@ struct DetailPage: View {
 
                 Spacer()
             }
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .frame(height: 56)
             .padding(.top, -5)
 
@@ -40,7 +40,7 @@ struct DetailPage: View {
             VStack(spacing: 24) {
                 Image(systemName: "info.circle")
                     .font(.system(size: 64))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
 
                 Text(title)
                     .font(.title)
@@ -48,12 +48,12 @@ struct DetailPage: View {
 
                 Text("这是「\(title)」的详情页面。你可以在这里展示更多相关内容。")
                     .font(.body)
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
             .frame(maxHeight: .infinity)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 }

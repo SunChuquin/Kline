@@ -170,24 +170,24 @@ struct AdaptiveStack<Content: View>: View {
         // 竖屏形态（紧凑）：垂直堆叠
         AdaptiveStack(isCompact: true) {
             Text("总资产 259,204").font(.system(size: 13, weight: .semibold))
-            Text("可用资金 100,000").font(.system(size: 13)).foregroundColor(.secondary)
-            Text("持仓市值 159,204").font(.system(size: 13)).foregroundColor(.secondary)
+            Text("可用资金 100,000").font(.system(size: 13)).foregroundColor(AppColors.textSecondary)
+            Text("持仓市值 159,204").font(.system(size: 13)).foregroundColor(AppColors.textSecondary)
         }
         .frame(width: 320, alignment: .leading)
         .padding(12)
-        .background(Color.gray.opacity(0.08))
-        .border(Color.gray.opacity(0.4))
+        .background(AppColors.textTertiary.opacity(0.08))
+        .border(AppColors.textTertiary.opacity(0.4))
 
         // 宽屏形态（常规）：水平堆叠
         AdaptiveStack(isCompact: false, hSpacing: 24) {
             Text("总资产 259,204").font(.system(size: 13, weight: .semibold))
-            Text("可用资金 100,000").font(.system(size: 13)).foregroundColor(.secondary)
-            Text("持仓市值 159,204").font(.system(size: 13)).foregroundColor(.secondary)
+            Text("可用资金 100,000").font(.system(size: 13)).foregroundColor(AppColors.textSecondary)
+            Text("持仓市值 159,204").font(.system(size: 13)).foregroundColor(AppColors.textSecondary)
         }
         .frame(width: 640, alignment: .leading)
         .padding(12)
-        .background(Color.gray.opacity(0.08))
-        .border(Color.gray.opacity(0.4))
+        .background(AppColors.textTertiary.opacity(0.08))
+        .border(AppColors.textTertiary.opacity(0.4))
     }
     .padding()
 }

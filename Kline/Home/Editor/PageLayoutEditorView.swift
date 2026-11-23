@@ -80,7 +80,7 @@ struct PageLayoutEditorView: View {
                 Divider()
                 statusBar
             }
-            .background(Color(.systemBackground).ignoresSafeArea())
+            .background(AppColors.pageBackground.ignoresSafeArea())
             .ignoresSafeArea(.container, edges: .bottom)
             .overlay {
                 if showFullPreview {
@@ -132,7 +132,7 @@ struct PageLayoutEditorView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
         } else {
             HStack(spacing: 10) {
                 backButton
@@ -145,7 +145,7 @@ struct PageLayoutEditorView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
         }
     }
 
@@ -162,9 +162,9 @@ struct PageLayoutEditorView: View {
                 Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                 Text("返回").font(.system(size: 15, weight: .medium))
             }
-            .foregroundColor(.primary)
+            .foregroundColor(AppColors.textPrimary)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Color.gray.opacity(0.12)).cornerRadius(8)
+            .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("layoutEditor.back")
@@ -175,7 +175,7 @@ struct PageLayoutEditorView: View {
         Text("布局编辑器")
             .accessibilityIdentifier("layoutEditor.title")
             .font(.system(size: 17, weight: .semibold))
-            .foregroundColor(.primary)
+            .foregroundColor(AppColors.textPrimary)
             .fixedSize()
     }
 
@@ -214,9 +214,9 @@ struct PageLayoutEditorView: View {
                     .font(.system(size: 14, weight: .semibold))
                 Text("全屏预览").font(.system(size: 15, weight: .medium))
             }
-            .foregroundColor(.primary)
+            .foregroundColor(AppColors.textPrimary)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Color.gray.opacity(0.12)).cornerRadius(8)
+            .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("layoutEditor.fullPreview")
@@ -298,7 +298,7 @@ struct PageLayoutEditorView: View {
                 .padding(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(.separator), lineWidth: 1)
+                        .stroke(AppColors.separator, lineWidth: 1)
                 )
                 .padding(12)
 
@@ -313,7 +313,7 @@ struct PageLayoutEditorView: View {
                 if let error = editor.jsonError {
                     Text(error)
                         .font(.system(size: 12))
-                        .foregroundColor(.red)
+                        .foregroundColor(AppColors.statusError)
                         .lineLimit(2)
                 }
             }
@@ -329,22 +329,22 @@ struct PageLayoutEditorView: View {
             if let error = editor.jsonError {
                 Text(error)
                     .font(.system(size: 13))
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.statusError)
                     .lineLimit(1)
             } else if editor.isDirty {
                 Text("● 未保存改动")
                     .font(.system(size: 13))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
             } else {
                 Text(editor.banner ?? "已同步")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .frame(height: 28)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 通用胶囊按钮
@@ -353,9 +353,9 @@ struct PageLayoutEditorView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12))
+                .background(AppColors.textTertiary.opacity(0.12))
                 .cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())

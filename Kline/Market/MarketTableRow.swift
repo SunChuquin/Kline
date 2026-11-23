@@ -53,9 +53,9 @@ struct MarketTableRow: View {
     /// 行背景色：持仓 = 深灰（systemGray5），固顶 = 浅灰（systemGray6），普通 = 系统背景
     /// 若同时持仓 + 固顶，持仓优先（语义更重要），仍用深灰
     private var rowBackground: Color {
-        if isPositioned { return Color(.systemGray5) }
-        if isPinned     { return Color(.systemGray6) }
-        return Color(.systemBackground)
+        if isPositioned { return AppColors.cardHoverBackground }
+        if isPinned     { return AppColors.sidebarBackground }
+        return AppColors.pageBackground
     }
 
     /// 统一列宽（保留当前表格样式：固定 108pt 等宽 + 竖线）
@@ -217,12 +217,12 @@ struct MarketTableRow: View {
                     HStack(spacing: 3) {
                         Text("名称/代码")
                             .font(.system(size: mainFont, weight: .medium))
-                            .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
+                            .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
                             .lineLimit(1)
                         if active, let r = rule {
                             Image(systemName: r.order == .descending ? "chevron.down" : "chevron.up")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(Color.accentColor)
+                                .foregroundColor(AppColors.accent)
                         }
                     }
                     .frame(maxHeight: .infinity)
@@ -230,18 +230,18 @@ struct MarketTableRow: View {
                     HStack(spacing: 3) {
                         Text(col.field.title)
                             .font(.system(size: mainFont, weight: .medium))
-                            .foregroundColor(active ? Color.accentColor : Color(.secondaryLabel))
+                            .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
                             .lineLimit(1)
                         // 已配置筛选的字段：显示漏斗小图标（没有选中排序箭头时也显示）
                         if !config.filterLabels(for: col.field, page: page).isEmpty {
                             Image(systemName: "line.3.horizontal.decrease.circle.fill")
                                 .font(.system(size: 10))
-                                .foregroundColor(.blue)
+                                .foregroundColor(AppColors.accent)
                         }
                         if active, let r = rule {
                             Image(systemName: r.order == .descending ? "chevron.down" : "chevron.up")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(Color.accentColor)
+                                .foregroundColor(AppColors.accent)
                         }
                     }
                     .frame(maxHeight: .infinity)
@@ -251,7 +251,7 @@ struct MarketTableRow: View {
         } else if let meta = meta {
             // 持仓高亮：名称/代码/板块等「标的」列文字变红（指标数值仍红涨绿跌）
             if col.isNameCode {
-                let fg: Color = isPositioned ? .red : .primary
+                let fg: Color = isPositioned ? AppColors.marketUp : AppColors.textPrimary
                 VStack(alignment: .leading, spacing: 1) {
                     Text(meta.name)
                         .font(.system(size: mainFont, weight: .medium))
@@ -259,13 +259,13 @@ struct MarketTableRow: View {
                         .lineLimit(1)
                     Text(meta.displayCode)
                         .font(.system(size: subFont))
-                        .foregroundColor(isPositioned ? fg : Color(.secondaryLabel))
+                        .foregroundColor(isPositioned ? fg : AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             } else {
                 let isLabel = col.field == .name || col.field == .code || col.field == .type
-                let cellFg: Color = isPositioned && isLabel ? Color.red : rowCache.colorFor(meta.id, col.field)
+                let cellFg: Color = isPositioned && isLabel ? AppColors.marketUp : rowCache.colorFor(meta.id, col.field)
                 Text(rowCache.textFor(meta.id, col.field))
                     .font(.system(size: mainFont))
                     .foregroundColor(cellFg)

@@ -23,14 +23,14 @@ struct AddToGroupSheet: View {
             // 顶部栏
             HStack(spacing: 12) {
                 Button("取消") { dismiss() }
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 Spacer()
                 Text("加入分组")
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Button(action: { onDone?(); dismiss() }) {
                     Text("完成")
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                         .font(.system(size: 16, weight: .bold))
                 }
             }
@@ -43,7 +43,7 @@ struct AddToGroupSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(meta.name).font(.system(size: 16, weight: .medium))
                     Text(meta.displayCode).font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 Spacer()
                 Button {
@@ -51,12 +51,12 @@ struct AddToGroupSheet: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: fav.isFavorited(meta.id) ? "star.fill" : "star")
-                            .foregroundColor(fav.isFavorited(meta.id) ? .yellow : .secondary)
+                            .foregroundColor(fav.isFavorited(meta.id) ? AppColors.statusWarning : AppColors.textSecondary)
                         Text(fav.isFavorited(meta.id) ? "已自选" : "一键加自选")
                             .font(.system(size: 13, weight: .medium))
                     }
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Color(.systemGray6))
+                    .background(AppColors.sidebarBackground)
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
@@ -71,13 +71,13 @@ struct AddToGroupSheet: View {
                     presentAddGroupAlert()
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "plus.circle.fill").foregroundColor(.green)
+                        Image(systemName: "plus.circle.fill").foregroundColor(AppColors.statusSuccess)
                         Text("新建自定义分组")
                             .font(.system(size: 13, weight: .medium))
                         Spacer()
                     }
                     .padding(.horizontal, 12).padding(.vertical, 10)
-                    .background(Color(.systemBackground))
+                    .background(AppColors.pageBackground)
                     .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
@@ -92,7 +92,7 @@ struct AddToGroupSheet: View {
                         HStack {
                             Spacer()
                             Text("暂无自定义分组，点击上方「新建自定义分组」")
-                                .foregroundColor(.secondary).font(.footnote)
+                                .foregroundColor(AppColors.textSecondary).font(.footnote)
                             Spacer()
                         }
                         .listRowBackground(Color.clear)
@@ -112,11 +112,11 @@ struct AddToGroupSheet: View {
                                         Text(g.name).font(.system(size: 15))
                                         Text("\(g.manualMetaIDs.count) 只")
                                             .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(AppColors.textSecondary)
                                     }
                                     Spacer()
                                     Image(systemName: member ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(member ? .green : .gray)
+                                        .foregroundColor(member ? AppColors.statusSuccess : AppColors.textTertiary)
                                         .font(.system(size: 20))
                                 }
                             }
@@ -130,7 +130,7 @@ struct AddToGroupSheet: View {
             }
             .listStyle(.insetGrouped)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppColors.pageBackground)
         // 用 @State 控 UIAlertController 弹窗
         .onAppear(perform: {})  // keep
     }

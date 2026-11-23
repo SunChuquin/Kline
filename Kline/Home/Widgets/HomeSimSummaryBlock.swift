@@ -41,10 +41,10 @@ struct HomeSimSummaryBlock: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("总资产")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 Text(SimFormat.amount0(summary.totalAssets))
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
             }
 
@@ -55,7 +55,7 @@ struct HomeSimSummaryBlock: View {
                            extra: SimFormat.pct(summary.dayProfitPct * 100),
                            color: homeProfitColor(summary.dayProfit))
                     metric(label: "持仓占比", value: SimFormat.pct(summary.positionPct * 100),
-                           extra: nil, color: .primary)
+                           extra: nil, color: AppColors.textPrimary)
                 }
             } else {
                 HStack(alignment: .top, spacing: 14) {
@@ -63,7 +63,7 @@ struct HomeSimSummaryBlock: View {
                            extra: SimFormat.pct(summary.dayProfitPct * 100),
                            color: homeProfitColor(summary.dayProfit))
                     metric(label: "持仓占比", value: SimFormat.pct(summary.positionPct * 100),
-                           extra: nil, color: .primary)
+                           extra: nil, color: AppColors.textPrimary)
                 }
             }
 
@@ -71,7 +71,7 @@ struct HomeSimSummaryBlock: View {
             if positions.isEmpty {
                 Text("暂无持仓")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, minHeight: compact ? 44 : 48, alignment: .leading)
             } else {
                 VStack(spacing: 0) {
@@ -90,7 +90,7 @@ struct HomeSimSummaryBlock: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             HStack(spacing: 4) {
                 Text(value)
@@ -115,11 +115,11 @@ struct HomeSimSummaryBlock: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(p.name)
                     .font(.system(size: 14))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(p.code)
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -127,7 +127,7 @@ struct HomeSimSummaryBlock: View {
 
             Text(SimFormat.price(snap.lastPrice))
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
 
             VStack(alignment: .trailing, spacing: 2) {

@@ -21,11 +21,11 @@ struct FormulaCenterSettingRow: View {
             HStack(spacing: 8) {
                 Text("公式管理")
                     .font(.system(size: 16))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Spacer(minLength: 12)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -126,9 +126,9 @@ struct FormulaCenterView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
             .padding(.leading, 16)
 
@@ -136,7 +136,7 @@ struct FormulaCenterView: View {
 
             Text("公式管理")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -147,15 +147,15 @@ struct FormulaCenterView: View {
                     Image(systemName: "plus").font(.system(size: 14, weight: .semibold))
                     Text("新建").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
             .accessibilityIdentifier("formulaCenter.new")
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 三分段控件
@@ -168,10 +168,10 @@ struct FormulaCenterView: View {
                 } label: {
                     Text(k.title)
                         .font(.system(size: 13, weight: kind == k ? .semibold : .regular))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 32)
-                        .background(kind == k ? Color(.systemBackground) : Color.clear)
+                        .background(kind == k ? AppColors.pageBackground : Color.clear)
                         .cornerRadius(8)
                         .shadow(color: kind == k ? Color.black.opacity(0.1) : Color.clear,
                                 radius: 2, y: 1)
@@ -203,7 +203,7 @@ struct FormulaCenterView: View {
                         customRow(ind)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
             }
 
@@ -230,7 +230,7 @@ struct FormulaCenterView: View {
                         systemRow(def, isMain: false)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
             }
         }
@@ -243,11 +243,11 @@ struct FormulaCenterView: View {
             HStack(spacing: 10) {
                 Text(def.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Spacer(minLength: 8)
                 Text(systemDetail(def, isMain: isMain))
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
@@ -266,11 +266,11 @@ struct FormulaCenterView: View {
                     .frame(width: 14, height: 5)
                 Text(ind.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Spacer(minLength: 8)
                 Text(customDetail(ind))
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
@@ -293,7 +293,7 @@ struct FormulaCenterView: View {
                         pickerRow(doc)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
             }
 
@@ -309,14 +309,14 @@ struct FormulaCenterView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(doc.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Text(summary(doc.pickBody))
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .lineLimit(1)
                 Text("被 \(pickerRefCount(doc.id)) 个自选分组引用")
                     .font(.system(size: 11))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
             }
             Spacer(minLength: 8)
             Button {
@@ -325,7 +325,7 @@ struct FormulaCenterView: View {
             } label: {
                 Text("编辑")
                     .font(.system(size: 13))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -340,7 +340,7 @@ struct FormulaCenterView: View {
             } label: {
                 Text("删除")
                     .font(.system(size: 13))
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.statusError)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -367,7 +367,7 @@ struct FormulaCenterView: View {
                         strategyRow(doc)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
             }
 
@@ -383,14 +383,14 @@ struct FormulaCenterView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(doc.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Text(strategyPickSummary(doc))
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .lineLimit(1)
                 Text("\(ruleCount(doc.rules)) 条规则")
                     .font(.system(size: 11))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
             }
             Spacer(minLength: 8)
             Button {
@@ -398,7 +398,7 @@ struct FormulaCenterView: View {
             } label: {
                 Text("详情")
                     .font(.system(size: 13))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -409,7 +409,7 @@ struct FormulaCenterView: View {
             } label: {
                 Text("编辑")
                     .font(.system(size: 13))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -421,7 +421,7 @@ struct FormulaCenterView: View {
             } label: {
                 Text("删除")
                     .font(.system(size: 13))
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.statusError)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -624,32 +624,32 @@ struct FormulaCenterView: View {
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.gray)
+            .foregroundColor(AppColors.textTertiary)
     }
 
     private func infoBanner(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundColor(.gray)
+            .foregroundColor(AppColors.textTertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(8)
     }
 
     private func emptyCard(_ title: String, _ subtitle: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: "function")
-                .font(.system(size: 32)).foregroundColor(.gray.opacity(0.5))
+                .font(.system(size: 32)).foregroundColor(AppColors.textTertiary.opacity(0.5))
             Text(title)
-                .font(.system(size: 15)).foregroundColor(.gray)
+                .font(.system(size: 15)).foregroundColor(AppColors.textTertiary)
             Text(subtitle)
-                .font(.system(size: 12)).foregroundColor(.gray.opacity(0.8))
+                .font(.system(size: 12)).foregroundColor(AppColors.textTertiary.opacity(0.8))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 28).padding(.horizontal, 16)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
     }
 
@@ -659,11 +659,11 @@ struct FormulaCenterView: View {
                 Image(systemName: "plus").font(.system(size: 14, weight: .semibold))
                 Text(title).font(.system(size: 15, weight: .medium))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
         .buttonStyle(.plain)

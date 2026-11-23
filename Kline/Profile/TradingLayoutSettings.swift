@@ -32,7 +32,7 @@ struct LayoutDropdownButton: View {
                     .font(.system(size: 12))
                     .lineLimit(1)
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
         }
         .buttonStyle(.plain)
         .frame(height: 28)
@@ -61,10 +61,10 @@ where Style.AllCases == [Style] {
                         } label: {
                             HStack {
                                 Text(titleFor(item))
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(AppColors.textPrimary)
                                 Spacer()
                                 if on {
-                                    Image(systemName: "checkmark").foregroundColor(.blue)
+                                    Image(systemName: "checkmark").foregroundColor(AppColors.accent)
                                 }
                             }
                             .padding(.horizontal, 12)
@@ -83,7 +83,7 @@ where Style.AllCases == [Style] {
             } label: {
                 Text("完成")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
                     .contentShape(Rectangle())
@@ -91,7 +91,7 @@ where Style.AllCases == [Style] {
             .buttonStyle(.plain)
         }
         .frame(width: 210)
-        .background(Color(.systemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
     }
@@ -194,7 +194,7 @@ struct LayoutEditorSettingRow: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())

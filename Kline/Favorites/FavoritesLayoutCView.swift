@@ -67,11 +67,11 @@ struct FavoritesLayoutCView: View {
             // 编辑态开关：与 A/B/D 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
             FavoritesEditToggleButton(model: model)
             iconButton("slider.horizontal.3") { model.showColumnPanel = true }
-            iconButton("plus", color: .blue) { model.showAddSheet = true }
+            iconButton("plus", color: AppColors.accent) { model.showAddSheet = true }
                 .padding(.trailing, 4)
         }
         .frame(height: 48)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 紧凑态顶栏：标题不动；右侧工具组进 WrappingHStack（trailing 对齐保持右锚点视觉）。
@@ -94,7 +94,7 @@ struct FavoritesLayoutCView: View {
         }
         // 换行时高度自适应（单行 48，两行 ~90），不写死
         .frame(minHeight: 48)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 紧凑态工具组条目（WrappingHStack 需 Identifiable 驱动断行；顺序 = regular 顶栏从左到右）
@@ -111,7 +111,7 @@ struct FavoritesLayoutCView: View {
         case .modeSwitch: modeSwitch
         case .edit: FavoritesEditToggleButton(model: model)
         case .columns: iconButton("slider.horizontal.3") { model.showColumnPanel = true }
-        case .add: iconButton("plus", color: .blue) { model.showAddSheet = true }
+        case .add: iconButton("plus", color: AppColors.accent) { model.showAddSheet = true }
         }
     }
     
@@ -125,32 +125,32 @@ struct FavoritesLayoutCView: View {
                     // 显示进度：图标 + 进度文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("\(p.done)/\(p.total)")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 } else if watchlistSync.isRunning {
                     // 显示加载中：图标 + 加载文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("刷新中...")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 } else {
                     // 正常状态：图标 + 刷新文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("刷新")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 }
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(Color(.systemGray6))
+            .background(AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -181,7 +181,7 @@ struct FavoritesLayoutCView: View {
                 setCardMode(false)
             }
         }
-        .background(Color(.systemGray6))
+        .background(AppColors.sidebarBackground)
         .cornerRadius(10)
     }
 
@@ -190,10 +190,10 @@ struct FavoritesLayoutCView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(active ? .white : .secondary)
+                .foregroundColor(active ? .white : AppColors.textSecondary)
                 .frame(width: 54, height: 36)
                 .background(RoundedRectangle(cornerRadius: 8)
-                    .fill(active ? Color.blue : Color.clear))
+                    .fill(active ? AppColors.accent : Color.clear))
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
         }
@@ -205,7 +205,7 @@ struct FavoritesLayoutCView: View {
     }
 
     /// 顶部图标按钮：统一 44x44 命中区
-    private func iconButton(_ systemName: String, color: Color = .secondary,
+    private func iconButton(_ systemName: String, color: Color = AppColors.textSecondary,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -258,7 +258,7 @@ struct FavoritesLayoutCView: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-            Text("自选页面准备中...").foregroundColor(.gray)
+            Text("自选页面准备中...").foregroundColor(AppColors.textTertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -299,11 +299,11 @@ struct FavoritesLayoutCView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(meta.name)
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text(meta.displayCode)
                 .font(.system(size: 10.5))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
         }
         .frame(width: isCompact ? 96 : 104, alignment: .leading)
@@ -314,7 +314,7 @@ struct FavoritesLayoutCView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("近 20 日")
                 .font(.system(size: 9.5))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             FavoritesMiniTrend(closes: Array(row.recentCloses.suffix(20)))
                 .frame(width: isCompact ? 104 : 120, height: 32)
         }
@@ -336,7 +336,7 @@ struct FavoritesLayoutCView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(field.title)
                 .font(.system(size: 9.5))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             Text(model.rowCache.textFor(meta.id, field))
                 .font(.system(size: 12.5, design: .monospaced))
                 .foregroundColor(model.rowCache.colorFor(meta.id, field))
@@ -365,10 +365,10 @@ struct FavoritesLayoutCView: View {
 
     /// 涨跌幅胶囊底色：涨红 / 跌绿 / 平或无效用灰
     private static func pctColor(_ pct: Double?) -> Color {
-        guard let p = pct else { return Color(.systemGray) }
-        if p > 0 { return Color(.systemRed) }
-        if p < 0 { return Color(.systemGreen) }
-        return Color(.systemGray)
+        guard let p = pct else { return AppColors.textTertiary }
+        if p > 0 { return AppColors.marketUp }
+        if p < 0 { return AppColors.marketDown }
+        return AppColors.textTertiary
     }
 
     /// 最右：44x44「更多」按钮，点击打开与长按**同一**面板（同一份 items / 同一套动作）
@@ -380,7 +380,7 @@ struct FavoritesLayoutCView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -410,10 +410,10 @@ struct FavoritesMiniTrend: View {
 
     /// 区间涨跌配色：末值 > 首值红、< 首值绿、相等灰
     private var tint: Color {
-        guard let first = closes.first, let last = closes.last else { return Color(.systemGray) }
-        if last > first { return Color(.systemRed) }
-        if last < first { return Color(.systemGreen) }
-        return Color(.systemGray)
+        guard let first = closes.first, let last = closes.last else { return AppColors.textTertiary }
+        if last > first { return AppColors.marketUp }
+        if last < first { return AppColors.marketDown }
+        return AppColors.textTertiary
     }
 
     /// 把收盘价序列归一化到视图尺寸（上下各留 2pt 内边距，避免线贴边被裁）

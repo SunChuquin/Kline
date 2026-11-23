@@ -230,10 +230,10 @@ private let previewPills: [PreviewPill] = [
 private func pillView(_ pill: PreviewPill) -> some View {
     Text(pill.text)
         .font(.system(size: 12))
-        .foregroundColor(.blue)
+        .foregroundColor(AppColors.accent)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Color.blue.opacity(0.12))
+        .background(AppColors.accent.opacity(0.12))
         .cornerRadius(10)
 }
 
@@ -245,11 +245,11 @@ private func pillView(_ pill: PreviewPill) -> some View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("可用宽 \(Int(width))pt")
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     WrappingHStack(items: previewPills) { pillView($0) }
                         .frame(width: width)
-                        .background(Color.gray.opacity(0.08))
-                        .border(Color.gray.opacity(0.4))
+                        .background(AppColors.textTertiary.opacity(0.08))
+                        .border(AppColors.textTertiary.opacity(0.4))
                 }
             }
         }
@@ -270,17 +270,17 @@ private func pillView(_ pill: PreviewPill) -> some View {
             // 空集合：不渲染任何内容、高度 0
             WrappingHStack(items: [PreviewPill]()) { pillView($0) }
                 .frame(width: 300)
-                .border(Color.gray.opacity(0.4))
+                .border(AppColors.textTertiary.opacity(0.4))
 
             // 紧凑间距 4
             WrappingHStack(items: previewPills, horizontalSpacing: 4, rowSpacing: 4) { pillView($0) }
                 .frame(width: 300)
-                .border(Color.gray.opacity(0.4))
+                .border(AppColors.textTertiary.opacity(0.4))
 
             // 宽松间距 16 + 居中对齐
             WrappingHStack(items: previewPills, horizontalSpacing: 16, rowSpacing: 16, alignment: .center) { pillView($0) }
                 .frame(width: 300)
-                .border(Color.gray.opacity(0.4))
+                .border(AppColors.textTertiary.opacity(0.4))
         }
         .padding()
     }

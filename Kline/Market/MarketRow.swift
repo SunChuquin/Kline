@@ -89,13 +89,13 @@ final class MarketRow: Identifiable, Hashable {
         return s
     }
 
-    /// 字段颜色：根据 changePct 的正负给出红/绿/灰
+    /// 字段颜色：根据 changePct 的正负给出红/绿/主文字色（A 股红涨绿跌，走全局 Token）
     func tintColor(_ f: MarketField) -> UIColor {
-        guard f.isTintedByChange else { return .label }
+        guard f.isTintedByChange else { return AppColors.textPrimaryUI }
         let pct = number(.changePct) ?? 0
-        if pct > 0 { return .systemRed }
-        if pct < 0 { return .systemGreen }
-        return .label
+        if pct > 0 { return AppColors.marketUpUI }
+        if pct < 0 { return AppColors.marketDownUI }
+        return AppColors.textPrimaryUI
     }
 
     // MARK: - 纯函数渲染（只做展示格式化，不做数值计算）

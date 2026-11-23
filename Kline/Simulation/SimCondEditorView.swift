@@ -155,7 +155,7 @@ struct SimCondEditorView: View {
             }
             submitFooter
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .onAppear(perform: handleAppear)
         .onChange(of: draftSignature) { _ in requestProjection() }
         // A5-5：`.engine` 模式下沉建单校验（防抖 + 取消即弃；`.swift` 模式 return，零开销）
@@ -187,7 +187,7 @@ struct SimCondEditorView: View {
             Button(action: onFinish) {
                 Text("取消")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -195,13 +195,13 @@ struct SimCondEditorView: View {
 
             Text(editing == nil ? "新建条件单" : "编辑条件单")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(maxWidth: .infinity)
 
             Button(action: handleSave) {
                 Text("保存")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(canSave ? Color.blue : Color(.tertiaryLabel))
+                    .foregroundColor(canSave ? AppColors.accent : AppColors.textTertiary)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
@@ -210,9 +210,9 @@ struct SimCondEditorView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -223,11 +223,11 @@ struct SimCondEditorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(code)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -243,7 +243,7 @@ struct SimCondEditorView: View {
         .padding(.horizontal, 16)
         .frame(height: 60)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -261,7 +261,7 @@ struct SimCondEditorView: View {
             if kind == .grid {
                 Text("网格交易按档位自动双向：下跌买入、上涨卖出")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -294,13 +294,13 @@ struct SimCondEditorView: View {
         let on = item == kind
         return Text(item.title)
             .font(.system(size: 12.5, weight: on ? .semibold : .regular))
-            .foregroundColor(on ? Color.blue : Color(.secondaryLabel))
+            .foregroundColor(on ? AppColors.accent : AppColors.textSecondary)
             .padding(.horizontal, 10)
             .frame(height: 26)
             .background(RoundedRectangle(cornerRadius: 6)
-                .fill(on ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground)))
+                .fill(on ? AppColors.accent.opacity(0.08) : AppColors.cardBackground))
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .stroke(on ? Color.blue : Color(.separator), lineWidth: on ? 1 : 0.5))
+                .stroke(on ? AppColors.accent : AppColors.separator, lineWidth: on ? 1 : 0.5))
             .frame(height: 44)
             .contentShape(Rectangle())
     }
@@ -418,11 +418,11 @@ struct SimCondEditorView: View {
                 field(.gridLower)
                 Text("~")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                 field(.gridUpper)
                 Text("元")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
         }
         numRow("网格间距", key: .gridStepPct, unitText: "%", showsDivider: true)
@@ -476,9 +476,9 @@ struct SimCondEditorView: View {
                 Toggle(isOn: $alertOnly) {
                     Text("仅提醒（不下单）")
                         .font(.system(size: 13))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                 }
-                .tint(.blue)
+                .tint(AppColors.accent)
                 .frame(minHeight: 46)
                 // 切换后清掉可能残留的下单校验错误（如"数量需为 100 股的整数倍"）
                 .onChange(of: alertOnly) { _ in errorText = nil }
@@ -562,15 +562,15 @@ struct SimCondEditorView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("预览")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             Text(alertOnly ? alertPreviewSentence : SimRulesProjection.shared.previewSentence(draftOrder()))
                 .font(.system(size: 12))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
         .padding(.horizontal, 16)
     }
 
@@ -593,7 +593,7 @@ struct SimCondEditorView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
                     // 仅提醒不下单 → 用中性蓝，避免用"买入红 / 卖出绿"误导为会下单
-                    .background(RoundedRectangle(cornerRadius: 10).fill(alertOnly ? Color.blue : dirColor))
+                    .background(RoundedRectangle(cornerRadius: 10).fill(alertOnly ? AppColors.accent : dirColor))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -602,7 +602,7 @@ struct SimCondEditorView: View {
             if let message = errorText {
                 Text(message)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.systemRed))
+                    .foregroundColor(AppColors.marketUp)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
@@ -611,9 +611,9 @@ struct SimCondEditorView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -622,7 +622,7 @@ struct SimCondEditorView: View {
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) { content() }
             .padding(.horizontal, 14)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
             .padding(.horizontal, 16)
     }
 
@@ -630,10 +630,10 @@ struct SimCondEditorView: View {
         HStack(spacing: 4) {
             Image(systemName: "info.circle")
                 .font(.system(size: 10))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text(text)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -650,7 +650,7 @@ struct SimCondEditorView: View {
                 if let tail = trailingText {
                     Text(tail)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
             }
@@ -660,7 +660,7 @@ struct SimCondEditorView: View {
     private func numRow(_ label: String, key: CondNumKey, unitText: String? = nil,
                         trailingText: String? = nil, enabled: Bool = true,
                         stepDelta: Double? = nil, showsDivider: Bool = true,
-                        color: Color = Color.primary) -> some View {
+                        color: Color = AppColors.textPrimary) -> some View {
         TradeLineRow(label: label, labelWidth: 84, height: 46, showsDivider: showsDivider) {
             HStack(spacing: 6) {
                 if let delta = stepDelta {
@@ -673,12 +673,12 @@ struct SimCondEditorView: View {
                 if let unit = unitText {
                     Text(unit)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 if let tail = trailingText {
                     Text(tail)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                 }
             }
         }
@@ -693,7 +693,7 @@ struct SimCondEditorView: View {
                 if let unit = unitText {
                     Text(unit)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 toggleButton(isOn: isOn, action: onToggle)
             }
@@ -704,7 +704,7 @@ struct SimCondEditorView: View {
         Button(action: action) {
             Text(isOn ? "开" : "关")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(isOn ? Color.blue : Color(.tertiaryLabel))
+                .foregroundColor(isOn ? AppColors.accent : AppColors.textTertiary)
                 .frame(width: 52, height: 44)
                 .contentShape(Rectangle())
         }
@@ -712,12 +712,12 @@ struct SimCondEditorView: View {
     }
 
     private func field(_ key: CondNumKey, enabled: Bool = true,
-                       color: Color = Color.primary) -> some View {
+                       color: Color = AppColors.textPrimary) -> some View {
         TextField("0", text: numBinding(key))
             .keyboardType(keyboardFor(key))
             .multilineTextAlignment(.trailing)
             .font(.system(size: 16, weight: .bold))
-            .foregroundColor(enabled ? color : Color(.secondaryLabel))
+            .foregroundColor(enabled ? color : AppColors.textSecondary)
             .frame(width: 96)
             .disabled(!enabled)
             .accessibilityIdentifier("condEditor.\(key.id)")
@@ -863,10 +863,10 @@ struct SimCondEditorView: View {
     private var lastPriceText: String { lastPrice.map { SimFormat.price($0) } ?? "—" }
     private var changeColor: Color {
         guard let snapshot = trainingSnapshot else { return rowCache.colorFor(metaID, .changePct) }
-        guard let value = snapshot.changePct else { return Color(.secondaryLabel) }
-        if value > 0 { return Color(.systemRed) }
-        if value < 0 { return Color(.systemGreen) }
-        return Color(.secondaryLabel)
+        guard let value = snapshot.changePct else { return AppColors.textSecondary }
+        if value > 0 { return AppColors.marketUp }
+        if value < 0 { return AppColors.marketDown }
+        return AppColors.textSecondary
     }
     private var changePctText: String {
         if let snapshot = trainingSnapshot {
@@ -875,7 +875,7 @@ struct SimCondEditorView: View {
         }
         return rowCache.textFor(metaID, .changePct)
     }
-    private var dirColor: Color { direction.isBuy ? Color(.systemRed) : Color(.systemGreen) }
+    private var dirColor: Color { direction.isBuy ? AppColors.marketUp : AppColors.marketDown }
     private var isGrid: Bool { kind == .grid }
     private var showOffsetRow: Bool { priceType == .limit && !isGrid }
     private var gridMultiplier: Double { params.gridMultiplier ?? 1 }

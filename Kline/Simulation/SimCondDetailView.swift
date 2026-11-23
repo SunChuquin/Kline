@@ -63,7 +63,7 @@ struct SimCondDetailView: View {
                 .padding(.bottom, 16)
             }
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
     }
 
     // MARK: 导航栏
@@ -73,7 +73,7 @@ struct SimCondDetailView: View {
             Button(action: onClose) {
                 Text("关闭")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -81,16 +81,16 @@ struct SimCondDetailView: View {
 
             Text("条件单详情")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(maxWidth: .infinity)
 
             Color.clear.frame(width: 44, height: 44)
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -101,25 +101,25 @@ struct SimCondDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(current.name)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(current.code)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
             SimCondStatusTag(status: current.status)
             Spacer(minLength: 8)
             Text(SimRulesProjection.shared.conditionSummary(current))
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
         .padding(.horizontal, 16)
     }
 
@@ -131,10 +131,10 @@ struct SimCondDetailView: View {
         } label: {
             Text("撤销该条件单")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(.separator), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppColors.separator, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -161,7 +161,7 @@ struct SimCondDetailView: View {
             } else {
                 Text("暂无关联委托")
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 14)
             }
@@ -175,13 +175,13 @@ struct SimCondDetailView: View {
                 SimDirectionTag(direction: related.direction)
                 Text("查看关联委托 #\(related.id.uuidString.prefix(8))")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 SimStatusTag(status: related.status)
                 Image(systemName: showRelated ? "chevron.up" : "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -198,24 +198,24 @@ struct SimCondDetailView: View {
         let summary = relatedFillSummary(related)
         let statusColor: Color
         switch related.status {
-        case .filled:    statusColor = Color(.systemRed)
-        case .partial:   statusColor = Color(.orange)
-        default:         statusColor = Color(.secondaryLabel)
+        case .filled:    statusColor = AppColors.marketUp
+        case .partial:   statusColor = AppColors.statusWarning
+        default:         statusColor = AppColors.textSecondary
         }
         return [
             ("方向", related.direction.title,
-             related.direction.isBuy ? Color(.systemRed) : Color(.systemGreen)),
-            ("名称代码", "\(related.name) \(related.code)", Color.primary),
-            ("类型", related.priceType.title, Color(.secondaryLabel)),
+             related.direction.isBuy ? AppColors.marketUp : AppColors.marketDown),
+            ("名称代码", "\(related.name) \(related.code)", AppColors.textPrimary),
+            ("类型", related.priceType.title, AppColors.textSecondary),
             ("委托价", related.price.map { SimFormat.price($0) } ?? "市价",
-             related.price == nil ? Color(.secondaryLabel) : Color.primary),
-            ("委托量", SimFormat.shares(related.qty), Color.primary),
+             related.price == nil ? AppColors.textSecondary : AppColors.textPrimary),
+            ("委托量", SimFormat.shares(related.qty), AppColors.textPrimary),
             ("已成", SimFormat.shares(related.filledQty),
-             related.filledQty > 0 ? Color.primary : Color(.secondaryLabel)),
+             related.filledQty > 0 ? AppColors.textPrimary : AppColors.textSecondary),
             ("状态", related.status.title, statusColor),
-            ("委托时间", SimFormat.dateTime(related.createdAt), Color(.secondaryLabel)),
-            ("成交均价", summary.price, Color.primary),
-            ("成交费用", summary.fee, Color(.secondaryLabel))
+            ("委托时间", SimFormat.dateTime(related.createdAt), AppColors.textSecondary),
+            ("成交均价", summary.price, AppColors.textPrimary),
+            ("成交费用", summary.fee, AppColors.textSecondary)
         ]
     }
 
@@ -242,7 +242,7 @@ struct SimCondDetailView: View {
         if triggerLogs.isEmpty {
             Text("暂无触发记录")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
         } else {
@@ -256,11 +256,11 @@ struct SimCondDetailView: View {
         HStack(alignment: .top, spacing: 8) {
             Text(SimFormat.time(log.occurredAt))
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(width: 66, alignment: .leading)
             Text(log.content)
                 .font(.system(size: 12))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Text(log.result)
@@ -270,7 +270,7 @@ struct SimCondDetailView: View {
         .padding(.vertical, 7)
         .overlay(alignment: .bottom) {
             if showsDivider {
-                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                Rectangle().fill(AppColors.separator).frame(height: 0.5)
             }
         }
     }
@@ -279,10 +279,10 @@ struct SimCondDetailView: View {
         let failure = ["失败", "拒绝", "被拒"]
         let success = ["成功", "已成交", "全部成交", "已触发", "已完成"]
         let pending = ["部成", "已报", "待报", "监控中"]
-        if failure.contains(where: { text.contains($0) }) { return Color(.systemRed) }
-        if success.contains(where: { text.contains($0) }) { return Color(.systemGreen) }
-        if pending.contains(where: { text.contains($0) }) { return Color(.orange) }
-        return Color(.secondaryLabel)
+        if failure.contains(where: { text.contains($0) }) { return AppColors.marketUp }
+        if success.contains(where: { text.contains($0) }) { return AppColors.marketDown }
+        if pending.contains(where: { text.contains($0) }) { return AppColors.statusWarning }
+        return AppColors.textSecondary
     }
 
     // MARK: - 内容构造
@@ -290,25 +290,25 @@ struct SimCondDetailView: View {
     private func conditionItems(_ o: SimCondOrder) -> [(String, String, Color)] {
         let p = o.params
         var items: [(String, String, Color)] = [
-            ("类型", o.kind.title, Color.primary),
-            ("条件", SimRulesProjection.shared.conditionSummary(o), Color.primary)
+            ("类型", o.kind.title, AppColors.textPrimary),
+            ("条件", SimRulesProjection.shared.conditionSummary(o), AppColors.textPrimary)
         ]
         switch o.kind {
         case .price:
-            items.append(("触发方向", (p.compareUp ?? true) ? "现价 ≥" : "现价 ≤", Color(.secondaryLabel)))
-            items.append(("触发价", priceText(p.triggerPrice), Color.primary))
+            items.append(("触发方向", (p.compareUp ?? true) ? "现价 ≥" : "现价 ≤", AppColors.textSecondary))
+            items.append(("触发价", priceText(p.triggerPrice), AppColors.textPrimary))
         case .stopLoss:
-            items.append(("基准价", priceText(p.basePrice), Color.primary))
-            items.append(("涨跌基准", p.baseMode.title, Color(.secondaryLabel)))
-            items.append(("止盈", priceText(p.takeProfitPrice), Color.primary))
-            items.append(("止损", priceText(p.stopLossPrice), Color.primary))
+            items.append(("基准价", priceText(p.basePrice), AppColors.textPrimary))
+            items.append(("涨跌基准", p.baseMode.title, AppColors.textSecondary))
+            items.append(("止盈", priceText(p.takeProfitPrice), AppColors.textPrimary))
+            items.append(("止损", priceText(p.stopLossPrice), AppColors.textPrimary))
         case .trailing:
-            items.append(("突破价", priceText(p.breakoutPrice), Color.primary))
-            items.append(("回落幅度", pctText(p.trailPct), Color.primary))
-            items.append(("保底价触发", p.floorEnabled ? "开" : "关", Color(.secondaryLabel)))
-            items.append(("保底价", priceText(p.floorPrice), Color.primary))
+            items.append(("突破价", priceText(p.breakoutPrice), AppColors.textPrimary))
+            items.append(("回落幅度", pctText(p.trailPct), AppColors.textPrimary))
+            items.append(("保底价触发", p.floorEnabled ? "开" : "关", AppColors.textSecondary))
+            items.append(("保底价", priceText(p.floorPrice), AppColors.textPrimary))
         case .time:
-            items.append(("触发时间", p.fireDate.map { SimFormat.dateTime($0) } ?? "—", Color.primary))
+            items.append(("触发时间", p.fireDate.map { SimFormat.dateTime($0) } ?? "—", AppColors.textPrimary))
         case .changePct:
             let thresholdValue = p.changeThreshold
             let descText: String
@@ -317,21 +317,21 @@ struct SimCondDetailView: View {
             } else {
                 descText = "—"
             }
-            items.append(("触发幅度", descText, Color.primary))
+            items.append(("触发幅度", descText, AppColors.textPrimary))
         case .maCross:
-            items.append(("均线周期", "MA\(p.maPeriod ?? 20)", Color.primary))
-            items.append(("穿越方向", (p.maAbove ?? true) ? "上穿" : "下破", Color.primary))
+            items.append(("均线周期", "MA\(p.maPeriod ?? 20)", AppColors.textPrimary))
+            items.append(("穿越方向", (p.maAbove ?? true) ? "上穿" : "下破", AppColors.textPrimary))
         case .grid:
-            items.append(("基准价", priceText(p.gridBase), Color.primary))
-            items.append(("价格区间", rangeText(p.gridLower, p.gridUpper), Color.primary))
-            items.append(("网格间距", pctText(p.gridStepPct), Color.primary))
-            items.append(("每格数量", sharesText(p.gridQtyPerLevel), Color.primary))
-            items.append(("倍数委托", multText(p.gridMultiplier), Color.primary))
+            items.append(("基准价", priceText(p.gridBase), AppColors.textPrimary))
+            items.append(("价格区间", rangeText(p.gridLower, p.gridUpper), AppColors.textPrimary))
+            items.append(("网格间距", pctText(p.gridStepPct), AppColors.textPrimary))
+            items.append(("每格数量", sharesText(p.gridQtyPerLevel), AppColors.textPrimary))
+            items.append(("倍数委托", multText(p.gridMultiplier), AppColors.textPrimary))
         case .batch:
-            items.append(("总数量", sharesText(p.batchTotalQty), Color.primary))
-            items.append(("分批笔数", p.batchCount.map { "\($0) 笔" } ?? "—", Color.primary))
-            items.append(("首批价格", priceText(p.batchFirstPrice), Color.primary))
-            items.append(("每批价差", pctText(p.batchStepPct), Color.primary))
+            items.append(("总数量", sharesText(p.batchTotalQty), AppColors.textPrimary))
+            items.append(("分批笔数", p.batchCount.map { "\($0) 笔" } ?? "—", AppColors.textPrimary))
+            items.append(("首批价格", priceText(p.batchFirstPrice), AppColors.textPrimary))
+            items.append(("每批价差", pctText(p.batchStepPct), AppColors.textPrimary))
         }
         return items
     }
@@ -339,26 +339,26 @@ struct SimCondDetailView: View {
     private func directiveItems(_ o: SimCondOrder) -> [(String, String, Color)] {
         var items: [(String, String, Color)] = [
             ("委托方向", o.directive.direction.title,
-             o.directive.direction.isBuy ? Color(.systemRed) : Color(.systemGreen)),
-            ("报价方式", o.directive.priceType.title, Color.primary)
+             o.directive.direction.isBuy ? AppColors.marketUp : AppColors.marketDown),
+            ("报价方式", o.directive.priceType.title, AppColors.textPrimary)
         ]
         if o.kind == .grid {
-            items.append(("每格数量", sharesText(o.params.gridQtyPerLevel), Color.primary))
-            items.append(("倍数", multText(o.params.gridMultiplier), Color.primary))
+            items.append(("每格数量", sharesText(o.params.gridQtyPerLevel), AppColors.textPrimary))
+            items.append(("倍数", multText(o.params.gridMultiplier), AppColors.textPrimary))
         } else {
             if o.directive.priceType == .limit {
-                items.append(("触发价偏移", offsetText(o.directive), Color(.secondaryLabel)))
+                items.append(("触发价偏移", offsetText(o.directive), AppColors.textSecondary))
             }
-            items.append(("数量", sharesText(o.directive.qty), Color.primary))
+            items.append(("数量", sharesText(o.directive.qty), AppColors.textPrimary))
         }
         return items
     }
 
     private func validityItems(_ o: SimCondOrder) -> [(String, String, Color)] {
         [
-            ("有效期", SimRulesProjection.shared.validitySummary(o), Color.primary),
-            ("触发次数", "\(o.triggeredCount)", Color.primary),
-            ("创建时间", SimFormat.dateTime(o.createdAt), Color(.secondaryLabel))
+            ("有效期", SimRulesProjection.shared.validitySummary(o), AppColors.textPrimary),
+            ("触发次数", "\(o.triggeredCount)", AppColors.textPrimary),
+            ("创建时间", SimFormat.dateTime(o.createdAt), AppColors.textSecondary)
         ]
     }
 
@@ -374,7 +374,7 @@ struct SimCondDetailView: View {
     }
 
     private func infoRow(_ label: String, _ value: String,
-                         showsDivider: Bool = true, color: Color = Color.primary) -> some View {
+                         showsDivider: Bool = true, color: Color = AppColors.textPrimary) -> some View {
         TradeLineRow(label: label, labelWidth: 84, height: 46, showsDivider: showsDivider) {
             Text(value)
                 .font(.system(size: 13))
@@ -390,12 +390,12 @@ struct SimCondDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .padding(.horizontal, 4)
                 .padding(.bottom, 6)
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 14)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
         }
         .padding(.horizontal, 16)
     }

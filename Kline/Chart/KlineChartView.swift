@@ -372,17 +372,17 @@ struct KlineChartView: View {
 
     // MARK: - 配色
 
-    var upColor: Color { Color(red: 0.85, green: 0.16, blue: 0.16) }
-    var downColor: Color { Color(red: 0.0, green: 0.55, blue: 0.35) }
-    var gridColor: Color { Color.gray.opacity(0.22) }
-    var axisTextColor: Color { Color(.label).opacity(0.55) }
+    var upColor: Color { AppColors.marketUp }
+    var downColor: Color { AppColors.marketDown }
+    var gridColor: Color { AppColors.textTertiary.opacity(0.22) }
+    var axisTextColor: Color { AppColors.textPrimary.opacity(0.55) }
     private var bollColor: Color { Color(red: 0.4, green: 0.4, blue: 0.9) }
-    private var ma5Color: Color { Color(.label).opacity(0.75) }
+    private var ma5Color: Color { AppColors.textPrimary.opacity(0.75) }
     private var ma10Color: Color { Color.orange }
     private var ma20Color: Color { Color.pink }
 
     func maColor(_ i: Int) -> Color {
-        let colors = [Color(.label).opacity(0.75), Color.orange, Color.pink, Color.blue,
+        let colors = [AppColors.textPrimary.opacity(0.75), Color.orange, Color.pink, AppColors.accent,
                       Color(red: 0.9, green: 0.6, blue: 0), Color.teal, Color.purple, Color.brown]
         return colors[i % colors.count]
     }
@@ -818,7 +818,7 @@ struct KlineChartView: View {
             .onAppear { accessoryMainCenterY = mainCenterY }
             .onChange(of: mainCenterY) { accessoryMainCenterY = $0 }
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .onAppear {
             // 恢复联动持久化的缩放级别（.id 重建后 @State 已回到默认 100，这里写入保存值）
             if let saved = initialVisibleCount {
@@ -1183,7 +1183,7 @@ struct KlineChartView: View {
 
     private func kv(_ title: String, _ value: Double, _ color: Color) -> some View {
         HStack(spacing: 2) {
-            Text(title).font(.system(size: 9)).foregroundColor(.gray)
+            Text(title).font(.system(size: 9)).foregroundColor(AppColors.textTertiary)
             Text(String(format: "%.2f", value)).font(.system(size: 9)).foregroundColor(color)
         }
     }
@@ -1371,7 +1371,7 @@ struct MainChartCanvas: View, Equatable {
     }
 
     /// 训练起始竖轴色：中性灰，与光标蓝线 / 买卖信号蓝橙 / K 线红绿都不冲突，深浅色主题下都可读
-    static let trainingStartColor = Color.gray
+    static let trainingStartColor = AppColors.textTertiary
 
     /// 训练态主图买卖信号：按可见切片的日期查标记，在对应 K 线上下方画圆点 + 字母。
     /// 实心圆 = 手动下单，空心圆 = 条件单触发（颜色区分）；买入 / 做 T 在下方，卖出在上方。
@@ -1499,7 +1499,7 @@ struct MainChartCanvas: View, Equatable {
         ctx.stroke(wick, with: .color(color), lineWidth: 1)
         if isHollow {
             // 悬空蜡烛：内部填充画布底色（夜间自适应），只留描边
-            ctx.fill(Path(rect), with: .color(Color(.systemBackground)))
+            ctx.fill(Path(rect), with: .color(AppColors.pageBackground))
             ctx.stroke(Path(rect), with: .color(color), lineWidth: 1)
         } else {
             ctx.fill(Path(rect), with: .color(color))
@@ -1883,9 +1883,9 @@ struct IndicatorNameButton: View {
         } label: {
             Text(title)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Color.gray.opacity(0.12)).cornerRadius(4)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(4)
         }
     }
 }

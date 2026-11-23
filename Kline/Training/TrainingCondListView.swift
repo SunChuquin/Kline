@@ -62,7 +62,7 @@ struct TrainingCondListView: View {
             bottomBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .onAppear {
             training.reloadConditions()
             training.reloadAlerts()
@@ -92,7 +92,7 @@ struct TrainingCondListView: View {
             Button(action: onClose) {
                 Text("关闭")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -103,7 +103,7 @@ struct TrainingCondListView: View {
             Button(action: startCreate) {
                 Text("＋ 新建")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(canCreate ? Color.blue : Color(.tertiaryLabel))
+                    .foregroundColor(canCreate ? AppColors.accent : AppColors.textTertiary)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
@@ -117,11 +117,11 @@ struct TrainingCondListView: View {
         .overlay {
             Text("训练条件单")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -185,10 +185,10 @@ struct TrainingCondListView: View {
         VStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 34))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             Text(text)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -201,23 +201,23 @@ struct TrainingCondListView: View {
             HStack(spacing: 6) {
                 Text(order.name)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(order.code)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 if order.directive.isAlertOnly { SimCondAlertBadge() }
                 SimCondStatusTag(status: order.status)
-                inlineButton("删除", tint: Color(.secondaryLabel)) { delete(order) }
+                inlineButton("删除", tint: AppColors.textSecondary) { delete(order) }
             }
 
             HStack(spacing: 6) {
                 SimCondKindChip(kind: order.kind)
                 Text(SimRulesProjection.shared.conditionSummary(order))
                     .font(.system(size: 13))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -225,7 +225,7 @@ struct TrainingCondListView: View {
 
             Text(directiveLine(order))
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -238,19 +238,19 @@ struct TrainingCondListView: View {
             HStack(spacing: 6) {
                 Text("创建训练日 \(TrainSessionRecord.dateText(record.createdDate))")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
                 Spacer(minLength: 6)
                 if !order.runtime.lastMessage.isEmpty {
                     Text(order.runtime.lastMessage)
                         .font(.system(size: 11))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
         .contentShape(Rectangle())
         .onTapGesture { openEditor(order) }
     }
@@ -273,7 +273,7 @@ struct TrainingCondListView: View {
             : (order.params.batchCount ?? 0)
     }
 
-    private func inlineButton(_ title: String, tint: Color = .blue,
+    private func inlineButton(_ title: String, tint: Color = AppColors.accent,
                               action: @escaping () -> Void) -> some View {
         SimInlineButton(title: title, tint: tint, action: action)
             .frame(minWidth: 44, minHeight: 44)
@@ -287,24 +287,24 @@ struct TrainingCondListView: View {
             HStack(spacing: 6) {
                 Image(systemName: "bell.badge")
                     .font(.system(size: 12))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                 Text("训练日 \(alert.tradeDateText)")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Spacer(minLength: 6)
                 Text(SimFormat.price(alert.price))
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
             }
             Text(alert.message)
                 .font(.system(size: 12.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
     }
 
     // MARK: 底部常驻条
@@ -313,7 +313,7 @@ struct TrainingCondListView: View {
         HStack(spacing: 12) {
             Text("按训练日收盘价结算 · 推进 K 线时自动检查")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
@@ -322,10 +322,10 @@ struct TrainingCondListView: View {
             } label: {
                 Text("立即检查")
                     .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .padding(.horizontal, 12)
                     .frame(height: 32)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.blue, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent, lineWidth: 1))
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -335,9 +335,9 @@ struct TrainingCondListView: View {
         .padding(.horizontal, 16)
         .frame(height: 52)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 

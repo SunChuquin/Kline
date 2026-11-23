@@ -906,7 +906,7 @@ struct SecondCursorHorizontalOverlay: View, Equatable {
            isInPanel(y, mainTop, mainBottom) || isInPanel(y, s1Top, s1Bottom)
             || isInPanel(y, s2Top, s2Bottom) || isInPanel(y, s3Top, s3Bottom) {
             CrosshairLineOverlay(width: width, height: height, y: y, valueText: valueText,
-                                 gapRanges: gapRanges, bgColor: Color.blue, lineColor: Color.blue)
+                                 gapRanges: gapRanges, bgColor: AppColors.accent, lineColor: AppColors.accent)
         }
     }
 }
@@ -953,17 +953,17 @@ struct LinkRangeAxisOverlay: View, Equatable {
                         // 两轴之间淡色填充，示意被框住的范围（越界部分由外层 .clipped() 裁掉）
                         if xR > xL {
                             Rectangle()
-                                .fill(Color.blue.opacity(0.06))
+                                .fill(AppColors.accent.opacity(0.06))
                                 .frame(width: xR - xL, height: regionHeight)
                                 .position(x: (xL + xR) / 2, y: midY)
                         }
                         // 两根竖轴（无标签）；线宽 0.5 与十字光标竖轴统一，比K线上下影线（1pt）细一半
                         if showLAxis {
-                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 0.5, height: regionHeight)
+                            Rectangle().fill(AppColors.accent.opacity(0.55)).frame(width: 0.5, height: regionHeight)
                                 .position(x: xL, y: midY)
                         }
                         if showRAxis {
-                            Rectangle().fill(Color.blue.opacity(0.55)).frame(width: 0.5, height: regionHeight)
+                            Rectangle().fill(AppColors.accent.opacity(0.55)).frame(width: 0.5, height: regionHeight)
                                 .position(x: xR, y: midY)
                         }
                     }

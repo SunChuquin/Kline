@@ -21,15 +21,15 @@ struct HomeQuickEntryChip: View {
                     .foregroundColor(kind.tint)
                 Text(kind.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Text(kind.subtitle)
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
             .padding(.horizontal, 14)
             .frame(minWidth: 168, minHeight: 68, alignment: .leading)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
             .contentShape(Rectangle())
         }

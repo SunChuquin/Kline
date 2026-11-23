@@ -7,7 +7,7 @@
 //  提交统一走 SimStore.submit 的校验与写入；失败原因就地展示（红色小字，不弹 alert，
 //  避免与面板遮罩冲突）。纯展示原子件（分段控件 / 步进按钮 / 五档报价条 / 费用明细块）
 //  见同目录 TradeTicketKit.swift。
-//  配色：买入 Color(.systemRed)、卖出 Color(.systemGreen)；背景一律语义色，支持深色模式。
+//  配色：买入 AppColors.marketUp、卖出 AppColors.marketDown；背景一律语义色，支持深色模式。
 //
 
 import SwiftUI
@@ -145,9 +145,9 @@ struct TradeTicketView: View {
             }
 
             TradeSegmentedRow(options: [
-                TradeSegOption(id: "buy", title: "买入", tint: Color(.systemRed),
+                TradeSegOption(id: "buy", title: "买入", tint: AppColors.marketUp,
                                selected: direction.isBuy, accessibilityID: "tradeTicket.dir.buy"),
-                TradeSegOption(id: "sell", title: "卖出", tint: Color(.systemGreen),
+                TradeSegOption(id: "sell", title: "卖出", tint: AppColors.marketDown,
                                selected: !direction.isBuy, accessibilityID: "tradeTicket.dir.sell"),
                 TradeSegOption(id: "type", title: priceType.title, selected: false)
             ], height: 30) { id in
@@ -172,7 +172,7 @@ struct TradeTicketView: View {
             // 提交按钮上方一行小字：合计费用
             Text("预计费用合计 \(SimTradeRulesProjection.moneyText(totalFee))")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
@@ -195,7 +195,7 @@ struct TradeTicketView: View {
             errorLine(padding: 18)
             Text("默认市价即时成交 · 限价 / 仓位比例 / 撤单请点「展开」")
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
                 .padding(.bottom, 10)
@@ -206,17 +206,17 @@ struct TradeTicketView: View {
         HStack(spacing: 10) {
             Text("市价 · 数量")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             TradeStepperButton(symbol: "−", size: 36, fontSize: 20) { stepQty(-rules.lotSize) }
             TextField("0", text: $qtyText)
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.center)
                 .font(.system(size: 22, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 42)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                .background(RoundedRectangle(cornerRadius: 10).fill(AppColors.cardBackground))
                 .onChange(of: qtyText) { newValue in
                     handleQtyTextChange(newValue)
                 }
@@ -224,7 +224,7 @@ struct TradeTicketView: View {
             TradeStepperButton(symbol: "＋", size: 36, fontSize: 20) { stepQty(rules.lotSize) }
             Text("股")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
@@ -235,7 +235,7 @@ struct TradeTicketView: View {
             Button {
                 performSubmit(.buy)
             } label: {
-                bigButtonLabel("买入 \(SimFormat.shares(qty)) 股", color: Color(.systemRed))
+                bigButtonLabel("买入 \(SimFormat.shares(qty)) 股", color: AppColors.marketUp)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("tradeTicket.submit")
@@ -243,7 +243,7 @@ struct TradeTicketView: View {
             Button {
                 showSellConfirm = true
             } label: {
-                bigButtonLabel("卖出 \(SimFormat.shares(qty)) 股", color: Color(.systemGreen))
+                bigButtonLabel("卖出 \(SimFormat.shares(qty)) 股", color: AppColors.marketDown)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("tradeTicket.dir.sell")
@@ -344,7 +344,7 @@ struct TradeTicketView: View {
         Button(action: openCondEditor) {
             Text("转条件单")
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .contentShape(Rectangle())
@@ -377,11 +377,11 @@ struct TradeTicketView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(name)
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text(code)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             // 训练态小胶囊标记，提示当前为训练下单（不涉及模拟账户）
             if training.isActive {
@@ -390,7 +390,7 @@ struct TradeTicketView: View {
                     .foregroundColor(Color.white)
                     .padding(.horizontal, 5)
                     .frame(height: 15)
-                    .background(Capsule().fill(Color.blue))
+                    .background(Capsule().fill(AppColors.accent))
                     .accessibilityIdentifier("trade.trainingBadge")
             }
             Spacer(minLength: 8)
@@ -404,7 +404,7 @@ struct TradeTicketView: View {
                 Button(action: expand) {
                     Text("展开")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Color.blue)
+                        .foregroundColor(AppColors.accent)
                 }
                 .buttonStyle(.plain)
             }
@@ -413,7 +413,7 @@ struct TradeTicketView: View {
         .padding(.vertical, 8)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color(.separator))
+                .fill(AppColors.separator)
                 .frame(height: 0.5)
         }
     }
@@ -430,7 +430,7 @@ struct TradeTicketView: View {
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(editable ? Color.primary : Color(.secondaryLabel))
+                    .foregroundColor(editable ? AppColors.textPrimary : AppColors.textSecondary)
                     .frame(width: 96)
                     .disabled(!editable)
                     .onChange(of: priceText) { newValue in
@@ -440,7 +440,7 @@ struct TradeTicketView: View {
                 TradeStepperButton(symbol: "＋", enabled: editable) { stepPrice(rules.priceTick) }
                 Text(unit)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
         }
     }
@@ -456,7 +456,7 @@ struct TradeTicketView: View {
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.trailing)
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .frame(width: 80)
                     .onChange(of: qtyText) { newValue in
                         handleQtyTextChange(newValue)
@@ -465,7 +465,7 @@ struct TradeTicketView: View {
                 TradeStepperButton(symbol: "＋") { stepQty(rules.lotSize) }
                 Text(unit)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
         }
@@ -476,12 +476,12 @@ struct TradeTicketView: View {
         HStack(spacing: 8) {
             Text(metaText)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text("预计金额 \(SimFormat.amount(amount))")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
         }
         .padding(.horizontal, padding)
@@ -517,7 +517,7 @@ struct TradeTicketView: View {
         if let message = errorText {
             Text(message)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.systemRed))
+                .foregroundColor(AppColors.marketUp)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, padding)
@@ -532,7 +532,7 @@ struct TradeTicketView: View {
         if let message = successText {
             Text(message)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.systemGreen))
+                .foregroundColor(AppColors.marketDown)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, padding)
@@ -602,7 +602,7 @@ struct TradeTicketView: View {
     private var commission: Double? { rules.commission(amount: amount) }
     private var stampTax: Double? { rules.stampTax(amount: amount, direction: direction) }
     private var totalFee: Double? { rules.fee(amount: amount, direction: direction) }
-    private var dirColor: Color { direction.isBuy ? Color(.systemRed) : Color(.systemGreen) }
+    private var dirColor: Color { direction.isBuy ? AppColors.marketUp : AppColors.marketDown }
 
     /// 委托后可用资金预计（金额是 GUI 层算术：由 cash / amount / fee 三个来源值合成）
     private var cashAfterTrade: Double? {

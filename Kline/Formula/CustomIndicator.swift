@@ -31,7 +31,7 @@ struct CustomIndicator: Identifiable, Codable, Hashable {
     var applicablePeriods: [KlinePeriod]?
 
     var color: Color {
-        Color(hex: colorHex) ?? .blue
+        Color(hex: colorHex) ?? AppColors.accent
     }
 }
 

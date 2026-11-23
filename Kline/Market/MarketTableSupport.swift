@@ -142,10 +142,10 @@ struct MarketEmptyStateView: View {
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 46)).foregroundColor(.gray)
-            Text(message).font(.system(size: 15)).foregroundColor(.primary)
+                .font(.system(size: 46)).foregroundColor(AppColors.textTertiary)
+            Text(message).font(.system(size: 15)).foregroundColor(AppColors.textPrimary)
             if let s = subtitle {
-                Text(s).font(.system(size: 13)).foregroundColor(.secondary)
+                Text(s).font(.system(size: 13)).foregroundColor(AppColors.textSecondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 24)
             }
         }
@@ -211,7 +211,7 @@ struct ColumnResizeHandle: View {
 
     var body: some View {
         Rectangle()
-            .fill(Color.blue.opacity(0.85))
+            .fill(AppColors.accent.opacity(0.85))
             .frame(width: 1.5)
             .frame(width: Self.hitW)
             .frame(maxHeight: .infinity)

@@ -12,7 +12,7 @@
 //  故本文件把 B / C 真正共用的部分提炼成独立的私有 struct 与私有自由函数，避免两份重复实现。
 //  金额压缩文案复用 QuickPanelLayouts.swift 的 qpAmountText（已放宽为文件外可见）。
 //
-//  配色：涨红跌绿；买入 Color(.systemRed)、卖出 Color(.systemGreen)；
+//  配色：涨红跌绿；买入 AppColors.marketUp、卖出 AppColors.marketDown；
 //  背景一律语义色（systemBackground / secondarySystemBackground / tertiarySystemBackground /
 //  separator），支持深色模式。iOS 15 兼容：不使用 iOS 16+ API（onChange 为单参数闭包）。
 //
@@ -57,11 +57,11 @@ private struct QuickAccountChip: View {
             HStack(spacing: 4) {
                 Text(store.accountName(id: store.selectedAccountID))
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
             .contentShape(Rectangle())
         }
@@ -77,11 +77,11 @@ private struct QuickSessionIndicator: View {
             let open = rules.isTradingSession(at: context.date)
             HStack(spacing: 4) {
                 Circle()
-                    .fill(open == true ? Color(.systemRed) : Color(.secondaryLabel))
+                    .fill(open == true ? AppColors.marketUp : AppColors.textSecondary)
                     .frame(width: 6, height: 6)
                 Text(sessionText(open: open, at: context.date))
                     .font(.system(size: 10.5))
-                    .foregroundColor(open == true ? Color(.systemRed) : Color(.secondaryLabel))
+                    .foregroundColor(open == true ? AppColors.marketUp : AppColors.textSecondary)
                     .lineLimit(1)
             }
         }
@@ -108,11 +108,11 @@ private struct QuickQuoteHeader: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(meta.name)
                 .font(.system(size: nameSize, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Text(meta.code)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(rowCache.numberFor(meta.id, .latestPrice).map { SimFormat.price($0) } ?? "—")
@@ -125,7 +125,7 @@ private struct QuickQuoteHeader: View {
         .padding(.horizontal, horizontalPadding)
         .frame(height: height)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 }
@@ -141,14 +141,14 @@ private struct QuickDirectionTag: View {
             .padding(.horizontal, 5)
             .frame(height: 16)
             .background(RoundedRectangle(cornerRadius: 4)
-                .fill(direction.isBuy ? Color(.systemRed) : Color(.systemGreen)))
+                .fill(direction.isBuy ? AppColors.marketUp : AppColors.marketDown))
     }
 }
 
 /// 1pt 描边小按钮（「卖」/「撤单」/「买」等行内操作）
 private struct QuickOutlineButton: View {
     let title: String
-    var color: Color = .blue
+    var color: Color = AppColors.accent
     var width: CGFloat = 32
     var height: CGFloat = 22
     let action: () -> Void
@@ -174,7 +174,7 @@ private struct QuickHintLine: View {
     var body: some View {
         Text(text)
             .font(.system(size: 12))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity)
@@ -186,7 +186,7 @@ private struct QuickHintLine: View {
 
 /// 盈亏正负着色（涨红跌绿）
 private func qpProfitColor(_ value: Double) -> Color {
-    value < 0 ? Color(.systemGreen) : Color(.systemRed)
+    value < 0 ? AppColors.marketDown : AppColors.marketUp
 }
 
 /// 标的元信息：优先取行情元信息，缺失时用持仓自带的代码 / 名称兜底（避免行情未就绪时丢标的）
@@ -311,7 +311,7 @@ struct QuickPanelBView: View {
 
             Text("可用 \(qpAmountText(store.summary(accountID: store.queryAccountID).cash))")
                 .font(.system(size: 12))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
 
             Spacer(minLength: 8)
@@ -320,9 +320,9 @@ struct QuickPanelBView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 40)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -334,7 +334,7 @@ struct QuickPanelBView: View {
             segmentButton(.order, badge: activeOrders.count)
         }
         .padding(3)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardBackground))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
@@ -347,22 +347,22 @@ struct QuickPanelBView: View {
             HStack(spacing: 4) {
                 Text(seg.title)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundColor(selected ? Color.primary : Color(.secondaryLabel))
+                    .foregroundColor(selected ? AppColors.textPrimary : AppColors.textSecondary)
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(Color.white)
                         .padding(.horizontal, 4)
                         .frame(height: 13)
-                        .background(Capsule().fill(Color(.systemRed)))
+                        .background(Capsule().fill(AppColors.marketUp))
                 }
             }
             .frame(maxWidth: .infinity)
             .frame(height: 30)
             .background(RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? Color(.systemBackground) : Color.clear))
+                .fill(selected ? AppColors.pageBackground : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .stroke(selected ? Color(.separator) : Color.clear, lineWidth: 1))
+                .stroke(selected ? AppColors.separator : Color.clear, lineWidth: 1))
             .shadow(color: selected ? Color.black.opacity(0.06) : Color.clear,
                     radius: 2, x: 0, y: 1)
             .contentShape(Rectangle())
@@ -378,7 +378,7 @@ struct QuickPanelBView: View {
             if isFallbackMeta {
                 Text("标的：\(meta.name) · 点下方「持仓」页的「卖」可带入")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
@@ -432,10 +432,10 @@ struct QuickPanelBView: View {
             Text("操作").frame(width: 32, alignment: .trailing)
         }
         .font(.system(size: 10.5))
-        .foregroundColor(Color(.secondaryLabel))
+        .foregroundColor(AppColors.textSecondary)
         .padding(.horizontal, 16)
         .frame(height: 24)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
     }
 
     private func positionRow(position: SimPosition) -> some View {
@@ -444,18 +444,18 @@ struct QuickPanelBView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(position.name)
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(position.code)
                     .font(.system(size: 10.5))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
             .frame(width: 88, alignment: .leading)
 
             Text(SimFormat.shares(position.qty))
                 .font(.system(size: 12))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
                 .frame(width: 64, alignment: .trailing)
 
@@ -464,7 +464,7 @@ struct QuickPanelBView: View {
                 Text("现价 \(SimFormat.price(snap.lastPrice))")
             }
             .font(.system(size: 10.5))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .lineLimit(1)
             .frame(width: 80, alignment: .trailing)
 
@@ -475,14 +475,14 @@ struct QuickPanelBView: View {
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, alignment: .trailing)
 
-            QuickOutlineButton(title: "卖", color: Color(.systemGreen)) {
+            QuickOutlineButton(title: "卖", color: AppColors.marketDown) {
                 sellFromPosition(position)
             }
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 16)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5).padding(.leading, 16)
         }
     }
 
@@ -517,11 +517,11 @@ struct QuickPanelBView: View {
             } label: {
                 Text("全部撤单")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color(.systemGreen))
+                    .foregroundColor(AppColors.marketDown)
                     .frame(maxWidth: .infinity)
                     .frame(height: 38)
                     .background(RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGreen).opacity(0.08)))
+                        .fill(AppColors.marketDown.opacity(0.08)))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -537,24 +537,24 @@ struct QuickPanelBView: View {
 
             Text(order.name)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
 
             Text(orderDetailText(order))
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
 
             Spacer(minLength: 6)
 
-            QuickOutlineButton(title: "撤单", color: Color.blue, width: 40) {
+            QuickOutlineButton(title: "撤单", color: AppColors.accent, width: 40) {
                 Task { await store.cancelOrder(id: order.id) }
             }
         }
         .padding(.horizontal, 16)
         .frame(height: 34)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 16)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5).padding(.leading, 16)
         }
     }
 
@@ -687,7 +687,7 @@ struct QuickPanelCView: View {
                 } label: {
                     Text("展开")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Color.blue)
+                        .foregroundColor(AppColors.accent)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -696,7 +696,7 @@ struct QuickPanelCView: View {
         .padding(.horizontal, 16)
         .frame(height: 36)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
     }
 
@@ -712,7 +712,7 @@ struct QuickPanelCView: View {
                     Text("收起")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -721,7 +721,7 @@ struct QuickPanelCView: View {
 
             Text("完整下单卡 · 默认市价")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 16)
@@ -741,7 +741,7 @@ struct QuickPanelCView: View {
                     Text("返回自选")
                         .font(.system(size: 12))
                 }
-                .foregroundColor(Color.blue)
+                .foregroundColor(AppColors.accent)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -761,7 +761,7 @@ struct QuickPanelCView: View {
             HStack(spacing: 8) {
                 Text("自选 · 点行内按钮带入标的")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                 Spacer(minLength: 8)
             }
             .padding(.horizontal, 16)
@@ -782,12 +782,12 @@ struct QuickPanelCView: View {
         HStack(spacing: 8) {
             Text(meta.name)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
                 .frame(width: 80, alignment: .leading)
             Text(meta.code)
                 .font(.system(size: 10.5))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
                 .frame(width: 86, alignment: .leading)
             Text(rowCache.numberFor(meta.id, .latestPrice).map { SimFormat.price($0) } ?? "—")
@@ -795,10 +795,10 @@ struct QuickPanelCView: View {
                 .foregroundColor(rowCache.colorFor(meta.id, .changePct))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-            QuickOutlineButton(title: "买", color: Color(.systemRed)) {
+            QuickOutlineButton(title: "买", color: AppColors.marketUp) {
                 pickFromWatchlist(meta, .buy)
             }
-            QuickOutlineButton(title: "卖", color: Color(.systemGreen)) {
+            QuickOutlineButton(title: "卖", color: AppColors.marketDown) {
                 pickFromWatchlist(meta, .sell)
             }
         }

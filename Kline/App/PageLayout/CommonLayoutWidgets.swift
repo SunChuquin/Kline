@@ -124,16 +124,16 @@ private struct CommonCardChrome<Content: View>: View {
                 if let time = updateTime, !time.isEmpty {
                     Text(time)
                         .font(.subheadline)
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 } else if showsMore {
                     if let label = moreLabel {
                         Text(label)
                             .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(AppColors.textTertiary)
                     } else {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 16))
-                            .foregroundColor(.gray)
+                            .foregroundColor(AppColors.textTertiary)
                     }
                 }
             }
@@ -141,7 +141,7 @@ private struct CommonCardChrome<Content: View>: View {
             content
         }
         .padding(16)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
@@ -170,7 +170,7 @@ struct CommonHScrollCard: View {
                             Text(items[index])
                                 .font(.system(size: 14))
                                 .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
-                                .background(Color(.systemGray5))
+                                .background(AppColors.cardHoverBackground)
                                 .cornerRadius(8)
                         }
                     }
@@ -203,7 +203,7 @@ struct CommonListCard: View {
                             Text("\(index + 1)")
                                 .font(.system(size: 14))
                                 .fontWeight(.bold)
-                                .foregroundColor(index + 1 <= 3 ? .red : .gray)
+                                .foregroundColor(index + 1 <= 3 ? AppColors.marketUp : AppColors.textTertiary)
                                 .frame(width: 24, alignment: .center)
 
                             Text(items[index])
@@ -230,7 +230,7 @@ private struct CommonEmptyHint: View {
             Text("暂无条目：在检查器里填写「条目」（每行一条）")
                 .font(.system(size: 12))
         }
-        .foregroundColor(.secondary)
+        .foregroundColor(AppColors.textSecondary)
         .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
     }
 }

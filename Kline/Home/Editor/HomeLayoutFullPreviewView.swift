@@ -38,9 +38,9 @@ struct HomeLayoutFullPreviewView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
     }
 
@@ -55,9 +55,9 @@ struct HomeLayoutFullPreviewView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
             .buttonStyle(.plain)
             .padding(.leading, 16)
@@ -66,30 +66,30 @@ struct HomeLayoutFullPreviewView: View {
 
             Text("预览 · 档位 \(editor.styleID)")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
 
             Spacer(minLength: 8)
 
             Text("预览模式 · 入口与 Tab 切换不生效")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
                 .frame(maxWidth: 320, alignment: .trailing)
                 .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "square.dashed")
                 .font(.system(size: 28))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             Text("当前档位暂无可用布局")
                 .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
     }
 }

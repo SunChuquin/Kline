@@ -70,7 +70,7 @@ struct BacktestParamView: View {
             noticeBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 内容贴物理屏幕底边（全 App 统一贴底为 0）
         .ignoresSafeArea(.container, edges: .bottom)
     }
@@ -86,9 +86,9 @@ struct BacktestParamView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -99,7 +99,7 @@ struct BacktestParamView: View {
 
             Text("历史回测")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -108,7 +108,7 @@ struct BacktestParamView: View {
             } label: {
                 Text("开始回测")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(backtest.isRunning ? Color(.tertiaryLabel) : Color.blue)
+                    .foregroundColor(backtest.isRunning ? AppColors.textTertiary : AppColors.accent)
                     .padding(.horizontal, 10)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -118,7 +118,7 @@ struct BacktestParamView: View {
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 未配置交易指令提示（不阻断回测）
@@ -126,7 +126,7 @@ struct BacktestParamView: View {
     private var tradeWarning: some View {
         Text("建议先在编辑里配置交易指令（方向 / 数量）")
             .font(.system(size: 12))
-            .foregroundColor(.orange)
+            .foregroundColor(AppColors.statusWarning)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -136,7 +136,7 @@ struct BacktestParamView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("回测参数")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             VStack(spacing: 0) {
                 row("回测区间") { daysSegmented }
                 divider
@@ -149,7 +149,7 @@ struct BacktestParamView: View {
                             .frame(width: 120)
                         Text("元")
                             .font(.system(size: 13))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                     }
                 }
                 capitalChipsRow
@@ -166,7 +166,7 @@ struct BacktestParamView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }
@@ -176,7 +176,7 @@ struct BacktestParamView: View {
         HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 13))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             content()
@@ -185,7 +185,7 @@ struct BacktestParamView: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(Color(.separator)).frame(height: 0.5)
+        Rectangle().fill(AppColors.separator).frame(height: 0.5)
     }
 
     /// 区间分段（60 / 120 / 250 / 500 交易日）
@@ -221,12 +221,12 @@ struct BacktestParamView: View {
                 } label: {
                     Text(chip.title)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(Color.blue)
+                        .foregroundColor(AppColors.accent)
                         .lineLimit(1)
                         .padding(.horizontal, 10)
                         .frame(height: 32)
                         .background(RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(.systemBackground)))
+                            .fill(AppColors.pageBackground))
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -242,7 +242,7 @@ struct BacktestParamView: View {
             Toggle(isOn: isOn) {
                 Text(title)
                     .font(.system(size: 13))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .toggleStyle(SwitchToggleStyle())
@@ -250,7 +250,7 @@ struct BacktestParamView: View {
 
             Text(note)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -260,14 +260,14 @@ struct BacktestParamView: View {
     private var noticeBar: some View {
         Text("回测基于本地日线库；不还原盘中路径，回落卖出按 bar 内先高后低假设；条件单实盘只吃行情快照，触发必然晚于回测")
             .font(.system(size: 11))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .overlay(alignment: .top) {
-                Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                Rectangle().fill(AppColors.separator).frame(height: 0.5)
             }
     }
 

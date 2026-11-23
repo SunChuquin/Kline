@@ -34,7 +34,7 @@ struct MarketLayoutDView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             Divider()
 
             content
@@ -56,7 +56,7 @@ struct MarketLayoutDView: View {
         } else {
             VStack(spacing: 16) {
                 ProgressView()
-                Text("加载中...").foregroundColor(.gray)
+                Text("加载中...").foregroundColor(AppColors.textTertiary)
             }
             .frame(maxHeight: .infinity)
         }
@@ -74,24 +74,24 @@ struct MarketOverviewBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 HStack(spacing: 28) {
-                    metric("上涨", countText(overview?.up), .red)
-                    metric("下跌", countText(overview?.down), .green)
-                    metric("平盘", countText(overview?.flat), .primary)
+                    metric("上涨", countText(overview?.up), AppColors.marketUp)
+                    metric("下跌", countText(overview?.down), AppColors.marketDown)
+                    metric("平盘", countText(overview?.flat), AppColors.textPrimary)
                 }
                 separator
                 HStack(spacing: 28) {
-                    metric("涨停", countText(overview?.limitUp), .red)
-                    metric("跌停", countText(overview?.limitDown), .green)
+                    metric("涨停", countText(overview?.limitUp), AppColors.marketUp)
+                    metric("跌停", countText(overview?.limitDown), AppColors.marketDown)
                 }
                 separator
-                metric("总成交额", turnoverText, .primary)
+                metric("总成交额", turnoverText, AppColors.textPrimary)
             }
             .padding(.horizontal, 12)
             // 横向可滚（窄屏不截断指标），纵向固定 56 保证指标块垂直居中
             .frame(height: 56)
         }
         .frame(height: 56)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 单个指标块：小字灰色标签 + 大字数值
@@ -99,7 +99,7 @@ struct MarketOverviewBar: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(key)
                 .font(.system(size: 10.5))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             Text(value)
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(color)
@@ -110,7 +110,7 @@ struct MarketOverviewBar: View {
 
     private var separator: some View {
         Rectangle()
-            .fill(Color(.separator))
+            .fill(AppColors.separator)
             .frame(width: 1, height: 30)
             .padding(.horizontal, 20)
     }

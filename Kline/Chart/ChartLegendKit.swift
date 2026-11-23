@@ -78,7 +78,7 @@ extension KlineChartView {
                     } label: {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(atLatest ? Color.gray.opacity(0.35) : Color.blue)
+                            .foregroundColor(atLatest ? AppColors.textTertiary.opacity(0.35) : AppColors.accent)
                             .frame(width: 22, height: 22, alignment: .center)
                             .contentShape(Rectangle())
                     }
@@ -93,7 +93,7 @@ extension KlineChartView {
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                             .frame(width: 22, height: 22, alignment: .center)
                             .contentShape(Rectangle())
                     }
@@ -108,7 +108,7 @@ extension KlineChartView {
                     } label: {
                         Text("裸")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(bareFromSub ? Color.blue : Color.gray)
+                            .foregroundColor(bareFromSub ? AppColors.accent : AppColors.textTertiary)
                             .frame(width: 22, height: 22, alignment: .center)
                             .contentShape(Rectangle())
                     }
@@ -118,7 +118,7 @@ extension KlineChartView {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: height)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
         }
         .frame(height: height)
     }
@@ -236,7 +236,7 @@ extension KlineChartView {
                     Image(systemName: hasTwoCursors ? "magnifyingglass"
                         : (needShowAll ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left"))
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(hasTwoCursors ? .blue : (mainFullscreen ? .blue : .gray))
+                        .foregroundColor(hasTwoCursors ? AppColors.accent : (mainFullscreen ? AppColors.accent : AppColors.textTertiary))
                         .frame(width: 22, height: 22, alignment: .center)
                         .contentShape(Rectangle())
                 }
@@ -249,7 +249,7 @@ extension KlineChartView {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: height)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
         }
         .frame(height: height)
     }
@@ -328,8 +328,8 @@ extension KlineChartView {
 
     func legendText(_ text: String) -> some View {
         HStack(spacing: 3) {
-            Circle().fill(Color.gray).frame(width: 6, height: 6)
-            Text(text).font(.system(size: 11)).foregroundColor(.gray)
+            Circle().fill(AppColors.textTertiary).frame(width: 6, height: 6)
+            Text(text).font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
         }
     }
 
@@ -351,19 +351,19 @@ extension KlineChartView {
                 coverageProgressBar(width: width, height: height)
             }
             HStack(spacing: 0) {
-                Text(left).font(.system(size: 11)).foregroundColor(.gray)
+                Text(left).font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                 if !isLinkedTile {
-                    Text("   周期数\(count)个").font(.system(size: 11)).foregroundColor(.gray)
+                    Text("   周期数\(count)个").font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                 }
                 Spacer()
             }
             .padding(.leading, 12)   // 起始文字朝中间偏移 4pt
-            Text(right).font(.system(size: 11)).foregroundColor(.gray)
+            Text(right).font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 4)   // 截止文字朝中间偏移 4pt
             // 联动多图：时间轴中间只显示周期数字，居中显示（单图保持「周期数xxx个」样式）
             if isLinkedTile {
-                Text("\(count)").font(.system(size: 11)).foregroundColor(.gray)
+                Text("\(count)").font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             // 📌 开启且第一个固定光标存在时：固定光标的行情数据覆盖显示在时间轴上（第二个光标出现后依然持续显示）
@@ -373,13 +373,13 @@ extension KlineChartView {
                 let changePct = prev > 0 ? (item.close - prev) / prev * 100 : 0
                 // 时间轴行情覆盖：多图可单指横向拖动查看完整数据；单图保持原始紧凑布局
                 let overlayContent = HStack(spacing: 6) {
-                    axisKV("开", String(format: "%.2f", item.open), .primary)
+                    axisKV("开", String(format: "%.2f", item.open), AppColors.textPrimary)
                     axisKV("收", String(format: "%.2f", item.close), item.isUp ? upColor : downColor)
                     axisKV("高", String(format: "%.2f", item.high), upColor)
                     axisKV("低", String(format: "%.2f", item.low), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
                     if !hideQuoteTurnover {
-                        axisKV("额", item.formattedTurnover, .primary)
+                        axisKV("额", item.formattedTurnover, AppColors.textPrimary)
                     }
                 }
                 Group {
@@ -397,12 +397,12 @@ extension KlineChartView {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .background(Color(.systemBackground).opacity(0.95))
+                .background(AppColors.pageBackground.opacity(0.95))
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .frame(width: width, height: height)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 是否显示指标覆盖进度条：后台正确计算尚未覆盖全部历史（非放大模式），算完（bgCoverageEnd 到末尾）后消失
@@ -419,9 +419,9 @@ extension KlineChartView {
         let barWidth = min(width * 0.72, 340)
         let barHeight: CGFloat = 4
         return ZStack(alignment: .leading) {
-            Capsule().fill(Color.gray.opacity(0.18))
+            Capsule().fill(AppColors.textTertiary.opacity(0.18))
             Capsule()
-                .fill(Color.blue)
+                .fill(AppColors.accent)
                 .frame(width: max(0, barWidth * endRatio), height: barHeight)
         }
         .frame(width: barWidth, height: barHeight)
@@ -446,13 +446,13 @@ extension KlineChartView {
                 let isUpMirror = mainMirrored ? !item.isUp : item.isUp
                 // 行情数据行：多图可单指横向拖动查看完整数据；单图保持原始紧凑布局
                 let quoteRowContent = HStack(spacing: 6) {
-                    axisKV("开", String(format: "%.2f", o), .primary)
+                    axisKV("开", String(format: "%.2f", o), AppColors.textPrimary)
                     axisKV("收", String(format: "%.2f", c), isUpMirror ? upColor : downColor)
                     axisKV("高", String(format: "%.2f", h), upColor)
                     axisKV("低", String(format: "%.2f", l), downColor)
                     axisKV("涨", String(format: "%+.2f%%", changePct), changePct >= 0 ? upColor : downColor)
                     if !hideQuoteTurnover {
-                        axisKV("额", item.formattedTurnover, .primary)
+                        axisKV("额", item.formattedTurnover, AppColors.textPrimary)
                     }
                 }
                 Group {
@@ -474,13 +474,13 @@ extension KlineChartView {
             }
         }
         .frame(width: width, height: height)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 时间轴上紧凑的"标题:值"单元（标题灰色小字、值带色）
     func axisKV(_ title: String, _ value: String, _ color: Color) -> some View {
         HStack(spacing: 2) {
-            Text(title).font(.system(size: 11)).foregroundColor(.gray)
+            Text(title).font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
             Text(value).font(.system(size: 11)).foregroundColor(color)
         }
     }

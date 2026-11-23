@@ -111,7 +111,7 @@ struct SidebarDrawer<Selection: Hashable, RowContent: View, Footer: View>: View 
             if let title = title {
                 Text(title)
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.top, 12)
@@ -139,7 +139,7 @@ struct SidebarDrawer<Selection: Hashable, RowContent: View, Footer: View>: View 
         // 定宽（侧栏语义的稳定列宽）+ 高度封顶（内容少时贴合、多时面板内滚动）
         .frame(width: panelWidth)
         .frame(maxHeight: maxPanelHeight)
-        .background(Color(.systemBackground))
+        .background(AppColors.sidebarBackground)
         .cornerRadius(14)
         .shadow(color: Color.black.opacity(0.18), radius: 16, y: 4)
         // 停靠侧与顶部各留 8pt：面板从锚点下方浮出，不贴边
@@ -166,24 +166,24 @@ private struct SidebarDrawerDemoPage: View {
                 HStack(spacing: 4) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     Text(selection).font(.system(size: 15, weight: .bold))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { isPresented.toggle() }
                 Spacer()
-                Text("演示页面").font(.system(size: 12)).foregroundColor(.secondary)
+                Text("演示页面").font(.system(size: 12)).foregroundColor(AppColors.textSecondary)
             }
             .padding(.horizontal, 12)
             .frame(height: 46)
             Divider()
             // 模拟页面内容区：抽屉 overlay 挂这里 → 面板从 header 下缘下拉展开
-            Color(.secondarySystemBackground)
+            AppColors.cardBackground
                 .overlay {
-                    Text("页面内容").foregroundColor(.secondary)
+                    Text("页面内容").foregroundColor(AppColors.textSecondary)
                 }
                 .overlay {
                     SidebarDrawer(
@@ -196,30 +196,30 @@ private struct SidebarDrawerDemoPage: View {
                             HStack(spacing: 9) {
                                 Image(systemName: "folder.fill")
                                     .font(.system(size: 13))
-                                    .foregroundColor(active ? .blue : .secondary)
+                                    .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
                                     .frame(width: 24, height: 24)
                                 Text(name).font(.system(size: 13, weight: .semibold))
                                 Spacer(minLength: 4)
                                 Text("\(groups.first(where: { $0.name == name })?.count ?? 0)")
                                     .font(.system(size: 11.5, design: .monospaced))
-                                    .foregroundColor(active ? .blue : .secondary)
+                                    .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
                             }
-                            .foregroundColor(active ? .blue : Color.primary)
+                            .foregroundColor(active ? AppColors.accent : AppColors.textPrimary)
                             .padding(.horizontal, 10)
                             .frame(height: 44)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(RoundedRectangle(cornerRadius: 9)
-                                .fill(active ? Color.blue.opacity(0.12) : Color.clear))
+                                .fill(active ? AppColors.accent.opacity(0.12) : Color.clear))
                         },
                         footer: {
                             HStack(spacing: 6) {
-                                Text("新建分组").font(.system(size: 12)).foregroundColor(.blue)
+                                Text("新建分组").font(.system(size: 12)).foregroundColor(AppColors.accent)
                                     .frame(maxWidth: .infinity)
-                                Text("管理分组").font(.system(size: 12)).foregroundColor(.blue)
+                                Text("管理分组").font(.system(size: 12)).foregroundColor(AppColors.accent)
                                     .frame(maxWidth: .infinity)
                             }
                             .padding(8)
-                            .background(Color(.secondarySystemBackground))
+                            .background(AppColors.cardBackground)
                         }
                     )
                 }

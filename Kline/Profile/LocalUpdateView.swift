@@ -137,7 +137,7 @@ struct LocalUpdateView: View {
             // 卡片组标题：与行情表设置的分组标题同规格（13 semibold 灰、左对齐卡片边缘）
             Text("本地更新")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
 
             VStack(spacing: 0) {
                 statusRow(title: "在线服务",
@@ -164,7 +164,7 @@ struct LocalUpdateView: View {
                     engineStatusIcon
                 }
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }
@@ -193,8 +193,8 @@ struct LocalUpdateView: View {
 
     /// 在线服务行：黄「=」探测中 / 绿勾在线 / 红叉离线
     private var serverIcon: (String, Color) {
-        if serverProbing { return ("minus.circle.fill", .yellow) }
-        return serverOK ? ("checkmark.circle.fill", .green) : ("xmark.circle.fill", .red)
+        if serverProbing { return ("minus.circle.fill", AppColors.statusWarning) }
+        return serverOK ? ("checkmark.circle.fill", AppColors.statusSuccess) : ("xmark.circle.fill", AppColors.statusError)
     }
 
     /// 检查新版行：灰「=」未检查 / 黄「…」检查中 / 黄进度圈 下载中 / 绿勾最新 / 红叉有新版或失败
@@ -216,21 +216,21 @@ struct LocalUpdateView: View {
         case .idle:
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         case .checking:
             Image(systemName: "ellipsis.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.yellow)
+                .foregroundColor(AppColors.statusWarning)
         case .downloading:
             downloadProgressIcon(percent)
         case .latest:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.green)
+                .foregroundColor(AppColors.statusSuccess)
         case .outdated, .failed:
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.red)
+                .foregroundColor(AppColors.statusError)
         }
     }
 
@@ -238,14 +238,14 @@ struct LocalUpdateView: View {
     private func downloadProgressIcon(_ percent: Int) -> some View {
         ZStack {
             Circle()
-                .stroke(Color.yellow.opacity(0.3), lineWidth: 2)
+                .stroke(AppColors.statusWarning.opacity(0.3), lineWidth: 2)
             Circle()
                 .trim(from: 0, to: CGFloat(percent) / 100)
-                .stroke(Color.yellow, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .stroke(AppColors.statusWarning, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text("\(percent)")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundColor(.yellow)
+                .foregroundColor(AppColors.statusWarning)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }
@@ -514,14 +514,14 @@ struct LocalUpdateView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("清单标的自动更新")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
 
             // 分段只为控制 ViewBuilder 子视图数量（同「本地更新」卡片组）
             VStack(spacing: 0) {
                 watchlistStatusRows
                 watchlistSlotRows
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }
@@ -586,14 +586,14 @@ struct LocalUpdateView: View {
                 HStack(spacing: 10) {
                     Text("立即更新")
                         .font(.system(size: 16))
-                        .foregroundColor(watchlistTappable ? Color.primary : Color.gray)
+                        .foregroundColor(watchlistTappable ? AppColors.textPrimary : AppColors.textTertiary)
                     Spacer(minLength: 12)
                     if watchlistSync.isRunning {
                         ProgressView()
                     } else {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 18))
-                            .foregroundColor(watchlistTappable ? Color.blue : Color.gray)
+                            .foregroundColor(watchlistTappable ? AppColors.accent : AppColors.textTertiary)
                             .frame(width: 24, height: 24)
                     }
                 }
@@ -610,7 +610,7 @@ struct LocalUpdateView: View {
             Text("盘中快照写的是当日未完成K线，条件单/预警会按「当前快照价」触发，勿当收盘价；"
                 + scheduleSemanticsText)
                 .font(.system(size: 12))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -628,13 +628,13 @@ struct LocalUpdateView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("补缺口（主库最新日 → 今天）")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
 
             VStack(spacing: 0) {
                 gapBackfillStatusRows
                 gapBackfillActionRows
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }
@@ -651,7 +651,7 @@ struct LocalUpdateView: View {
 
             Divider()
             infoRow(title: "主库基线", value: mainDBBaselineText,
-                    valueColor: mainDBBaselineStale ? .orange : Color(.secondaryLabel),
+                    valueColor: mainDBBaselineStale ? AppColors.statusWarning : AppColors.textSecondary,
                     identifier: "gapBackfill.baseline")
 
             Divider()
@@ -673,14 +673,14 @@ struct LocalUpdateView: View {
                 HStack(spacing: 10) {
                     Text("补一次缺口")
                         .font(.system(size: 16))
-                        .foregroundColor(gapBackfillTappable ? Color.primary : Color.gray)
+                        .foregroundColor(gapBackfillTappable ? AppColors.textPrimary : AppColors.textTertiary)
                     Spacer(minLength: 12)
                     if gapBackfill.isRunning {
                         ProgressView()
                     } else {
                         Image(systemName: "square.and.arrow.down.on.square")
                             .font(.system(size: 18))
-                            .foregroundColor(gapBackfillTappable ? Color.blue : Color.gray)
+                            .foregroundColor(gapBackfillTappable ? AppColors.accent : AppColors.textTertiary)
                             .frame(width: 24, height: 24)
                     }
                 }
@@ -699,14 +699,14 @@ struct LocalUpdateView: View {
                 HStack(spacing: 10) {
                     Text("基准缺失名单")
                         .font(.system(size: 16))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                     Spacer(minLength: 12)
                     if baselineMissingLoading {
                         ProgressView()
                     } else {
                         Image(systemName: "list.bullet.rectangle")
                             .font(.system(size: 18))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                             .frame(width: 24, height: 24)
                     }
                 }
@@ -722,7 +722,7 @@ struct LocalUpdateView: View {
                 Divider()
                 Text(line)
                     .font(.system(size: 12))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -736,10 +736,10 @@ struct LocalUpdateView: View {
 
     private var gapBackfillStateColor: Color {
         switch gapBackfill.state {
-        case .idle:    return Color(.secondaryLabel)
-        case .running: return .yellow
-        case .ok:      return .green
-        case .failed:  return .red
+        case .idle:    return AppColors.textSecondary
+        case .running: return AppColors.statusWarning
+        case .ok:      return AppColors.statusSuccess
+        case .failed:  return AppColors.statusError
         }
     }
 
@@ -775,10 +775,10 @@ struct LocalUpdateView: View {
 
     private var watchlistStateColor: Color {
         switch watchlistState {
-        case .disabled, .idle: return .gray
-        case .syncing:         return .yellow
-        case .synced:          return .green
-        case .failed:          return .red
+        case .disabled, .idle: return AppColors.textTertiary
+        case .syncing:         return AppColors.statusWarning
+        case .synced:          return AppColors.statusSuccess
+        case .failed:          return AppColors.statusError
         }
     }
 
@@ -789,29 +789,29 @@ struct LocalUpdateView: View {
         case .disabled, .idle:
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         case .syncing:
             Image(systemName: "ellipsis.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.yellow)
+                .foregroundColor(AppColors.statusWarning)
         case .synced:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.green)
+                .foregroundColor(AppColors.statusSuccess)
         case .failed:
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundColor(.red)
+                .foregroundColor(AppColors.statusError)
         }
     }
 
     /// 「最近结果」配色（失败红 / 成功绿 / 其余次要色）
     private var watchlistResultColor: Color {
-        guard let outcome = watchlistSync.lastOutcome else { return Color(.secondaryLabel) }
+        guard let outcome = watchlistSync.lastOutcome else { return AppColors.textSecondary }
         switch outcome {
-        case .failed:  return .red
-        case .success: return .green
-        case .skipped: return Color(.secondaryLabel)
+        case .failed:  return AppColors.statusError
+        case .success: return AppColors.statusSuccess
+        case .skipped: return AppColors.textSecondary
         }
     }
 
@@ -874,7 +874,7 @@ struct LocalUpdateView: View {
 
     /// 只读信息行（左标题 + 右值），行高固定 48
     private func infoRow(title: String, value: String,
-                         valueColor: Color = Color(.secondaryLabel),
+                         valueColor: Color = AppColors.textSecondary,
                          identifier: String? = nil) -> some View {
         HStack(spacing: 10) {
             Text(title)
@@ -911,19 +911,19 @@ private struct BaselineMissingSheet: View {
                             HStack {
                                 Text(item.name)
                                     .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(AppColors.textPrimary)
                                 Text(item.code)
                                     .font(.system(size: 12))
-                                    .foregroundColor(Color(.secondaryLabel))
+                                    .foregroundColor(AppColors.textSecondary)
                                 Spacer(minLength: 8)
                                 Text(item.cause)
                                     .font(.system(size: 12))
-                                    .foregroundColor(Color(.secondaryLabel))
+                                    .foregroundColor(AppColors.textSecondary)
                                     .lineLimit(1)
                             }
                             Text(item.file)
                                 .font(.system(size: 11))
-                                .foregroundColor(Color(.tertiaryLabel))
+                                .foregroundColor(AppColors.textTertiary)
                         }
                         .padding(.vertical, 2)
                     }

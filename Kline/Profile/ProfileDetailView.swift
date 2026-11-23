@@ -112,7 +112,7 @@ struct ProfileDetailView: View {
             footer
         }
         // 内容延伸到物理屏幕底边 + 背景铺满（否则 2018 等机型底部 20pt 露出下层导航栏）
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
         // 容器层浮层：居中显示主题选择弹窗（与行情表设置的字段筛选弹窗同做法，
         // 放在页面根而非行内，避免被 ScrollView 裁剪）
@@ -280,13 +280,14 @@ struct ProfileDetailView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("返回")
+            .accessibilityIdentifier("profile.close")
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("个人中心")
                     .font(.system(size: 20, weight: .bold))
                 Text("设置")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
 
             Spacer(minLength: 0)
@@ -294,7 +295,7 @@ struct ProfileDetailView: View {
         .padding(.leading, 4)
         .padding(.trailing, 16)
         .frame(height: 56)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 左侧分类导航
@@ -315,7 +316,7 @@ struct ProfileDetailView: View {
             .padding(.vertical, 12)
         }
         .frame(width: width)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.sidebarBackground)
     }
 
     /// 单个分类项：图标 + 名称，选中态用主题色文字 + 淡色圆角底
@@ -334,12 +335,12 @@ struct ProfileDetailView: View {
                     .minimumScaleFactor(0.8)
                 Spacer(minLength: 0)
             }
-            .foregroundColor(selected ? .accentColor : Color(.label))
+            .foregroundColor(selected ? AppColors.accent : AppColors.textPrimary)
             .padding(.horizontal, 10)
             .frame(height: 44)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    .fill(selected ? AppColors.selectedBackground : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -358,7 +359,7 @@ struct ProfileDetailView: View {
                         .font(.system(size: 22, weight: .bold))
                     Text(selectedCategory.subtitle)
                         .font(.system(size: 12))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -368,7 +369,7 @@ struct ProfileDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     @ViewBuilder
@@ -391,12 +392,12 @@ struct ProfileDetailView: View {
             VStack(spacing: 10) {
                 Image(systemName: "person.circle.fill")
                     .font(.system(size: 84))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(AppColors.accent)
                 Text("用户名")
                     .font(.system(size: 20, weight: .semibold))
                 Text("ID: 123456")
                     .font(.system(size: 13))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 28)
@@ -485,10 +486,10 @@ struct ProfileDetailView: View {
                     .font(.system(size: 12, design: .monospaced))
             }
         }
-        .foregroundColor(Color(.secondaryLabel))
+        .foregroundColor(AppColors.textSecondary)
         .padding(.horizontal, 16)
         .frame(height: 40)
-        .background(Color(.systemBackground))
+        .background(AppColors.sidebarBackground)
     }
 
     // MARK: - 通用行与卡片
@@ -500,11 +501,11 @@ struct ProfileDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
             VStack(spacing: 0) {
                 content()
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
         }
     }
@@ -530,11 +531,11 @@ struct ProfileDetailView: View {
             HStack(spacing: 10) {
                 Text(title)
                     .font(.system(size: 16))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Spacer(minLength: 12)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 48)

@@ -34,7 +34,7 @@ struct MarketLayoutAView: View {
         VStack(spacing: 16) {
             ProgressView()
             Text("加载中...")
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         }
         .frame(maxHeight: .infinity)
     }

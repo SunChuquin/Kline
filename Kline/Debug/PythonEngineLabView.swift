@@ -49,7 +49,7 @@ struct PythonEngineLabView: View {
             }
         }
         // 内容延伸到物理屏幕底边 + 背景铺满（与个人中心同做法）
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear { refreshStatus() }
     }
@@ -70,7 +70,7 @@ struct PythonEngineLabView: View {
 
             Spacer()
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .frame(height: 56)
     }
 
@@ -80,7 +80,7 @@ struct PythonEngineLabView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("引擎状态")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
 
             VStack(spacing: 0) {
                 // 刷新状态（整行可点，命中区 48pt ≥ 44pt）
@@ -88,11 +88,11 @@ struct PythonEngineLabView: View {
                     HStack(spacing: 10) {
                         Text("刷新状态")
                             .font(.system(size: 16))
-                            .foregroundColor(Color.primary)
+                            .foregroundColor(AppColors.textPrimary)
                         Spacer(minLength: 12)
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 18))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                             .frame(width: 24, height: 24)
                     }
                     .padding(.horizontal, 16)
@@ -113,9 +113,9 @@ struct PythonEngineLabView: View {
                 infoRow(title: "引擎版本", value: manifestVersionText)
                 Divider()
                 infoRow(title: "解释器", value: host.isLoaded ? "已加载（进程内常驻）" : "未加载",
-                        valueColor: host.isLoaded ? .green : Color(.secondaryLabel))
+                        valueColor: host.isLoaded ? AppColors.statusSuccess : AppColors.textSecondary)
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
 
             if host.isBusy {
@@ -124,11 +124,11 @@ struct PythonEngineLabView: View {
                     ProgressView()
                     Text(host.busyText)
                         .font(.system(size: 13))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                     if host.busyText.hasPrefix("下载引擎包") {
                         Text("\(Int(host.downloadProgress * 100))%")
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(Color(.secondaryLabel))
+                            .foregroundColor(AppColors.textSecondary)
                     }
                     Spacer(minLength: 0)
                 }
@@ -144,7 +144,7 @@ struct PythonEngineLabView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("操作")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
 
             VStack(spacing: 0) {
                 // ① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）
@@ -152,7 +152,7 @@ struct PythonEngineLabView: View {
                     HStack(spacing: 10) {
                         Text("下载引擎包（.tipa）")
                             .font(.system(size: 16))
-                            .foregroundColor(host.isBusy ? Color.gray : Color.primary)
+                            .foregroundColor(host.isBusy ? AppColors.textTertiary : AppColors.textPrimary)
                         Spacer(minLength: 12)
                         downloadIcon
                             .frame(width: 24, height: 24)
@@ -227,7 +227,7 @@ struct PythonEngineLabView: View {
 
                 actionRow(title: "清理下载文件",
                           systemImage: "trash",
-                          tint: .red,
+                          tint: AppColors.statusError,
                           enabled: !host.isBusy) {
                     cleanDownloads()
                 }
@@ -240,13 +240,13 @@ struct PythonEngineLabView: View {
                     exportCrashLogs()
                 }
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(12)
 
             // 三段式流程说明（实验已进程隔离：Python 在 pyrunner 子进程执行，崩溃不影响本 App）
             Text("流程：① 下载引擎包（.tipa + sha256 校验，落在 Documents/Downloads）→ ② 用 TrollStore 安装（安装时整包授信代码签名，装成 Engine.app）→ ③ 回本页「刷新状态」确认已安装后即可跑实验①②③。实验经 pyrunner 独立子进程执行 Python（root 拉起、进程隔离），引擎崩溃只死子进程，绝不影响本 App；超时多为子进程崩溃，stderr 见 Documents/py_runner_stderr.log。「加载引擎」仅为测量进程内 dlopen/Py_Initialize 计时，跑实验无需它。Engine.app 的卸载请在 TrollStore 内操作；「清理下载文件」只删除已下载的 tipa。")
                 .font(.system(size: 12))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
                 .padding(.top, 4)
@@ -259,14 +259,14 @@ struct PythonEngineLabView: View {
         if host.isBusy && host.busyText.hasPrefix("下载引擎包") {
             ZStack {
                 Circle()
-                    .stroke(Color.yellow.opacity(0.3), lineWidth: 2)
+                    .stroke(AppColors.statusWarning.opacity(0.3), lineWidth: 2)
                 Circle()
                     .trim(from: 0, to: CGFloat(max(0.02, host.downloadProgress)))
-                    .stroke(Color.yellow, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .stroke(AppColors.statusWarning, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 Text("\(Int(host.downloadProgress * 100))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.yellow)
+                    .foregroundColor(AppColors.statusWarning)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
             }
@@ -275,13 +275,13 @@ struct PythonEngineLabView: View {
         } else {
             Image(systemName: "arrow.down.circle")
                 .font(.system(size: 18))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
         }
     }
 
     /// 通用操作行（48pt 行高，图标位固定 24x24，布局不随状态变形）
     private func actionRow(title: String, systemImage: String,
-                           tint: Color = .blue,
+                           tint: Color = AppColors.accent,
                            enabled: Bool,
                            showSpinner: Bool = false,
                            action: @escaping () -> Void) -> some View {
@@ -289,7 +289,7 @@ struct PythonEngineLabView: View {
             HStack(spacing: 10) {
                 Text(title)
                     .font(.system(size: 16))
-                    .foregroundColor(enabled ? Color.primary : Color.gray)
+                    .foregroundColor(enabled ? AppColors.textPrimary : AppColors.textTertiary)
                 Spacer(minLength: 12)
                 if showSpinner {
                     ProgressView()
@@ -297,7 +297,7 @@ struct PythonEngineLabView: View {
                 } else {
                     Image(systemName: systemImage)
                         .font(.system(size: 18))
-                        .foregroundColor(enabled ? tint : Color.gray)
+                        .foregroundColor(enabled ? tint : AppColors.textTertiary)
                         .frame(width: 24, height: 24)
                 }
             }
@@ -310,7 +310,7 @@ struct PythonEngineLabView: View {
     }
 
     /// 只读信息行（与 LocalUpdateView 同规格，行高固定 48）
-    private func infoRow(title: String, value: String, valueColor: Color = Color(.secondaryLabel)) -> some View {
+    private func infoRow(title: String, value: String, valueColor: Color = AppColors.textSecondary) -> some View {
         HStack(spacing: 10) {
             Text(title)
                 .font(.system(size: 16))
@@ -332,7 +332,7 @@ struct PythonEngineLabView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("结果输出")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.85))
+                .foregroundColor(AppColors.textSecondary)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -340,13 +340,13 @@ struct PythonEngineLabView: View {
                         if host.outputLines.isEmpty {
                             Text("（暂无输出）")
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Color(.tertiaryLabel))
+                                .foregroundColor(AppColors.textTertiary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         ForEach(Array(host.outputLines.enumerated()), id: \.offset) { index, line in
                             Text(line)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Color(.secondaryLabel))
+                                .foregroundColor(AppColors.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(index)
@@ -355,7 +355,7 @@ struct PythonEngineLabView: View {
                     .padding(10)
                 }
                 .frame(maxHeight: 280)
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(12)
                 .onChange(of: host.outputLines.count) { _ in
                     proxy.scrollTo(max(0, host.outputLines.count - 1), anchor: .bottom)
@@ -381,10 +381,10 @@ struct PythonEngineLabView: View {
 
     private func statusColor(_ st: PythonEngineStatus) -> Color {
         switch st {
-        case .notInstalled:      return .gray
-        case .installed:         return .green
-        case .versionMismatch:   return .yellow
-        case .corrupted:         return .red
+        case .notInstalled:      return AppColors.textTertiary
+        case .installed:         return AppColors.statusSuccess
+        case .versionMismatch:   return AppColors.statusWarning
+        case .corrupted:         return AppColors.statusError
         }
     }
 

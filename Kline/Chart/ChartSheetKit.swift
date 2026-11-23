@@ -23,7 +23,7 @@ extension KlineChartView {
                 content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(width: geometry.size.width, height: min(geometry.size.height * heightFraction, 660))
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             // 只圆顶部两角：底边贴紧物理屏幕底边后，底部若保留圆角，两角会露出深色遮罩
             .clipShape(TopRoundedCornerRect(radius: 16))
             // ⚠️ 固定高度面板直接加 .ignoresSafeArea 无效：扩展容器内默认居中放置，
@@ -65,11 +65,11 @@ extension KlineChartView {
                     groupHeader("自定义技术指标（主图）")
                     HStack {
                         Button("+ 新增/管理") { editorUI.showMainSheet = false; editorUI.editorTarget = .main; showCustomEditor = true }
-                            .font(.system(size: 13)).foregroundColor(.blue)
+                            .font(.system(size: 13)).foregroundColor(AppColors.accent)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     if mainCustoms.isEmpty {
-                        Text("暂无主图自定义技术指标").font(.system(size: 12)).foregroundColor(.gray)
+                        Text("暂无主图自定义技术指标").font(.system(size: 12)).foregroundColor(AppColors.textTertiary)
                             .padding(.horizontal, 16).padding(.bottom, 12)
                     } else {
                         ForEach(mainCustoms) { ind in mainCustomRow(ind) }
@@ -105,13 +105,13 @@ extension KlineChartView {
             VStack(spacing: 6) {
                 Image(systemName: on ? "checkmark.square.fill" : "square")
                     .font(.system(size: 14))
-                    .foregroundColor(on ? .blue : .gray.opacity(0.6))
-                Text(title).font(.system(size: 13)).foregroundColor(.primary)
+                    .foregroundColor(on ? AppColors.accent : AppColors.textTertiary.opacity(0.6))
+                Text(title).font(.system(size: 13)).foregroundColor(AppColors.textPrimary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(Color(uiColor: .systemGray6).opacity(on ? 1 : 0.45))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? Color.blue : Color.gray.opacity(0.25), lineWidth: on ? 1.5 : 1))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? AppColors.accent : AppColors.textTertiary.opacity(0.25), lineWidth: on ? 1.5 : 1))
         }
     }
 
@@ -122,16 +122,16 @@ extension KlineChartView {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: activeCustomIndicator?.id == ind.id ? "checkmark.circle.fill" : "circle")
-                        .foregroundColor(activeCustomIndicator?.id == ind.id ? .blue : .gray)
+                        .foregroundColor(activeCustomIndicator?.id == ind.id ? AppColors.accent : AppColors.textTertiary)
                     RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 14, height: 5)
-                    Text(ind.name).font(.system(size: 14)).foregroundColor(.primary)
+                    Text(ind.name).font(.system(size: 14)).foregroundColor(AppColors.textPrimary)
                 }
             }
             Spacer()
             Button {
                 editorUI.showMainSheet = false; editorUI.editorTarget = .main; showCustomEditor = true
             } label: {
-                Image(systemName: "pencil").font(.system(size: 13)).foregroundColor(.gray)
+                Image(systemName: "pencil").font(.system(size: 13)).foregroundColor(AppColors.textTertiary)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 9)
@@ -175,11 +175,11 @@ extension KlineChartView {
                     groupHeader("自定义技术指标（副图）")
                     HStack {
                         Button("+ 新增/管理") { editorUI.showSubSheet = false; editorUI.editorTarget = .sub; showCustomEditor = true }
-                            .font(.system(size: 13)).foregroundColor(.blue)
+                            .font(.system(size: 13)).foregroundColor(AppColors.accent)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     if subCustoms.isEmpty {
-                        Text("暂无副图自定义技术指标").font(.system(size: 12)).foregroundColor(.gray)
+                        Text("暂无副图自定义技术指标").font(.system(size: 12)).foregroundColor(AppColors.textTertiary)
                             .padding(.horizontal, 16).padding(.bottom, 12)
                     } else {
                         ForEach(subCustoms) { ind in subCustomRow(ind, model: m) }
@@ -219,11 +219,11 @@ extension KlineChartView {
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundColor(selected ? .blue : .primary)
+                .foregroundColor(selected ? AppColors.accent : AppColors.textPrimary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(Color(uiColor: .systemGray6).opacity(selected ? 1 : 0.45))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.blue : Color.gray.opacity(0.25), lineWidth: selected ? 1.5 : 1))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? AppColors.accent : AppColors.textTertiary.opacity(0.25), lineWidth: selected ? 1.5 : 1))
         }
     }
 
@@ -243,11 +243,11 @@ extension KlineChartView {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: m.activeCustomID == ind.id ? "checkmark.circle.fill" : "circle")
-                        .foregroundColor(m.activeCustomID == ind.id ? .blue : .gray)
+                        .foregroundColor(m.activeCustomID == ind.id ? AppColors.accent : AppColors.textTertiary)
                     RoundedRectangle(cornerRadius: 2).fill(ind.color).frame(width: 14, height: 5)
-                    Text(ind.name).font(.system(size: 14)).foregroundColor(.primary)
+                    Text(ind.name).font(.system(size: 14)).foregroundColor(AppColors.textPrimary)
                     if m.activeCustomID == ind.id {
-                        Text("当前").font(.system(size: 10)).foregroundColor(.blue)
+                        Text("当前").font(.system(size: 10)).foregroundColor(AppColors.accent)
                     }
                 }
             }
@@ -255,7 +255,7 @@ extension KlineChartView {
             Button {
                 editorUI.showSubSheet = false; editorUI.editorTarget = .sub; showCustomEditor = true
             } label: {
-                Image(systemName: "pencil").font(.system(size: 13)).foregroundColor(.gray)
+                Image(systemName: "pencil").font(.system(size: 13)).foregroundColor(AppColors.textTertiary)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 9)
@@ -274,12 +274,12 @@ extension KlineChartView {
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.blue.opacity(0.06))
+            .background(AppColors.accent.opacity(0.06))
             .cornerRadius(8)
         }
         .padding(.horizontal, 16)
@@ -289,17 +289,17 @@ extension KlineChartView {
     func groupHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 11, weight: .medium))
-            .foregroundColor(.gray)
+            .foregroundColor(AppColors.textTertiary)
             .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 2)
     }
 
     func sheetHeader(title: String, onClose: @escaping () -> Void) -> some View {
         HStack {
-            Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(.primary)
+            Text(title).font(.system(size: 16, weight: .bold)).foregroundColor(AppColors.textPrimary)
             Spacer()
             Button("重置内置指标") { editorUI.showResetBuiltinConfirm = true }
-                .font(.system(size: 13)).foregroundColor(.red)
-            Button("完成") { onClose() }.font(.system(size: 14)).foregroundColor(.blue)
+                .font(.system(size: 13)).foregroundColor(AppColors.statusError)
+            Button("完成") { onClose() }.font(.system(size: 14)).foregroundColor(AppColors.accent)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .alert("重置内置指标", isPresented: Binding(get: { editorUI.showResetBuiltinConfirm },

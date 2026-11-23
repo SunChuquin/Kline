@@ -30,7 +30,7 @@ struct ColumnFilterButton: View {
                     .font(.system(size: 12))
                     .lineLimit(1)
             }
-            .foregroundColor(isEmpty ? .secondary : .blue)
+            .foregroundColor(isEmpty ? AppColors.textSecondary : AppColors.accent)
         }
         .buttonStyle(.plain)
         .frame(height: 28)
@@ -52,10 +52,10 @@ struct FilterOptionsPanel: View {
                     } label: {
                         HStack {
                             Text("全部（不筛选）")
-                                .foregroundColor(.primary)
+                                .foregroundColor(AppColors.textPrimary)
                             Spacer()
                             if filterLabels.isEmpty {
-                                Image(systemName: "checkmark").foregroundColor(.blue)
+                                Image(systemName: "checkmark").foregroundColor(AppColors.accent)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -75,10 +75,10 @@ struct FilterOptionsPanel: View {
                         } label: {
                             HStack {
                                 Text(opt.label)
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(AppColors.textPrimary)
                                 Spacer()
                                 if on {
-                                    Image(systemName: "checkmark").foregroundColor(.blue)
+                                    Image(systemName: "checkmark").foregroundColor(AppColors.accent)
                                 }
                             }
                             .padding(.horizontal, 12)
@@ -97,7 +97,7 @@ struct FilterOptionsPanel: View {
             } label: {
                 Text("完成")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
                     .contentShape(Rectangle())
@@ -105,7 +105,7 @@ struct FilterOptionsPanel: View {
             .buttonStyle(.plain)
         }
         .frame(width: 210)
-        .background(Color(.systemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
     }
@@ -203,13 +203,13 @@ struct MarketColumnConfigPanel: View {
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.gray.opacity(0.6))
+                        .foregroundColor(AppColors.textTertiary.opacity(0.6))
                 }
                 .frame(minHeight: 36)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
         } header: {
             Text("快捷操作")
         } footer: {
@@ -285,12 +285,12 @@ struct MarketColumnConfigPanel: View {
                     .font(.system(size: 16, weight: .semibold))
                 HStack(spacing: 12) {
                     Button("取消") { dismiss() }
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     Spacer()
                     Button("重置") {
                         draft = MarketConfigStore.defaultConfig()
                     }
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
                     Button(action: {
                         var saved = draft
                         // 冻结列数做范围收敛（1~3），防止异常值写入
@@ -299,7 +299,7 @@ struct MarketColumnConfigPanel: View {
                         dismiss()
                     }) {
                         Text("完成")
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                             .font(.system(size: 16, weight: .bold))
                     }
                 }
@@ -351,7 +351,7 @@ struct MarketColumnConfigPanel: View {
             .listStyle(.insetGrouped)
             .environment(\.editMode, .constant(.active))
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppColors.pageBackground)
         // 容器层浮层：屏幕居中显示多选筛选面板，避免被 List 行裁剪
         .overlay {
             if let field = openFilterField,

@@ -23,7 +23,7 @@ struct HomeHeaderBar: View {
             HStack(spacing: 6) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.system(size: 24))
-                    .foregroundColor(.red)
+                    .foregroundColor(AppColors.marketUp)
                 Text("Kline")
                     .font(.system(size: 18))
                     .fontWeight(.bold)
@@ -38,18 +38,18 @@ struct HomeHeaderBar: View {
                 HStack(spacing: 5) {
                     Image(systemName: "person.circle.fill")
                         .font(.system(size: 28))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("登录")
                         .font(.system(size: 16))
                 }
                 .padding(EdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2))
-                .background(Color(.systemGray5))
+                .background(AppColors.cardHoverBackground)
                 .cornerRadius(20)
             }
             .accessibilityIdentifier("home.profileButton")
             .padding(.trailing, 16)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .frame(minHeight: 56)
     }
 }

@@ -58,22 +58,22 @@ private struct DashboardGroupPalette {
         if scheme == .dark {
             return DashboardGroupPalette(
                 isDark: true,
-                groupFill: Color(red: 0.055, green: 0.082, blue: 0.133),   // #0E1522
-                border: Color.white.opacity(0.06),
-                primaryText: .white,
-                secondaryText: Color.white.opacity(0.55),
-                divider: Color.white.opacity(0.06),
-                badgeFill: Color(red: 1.00, green: 0.30, blue: 0.32)       // #FF4D52
+                groupFill: AppColors.cardBackground,
+                border: AppColors.separator,
+                primaryText: AppColors.textPrimary,
+                secondaryText: AppColors.textSecondary,
+                divider: AppColors.separator,
+                badgeFill: AppColors.marketUp
             )
         }
         return DashboardGroupPalette(
             isDark: false,
-            groupFill: Color(red: 0.969, green: 0.976, blue: 0.988),       // #F7F9FC
-            border: Color(red: 0.929, green: 0.941, blue: 0.957),          // #EDF0F4
-            primaryText: Color(red: 0.090, green: 0.125, blue: 0.200),     // #172033
-            secondaryText: Color(red: 0.573, green: 0.608, blue: 0.667),   // #929BAA
-            divider: Color(red: 0.929, green: 0.941, blue: 0.957),         // #EDF0F4
-            badgeFill: Color(red: 0.890, green: 0.302, blue: 0.302)        // #E34D4D
+            groupFill: AppColors.cardBackground,
+            border: AppColors.separator,
+            primaryText: AppColors.textPrimary,
+            secondaryText: AppColors.textSecondary,
+            divider: AppColors.separator,
+            badgeFill: AppColors.marketUp
         )
     }
 }
@@ -232,8 +232,8 @@ private struct DashboardPager<Content: View>: View {
                 HStack(spacing: 5) {
                     ForEach(0..<pageCount, id: \.self) { index in
                         Circle()
-                            .fill(index == selection ? Color.accentColor
-                                                     : Color.accentColor.opacity(0.25))
+                            .fill(index == selection ? AppColors.accent
+                                                     : AppColors.accent.opacity(0.25))
                             .frame(width: 5, height: 5)
                     }
                 }
@@ -509,7 +509,7 @@ private struct DashboardEmptyHint: View {
                 .font(.system(size: 12))
                 .lineLimit(2)
         }
-        .foregroundColor(.secondary)
+        .foregroundColor(AppColors.textSecondary)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }

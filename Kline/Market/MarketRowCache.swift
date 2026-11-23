@@ -167,7 +167,7 @@ final class MarketRowCache: ObservableObject {
     }
 
     func colorFor(_ metaID: Int, _ field: MarketField) -> Color {
-        guard let row = rows[metaID] else { return Color.primary }
+        guard let row = rows[metaID] else { return AppColors.textPrimary }
         return Color(row.tintColor(field))
     }
 

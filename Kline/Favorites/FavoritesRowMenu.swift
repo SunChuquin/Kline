@@ -119,7 +119,7 @@ struct FavoritesRowMenuPanel: View {
                     .lineLimit(1)
                 Text(subtitle)
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -139,7 +139,7 @@ struct FavoritesRowMenuPanel: View {
             Button(action: onCancel) {
                 Text("取消")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
                     // 视觉高度约 40pt，命中区补到 44pt（项目既有约定）
@@ -149,7 +149,7 @@ struct FavoritesRowMenuPanel: View {
             .buttonStyle(.plain)
         }
         .frame(width: 260)
-        .background(Color(.systemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
     }
@@ -193,7 +193,7 @@ struct FavoritesRowMenuPanel: View {
                 if !item.enabled, let reason = item.reason {
                     Text(reason)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 30)
@@ -211,8 +211,8 @@ struct FavoritesRowMenuPanel: View {
 
     /// 主行颜色：危险项红、可用项主色、不可用项置灰（原因行固定用 secondary）
     private func mainColor(_ item: FavoritesRowMenuItem) -> Color {
-        guard item.enabled else { return Color(.tertiaryLabel) }
-        return item.destructive ? Color(.systemRed) : Color.primary
+        guard item.enabled else { return AppColors.textTertiary }
+        return item.destructive ? AppColors.marketUp : AppColors.textPrimary
     }
 }
 
@@ -269,28 +269,28 @@ struct FavoritesNoteSheet: View {
                 if text.isEmpty {
                     Text("写点什么都行：买点 / 止损 / 关注理由")
                         .font(.system(size: 13))
-                        .foregroundColor(Color(.tertiaryLabel))
+                        .foregroundColor(AppColors.textTertiary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 14)
                         .allowsHitTesting(false)
                 }
             }
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(.separator), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(AppColors.separator, lineWidth: 1))
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             Divider()
 
             HStack(spacing: 0) {
-                dialogButton("清空", color: .secondary) { onClear() }
+                dialogButton("清空", color: AppColors.textSecondary) { onClear() }
                 Spacer(minLength: 0)
-                dialogButton("取消", color: .secondary) { onCancel() }
-                dialogButton("保存", color: .blue, bold: true) { onSave(text) }
+                dialogButton("取消", color: AppColors.textSecondary) { onCancel() }
+                dialogButton("保存", color: AppColors.accent, bold: true) { onSave(text) }
             }
             .padding(.horizontal, 10)
             .frame(height: 52)
         }
         .frame(width: 320)
-        .background(Color(.systemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(14)
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
     }
@@ -347,7 +347,7 @@ struct FavoritesBatchAlertSheet: View {
                     .font(.system(size: 15, weight: .semibold))
                 Text(subtitle)
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -358,28 +358,28 @@ struct FavoritesBatchAlertSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("触发规则")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                 HStack(spacing: 2) {
                     segment("上穿", active: compareUp) { compareUp = true }
                     segment("下穿", active: !compareUp) { compareUp = false }
                 }
-                .background(Color(.systemGray6))
+                .background(AppColors.sidebarBackground)
                 .cornerRadius(10)
 
                 Text("触发价")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .padding(.top, 2)
                 TextField("如 15.80", text: $valueText)
                     .keyboardType(.decimalPad)
                     .font(.system(size: 15, design: .monospaced))
                     .frame(height: 44)
                     .padding(.horizontal, 10)
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(.separator), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(AppColors.separator, lineWidth: 1))
 
                 Text("触发后不下单、不校验持仓，只在「预警记录」里查看")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 14)
@@ -388,9 +388,9 @@ struct FavoritesBatchAlertSheet: View {
 
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                dialogButton("取消", color: .secondary) { onCancel() }
+                dialogButton("取消", color: AppColors.textSecondary) { onCancel() }
                 dialogButton(count > 1 ? "应用到 \(count) 只" : "设置预警",
-                             color: triggerPrice == nil ? Color(.tertiaryLabel) : .blue,
+                             color: triggerPrice == nil ? AppColors.textTertiary : AppColors.accent,
                              bold: true) {
                     guard let price = triggerPrice else { return }
                     onApply(compareUp, price)
@@ -400,7 +400,7 @@ struct FavoritesBatchAlertSheet: View {
             .frame(height: 52)
         }
         .frame(width: 320)
-        .background(Color(.systemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(14)
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
     }
@@ -410,11 +410,11 @@ struct FavoritesBatchAlertSheet: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(active ? .white : .secondary)
+                .foregroundColor(active ? .white : AppColors.textSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 36)
                 .background(RoundedRectangle(cornerRadius: 8)
-                    .fill(active ? Color.blue : Color.clear))
+                    .fill(active ? AppColors.accent : Color.clear))
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
         }
@@ -513,7 +513,7 @@ struct BatchActionBar: View {
                 HStack(spacing: 0) {
                     Text(reason)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -526,10 +526,10 @@ struct BatchActionBar: View {
                     Button(action: onDone) {
                         Text("完成")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.blue)
+                            .foregroundColor(AppColors.accent)
                             .padding(.horizontal, 10)
                             .frame(height: 28)
-                            .background(Color(.systemGray6))
+                            .background(AppColors.sidebarBackground)
                             .cornerRadius(7)
                             .frame(height: 44)
                             .contentShape(Rectangle())
@@ -540,7 +540,7 @@ struct BatchActionBar: View {
                 }
                 Text(countText)
                     .font(.system(size: 13, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
                     // 固定宽：数量从 1 位变 3 位时右侧按钮不位移（不抖动）
                     .frame(width: 86, alignment: .leading)
@@ -559,7 +559,7 @@ struct BatchActionBar: View {
             .padding(.leading, 12)
             .frame(height: 56)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.cardBackground)
     }
 
     /// 动作按钮：图标 + 文字 12pt、systemGray6 胶囊、44pt 命中区（观感对齐 MarketToolButton）
@@ -571,10 +571,10 @@ struct BatchActionBar: View {
                 Image(systemName: entry.icon).font(.system(size: 12, weight: .medium))
                 Text(entry.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
             }
-            .foregroundColor(entry.enabled ? .blue : Color(.tertiaryLabel))
+            .foregroundColor(entry.enabled ? AppColors.accent : AppColors.textTertiary)
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(Color(.systemGray6))
+            .background(AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(height: 44)
             .contentShape(Rectangle())

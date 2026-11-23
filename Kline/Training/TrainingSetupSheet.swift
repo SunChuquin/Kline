@@ -137,7 +137,7 @@ struct TrainingSetupSheet: View {
                             if let errorText {
                                 Text(errorText)
                                     .font(.system(size: 12))
-                                    .foregroundColor(.red)
+                                    .foregroundColor(AppColors.statusError)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
@@ -149,7 +149,7 @@ struct TrainingSetupSheet: View {
                     footer
                 }
                 .frame(maxWidth: 520)
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .shadow(color: Color.black.opacity(0.25), radius: 24, y: 8)
                 .padding(.horizontal, 24)
@@ -177,7 +177,7 @@ struct TrainingSetupSheet: View {
             Button { isPresented = false } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -211,7 +211,7 @@ struct TrainingSetupSheet: View {
             if favorites.visibleGroups.isEmpty {
                 Text("暂无可用分组")
                     .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -242,25 +242,25 @@ struct TrainingSetupSheet: View {
             .accessibilityIdentifier("trainingSetup.accountType")
             Text(accountType.subtitle)
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if accountType == .fixedAmount {
                 HStack(spacing: 8) {
                     Text("本金")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     TextField("100000", text: $capitalText)
                         .keyboardType(.numberPad)
                         .font(.system(size: 14))
                         .padding(.horizontal, 10)
                         .frame(height: 34)
-                        .background(Color(.tertiarySystemBackground))
+                        .background(AppColors.cardHoverBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .frame(maxWidth: 170)
                         .accessibilityIdentifier("trainingSetup.capital")
                     Text("元")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     Spacer(minLength: 0)
                 }
             }
@@ -282,7 +282,7 @@ struct TrainingSetupSheet: View {
             .accessibilityIdentifier("trainingSetup.tradeMode")
             Text(tradeMode.subtitle)
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -294,18 +294,18 @@ struct TrainingSetupSheet: View {
                 if let meta = selectedMeta {
                     Text("\(meta.name) \(meta.displayCode)")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                 } else {
                     Text("未选择")
                         .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 Spacer()
                 Button("随机抽取") { Task { await pickRandom() } }
                     .font(.system(size: 13, weight: .medium))
                     .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(AppColors.accent)
             }
             searchField
             if !searchResults.isEmpty { searchResultList }
@@ -316,7 +316,7 @@ struct TrainingSetupSheet: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             TextField("输入名称 / 代码搜索", text: $keyword)
                 .font(.system(size: 14))
                 .textInputAutocapitalization(.never)
@@ -324,14 +324,14 @@ struct TrainingSetupSheet: View {
             if !keyword.isEmpty {
                 Button { keyword = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: 36)
-        .background(Color(.tertiarySystemBackground))
+        .background(AppColors.cardHoverBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -342,20 +342,20 @@ struct TrainingSetupSheet: View {
                     HStack(spacing: 8) {
                         Text(meta.name)
                             .font(.system(size: 14))
-                            .foregroundColor(.primary)
+                            .foregroundColor(AppColors.textPrimary)
                             .lineLimit(1)
                         Text(meta.displayCode)
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                         Spacer()
                         if !TrainingDateMath.isTrainable(meta) {
                             Text("历史不足")
                                 .font(.system(size: 11))
-                                .foregroundColor(.orange)
+                                .foregroundColor(AppColors.statusWarning)
                         } else if meta.id == selectedMeta?.id {
                             Image(systemName: "checkmark")
                                 .font(.system(size: 12))
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(AppColors.accent)
                         }
                     }
                     .padding(.vertical, 9)
@@ -366,7 +366,7 @@ struct TrainingSetupSheet: View {
                 Divider()
             }
         }
-        .background(Color(.tertiarySystemBackground))
+        .background(AppColors.cardHoverBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -380,7 +380,7 @@ struct TrainingSetupSheet: View {
                 Button("随机") { randomizeDate() }
                     .font(.system(size: 13, weight: .medium))
                     .buttonStyle(.plain)
-                    .foregroundColor(canRandomizeDate ? .accentColor : .secondary)
+                    .foregroundColor(canRandomizeDate ? AppColors.accent : AppColors.textSecondary)
                     .disabled(!canRandomizeDate)
             }
             if let meta = selectedMeta,
@@ -388,7 +388,7 @@ struct TrainingSetupSheet: View {
                let upper = TrainingDateMath.maxDate(of: meta), lower <= upper {
                 Text("可选区间 \(TrainSessionRecord.dateText(TrainingDateMath.int(from: lower))) ~ \(TrainSessionRecord.dateText(TrainingDateMath.int(from: upper)))")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
             }
             if let range = dateRange {
                 DatePicker("", selection: dateBinding, in: range, displayedComponents: .date)
@@ -399,7 +399,7 @@ struct TrainingSetupSheet: View {
             if let meta = selectedMeta, !TrainingDateMath.isTrainable(meta) {
                 Text("该标的历史数据不足（需至少能取到最新库日期前 65 天）")
                     .font(.system(size: 11))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
             }
         }
     }
@@ -409,10 +409,10 @@ struct TrainingSetupSheet: View {
             Button { isPresented = false } label: {
                 Text("取消")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
-                    .background(Color(.tertiarySystemBackground))
+                    .background(AppColors.cardHoverBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -421,10 +421,10 @@ struct TrainingSetupSheet: View {
             Button { Task { await startTraining() } } label: {
                 Text("开始训练")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(canStart ? .white : .secondary)
+                    .foregroundColor(canStart ? .white : AppColors.textSecondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
-                    .background(canStart ? Color.accentColor : Color(.tertiarySystemBackground))
+                    .background(canStart ? AppColors.accent : AppColors.cardHoverBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -439,17 +439,17 @@ struct TrainingSetupSheet: View {
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.secondary)
+            .foregroundColor(AppColors.textSecondary)
     }
 
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundColor(selected ? .white : .primary)
+                .foregroundColor(selected ? .white : AppColors.textPrimary)
                 .padding(.horizontal, 14)
                 .frame(height: 32)
-                .background(selected ? Color.accentColor : Color(.systemBackground))
+                .background(selected ? AppColors.accent : AppColors.pageBackground)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)

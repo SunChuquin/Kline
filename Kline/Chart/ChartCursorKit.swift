@@ -103,7 +103,7 @@ extension KlineChartView {
                                      secondLine: secondLineText.isEmpty ? nil : secondLineText,
                                      gapRanges: lineGap,
                                      bgColor: bgColor,
-                                     lineColor: compare != nil ? Color.blue : Color(.label).opacity(0.45))
+                                     lineColor: compare != nil ? AppColors.accent : AppColors.textPrimary.opacity(0.45))
                     .equatable()
                 // 主图横线右边：光标K线收盘 → 屏幕最后那根K线收盘 的涨幅；
                 // 光标停在屏幕最右边一根K线（index == endIndex）时不显示（涨幅恒为0无意义）。
@@ -158,7 +158,7 @@ extension KlineChartView {
             let lineHeight = max(0, height - topCut)
             let lineBottom = topCut + lineHeight
             // 线宽 0.5：比K线上下影线（1pt）细一半
-            let vColor: Color = (compare != nil || secondary) ? .blue : Color(.label).opacity(0.45)
+            let vColor: Color = (compare != nil || secondary) ? AppColors.accent : AppColors.textPrimary.opacity(0.45)
             // 避开光标所在那根K线：与「竖轴遇到副图指标数据栏不穿过去、而是分段绘制」同理，
             // 竖轴遇到该K线（上下影线 + 实体）也不穿过去，改在K线上、下两段分别绘制，
             // 这样光标停在哪根K线上，那根K线都完整可见

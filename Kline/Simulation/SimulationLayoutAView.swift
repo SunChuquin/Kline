@@ -85,13 +85,13 @@ struct SimulationLayoutAView: View {
                         sidebar
                             .frame(width: sidebarWidth)
                         Rectangle()
-                            .fill(Color(.separator))
+                            .fill(AppColors.separator)
                             .frame(width: 0.5)
                         workspace
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground))
+                    .background(AppColors.pageBackground)
                 }
             }
             .onChange(of: isCompact) { compact in
@@ -123,7 +123,7 @@ struct SimulationLayoutAView: View {
         VStack(spacing: 0) {
             Text("账户")
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(EdgeInsets(top: 12, leading: 16, bottom: 5, trailing: 16))
 
@@ -141,7 +141,7 @@ struct SimulationLayoutAView: View {
             if let hint = sidebarHint {
                 Text(hint)
                     .font(.system(size: 10.5))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
@@ -151,7 +151,7 @@ struct SimulationLayoutAView: View {
             sidebarBottomActions
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .alert("新建账户", isPresented: $showCreateAccount) {
             TextField("账户名称", text: $newAccountName)
             TextField("初始资金", text: $newAccountCapital)
@@ -175,7 +175,7 @@ struct SimulationLayoutAView: View {
         }) {
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray))
+                    .fill(AppColors.textTertiary)
                     .frame(width: 30, height: 30)
                     .overlay(
                         Image(systemName: "globe")
@@ -185,11 +185,11 @@ struct SimulationLayoutAView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("全部账户汇总")
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text("\(store.activeAccounts.count) 个账户 · 聚合视图")
                         .font(.system(size: 10))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -201,7 +201,7 @@ struct SimulationLayoutAView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 9)
-                .fill(selected ? Color(.systemBackground) : Color.clear))
+                .fill(selected ? AppColors.pageBackground : Color.clear))
             .shadow(color: selected ? Color.black.opacity(0.08) : Color.clear,
                     radius: 2, x: 0, y: 1)
             .contentShape(Rectangle())
@@ -230,11 +230,11 @@ struct SimulationLayoutAView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(account.name)
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Text(SimFormat.amount0(summary.totalAssets))
                         .font(.system(size: 10))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -246,7 +246,7 @@ struct SimulationLayoutAView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 9)
-                .fill(selected ? Color(.systemBackground) : Color.clear))
+                .fill(selected ? AppColors.pageBackground : Color.clear))
             .shadow(color: selected ? Color.black.opacity(0.08) : Color.clear,
                     radius: 2, x: 0, y: 1)
             .contentShape(Rectangle())
@@ -262,7 +262,7 @@ struct SimulationLayoutAView: View {
                 Text("新建账户").font(.system(size: 12.5))
                 Spacer(minLength: 0)
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 16)
             .frame(height: 34)
             .contentShape(Rectangle())
@@ -273,7 +273,7 @@ struct SimulationLayoutAView: View {
 
     private var sidebarBottomActions: some View {
         VStack(spacing: 0) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
             bottomActionRow(icon: "gear", title: "交易规则设置") {
                 sidebarHint = Self.rulesText
             }
@@ -291,7 +291,7 @@ struct SimulationLayoutAView: View {
                 Text(title).font(.system(size: 12.5))
                 Spacer(minLength: 0)
             }
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .padding(.horizontal, 16)
             .frame(height: 34)
             .contentShape(Rectangle())
@@ -367,14 +367,14 @@ struct SimulationLayoutAView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                     Text(store.accountName(id: store.queryAccountID))
                         .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(Color.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(Color(.secondaryLabel))
+                        .foregroundColor(AppColors.textSecondary)
                 }
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -386,9 +386,9 @@ struct SimulationLayoutAView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
         .alert("新建账户", isPresented: $showCreateAccount) {
             TextField("账户名称", text: $newAccountName)
@@ -462,7 +462,7 @@ struct SimulationLayoutAView: View {
                 }
             }
             .padding(8)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
         }
     }
 
@@ -473,11 +473,11 @@ struct SimulationLayoutAView: View {
                 Image(systemName: icon).font(.system(size: 12, weight: .medium))
                 Text(title).font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .frame(maxWidth: .infinity)
             .frame(height: 44)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator), lineWidth: 0.5))
+            .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.pageBackground))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppColors.separator, lineWidth: 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -592,9 +592,9 @@ struct SimulationLayoutAView: View {
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Rectangle().fill(AppColors.separator).frame(height: 0.5)
         }
         // 条件单全屏呈现挂在本行（与根视图的全屏下单页分开宿主，避免同视图多个 fullScreenCover）
         .simCondEntryPresentation($condPresentation, accountID: store.queryAccountID)
@@ -606,7 +606,7 @@ struct SimulationLayoutAView: View {
         return Button(action: { condPresentation = .list(UUID()) }) {
             Text("条件单")
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .overlay(alignment: .topTrailing) {
                     if monitoring > 0 {
                         Text("\(monitoring)")
@@ -614,7 +614,7 @@ struct SimulationLayoutAView: View {
                             .foregroundColor(Color.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color(.systemRed)))
+                            .background(Capsule().fill(AppColors.marketUp))
                             .offset(x: 12, y: -8)
                     }
                 }
@@ -654,16 +654,16 @@ struct SimulationLayoutAView: View {
         HStack(spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             TextField(placeholder, text: text)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(width: moduleRowSplits ? nil : 148)
                 .frame(maxWidth: moduleRowSplits ? .infinity : nil)
         }
         .padding(.horizontal, 8)
         .frame(height: 26)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(AppColors.cardBackground))
     }
 
     private func toolbarButton(icon: String?, title: String,
@@ -675,10 +675,10 @@ struct SimulationLayoutAView: View {
                 }
                 Text(title).font(.system(size: 11.5))
             }
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(AppColors.textSecondary)
             .padding(.horizontal, 8)
             .frame(height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(.separator), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.separator, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -689,12 +689,12 @@ struct SimulationLayoutAView: View {
         if let text = toast {
             Text(text)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator), lineWidth: 0.5))
+                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardHoverBackground))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppColors.separator, lineWidth: 0.5))
                 .padding(.top, 6)
         }
     }
@@ -881,12 +881,12 @@ struct SimulationLayoutAView: View {
 
     /// 账户色块颜色：解析 "#RRGGBB"，失败回退 systemGray
     private func colorFromHex(_ hex: String) -> Color {
-        Color(hex: hex) ?? Color(.systemGray)
+        Color(hex: hex) ?? AppColors.textTertiary
     }
 
     /// 盈亏配色（涨红跌绿）
     private func profitColor(_ value: Double) -> Color {
-        value < 0 ? Color(.systemGreen) : Color(.systemRed)
+        value < 0 ? AppColors.marketDown : AppColors.marketUp
     }
 
     /// 工作区轻提示：2 秒后自动消失

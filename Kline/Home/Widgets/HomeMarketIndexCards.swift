@@ -101,7 +101,7 @@ struct HomeMarketIndexCards: View {
         if rows.isEmpty {
             Text(db.isLoaded ? "暂无指数数据" : "指数加载中")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
         } else {
             VStack(spacing: 12) {

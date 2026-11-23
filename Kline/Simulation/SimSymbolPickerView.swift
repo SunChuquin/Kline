@@ -90,7 +90,7 @@ struct SimSymbolPickerView: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .onAppear { model.browse() }
         .onChange(of: keyword) { model.search($0) }
         .onReceive(databaseManager.$isLoaded) { _ in
@@ -105,7 +105,7 @@ struct SimSymbolPickerView: View {
             Button(action: onClose) {
                 Text("取消")
                     .font(.system(size: 15))
-                    .foregroundColor(Color.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -116,7 +116,7 @@ struct SimSymbolPickerView: View {
 
             Text("选择标的")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer(minLength: 4)
 
@@ -128,7 +128,7 @@ struct SimSymbolPickerView: View {
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: 搜索框
@@ -137,7 +137,7 @@ struct SimSymbolPickerView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
             TextField("输入名称或代码", text: $keyword)
                 .font(.system(size: 14))
                 .textInputAutocapitalization(.never)
@@ -150,7 +150,7 @@ struct SimSymbolPickerView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
-                        .foregroundColor(Color(.tertiaryLabel))
+                        .foregroundColor(AppColors.textTertiary)
                 }
                 .buttonStyle(.plain)
             }
@@ -171,10 +171,10 @@ struct SimSymbolPickerView: View {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 30))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
                 Text(emptyHintText)
                     .font(.system(size: 13))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -183,7 +183,7 @@ struct SimSymbolPickerView: View {
                     if model.isBrowsing {
                         Text("以下为全部标的（前 \(SimSymbolPickerModel.browseLimit) 条），输入关键字精确搜索")
                             .font(.system(size: 11))
-                            .foregroundColor(Color(.tertiaryLabel))
+                            .foregroundColor(AppColors.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
@@ -217,15 +217,15 @@ struct SimSymbolPickerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(meta.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(Color.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Text(meta.displayCode)
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(AppColors.textSecondary)
             }
             Spacer(minLength: 8)
             Text(meta.type)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.tertiaryLabel))
+                .foregroundColor(AppColors.textTertiary)
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 44)

@@ -22,7 +22,7 @@ enum FloatingAccessoryMetrics {
     // MARK: 两按钮共用
 
     /// 描边色：语义色 label（浅色模式=黑、深色模式=白），深浅两主题下都能勾出轮廓
-    static let ringStroke: Color = Color(.label)
+    static let ringStroke: Color = AppColors.textPrimary
     /// 描边宽度：1pt（strokeBorder 内描边，不改变各圈直径与环宽）
     static let ringStrokeWidth: CGFloat = 1
     /// 贴边（吸附后 / 默认落位）与屏幕左右边缘的间距

@@ -632,7 +632,7 @@ struct MarketHeaderBar: View {
                             HStack(spacing: 3) {
                                 Text(field.rawValue)
                                     .font(.system(size: 20, weight: model.topMenu == field ? .bold : .regular))
-                                    .foregroundColor(model.topMenu == field ? .red : .primary)
+                                    .foregroundColor(model.topMenu == field ? AppColors.accent : AppColors.textPrimary)
                                 // 仅选中项显示「上下箭头」图标（未选中只显示文字）
                                 if model.topMenu == field {
                                     menuChevronIcon
@@ -660,7 +660,7 @@ struct MarketHeaderBar: View {
                         }
                     } label: {
                         Image(systemName: model.edgeAdjust ? "xmark.square" : "slider.horizontal.3")
-                            .foregroundColor(model.edgeAdjust ? .blue : .secondary)
+                            .foregroundColor(model.edgeAdjust ? AppColors.accent : AppColors.textSecondary)
                             .font(.system(size: 16))
                     }
                     .buttonStyle(.plain)
@@ -680,7 +680,7 @@ struct MarketHeaderBar: View {
                     if model.topMenu == .picker {
                         Button { model.showFormulaCenter = true } label: {
                             Image(systemName: "function")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(AppColors.textSecondary)
                                 .font(.system(size: 16))
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
@@ -691,7 +691,7 @@ struct MarketHeaderBar: View {
                     }
                     Button { model.homeSearchActive = true } label: {
                         Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary).font(.system(size: 16))
+                            .foregroundColor(AppColors.textSecondary).font(.system(size: 16))
                     }
                     .buttonStyle(.plain)
                     .frame(width: 28, height: 28)
@@ -700,7 +700,7 @@ struct MarketHeaderBar: View {
                 .padding(.trailing, 12)
             }
             .frame(maxWidth: .infinity)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
 
             // 二级胶囊（根据一级切换）：默认隐藏，展开/收起带动画
             if model.secondLevelVisible {
@@ -708,7 +708,7 @@ struct MarketHeaderBar: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .clipped()
     }
 
@@ -718,10 +718,10 @@ struct MarketHeaderBar: View {
         VStack(spacing: -3) {
             Image(systemName: "chevron.up")
                 .font(.system(size: 9, weight: .heavy))
-                .foregroundColor(model.secondLevelVisible ? Color.secondary.opacity(0.45) : .red)
+                .foregroundColor(model.secondLevelVisible ? AppColors.textSecondary.opacity(0.45) : AppColors.accent)
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .heavy))
-                .foregroundColor(model.secondLevelVisible ? .red : Color.secondary.opacity(0.45))
+                .foregroundColor(model.secondLevelVisible ? AppColors.accent : AppColors.textSecondary.opacity(0.45))
         }
         .padding(.leading, 1)
         .accessibilityHidden(true)
@@ -761,17 +761,17 @@ struct MarketSecondLevelBar: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 38)
-        .background(Color(.systemGray6).opacity(0.4))
+        .background(AppColors.sidebarBackground.opacity(0.4))
     }
 
     /// 单个胶囊：选中红色加粗 + 淡红底
     private func capsule(text: String, selected: Bool) -> some View {
         Text(text)
             .font(.system(size: 18, weight: selected ? .bold : .regular))
-            .foregroundColor(selected ? .red : .primary)
+            .foregroundColor(selected ? AppColors.accent : AppColors.textPrimary)
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
-            .background(selected ? Color.red.opacity(0.08) : Color.clear)
+            .background(selected ? AppColors.accent.opacity(0.08) : Color.clear)
             .cornerRadius(14)
     }
 }
@@ -815,10 +815,10 @@ struct MarketToolButton: View {
                 Image(systemName: icon).font(.system(size: 12, weight: .medium))
                 Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(Color(.systemGray6))
+            .background(AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(height: 44)
             .contentShape(Rectangle())
@@ -853,7 +853,7 @@ struct MarketTableBody: View {
                 MarketTableRow(page: .marketBoard, mode: .header, config: model.colCfg, rowCache: model.rowCache,
                                frozenCount: model.frozenCount, xOffset: model.hScrollOffset,
                                heightOverride: headerHeightOverride, fontSizeOverride: fontSizeOverride)
-                    .background(Color(.systemBackground))
+                    .background(AppColors.pageBackground)
                 // 列表：外层垂直 ScrollView 保留上下滚动/懒加载；
                 // 横向用手势驱动 hScrollOffset（冻结前 N 列不动，其余列平移）
                 ScrollView {
@@ -953,17 +953,17 @@ struct MarketBatchList: View {
         return HStack(spacing: 10) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 20))
-                .foregroundColor(selected ? .blue : Color(.tertiaryLabel))
+                .foregroundColor(selected ? AppColors.accent : AppColors.textTertiary)
                 .frame(width: 28, height: 44)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(meta.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Text(meta.displayCode)
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -984,7 +984,7 @@ struct MarketBatchList: View {
         .frame(height: 52)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .background(selected ? Color.blue.opacity(0.08) : Color(.systemBackground))
+        .background(selected ? AppColors.accent.opacity(0.08) : AppColors.pageBackground)
         .onTapGesture {
             var next = model.batchSelection
             if selected { next.remove(meta.id) } else { next.insert(meta.id) }

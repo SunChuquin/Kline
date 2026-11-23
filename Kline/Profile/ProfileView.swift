@@ -33,7 +33,7 @@ struct ProfileView: View {
 
                 Spacer()
             }
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .frame(height: 56)
             .padding(.top, -5)
 
@@ -79,7 +79,7 @@ struct ProfileView: View {
 
                             // 额外的占位卡片
                             Rectangle()
-                                .fill(Color(.systemGray5))
+                                .fill(AppColors.cardHoverBackground)
                                 .frame(height: 150)
                                 .cornerRadius(12)
                         }
@@ -116,13 +116,13 @@ struct ProfileView: View {
 
                             // 额外的占位卡片
                             Rectangle()
-                                .fill(Color(.systemGray4))
+                                .fill(AppColors.separator)
                                 .frame(height: 200)
                                 .cornerRadius(12)
 
                             // 另一个占位卡片
                             Rectangle()
-                                .fill(Color(.systemGray5))
+                                .fill(AppColors.cardHoverBackground)
                                 .frame(height: 180)
                                 .cornerRadius(12)
                         }
@@ -134,7 +134,7 @@ struct ProfileView: View {
             .padding(16)
         }
         // 内容延伸到物理屏幕底边 + 背景铺满（否则 2018 等机型底部 20pt 露出下层导航栏）
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
         .overlay(
             Group {

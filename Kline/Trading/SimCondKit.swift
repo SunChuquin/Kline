@@ -19,10 +19,10 @@ struct SimCondKindChip: View {
     var body: some View {
         Text(kind.title)
             .font(.system(size: 10.5, weight: .bold))
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 6)
             .frame(height: 17)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.12)))
+            .background(RoundedRectangle(cornerRadius: 6).fill(AppColors.accent.opacity(0.12)))
     }
 }
 
@@ -35,9 +35,9 @@ struct SimCondAlertBadge: View {
     var body: some View {
         Text("提醒")
             .font(.system(size: 10.5, weight: .bold))
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .frame(width: 34, height: 17)
-            .background(RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5)))
+            .background(RoundedRectangle(cornerRadius: 4).fill(AppColors.cardHoverBackground))
     }
 }
 
@@ -52,11 +52,11 @@ struct SimCondStatusTag: View {
         case .monitoring:
             return Color(.orange)
         case .triggered, .rejected:
-            return Color(.systemRed)
+            return AppColors.marketUp
         case .completed:
-            return Color(.systemGreen)
+            return AppColors.marketDown
         case .expired, .cancelled:
-            return Color(.secondaryLabel)
+            return AppColors.textSecondary
         }
     }
 
@@ -89,13 +89,13 @@ struct SimCondProgressBar: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("\(done)/\(total) \(unit) · 已成交 \(triggered) 笔")
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color(.secondaryLabel).opacity(0.2))
+                        .fill(AppColors.textSecondary.opacity(0.2))
                     Capsule()
-                        .fill(Color.blue)
+                        .fill(AppColors.accent)
                         .frame(width: geo.size.width * CGFloat(ratio))
                 }
             }
@@ -116,9 +116,9 @@ struct SimCondOverviewStrip: View {
         HStack(spacing: 0) {
             cell(title: "监控中", value: monitoring, tint: Color(.orange))
             separator
-            cell(title: "已触发", value: triggered, tint: Color(.systemRed))
+            cell(title: "已触发", value: triggered, tint: AppColors.marketUp)
             separator
-            cell(title: "已失效", value: invalid, tint: Color(.secondaryLabel))
+            cell(title: "已失效", value: invalid, tint: AppColors.textSecondary)
         }
         .frame(height: 56)
     }
@@ -130,14 +130,14 @@ struct SimCondOverviewStrip: View {
                 .foregroundColor(tint)
             Text(title)
                 .font(.system(size: 11))
-                .foregroundColor(Color(.secondaryLabel))
+                .foregroundColor(AppColors.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
 
     private var separator: some View {
         Rectangle()
-            .fill(Color(.separator))
+            .fill(AppColors.separator)
             .frame(width: 0.5, height: 24)
     }
 }

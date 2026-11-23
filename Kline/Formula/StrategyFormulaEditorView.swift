@@ -311,7 +311,7 @@ struct StrategyFormulaEditorView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
-                            .background(canSave ? Color.blue : Color.gray)
+                            .background(canSave ? AppColors.accent : AppColors.textTertiary)
                             .cornerRadius(10)
                             .contentShape(Rectangle())
                     }
@@ -324,7 +324,7 @@ struct StrategyFormulaEditorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 表单贴物理屏幕底边（全 App 统一贴底为 0）；仅忽略 container 区，键盘行为不变
         .ignoresSafeArea(.container, edges: .bottom)
         // 内嵌公式语义校验（Python 后台求值落态）：出现/模式切换/正文变化即重算
@@ -362,7 +362,7 @@ struct StrategyFormulaEditorView: View {
         HStack(spacing: 10) {
             Button("取消") { onClose() }
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("strategyEditor.cancel")
@@ -371,7 +371,7 @@ struct StrategyFormulaEditorView: View {
 
             Text("策略公式")
                 .font(.system(size: 16, weight: .bold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer(minLength: 4)
 
@@ -379,7 +379,7 @@ struct StrategyFormulaEditorView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white)
                 .padding(.horizontal, 12).padding(.vertical, 5)
-                .background(canSave ? Color.blue : Color.gray)
+                .background(canSave ? AppColors.accent : AppColors.textTertiary)
                 .cornerRadius(6)
                 .frame(minHeight: 44)
                 .disabled(!canSave)
@@ -387,7 +387,7 @@ struct StrategyFormulaEditorView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     // MARK: - 名称
@@ -396,7 +396,7 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("名称")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             TextField("例如：趋势回踩策略", text: $name)
                 .font(.system(size: 14))
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -411,7 +411,7 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("选股条件")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             // 二选一分段：切换只改显示，pickBody / pickRef 各自的内容都保留
             HStack(spacing: 4) {
@@ -421,10 +421,10 @@ struct StrategyFormulaEditorView: View {
                     } label: {
                         Text(m.title)
                             .font(.system(size: 13, weight: mode == m ? .semibold : .regular))
-                            .foregroundColor(.primary)
+                            .foregroundColor(AppColors.textPrimary)
                             .frame(maxWidth: .infinity)
                             .frame(height: 32)
-                            .background(mode == m ? Color(.systemBackground) : Color.clear)
+                            .background(mode == m ? AppColors.pageBackground : Color.clear)
                             .cornerRadius(8)
                             .shadow(color: mode == m ? Color.black.opacity(0.1) : Color.clear,
                                     radius: 2, y: 1)
@@ -471,17 +471,17 @@ struct StrategyFormulaEditorView: View {
                 && data.isEmpty {
                 Text("样例行情未就绪，语法校验待行情到达后进行")
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let testMessage {
                 Text(testMessage)
                     .font(.system(size: 12))
-                    .foregroundColor(testIsError ? .red : .primary)
+                    .foregroundColor(testIsError ? AppColors.statusError : AppColors.textPrimary)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background((testIsError ? Color.red : Color.green).opacity(0.1))
+                    .background((testIsError ? AppColors.statusError : AppColors.statusSuccess).opacity(0.1))
                     .cornerRadius(6)
             }
         }
@@ -493,10 +493,10 @@ struct StrategyFormulaEditorView: View {
         if library.pickers.isEmpty {
             Text("公式库还没有选股公式，请先到「选股指标」段新建")
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(10)
         } else {
             VStack(spacing: 0) {
@@ -504,7 +504,7 @@ struct StrategyFormulaEditorView: View {
                     referenceRow(p)
                 }
             }
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(10)
         }
     }
@@ -517,14 +517,14 @@ struct StrategyFormulaEditorView: View {
             HStack(spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16))
-                    .foregroundColor(selected ? .blue : .gray)
+                    .foregroundColor(selected ? AppColors.accent : AppColors.textTertiary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(picker.name)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                     Text(oneLine(picker.pickBody))
                         .font(.system(size: 11))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
@@ -543,7 +543,7 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("交易指令")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             VStack(alignment: .leading, spacing: 14) {
                 directionControl
@@ -553,7 +553,7 @@ struct StrategyFormulaEditorView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
             .cornerRadius(10)
         }
     }
@@ -564,16 +564,16 @@ struct StrategyFormulaEditorView: View {
             HStack(spacing: 6) {
                 Text("方向")
                     .font(.system(size: 13))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 if trade.direction == nil {
                     Text("请选择")
                         .font(.system(size: 11))
-                        .foregroundColor(.orange)
+                        .foregroundColor(AppColors.statusWarning)
                 }
             }
             tradeSegment([
-                TradeChipOption(id: "buy", title: "买入", tint: Color(.systemRed), selected: trade.direction == .buy),
-                TradeChipOption(id: "sell", title: "卖出", tint: Color(.systemGreen), selected: trade.direction == .sell)
+                TradeChipOption(id: "buy", title: "买入", tint: AppColors.marketUp, selected: trade.direction == .buy),
+                TradeChipOption(id: "sell", title: "卖出", tint: AppColors.marketDown, selected: trade.direction == .sell)
             ]) { id in
                 let picked: SimOrderDirection = (id == "buy") ? .buy : .sell
                 // 再点一次已选项 = 取消选择（回到 nil）
@@ -587,7 +587,7 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("数量 / 金额")
                 .font(.system(size: 13))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             tradeSegment([
                 TradeChipOption(id: "qty", title: "按数量", selected: sizeMode == .qty),
                 TradeChipOption(id: "amount", title: "按金额", selected: sizeMode == .amount)
@@ -628,7 +628,7 @@ struct StrategyFormulaEditorView: View {
 
             Text("股")
                 .font(.system(size: 13))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
 
             Spacer(minLength: 4)
 
@@ -661,13 +661,13 @@ struct StrategyFormulaEditorView: View {
 
                 Text("元")
                     .font(.system(size: 13))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
 
                 Spacer(minLength: 0)
             }
             Text("生成条件单时按最新价折算并向下取整到 100 股")
                 .font(.system(size: 11))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         }
     }
 
@@ -676,7 +676,7 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("报价方式")
                 .font(.system(size: 13))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             tradeSegment([
                 TradeChipOption(id: "market", title: "市价", selected: trade.priceType == .market),
                 TradeChipOption(id: "limit", title: "限价", selected: trade.priceType == .limit)
@@ -700,7 +700,7 @@ struct StrategyFormulaEditorView: View {
                     HStack(spacing: 8) {
                         Text("偏移档次")
                             .font(.system(size: 13))
-                            .foregroundColor(.primary)
+                            .foregroundColor(AppColors.textPrimary)
                         TextField("0", text: $offsetText)
                             .font(.system(size: 14))
                             .keyboardType(.numbersAndPunctuation)
@@ -715,12 +715,12 @@ struct StrategyFormulaEditorView: View {
                             }
                         Text("档")
                             .font(.system(size: 13))
-                            .foregroundColor(.gray)
+                            .foregroundColor(AppColors.textTertiary)
                         Spacer(minLength: 0)
                     }
                     Text("触达触发价 ± N 档委托")
                         .font(.system(size: 11))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 }
             }
         }
@@ -731,7 +731,7 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("有效期")
                 .font(.system(size: 13))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
             HStack(spacing: 8) {
                 chip("当日", selected: trade.validity == .day) {
                     trade.validity = .day
@@ -770,21 +770,21 @@ struct StrategyFormulaEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("绑定账户（可多选）")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             if staleAccountCount > 0 {
                 Text("\(staleAccountCount) 个已归档/失效账户已自动跳过")
                     .font(.system(size: 11))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
             }
 
             if sim.accounts.isEmpty {
                 Text("还没有模拟账户，请先到模拟页创建")
                     .font(.system(size: 12))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(Color(.secondarySystemBackground))
+                    .background(AppColors.cardBackground)
                     .cornerRadius(10)
             } else {
                 VStack(spacing: 0) {
@@ -792,13 +792,13 @@ struct StrategyFormulaEditorView: View {
                         accountRow(account)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(10)
             }
 
             Text("生成条件单时会为每个账户各生成一套；多账户并行执行")
                 .font(.system(size: 11))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -812,7 +812,7 @@ struct StrategyFormulaEditorView: View {
         } label: {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(Color(hex: account.colorHex) ?? Color(.systemGray))
+                    .fill(Color(hex: account.colorHex) ?? AppColors.textTertiary)
                     .frame(width: 24, height: 24)
                     .overlay(
                         Text(account.badge)
@@ -822,20 +822,20 @@ struct StrategyFormulaEditorView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.name)
                         .font(.system(size: 15))
-                        .foregroundColor(archived ? Color(.secondaryLabel) : Color.primary)
+                        .foregroundColor(archived ? AppColors.textSecondary : AppColors.textPrimary)
                     Text("可买资金 \(SimFormat.amount(account.cash))")
                         .font(.system(size: 11))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 }
                 Spacer(minLength: 8)
                 if archived {
                     Text("已归档")
                         .font(.system(size: 11))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 } else {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 18))
-                        .foregroundColor(selected ? .blue : .gray)
+                        .foregroundColor(selected ? AppColors.accent : AppColors.textTertiary)
                 }
             }
             .padding(.horizontal, 12)
@@ -871,7 +871,7 @@ struct StrategyFormulaEditorView: View {
             HStack(spacing: 8) {
                 Text("交易规则（RULES）")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Spacer(minLength: 8)
                 Button {
                     addRow()
@@ -880,7 +880,7 @@ struct StrategyFormulaEditorView: View {
                         Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
                         Text("添加规则").font(.system(size: 13, weight: .medium))
                     }
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
@@ -893,7 +893,7 @@ struct StrategyFormulaEditorView: View {
                     ForEach(Array(parseErrors.enumerated()), id: \.offset) { _, e in
                         Text("✗ \(e)")
                             .font(.system(size: 11))
-                            .foregroundColor(.red)
+                            .foregroundColor(AppColors.statusError)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -903,10 +903,10 @@ struct StrategyFormulaEditorView: View {
             if rows.isEmpty {
                 Text("还没有交易规则，点击右上「添加规则」新增一条")
                     .font(.system(size: 12))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(Color(.secondarySystemBackground))
+                    .background(AppColors.cardBackground)
                     .cornerRadius(10)
             } else {
                 VStack(spacing: 0) {
@@ -914,7 +914,7 @@ struct StrategyFormulaEditorView: View {
                         ruleRow($row)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(10)
             }
         }
@@ -936,13 +936,13 @@ struct StrategyFormulaEditorView: View {
                     // 该规则对应的条件单中文名（帮助理解映射关系）
                     Text(kind.conditionOrderTitle)
                         .font(.system(size: 11))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                     // 该规则自带的指令覆盖（优先于交易指令区块）
                     if let directiveOverride, !directiveOverride.isEmpty,
                        let summary = directiveOverride.summary {
                         Text("指令：\(summary)")
                             .font(.system(size: 11))
-                            .foregroundColor(.gray)
+                            .foregroundColor(AppColors.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -952,7 +952,7 @@ struct StrategyFormulaEditorView: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 14))
-                        .foregroundColor(.red)
+                        .foregroundColor(AppColors.statusError)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -963,7 +963,7 @@ struct StrategyFormulaEditorView: View {
                 // `.engine` 目录未就绪：给显式占位，**不渲染空 specs**（以免用户误以为该规则无参数）
                 Text(StrategyProjection.placeholderText + " 参数加载中")
                     .font(.system(size: 11))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ForEach(specs, id: \.key) { spec in
@@ -985,10 +985,10 @@ struct StrategyFormulaEditorView: View {
             HStack(spacing: 4) {
                 Text(kind.title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
             .padding(.horizontal, 10)
             .frame(minHeight: 44)
@@ -1004,7 +1004,7 @@ struct StrategyFormulaEditorView: View {
         HStack(spacing: 8) {
             Text(spec.title)
                 .font(.system(size: 12))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .frame(width: 68, alignment: .leading)
 
             switch spec.type {
@@ -1037,10 +1037,10 @@ struct StrategyFormulaEditorView: View {
             HStack(spacing: 4) {
                 Text(display)
                     .font(.system(size: 13))
-                    .foregroundColor(current.isEmpty ? .gray : .primary)
+                    .foregroundColor(current.isEmpty ? AppColors.textTertiary : AppColors.textPrimary)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
             .padding(.horizontal, 10)
             .frame(minHeight: 36)
@@ -1067,7 +1067,7 @@ struct StrategyFormulaEditorView: View {
         if !spec.unit.isEmpty {
             Text(spec.unit)
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         }
     }
 
@@ -1080,20 +1080,20 @@ struct StrategyFormulaEditorView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text(preview?.trade ?? placeholder)
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(preview?.summary ?? placeholder)
                 .font(.system(size: 13))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(preview?.executionNotice ?? placeholder)
                 .font(.system(size: 11))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(10)
     }
 
@@ -1107,13 +1107,13 @@ struct StrategyFormulaEditorView: View {
                     ForEach(Array(list.enumerated()), id: \.offset) { _, e in
                         Text("✗ \(e)")
                             .font(.system(size: 12))
-                            .foregroundColor(.red)
+                            .foregroundColor(AppColors.statusError)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let saveError {
                         Text("✗ \(saveError)")
                             .font(.system(size: 12))
-                            .foregroundColor(.red)
+                            .foregroundColor(AppColors.statusError)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -1123,7 +1123,7 @@ struct StrategyFormulaEditorView: View {
             // 引擎校验结果未就绪（`.engine` 冷缓存）：显示占位，**绝不**显示「已通过」
             Text("\(StrategyProjection.placeholderText) 校验中")
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -1257,7 +1257,7 @@ struct StrategyFormulaEditorView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -1279,10 +1279,10 @@ struct StrategyFormulaEditorView: View {
                 } label: {
                     Text(opt.title)
                         .font(.system(size: 13, weight: opt.selected ? .semibold : .regular))
-                        .foregroundColor(opt.selected ? (opt.tint ?? Color.primary) : Color.primary)
+                        .foregroundColor(opt.selected ? (opt.tint ?? AppColors.textPrimary) : AppColors.textPrimary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 32)
-                        .background(opt.selected ? Color(.systemBackground) : Color.clear)
+                        .background(opt.selected ? AppColors.pageBackground : Color.clear)
                         .cornerRadius(8)
                         .shadow(color: opt.selected ? Color.black.opacity(0.1) : Color.clear,
                                 radius: 2, y: 1)
@@ -1302,10 +1302,10 @@ struct StrategyFormulaEditorView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
-                .foregroundColor(selected ? .white : Color.primary)
+                .foregroundColor(selected ? .white : AppColors.textPrimary)
                 .padding(.horizontal, 10)
                 .frame(height: 32)
-                .background(selected ? Color.blue : Color(uiColor: .systemGray6))
+                .background(selected ? AppColors.accent : Color(uiColor: .systemGray6))
                 .cornerRadius(8)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())

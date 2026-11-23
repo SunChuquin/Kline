@@ -93,8 +93,8 @@ struct LinkedKlineTile: View {
     var body: some View {
         Group {
             if currentLoading {
-                Color(.systemBackground)
-                    .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .gray)))
+                AppColors.pageBackground
+                    .overlay(ProgressView().progressViewStyle(CircularProgressViewStyle(tint: AppColors.textTertiary)))
             } else if let series = currentSeries {
                 kline(series: series)
             } else {
@@ -280,13 +280,13 @@ struct LinkedKlineTile: View {
         VStack(spacing: 10) {
             Image(systemName: "chart.bar.xaxis")
                 .font(.system(size: 40))
-                .foregroundColor(.gray.opacity(0.5))
+                .foregroundColor(AppColors.textTertiary.opacity(0.5))
             Text("暂无\(view.displayCode) \(view.period.rawValue)数据")
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 渲染单个 K 线图，并把副图二搜索栏作为 overlay 覆盖
@@ -456,7 +456,7 @@ struct LinkedKlineTile: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -464,7 +464,7 @@ struct LinkedKlineTile: View {
                     .font(.system(size: 14))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color(.tertiarySystemFill))
+                    .background(AppColors.cardHoverBackground)
                     .cornerRadius(6)
                     .focused($searchFocused)
                     .autocorrectionDisabled()
@@ -474,13 +474,13 @@ struct LinkedKlineTile: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(.gray)
+                            .foregroundColor(AppColors.textTertiary)
                     }
                 }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             // 实测输入行底部的全局 y（屏幕坐标），供 Full 键盘避让计算
             .background(
                 GeometryReader { g in
@@ -499,7 +499,7 @@ struct LinkedKlineTile: View {
                     .animation(.easeInOut(duration: kbDock.lastAnimDuration), value: searchResultMaxHeight)
             }
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .transition(.opacity)
     }
 
@@ -547,7 +547,7 @@ struct SearchContentView: View {
                 if results.isEmpty {
                     Text("没有匹配的标的")
                         .font(.system(size: 13))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                         .padding(12)
                 } else {
                     ForEach(results) { item in
@@ -572,12 +572,12 @@ struct SearchContentView: View {
             HStack {
                 Text(item.name)
                     .font(.system(size: 14))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .lineLimit(1)
                 Spacer()
                 Text(item.displayCode)
                     .font(.system(size: 12))
-                    .foregroundColor(.gray)
+                    .foregroundColor(AppColors.textTertiary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)

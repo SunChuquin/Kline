@@ -36,7 +36,7 @@ struct HomeFavoritesBlock: View {
         if rows.isEmpty {
             Text("暂无自选，去自选页添加")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: effectiveCompact ? 44 : 48, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { onEmptyTap() }

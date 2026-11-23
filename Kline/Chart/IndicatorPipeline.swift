@@ -173,13 +173,13 @@ struct PrefetchCalcResult {
 // 而本工程构建配置下实例方法无法用「裸名」引用 static 成员，故用文件级函数复用，
 // 与 KlineChartView 实例内配色/命名/参数逻辑保持一致。
 
-private let prefetchUpColor = Color(red: 0.85, green: 0.16, blue: 0.16)
-private let prefetchDownColor = Color(red: 0.0, green: 0.55, blue: 0.35)
+private let prefetchUpColor = AppColors.marketUp
+private let prefetchDownColor = AppColors.marketDown
 private let prefetchMa10Color = Color.orange
 private let prefetchBollColor = Color(red: 0.4, green: 0.4, blue: 0.9)
 
 private func prefetchMaColor(_ i: Int) -> Color {
-    let colors = [Color(.label).opacity(0.75), Color.orange, Color.pink, Color.blue,
+    let colors = [AppColors.textPrimary.opacity(0.75), Color.orange, Color.pink, AppColors.accent,
                   Color(red: 0.9, green: 0.6, blue: 0), Color.teal, Color.purple, Color.brown]
     return colors[i % colors.count]
 }
@@ -189,7 +189,7 @@ private func prefetchDisplayName(_ raw: String) -> String { raw.replacingOccurre
 private func prefetchCustomLineColor(_ index: Int, line: TDXOutputLine, indicatorColor: Color?) -> Color {
     if let hex = line.colorHex, let c = Color(hex: hex) { return c }
     if let indicatorColor { return indicatorColor }
-    let palette = [Color.blue, Color(red: 0.9, green: 0.35, blue: 0.1), Color(red: 0.2, green: 0.55, blue: 0.85),
+    let palette = [AppColors.accent, Color(red: 0.9, green: 0.35, blue: 0.1), Color(red: 0.2, green: 0.55, blue: 0.85),
                    Color(red: 0.6, green: 0.25, blue: 0.7), Color.teal, Color.pink]
     return palette[index % palette.count]
 }
@@ -615,7 +615,7 @@ extension KlineChartView {
     func customLineColor(_ index: Int, line: TDXOutputLine, indicatorColor: Color?) -> Color {
         if let hex = line.colorHex, let c = Color(hex: hex) { return c }
         if let indicatorColor { return indicatorColor }
-        let palette = [Color.blue, Color(red: 0.9, green: 0.35, blue: 0.1), Color(red: 0.2, green: 0.55, blue: 0.85),
+        let palette = [AppColors.accent, Color(red: 0.9, green: 0.35, blue: 0.1), Color(red: 0.2, green: 0.55, blue: 0.85),
                        Color(red: 0.6, green: 0.25, blue: 0.7), Color.teal, Color.pink]
         return palette[index % palette.count]
     }

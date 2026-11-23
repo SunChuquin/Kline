@@ -41,7 +41,7 @@ struct FavoritesLayoutBView: View {
                         FavoritesGroupSidebar(model: model)
                         // 侧栏与工作区之间的 1pt 分隔线
                         Rectangle()
-                            .fill(Color(.separator))
+                            .fill(AppColors.separator)
                             .frame(width: 1)
                         workspace
                     }
@@ -70,7 +70,7 @@ struct FavoritesLayoutBView: View {
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 分组抽屉（紧凑态）：行与底部入口照搬常驻侧栏（FavoritesGroupRow /
@@ -104,7 +104,7 @@ struct FavoritesLayoutBView: View {
             FavoritesTableBody(model: model)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 一行标题（当前分组名 + N 只）+ 工具条（表头设置 / 编辑 / 公式分组刷新选股）。
@@ -122,7 +122,7 @@ struct FavoritesLayoutBView: View {
             }
             Text("\(model.currentItems.count) 只")
                 .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize()
             Spacer(minLength: isCompact ? 4 : 8)
             // 刷新监控标的列表（全局刷新按钮）
@@ -155,7 +155,7 @@ struct FavoritesLayoutBView: View {
         }
         .padding(.horizontal, isCompact ? 12 : 16)
         .frame(height: 46)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     /// 紧凑态「分组」抽屉入口（锚点）：侧栏图标 + 当前分组名 + 下拉箭头。
@@ -166,14 +166,14 @@ struct FavoritesLayoutBView: View {
         HStack(spacing: 4) {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             Text(model.currentGroup.name)
                 .font(.system(size: 15, weight: .bold))
                 .lineLimit(1)
                 .accessibilityIdentifier("favorites.title")
             Image(systemName: "chevron.down")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
         }
         // 低布局优先级：空间不足时优先压缩分组名（截断显示），右侧工具按钮保持完整可点
         .layoutPriority(-1)
@@ -192,32 +192,32 @@ struct FavoritesLayoutBView: View {
                     // 显示进度：图标 + 进度文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("\(p.done)/\(p.total)")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 } else if watchlistSync.isRunning {
                     // 显示加载中：图标 + 加载文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("刷新中...")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 } else {
                     // 正常状态：图标 + 刷新文字
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                     Text("刷新")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 }
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(Color(.systemGray6))
+            .background(AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -246,10 +246,10 @@ struct FavoritesLayoutBView: View {
                 Image(systemName: icon).font(.system(size: 12, weight: .medium))
                 Text(title).font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(active ? .white : .blue)
+            .foregroundColor(active ? .white : AppColors.accent)
             .padding(.horizontal, 11)
             .frame(height: 28)
-            .background(active ? Color.blue : Color(.systemGray6))
+            .background(active ? AppColors.accent : AppColors.sidebarBackground)
             .cornerRadius(7)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -263,7 +263,7 @@ struct FavoritesLayoutBView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 16))
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -283,21 +283,21 @@ struct FavoritesLayoutBView: View {
                         ProgressView().scaleEffect(0.7)
                         Text("\(p.done)/\(p.total)")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(AppColors.textSecondary)
                     }
                     .padding(.horizontal, 11)
                     .frame(height: 28)
-                    .background(Color(.systemGray6))
+                    .background(AppColors.sidebarBackground)
                     .cornerRadius(7)
                 } else {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .medium))
                         Text("刷新选股").font(.system(size: 12, weight: .medium))
                     }
-                    .foregroundColor(.blue)
+                    .foregroundColor(AppColors.accent)
                     .padding(.horizontal, 11)
                     .frame(height: 28)
-                    .background(Color(.systemGray6))
+                    .background(AppColors.sidebarBackground)
                     .cornerRadius(7)
                 }
             }
@@ -324,7 +324,7 @@ private struct FavoritesGroupRow: View {
         HStack(spacing: 9) {
             Image(systemName: iconName)
                 .font(.system(size: 13))
-                .foregroundColor(active ? .blue : .secondary)
+                .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
                 .frame(width: 24, height: 24)
             Text(group.name)
                 .font(.system(size: 13, weight: .semibold))
@@ -335,14 +335,14 @@ private struct FavoritesGroupRow: View {
             }
             Text("\(model.countOfGroup(group))")
                 .font(.system(size: 11.5, design: .monospaced))
-                .foregroundColor(active ? .blue : .secondary)
+                .foregroundColor(active ? AppColors.accent : AppColors.textSecondary)
         }
-        .foregroundColor(active ? .blue : Color.primary)
+        .foregroundColor(active ? AppColors.accent : AppColors.textPrimary)
         .padding(.horizontal, 10)
         .frame(height: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 9)
-            .fill(active ? Color.blue.opacity(0.12) : Color.clear))
+            .fill(active ? AppColors.accent.opacity(0.12) : Color.clear))
     }
 
     /// 分组图标：「全部」用托盘，自定义组用文件夹，公式组用函数符
@@ -361,11 +361,11 @@ private struct FavoritesGroupRow: View {
                 if let p = model.refreshProgress, p.groupID == group.id {
                     Text("\(p.done)/\(p.total)")
                         .font(.system(size: 9.5, design: .monospaced))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                 } else {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
                 }
             }
             .frame(width: 44, height: 44)
@@ -387,7 +387,7 @@ private struct FavoritesGroupFooterButtons: View {
                 footerButton("管理分组", icon: "slider.horizontal.3") { model.showManageSheet = true }
             }
             .padding(8)
-            .background(Color(.secondarySystemBackground))
+            .background(AppColors.cardBackground)
         }
     }
 
@@ -397,13 +397,13 @@ private struct FavoritesGroupFooterButtons: View {
                 Image(systemName: icon).font(.system(size: 12, weight: .medium))
                 Text(title).font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(.blue)
+            .foregroundColor(AppColors.accent)
             .frame(maxWidth: .infinity)
             .frame(height: 44)
             .background(RoundedRectangle(cornerRadius: 8)
-                .fill(Color(.systemBackground)))
+                .fill(AppColors.pageBackground))
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(.separator), lineWidth: 0.5))
+                .stroke(AppColors.separator, lineWidth: 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -437,7 +437,7 @@ struct FavoritesGroupSidebar: View {
 
             Text("分组")
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.bottom, 5)
@@ -459,7 +459,7 @@ struct FavoritesGroupSidebar: View {
             FavoritesGroupFooterButtons(model: model)
         }
         .frame(width: Self.width)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
     }
 }
 

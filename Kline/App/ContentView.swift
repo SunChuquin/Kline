@@ -78,6 +78,9 @@ struct ContentView: View {
                     mainContentView
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .frame(width: geo.size.width, height: geo.size.height)
+                        // 全局页面底色：所有页面共用同一语义背景（未自设背景的页面不再
+                        // 落到系统窗口的纯黑/纯白，日间与夜间都保持统一层次）
+                        .background(AppColors.pageBackground)
                         // 紧凑宽度单一事实来源：把根层实测可用宽注入环境，
                         // 首页/模拟/布局编辑器预览内的 AdaptiveStack 与 widget 共用
                         .environment(\.klineAvailableWidth, geo.size.width)
@@ -223,7 +226,7 @@ struct ContentView: View {
     private var bottomMenuBar: some View {
         VStack(spacing: 0) {
             // 顶部分隔线（使用负offset往上挪）
-            Color(.separator)
+            AppColors.separator
                 .frame(height: 1)
                 .offset(y: -2)
             // 菜单按钮（上图下字：图标在上、文字在下）
@@ -238,7 +241,7 @@ struct ContentView: View {
                             Text(menuItems[index].title)
                                 .font(.system(size: 11))
                         }
-                        .foregroundColor(selectedTab == index ? .accentColor : Color(.secondaryLabel))
+                        .foregroundColor(selectedTab == index ? AppColors.accent : AppColors.textSecondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                     }
@@ -246,7 +249,7 @@ struct ContentView: View {
                 }
             }
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.sidebarBackground)
     }
 
     // MARK: - 处理菜单按钮点击

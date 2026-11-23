@@ -94,12 +94,12 @@ struct FavManageSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button("取消") { dismiss() }.foregroundColor(.secondary)
+                Button("取消") { dismiss() }.foregroundColor(AppColors.textSecondary)
                 Spacer()
                 Text("管理分组").font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Button(action: { dismiss() }) {
-                    Text("完成").foregroundColor(.blue).fontWeight(.bold)
+                    Text("完成").foregroundColor(AppColors.accent).fontWeight(.bold)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
@@ -115,7 +115,7 @@ struct FavManageSheet: View {
                         let issue = fav.formulaIssue(groupID: g.id)
                         HStack(spacing: 10) {
                             Image(systemName: g.kind == .manual ? "folder.fill" : "function")
-                                .foregroundColor(g.kind == .manual ? .orange : .purple)
+                                .foregroundColor(g.kind == .manual ? AppColors.statusWarning : .purple)
                             VStack(alignment: .leading, spacing: 2) {
                                 TextField("分组名",
                                           text: Binding(
@@ -131,28 +131,28 @@ struct FavManageSheet: View {
                                     Text(g.kind == .manual ? "自定义" : "公式选股")
                                         .font(.system(size: 11))
                                         .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(g.kind == .manual ? Color.orange.opacity(0.15) : Color.purple.opacity(0.15))
-                                        .foregroundColor(g.kind == .manual ? .orange : .purple)
+                                        .background(g.kind == .manual ? AppColors.statusWarning.opacity(0.15) : Color.purple.opacity(0.15))
+                                        .foregroundColor(g.kind == .manual ? AppColors.statusWarning : .purple)
                                         .cornerRadius(4)
                                     // 公式分组显示引用到的选股公式名；引用失效时用橙字提示
                                     if g.kind == .formula {
                                         Text(fav.formulaName(groupID: g.id) ?? "未选择公式")
                                             .font(.system(size: 11))
-                                            .foregroundColor(issue == nil ? .secondary : .orange)
+                                            .foregroundColor(issue == nil ? AppColors.textSecondary : AppColors.statusWarning)
                                             .lineLimit(1)
                                     }
                                     Text("\(g.manualMetaIDs.count) 只")
-                                        .font(.system(size: 11)).foregroundColor(.secondary)
+                                        .font(.system(size: 11)).foregroundColor(AppColors.textSecondary)
                                 }
                                 // 引用失效：橙字提示 + 「重新选择」入口（打开公式分组编辑浮层）
                                 if let issue = issue {
                                     HStack(spacing: 6) {
                                         Text(issue)
                                             .font(.system(size: 11))
-                                            .foregroundColor(.orange)
+                                            .foregroundColor(AppColors.statusWarning)
                                         Button("重新选择") { formulaEditorTarget = g }
                                             .font(.system(size: 11))
-                                            .foregroundColor(.blue)
+                                            .foregroundColor(AppColors.accent)
                                             .contentShape(Rectangle())
                                     }
                                 }
@@ -182,7 +182,7 @@ struct FavManageSheet: View {
             .listStyle(.insetGrouped)
             .environment(\.editMode, .constant(.active))
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppColors.pageBackground)
         // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
         .ignoresSafeArea(.keyboard)
         // 「重新选择」：打开公式分组编辑浮层（改引用 / 换公式）
@@ -214,7 +214,7 @@ struct FavAddGroupSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button("取消") { dismiss() }.foregroundColor(.secondary)
+                Button("取消") { dismiss() }.foregroundColor(AppColors.textSecondary)
                 Spacer()
                 Text("新建分组").font(.system(size: 16, weight: .semibold))
                 Spacer()
@@ -230,7 +230,7 @@ struct FavAddGroupSheet: View {
                     }
                     dismiss()
                 }) {
-                    Text("创建").foregroundColor(.blue).fontWeight(.bold)
+                    Text("创建").foregroundColor(AppColors.accent).fontWeight(.bold)
                 }
                 .disabled(!canCreate)
             }
@@ -257,7 +257,7 @@ struct FavAddGroupSheet: View {
                 }
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppColors.pageBackground)
         // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
         .ignoresSafeArea(.keyboard)
         // 去公式管理新建选股公式（关闭后列表因 @Published 自动刷新）
@@ -282,7 +282,7 @@ private struct FavPickerFormulaChooser: View {
             if library.pickers.isEmpty {
                 Text("公式库还没有选股公式")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .padding(.vertical, 6)
             } else {
                 VStack(spacing: 0) {
@@ -290,7 +290,7 @@ private struct FavPickerFormulaChooser: View {
                         pickerRow(doc)
                     }
                 }
-                .background(Color(.secondarySystemBackground))
+                .background(AppColors.cardBackground)
                 .cornerRadius(10)
             }
 
@@ -299,18 +299,18 @@ private struct FavPickerFormulaChooser: View {
                     Image(systemName: "function").font(.system(size: 13, weight: .semibold))
                     Text("去公式管理新建").font(.system(size: 14, weight: .medium))
                 }
-                .foregroundColor(.blue)
+                .foregroundColor(AppColors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
-                .background(Color.blue.opacity(0.08))
+                .background(AppColors.accent.opacity(0.08))
                 .cornerRadius(10)
             }
             .buttonStyle(.plain)
 
             Text("选股公式统一在公式管理里维护；这里只选择引用。分组刷新时最后一根输出值 > 0 视为命中")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -323,14 +323,14 @@ private struct FavPickerFormulaChooser: View {
             HStack(spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
-                    .foregroundColor(selected ? .blue : .gray)
+                    .foregroundColor(selected ? AppColors.accent : AppColors.textTertiary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(doc.name)
                         .font(.system(size: 15))
-                        .foregroundColor(.primary)
+                        .foregroundColor(AppColors.textPrimary)
                     Text(summary(doc.pickBody))
                         .font(.system(size: 11))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
@@ -372,7 +372,7 @@ struct FavFormulaEditorSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button("取消") { dismiss() }.foregroundColor(.secondary)
+                Button("取消") { dismiss() }.foregroundColor(AppColors.textSecondary)
                 Spacer()
                 Text("公式分组：\(group.name)")
                     .font(.system(size: 16, weight: .semibold)).lineLimit(1)
@@ -385,7 +385,7 @@ struct FavFormulaEditorSheet: View {
                     fav.bindFormula(groupID: group.id, formulaID: selectedPickerID)
                     dismiss()
                 }) {
-                    Text("保存").foregroundColor(.blue).fontWeight(.bold)
+                    Text("保存").foregroundColor(AppColors.accent).fontWeight(.bold)
                 }
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -396,7 +396,7 @@ struct FavFormulaEditorSheet: View {
             if let issue = fav.formulaIssue(groupID: group.id) {
                 Text(issue)
                     .font(.system(size: 12))
-                    .foregroundColor(.orange)
+                    .foregroundColor(AppColors.statusWarning)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16).padding(.top, 10)
             }
@@ -413,7 +413,7 @@ struct FavFormulaEditorSheet: View {
                 }
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppColors.pageBackground)
         // sheet 是独立呈现图层，需单独禁用键盘避让，保证弹出键盘时面板布局不被挤压
         .ignoresSafeArea(.keyboard)
         // 去公式管理新建选股公式（关闭后列表因 @Published 自动刷新）

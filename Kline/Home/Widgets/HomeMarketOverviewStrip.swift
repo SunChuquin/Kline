@@ -46,7 +46,7 @@ struct HomeMarketOverviewStrip: View {
             if rows.isEmpty {
                 Text(db.isLoaded ? "暂无指数数据" : "指数加载中")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, minHeight: indexAreaHeight, alignment: .leading)
             } else if isCompactWidth {
                 // 竖屏：垂直堆叠——每指数一行全宽（名称左 / 现价+涨跌幅右）
@@ -73,7 +73,7 @@ struct HomeMarketOverviewStrip: View {
         return HStack(spacing: 10) {
             Text(meta.name)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Text(row.text(.latestPrice))
@@ -103,7 +103,7 @@ struct HomeMarketOverviewStrip: View {
         return VStack(alignment: .leading, spacing: compact ? 2 : 3) {
             Text(meta.name)
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .lineLimit(1)
             Text(row.text(.latestPrice))
                 .font(.system(size: 15, weight: .semibold))
@@ -133,25 +133,25 @@ struct HomeMarketOverviewStrip: View {
         if let b = breadth {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("涨 \(b.up)").foregroundColor(.red)
-                    Text("·").foregroundColor(.secondary)
-                    Text("平 \(b.flat)").foregroundColor(.secondary)
-                    Text("·").foregroundColor(.secondary)
-                    Text("跌 \(b.down)").foregroundColor(.green)
+                    Text("涨 \(b.up)").foregroundColor(AppColors.marketUp)
+                    Text("·").foregroundColor(AppColors.textSecondary)
+                    Text("平 \(b.flat)").foregroundColor(AppColors.textSecondary)
+                    Text("·").foregroundColor(AppColors.textSecondary)
+                    Text("跌 \(b.down)").foregroundColor(AppColors.marketDown)
                 }
                 .font(.system(size: 12))
 
                 HStack(spacing: 6) {
-                    Text("涨停 \(b.limitUp)").foregroundColor(.red)
-                    Text("/").foregroundColor(.secondary)
-                    Text("跌停 \(b.limitDown)").foregroundColor(.green)
+                    Text("涨停 \(b.limitUp)").foregroundColor(AppColors.marketUp)
+                    Text("/").foregroundColor(AppColors.textSecondary)
+                    Text("跌停 \(b.limitDown)").foregroundColor(AppColors.marketDown)
                 }
                 .font(.system(size: 12))
             }
         } else {
             Text(db.isLoaded && !hasMainBoardMetas ? "暂无涨跌数据" : "加载中")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
         }
     }

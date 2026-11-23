@@ -28,10 +28,10 @@ struct SimulationView: View {
                 // 当前布局指示（同时是既有 UITest 的锚点，标识不可改）
                 Text("模拟页 · 方案 \(layoutStore.simulationLayout.shortTitle)")
                     .font(.system(size: 11))
-                    .foregroundColor(Color(.tertiaryLabel))
+                    .foregroundColor(AppColors.textTertiary)
                     .accessibilityIdentifier("simulation.subtitle")
             }
-            .background(Color(.systemBackground))
+            .background(AppColors.pageBackground)
             .frame(height: 56)
             .padding(.top, -5)
             .padding(.trailing, 16)
@@ -56,7 +56,7 @@ struct SimulationView: View {
             .frame(maxHeight: .infinity)
         }
         // 内容延伸到物理屏幕底边 + 背景铺满（避免底部露出下层导航栏）
-        .background(Color(.systemBackground).ignoresSafeArea())
+        .background(AppColors.pageBackground.ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
             // 注册内置默认（幂等）后按需重载：沙盒 Documents/Layouts/simulation.json 变化即时生效
@@ -187,12 +187,12 @@ private struct SimConfigHost: View {
         if let text = model.toast {
             Text(text)
                 .font(.system(size: 11.5))
-                .foregroundColor(Color.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .lineLimit(1)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator), lineWidth: 0.5))
+                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.cardHoverBackground))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppColors.separator, lineWidth: 0.5))
                 .padding(.top, 6)
         }
     }

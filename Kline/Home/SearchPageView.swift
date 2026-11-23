@@ -151,7 +151,7 @@ struct SearchPageView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         .onChange(of: searchText) { newValue in
             model.search(newValue)
         }
@@ -212,9 +212,9 @@ struct SearchPageView: View {
                       action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .foregroundColor(selected ? .white : .primary)
+                .foregroundColor(selected ? .white : AppColors.textPrimary)
                 .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                .background(selected ? Color.accentColor : Color(.systemGray5))
+                .background(selected ? AppColors.accent : AppColors.cardHoverBackground)
                 .cornerRadius(20)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -248,7 +248,7 @@ struct SearchPageView: View {
                 HStack(spacing: 0) {
                     Text("\(type) · 共 \(model.typeResults.count) 只")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppColors.textSecondary)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 16)
@@ -279,7 +279,7 @@ struct SearchPageView: View {
 
                     Text(item.code)
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppColors.textTertiary)
                 }
 
                 Spacer()
@@ -287,12 +287,12 @@ struct SearchPageView: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(item.type)
                         .font(.system(size: 12))
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppColors.accent)
 
                     if let lastDate = item.lastDate {
                         Text(String(lastDate))
                             .font(.system(size: 11))
-                            .foregroundColor(.gray)
+                            .foregroundColor(AppColors.textTertiary)
                     }
                 }
             }
@@ -304,7 +304,7 @@ struct SearchPageView: View {
             Divider()
                 .padding(.leading, 80)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 长按出操作面板：面板挂在页面自身容器层 overlay，行自身无样式改动
         // （不用 .contextMenu —— 它走 UIContextMenuInteraction 抬升快照管线，会把行换宿主重排）
         .onLongPressGesture(minimumDuration: 0.5) {
@@ -322,7 +322,7 @@ struct SearchPageView: View {
                     .padding()
             }
             Text(text)
-                .foregroundColor(.gray)
+                .foregroundColor(AppColors.textTertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 50)

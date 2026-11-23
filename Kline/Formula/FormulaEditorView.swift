@@ -77,9 +77,9 @@ struct FormulaEditorView: View {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
                     Text("返回").font(.system(size: 15, weight: .medium))
                 }
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
             .padding(.leading, 16)
 
@@ -87,7 +87,7 @@ struct FormulaEditorView: View {
 
             Text("自定义指标")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
 
             Spacer()
 
@@ -97,24 +97,24 @@ struct FormulaEditorView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(AppColors.textPrimary)
                     .frame(width: 34, height: 34)
-                    .background(Color.gray.opacity(0.12)).cornerRadius(8)
+                    .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
             .padding(.trailing, 16)
         }
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
     }
 
     private var emptyView: some View {
         VStack(spacing: 12) {
             Image(systemName: "function")
-                .font(.system(size: 40)).foregroundColor(.gray.opacity(0.5))
+                .font(.system(size: 40)).foregroundColor(AppColors.textTertiary.opacity(0.5))
             Text("还没有自定义指标")
-                .font(.system(size: 15)).foregroundColor(.gray)
+                .font(.system(size: 15)).foregroundColor(AppColors.textTertiary)
             Text("点击右上角 + 新建指标，支持通达信公式语法")
-                .font(.system(size: 12)).foregroundColor(.gray.opacity(0.8))
+                .font(.system(size: 12)).foregroundColor(AppColors.textTertiary.opacity(0.8))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -126,14 +126,14 @@ struct FormulaEditorView: View {
                 .frame(width: 22, height: 6)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name)
-                    .font(.system(size: 15, weight: .medium)).foregroundColor(.primary)
+                    .font(.system(size: 15, weight: .medium)).foregroundColor(AppColors.textPrimary)
                 Text(item.formula.replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 11)).foregroundColor(.gray)
+                    .font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 12)).foregroundColor(.gray)
+                .font(.system(size: 12)).foregroundColor(AppColors.textTertiary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -268,26 +268,26 @@ struct IndicatorEditSheet: View {
         VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Text(headerTitle)
-                        .font(.system(size: 16, weight: .bold)).foregroundColor(.primary)
+                        .font(.system(size: 16, weight: .bold)).foregroundColor(AppColors.textPrimary)
                     Spacer(minLength: 4)
                     Button("全选") { inputController.selectAll() }
-                        .font(.system(size: 12)).foregroundColor(.blue)
+                        .font(.system(size: 12)).foregroundColor(AppColors.accent)
                     Button("清空") { formula = "" }
-                        .font(.system(size: 12)).foregroundColor(.blue)
+                        .font(.system(size: 12)).foregroundColor(AppColors.accent)
                     Button("测试公式") { runTest() }
-                        .font(.system(size: 12, weight: .medium)).foregroundColor(.blue)
+                        .font(.system(size: 12, weight: .medium)).foregroundColor(AppColors.accent)
                     // 恢复编译时内容：仅系统指标可点（自定义指标禁用）；选股模式整块不显示
                     if !isPicker {
                         Button("恢复编译时内容") { restoreBuiltin() }
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(canRestoreBuiltin ? .orange : .gray)
+                            .foregroundColor(canRestoreBuiltin ? AppColors.statusWarning : AppColors.textTertiary)
                             .disabled(!canRestoreBuiltin)
                     }
                     Button("保存") { save() }
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12).padding(.vertical, 5)
-                        .background(canSave ? Color.blue : Color.gray)
+                        .background(canSave ? AppColors.accent : AppColors.textTertiary)
                         .cornerRadius(6)
                         .disabled(!canSave)
                     Button("取消") {
@@ -297,7 +297,7 @@ struct IndicatorEditSheet: View {
                             onCancel()
                         }
                     }
-                    .font(.system(size: 12)).foregroundColor(.gray)
+                    .font(.system(size: 12)).foregroundColor(AppColors.textTertiary)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
 
@@ -309,7 +309,7 @@ struct IndicatorEditSheet: View {
                         if !isSystemIndicator {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("名称").font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
+                                Text("名称").font(.system(size: 13, weight: .medium)).foregroundColor(AppColors.textPrimary)
                                 TextField("例如：双均线", text: $name)
                                     .font(.system(size: 14))
                                     .padding(.horizontal, 10).padding(.vertical, 8)
@@ -319,7 +319,7 @@ struct IndicatorEditSheet: View {
                             // 作用域：选股公式不适用，隐藏
                             if !isPicker {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("作用域").font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
+                                Text("作用域").font(.system(size: 13, weight: .medium)).foregroundColor(AppColors.textPrimary)
                                 HStack(spacing: 8) {
                                     ForEach(IndicatorScope.allCases) { s in
                                         Button {
@@ -327,9 +327,9 @@ struct IndicatorEditSheet: View {
                                         } label: {
                                             Text(s.rawValue)
                                                 .font(.system(size: 12))
-                                                .foregroundColor(scope == s ? .white : .primary)
+                                                .foregroundColor(scope == s ? .white : AppColors.textPrimary)
                                                 .padding(.horizontal, 12).padding(.vertical, 6)
-                                                .background(scope == s ? Color.blue : Color(uiColor: .systemGray6))
+                                                .background(scope == s ? AppColors.accent : Color(uiColor: .systemGray6))
                                                 .cornerRadius(6)
                                         }
                                     }
@@ -353,7 +353,7 @@ struct IndicatorEditSheet: View {
                                 }
                             }
                             Text("选择该指标可用的周期。不同周期各有一份独立参数副本（USER_<名称>.tdx），可单独编辑")
-                                .font(.system(size: 10)).foregroundColor(.gray)
+                                .font(.system(size: 10)).foregroundColor(AppColors.textTertiary)
                         }
                         }
                         field("公式") {
@@ -365,7 +365,7 @@ struct IndicatorEditSheet: View {
                             .padding(8)
                             .background(Color(uiColor: .systemGray6)).cornerRadius(6)
                             Text("支持：MA/EMA/SMA/REF/HHV/LLV/ABS/MAX/MIN/SUM/STD/COUNT/IF/CROSS/BARSLAST/AND/OR/NOT，数据 C/H/L/O/V/AMOUNT，运算符 + - * / < > <= >= == != ")
-                                .font(.system(size: 10)).foregroundColor(.gray)
+                                .font(.system(size: 10)).foregroundColor(AppColors.textTertiary)
                         }
                         field("常用符号") {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 6)], alignment: .leading, spacing: 6) {
@@ -394,7 +394,7 @@ struct IndicatorEditSheet: View {
                         field("输出线条样式（通达信选项）") {
                             // 线条类型：全宽单行，避免"不绘制"换行
                             HStack(spacing: 8) {
-                                Text("样式").font(.system(size: 11)).foregroundColor(.gray)
+                                Text("样式").font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                                 styleChip("实线", opt: "", selected: style == .solid) { style = .solid }
                                 styleChip("虚线", opt: ",DOTLINE", selected: style == .dotline) { appendOption(",DOTLINE"); style = .dotline }
                                 styleChip("圆点", opt: ",POINTDOT", selected: style == .pointdot) { appendOption(",POINTDOT"); style = .pointdot }
@@ -404,7 +404,7 @@ struct IndicatorEditSheet: View {
                             }
                             // 线条粗细：全宽单行
                             HStack(spacing: 8) {
-                                Text("粗细").font(.system(size: 11)).foregroundColor(.gray)
+                                Text("粗细").font(.system(size: 11)).foregroundColor(AppColors.textTertiary)
                                 ForEach([1, 2, 3, 4], id: \.self) { t in
                                     styleChip("×\(t)", opt: t == 1 ? "" : ",LINETHICK\(t)", selected: thickness == t) {
                                         if t != 1 { appendOption(",LINETHICK\(t)") }
@@ -420,16 +420,16 @@ struct IndicatorEditSheet: View {
                                 }
                             }
                             Text("点击样式/粗细/颜色会在光标处插入对应关键字，例如插入 DOTLINE / LINETHICK2 / COLORRED")
-                                .font(.system(size: 10)).foregroundColor(.gray)
+                                .font(.system(size: 10)).foregroundColor(AppColors.textTertiary)
                         }
                         }
                         if let message = testMessage {
                             Text(message)
                                 .font(.system(size: 12))
-                                .foregroundColor(testError ? .red : .primary)
+                                .foregroundColor(testError ? AppColors.statusError : AppColors.textPrimary)
                                 .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background((testError ? Color.red : Color.green).opacity(0.1)).cornerRadius(6)
+                                .background((testError ? AppColors.statusError : AppColors.statusSuccess).opacity(0.1)).cornerRadius(6)
                         }
                     }
                     .padding(16)
@@ -439,7 +439,7 @@ struct IndicatorEditSheet: View {
                 Color.clear.frame(height: 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 表单贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
         .ignoresSafeArea(.container, edges: .bottom)
         .alert("存在修改未保存，是否取消修改？", isPresented: $showCancelConfirm) {
@@ -461,7 +461,7 @@ struct IndicatorEditSheet: View {
 
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundColor(.primary)
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundColor(AppColors.textPrimary)
             content()
         }
     }
@@ -575,9 +575,9 @@ struct IndicatorEditSheet: View {
                 .font(.system(size: 11))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundColor(selected ? .white : .primary)
+                .foregroundColor(selected ? .white : AppColors.textPrimary)
                 .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(selected ? Color.blue : Color(uiColor: .systemGray6))
+                .background(selected ? AppColors.accent : Color(uiColor: .systemGray6))
                 .cornerRadius(6)
         }
     }
@@ -592,7 +592,7 @@ struct IndicatorEditSheet: View {
                 .frame(maxWidth: .infinity)
                 .overlay(
                     RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color(.label).opacity(0.15), lineWidth: 1)
+                        .stroke(AppColors.textPrimary.opacity(0.15), lineWidth: 1)
                 )
         }
     }
@@ -606,7 +606,7 @@ struct IndicatorEditSheet: View {
                 .font(.system(size: 12, design: .monospaced))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundColor(.primary)
+                .foregroundColor(AppColors.textPrimary)
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .background(Color(uiColor: .systemGray6)).cornerRadius(6)
         }
@@ -743,9 +743,9 @@ struct SystemIndicatorEditorContainer: View {
                         ForEach(mainIds, id: \.self) { mid in
                             Button(mid) { mainId = mid }
                                 .font(.system(size: 13, weight: mainId == mid ? .semibold : .regular))
-                                .foregroundColor(mainId == mid ? .white : .primary)
+                                .foregroundColor(mainId == mid ? .white : AppColors.textPrimary)
                                 .padding(.horizontal, 14).padding(.vertical, 7)
-                                .background(mainId == mid ? Color.blue : Color(uiColor: .systemGray6))
+                                .background(mainId == mid ? AppColors.accent : Color(uiColor: .systemGray6))
                                 .cornerRadius(6)
                         }
                     }
@@ -775,7 +775,7 @@ struct SystemIndicatorEditorContainer: View {
             )
             .id(id)
         }
-        .background(Color(.systemBackground))
+        .background(AppColors.pageBackground)
         // 表单贴物理屏幕底边（全 App 统一贴底为0）；仅忽略 container 区，键盘行为不变
         .ignoresSafeArea(.container, edges: .bottom)
     }

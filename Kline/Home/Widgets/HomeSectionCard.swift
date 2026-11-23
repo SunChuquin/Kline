@@ -21,12 +21,12 @@ struct HomeSectionCard<Content: View>: View {
         VStack(alignment: .leading, spacing: compact ? 8 : 10) {
             Text(title)
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppColors.textSecondary)
             content
         }
         .padding(compact ? 10 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
+        .background(AppColors.cardBackground)
         .cornerRadius(12)
     }
 }
