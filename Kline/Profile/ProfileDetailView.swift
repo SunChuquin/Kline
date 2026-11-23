@@ -444,8 +444,7 @@ struct ProfileDetailView: View {
             LocalUpdateView()
 
             settingsCard("局域网") {
-                linkRow("联机同步") { showLANSync = true }
-                    .accessibilityIdentifier("profile.lansync.entry")
+                linkRow("联机同步", identifier: "profile.lansync.entry") { showLANSync = true }
             }
         }
     }
@@ -455,7 +454,7 @@ struct ProfileDetailView: View {
         settingsCard("调试入口") {
             linkRow("Python 引擎实验室") { showPythonLab = true }
             insetDivider
-            linkRow("行情卡片样张（临时）") {
+            linkRow("行情卡片样张（临时）", identifier: "profile.indexCardGallery.entry") {
                 // 与原实现一致：打开样张前先关掉其它浮层
                 showThemePanel = false
                 showPanelLayoutPanel = false
@@ -469,7 +468,6 @@ struct ProfileDetailView: View {
                 showLANSync = false
                 showIndexCardGallery = true
             }
-            .accessibilityIdentifier("profile.indexCardGallery.entry")
         }
     }
 
@@ -524,8 +522,11 @@ struct ProfileDetailView: View {
     }
 
     /// 整行可点的跳转行（标题 + 右侧 chevron，命中区 48pt）
-    private func linkRow(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    /// 标识直接打在 Button 上，保证 UI 测试能按 buttons[...] 命中
+    @ViewBuilder
+    private func linkRow(_ title: String, identifier: String? = nil,
+                         action: @escaping () -> Void) -> some View {
+        let row = Button(action: action) {
             HStack(spacing: 10) {
                 Text(title)
                     .font(.system(size: 16))
@@ -540,6 +541,12 @@ struct ProfileDetailView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+
+        if let identifier = identifier {
+            row.accessibilityIdentifier(identifier)
+        } else {
+            row
+        }
     }
 }
 
