@@ -60,14 +60,14 @@ struct FavoritesLayoutCView: View {
             // 刷新监控标的列表（全局刷新按钮）
             refreshButton
             // 搜索按钮
-            iconButton("magnifyingglass") { 
+            iconButton("magnifyingglass", label: "搜索") { 
                 model.homeSearchActive = true 
             }
             modeSwitch
             // 编辑态开关：与 A/B/D 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
             FavoritesEditToggleButton(model: model)
-            iconButton("slider.horizontal.3") { model.showColumnPanel = true }
-            iconButton("plus", color: AppColors.accent) { model.showAddSheet = true }
+            iconButton("slider.horizontal.3", label: "表头设置") { model.showColumnPanel = true }
+            iconButton("plus", label: "新建分组", style: .accent) { model.showAddSheet = true }
                 .padding(.trailing, 4)
         }
         .frame(height: 48)
@@ -107,70 +107,19 @@ struct FavoritesLayoutCView: View {
     private func compactToolItem(_ item: CompactToolItem) -> some View {
         switch item {
         case .refresh: refreshButton
-        case .search: iconButton("magnifyingglass") { model.homeSearchActive = true }
+        case .search: iconButton("magnifyingglass", label: "搜索") { model.homeSearchActive = true }
         case .modeSwitch: modeSwitch
         case .edit: FavoritesEditToggleButton(model: model)
-        case .columns: iconButton("slider.horizontal.3") { model.showColumnPanel = true }
-        case .add: iconButton("plus", color: AppColors.accent) { model.showAddSheet = true }
+        case .columns: iconButton("slider.horizontal.3", label: "表头设置") { model.showColumnPanel = true }
+        case .add: iconButton("plus", label: "新建分组", style: .accent) { model.showAddSheet = true }
         }
     }
     
-    /// 刷新按钮
+    /// 刷新按钮（统一 IconButton）
     private var refreshButton: some View {
-        Button {
-            WatchlistSyncManager.shared.sync(reason: "手动")
-        } label: {
-            HStack(spacing: 5) {
-                if let p = model.refreshProgress {
-                    // 显示进度：图标 + 进度文字
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                    Text("\(p.done)/\(p.total)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                } else if watchlistSync.isRunning {
-                    // 显示加载中：图标 + 加载文字
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                    Text("刷新中...")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                } else {
-                    // 正常状态：图标 + 刷新文字
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                    Text("刷新")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                }
-            }
-            .foregroundColor(AppColors.accent)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(AppColors.sidebarBackground)
-            .cornerRadius(7)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .disabled(!watchlistTappable)
-        .buttonStyle(.plain)
-        .fixedSize()
+        FavoritesRefreshButton(model: model)
     }
     
-    /// 清单标的自动更新状态（用于刷新按钮控制）
-    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
-    
-    /// 刷新按钮可点条件：已启用且当前不在执行中
-    private var watchlistTappable: Bool {
-        syncConfig.enabled && !watchlistSync.isRunning
-    }
-    
-    /// 同步配置（用于判断是否启用）
-    @ObservedObject private var syncConfig = TdxSyncConfig.shared
-
     /// 「卡片 / 表格」分段切换（当前态蓝底白字）
     private var modeSwitch: some View {
         HStack(spacing: 2) {
@@ -204,17 +153,11 @@ struct FavoritesLayoutCView: View {
         if model.showsCardMode != on { model.showsCardMode = on }
     }
 
-    /// 顶部图标按钮：统一 44x44 命中区
-    private func iconButton(_ systemName: String, color: Color = AppColors.textSecondary,
+    /// 顶部图标按钮：统一 IconButton（纯图标 + 无障碍标签）
+    private func iconButton(_ systemName: String, label: String,
+                            style: ToolbarIconButton.Style = .normal,
                             action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 16))
-                .foregroundColor(color)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        ToolbarIconButton(icon: systemName, label: label, style: style, action: action)
     }
 
     // MARK: - 内容区（卡片流 / 表格 / 编辑态）

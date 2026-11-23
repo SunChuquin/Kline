@@ -151,23 +151,15 @@ struct PageLayoutEditorView: View {
 
     /// 返回按钮：有未保存改动时先弹确认，再走 onClose
     private var backButton: some View {
-        Button {
+        ToolbarIconButton(icon: "chevron.left",
+                          label: "返回",
+                          accessibilityIdentifier: "layoutEditor.back") {
             if editor.isDirty {
                 showDirtyAlert = true
             } else {
                 onClose()
             }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
-                Text("返回").font(.system(size: 15, weight: .medium))
-            }
-            .foregroundColor(AppColors.textPrimary)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("layoutEditor.back")
     }
 
     /// 标题：fixedSize 保持不截断（紧凑两行下第一行空间充裕，无需放开）
@@ -204,22 +196,13 @@ struct PageLayoutEditorView: View {
         .accessibilityIdentifier("layoutEditor.stylePicker")
     }
 
-    /// 全屏预览入口（紧凑态必须保持文字水平完整显示，命中区不缩小）
+    /// 全屏预览入口：统一 IconButton（纯图标 + 无障碍标签）
     private var fullPreviewButton: some View {
-        Button {
+        ToolbarIconButton(icon: "arrow.up.left.and.arrow.down.right",
+                          label: "全屏预览",
+                          accessibilityIdentifier: "layoutEditor.fullPreview") {
             showFullPreview = true
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("全屏预览").font(.system(size: 15, weight: .medium))
-            }
-            .foregroundColor(AppColors.textPrimary)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("layoutEditor.fullPreview")
     }
 
     // MARK: - 页签行
@@ -238,10 +221,17 @@ struct PageLayoutEditorView: View {
 
             Spacer(minLength: 8)
 
-            pillButton("保存") { editor.save() }
-                .accessibilityIdentifier("layoutEditor.save")
-            pillButton("恢复默认") { showResetConfirm = true }
-                .accessibilityIdentifier("layoutEditor.resetDefault")
+            ToolbarIconButton(icon: "checkmark",
+                              label: "保存",
+                              style: .accent,
+                              accessibilityIdentifier: "layoutEditor.save") {
+                editor.save()
+            }
+            ToolbarIconButton(icon: "arrow.counterclockwise",
+                              label: "恢复默认",
+                              accessibilityIdentifier: "layoutEditor.resetDefault") {
+                showResetConfirm = true
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)

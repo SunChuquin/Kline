@@ -84,34 +84,22 @@ struct TrainingRecordListView: View {
 
     private var listNavBar: some View {
         HStack(spacing: 8) {
-            Button(action: onClose) {
-                HStack(spacing: 2) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("返回")
-                        .font(.system(size: 15))
-                }
-                .foregroundColor(AppColors.accent)
-                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+            ToolbarIconButton(icon: "chevron.left",
+                              label: "返回",
+                              accessibilityIdentifier: "trainingRecord.back") {
+                onClose()
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("trainingRecord.back")
 
             Spacer(minLength: 8)
 
             // 清空：列表为空时置灰（避免无反应点击）
-            Button(action: { showClearConfirm = true }) {
-                Text("清空")
-                    .font(.system(size: 15))
-                    .foregroundColor(AppColors.marketUp)
-                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
-                    .contentShape(Rectangle())
+            ToolbarIconButton(icon: "trash",
+                              label: "清空",
+                              style: .destructive,
+                              accessibilityIdentifier: "trainingRecord.clearAll") {
+                showClearConfirm = true
             }
-            .buttonStyle(.plain)
             .disabled(store.sessions.isEmpty)
-            .opacity(store.sessions.isEmpty ? 0.4 : 1)
-            .accessibilityIdentifier("trainingRecord.clearAll")
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
@@ -325,19 +313,11 @@ private struct TrainingTradeDetailView: View {
 
     private var navBar: some View {
         HStack(spacing: 8) {
-            Button(action: onBack) {
-                HStack(spacing: 2) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("返回")
-                        .font(.system(size: 15))
-                }
-                .foregroundColor(AppColors.accent)
-                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+            ToolbarIconButton(icon: "chevron.left",
+                              label: "返回",
+                              accessibilityIdentifier: "trainingRecord.detailBack") {
+                onBack()
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("trainingRecord.detailBack")
 
             Spacer(minLength: 8)
 

@@ -33,21 +33,13 @@ struct HomeHeaderBar: View {
 
             Spacer()
 
-            // 用户入口按钮
-            Button(action: onProfile) {
-                HStack(spacing: 5) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(AppColors.accent)
-                    Text("登录")
-                        .font(.system(size: 16))
-                }
-                .padding(EdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2))
-                .background(AppColors.cardHoverBackground)
-                .cornerRadius(20)
-            }
-            .accessibilityIdentifier("home.profileButton")
-            .padding(.trailing, 16)
+            // 用户入口：统一纯图标 IconButton（不再显示「登录」文字）
+            ToolbarIconButton(icon: "person.crop.circle",
+                              label: "个人中心",
+                              style: .accent,
+                              accessibilityIdentifier: "home.profileButton",
+                              action: onProfile)
+                .padding(.trailing, 8)
         }
         .background(AppColors.pageBackground)
         .frame(minHeight: 56)

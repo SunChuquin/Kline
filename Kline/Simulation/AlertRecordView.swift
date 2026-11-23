@@ -49,32 +49,19 @@ struct AlertRecordView: View {
 
     private var navBar: some View {
         HStack(spacing: 8) {
-            Button(action: onClose) {
-                HStack(spacing: 2) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("返回")
-                        .font(.system(size: 15))
-                }
-                .foregroundColor(AppColors.accent)
-                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+            ToolbarIconButton(icon: "chevron.left", label: "返回") {
+                onClose()
             }
-            .buttonStyle(.plain)
 
             Spacer(minLength: 8)
 
             // 清空全部：记录为空时置灰（避免无反应点击）
-            Button(action: { showClearConfirm = true }) {
-                Text("清空全部")
-                    .font(.system(size: 15))
-                    .foregroundColor(AppColors.marketUp)
-                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
-                    .contentShape(Rectangle())
+            ToolbarIconButton(icon: "trash",
+                              label: "清空全部",
+                              style: .destructive) {
+                showClearConfirm = true
             }
-            .buttonStyle(.plain)
             .disabled(store.alertRecords.isEmpty)
-            .opacity(store.alertRecords.isEmpty ? 0.4 : 1)
         }
         .padding(.horizontal, 16)
         .frame(height: 44)

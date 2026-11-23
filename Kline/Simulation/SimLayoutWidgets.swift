@@ -295,53 +295,28 @@ struct SimTopBarWidget: View {
         .accessibilityIdentifier("sim.account.menu")
     }
 
-    /// 蓝描边小按钮（资金管理 / 设置，26pt 高，与 A/B/C 顶部动作一致）
+    /// 工具栏小入口（资金管理 / 设置）：统一 IconButton
     private func miniButton(icon: String, title: String,
                             action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 11))
-                Text(title).font(.system(size: 12))
-            }
-            .foregroundColor(AppColors.accent)
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.accent.opacity(0.5), lineWidth: 1))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        ToolbarIconButton(icon: icon, label: title, style: .accent, action: action)
     }
 }
 
 // MARK: - 工具栏「条件单」入口
 
-/// 「条件单」入口（文字右上角叠监控中数量角标；A/B/C 工具栏共用视觉令牌）
+/// 「条件单」入口（右上角叠监控中数量角标；A/B/C 工具栏共用同一种 IconButton）
 struct SimCondEntryWidget: View {
     @ObservedObject var model: SimulationPageModel
     @ObservedObject private var store = SimStore.shared
 
     var body: some View {
         let monitoring = store.condCounts(accountID: store.queryAccountID).monitoring
-        return Button(action: { model.condPresentation = .list(UUID()) }) {
-            Text("条件单")
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(AppColors.accent)
-                .overlay(alignment: .topTrailing) {
-                    if monitoring > 0 {
-                        Text("\(monitoring)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(AppColors.marketUp))
-                            .offset(x: 12, y: -8)
-                    }
-                }
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+        return ToolbarIconButton(icon: "bell.badge",
+                                 label: "条件单",
+                                 badgeCount: monitoring,
+                                 accessibilityIdentifier: "sim.cond.entry") {
+            model.condPresentation = .list(UUID())
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sim.cond.entry")
     }
 }
 

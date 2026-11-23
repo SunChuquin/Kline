@@ -353,29 +353,15 @@ struct SimulationLayoutCView: View {
         .simCondEntryPresentation($condPresentation, accountID: store.queryAccountID)
     }
 
-    /// 工具栏「条件单」入口（文字右上角叠监控中数量角标）
+    /// 工具栏「条件单」入口（右上角叠监控中数量角标）
     private var condEntryButton: some View {
         let monitoring = store.condCounts(accountID: store.queryAccountID).monitoring
-        return Button(action: { condPresentation = .list(UUID()) }) {
-            Text("条件单")
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundColor(AppColors.accent)
-                .overlay(alignment: .topTrailing) {
-                    if monitoring > 0 {
-                        Text("\(monitoring)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(AppColors.marketUp))
-                            .offset(x: 12, y: -8)
-                    }
-                }
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+        return ToolbarIconButton(icon: "bell.badge",
+                                 label: "条件单",
+                                 badgeCount: monitoring,
+                                 accessibilityIdentifier: "sim.cond.entry") {
+            condPresentation = .list(UUID())
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sim.cond.entry")
     }
 
     private var searchBox: some View {
@@ -413,18 +399,9 @@ struct SimulationLayoutCView: View {
     }
 
     private var refreshButton: some View {
-        Button(action: { Task { await refreshQuotes() } }) {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                Text("刷新").font(.system(size: 11.5))
-            }
-            .foregroundColor(AppColors.textSecondary)
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(AppColors.separator, lineWidth: 1))
-            .contentShape(Rectangle())
+        ToolbarIconButton(icon: "arrow.clockwise", label: "刷新") {
+            Task { await refreshQuotes() }
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - 在途委托 / 当日成交

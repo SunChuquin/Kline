@@ -574,34 +574,45 @@ final class FavoritesPageModel: ObservableObject {
 
 // MARK: - 编辑态开关按钮（四档共用：文案「编辑」→「完成」）
 
-/// 编辑态开关：灰底胶囊蓝字「编辑」→ 编辑态蓝底白字「完成」，命中区 44pt。
-/// A 工具条 / B 工作区标题 / C 顶栏 / D 顶栏共用同一个按钮，保证四档文案与选中态一致；
+/// 编辑态开关（A/B/C/D 四档共用）：统一 IconButton，选中态强调色。
 /// 退出编辑态时由 `FavoritesPageModel.toggleEditingMode()` 一并清空多选。
 struct FavoritesEditToggleButton: View {
     @ObservedObject var model: FavoritesPageModel
 
     var body: some View {
-        Button {
+        ToolbarIconButton(icon: model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal",
+                          label: model.showEditingMode ? "完成编辑" : "编辑",
+                          isActive: model.showEditingMode,
+                          accessibilityIdentifier: "favorites.edit") {
             model.toggleEditingMode()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: model.showEditingMode ? "line.3.horizontal.circle.fill" : "line.3.horizontal")
-                    .font(.system(size: 12, weight: .medium))
-                Text(model.showEditingMode ? "完成" : "编辑")
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    // 固定最小宽：文案切换时按钮宽度不跳动
-                    .frame(minWidth: 24)
-            }
-            .foregroundColor(model.showEditingMode ? .white : AppColors.accent)
-            .padding(.horizontal, 11)
-            .frame(height: 28)
-            .background(model.showEditingMode ? AppColors.accent : AppColors.sidebarBackground)
-            .cornerRadius(7)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+    }
+}
+
+/// 自选页全局刷新按钮（A/B/C/D 四档共用）：统一 IconButton，忙碌时显示进度圈。
+struct FavoritesRefreshButton: View {
+    @ObservedObject var model: FavoritesPageModel
+    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
+    @ObservedObject private var syncConfig = TdxSyncConfig.shared
+
+    /// 可点条件：已启用且当前不在执行中
+    private var tappable: Bool { syncConfig.enabled && !watchlistSync.isRunning }
+
+    var body: some View {
+        ToolbarIconButton(icon: "arrow.clockwise",
+                          label: "刷新",
+                          isBusy: watchlistSync.isRunning || model.refreshProgress != nil,
+                          accessibilityIdentifier: "favorites.refresh") {
+            WatchlistSyncManager.shared.sync(reason: "手动")
+        }
+        .disabled(!tappable)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        if let p = model.refreshProgress { return "\(p.done)/\(p.total)" }
+        if watchlistSync.isRunning { return "刷新中" }
+        return ""
     }
 }
 
@@ -611,146 +622,105 @@ struct FavoritesEditToggleButton: View {
 /// 选中公式分组时额外显示「刷新选股」与「选择公式 / 编辑公式」。A/B/C/D 四档共用。
 struct FavoritesToolbar: View {
     @ObservedObject var model: FavoritesPageModel
-    
-    /// 清单标的自动更新状态（用于刷新按钮控制）
-    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
-    
-    /// 刷新按钮可点条件：已启用且当前不在执行中
-    private var watchlistTappable: Bool {
-        syncConfig.enabled && !watchlistSync.isRunning
-    }
-    
-    /// 同步配置（用于判断是否启用）
-    @ObservedObject private var syncConfig = TdxSyncConfig.shared
+
+    /// 窄屏（手机竖屏）：低频操作收纳进「更多」菜单，避免挤压标题
+    @CompactWidthValue private var isCompact
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             Text("自选")
                 .font(.system(size: 18, weight: .bold))
+                .foregroundColor(AppColors.textPrimary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
                 .accessibilityIdentifier("favorites.title")
                 .padding(.leading, 16)
-            Spacer()
-            // 刷新监控标的列表（全局刷新按钮）
-            Button {
-                WatchlistSyncManager.shared.sync(reason: "手动")
-            } label: {
-                HStack(spacing: 5) {
-                    if let p = model.refreshProgress {
-                        // 显示进度：图标 + 进度文字
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(AppColors.accent)
-                        Text("\(p.done)/\(p.total)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(AppColors.accent)
-                    } else if watchlistSync.isRunning {
-                        // 显示加载中：图标 + 加载文字
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(AppColors.accent)
-                        Text("刷新中...")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(AppColors.accent)
-                    } else {
-                        // 正常状态：图标 + 刷新文字
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(AppColors.accent)
-                        Text("刷新")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(AppColors.accent)
-                    }
-                }
-                .foregroundColor(AppColors.accent)
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(AppColors.sidebarBackground)
-                .cornerRadius(7)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .disabled(!watchlistTappable)
-            .buttonStyle(.plain)
-            .fixedSize()
-            
-            // 搜索按钮
-            MarketToolButton(icon: "magnifyingglass", title: "搜索") {
+
+            Spacer(minLength: 4)
+
+            // 全局刷新（监控标的 / 公式进度）：忙碌时显示进度圈
+            FavoritesRefreshButton(model: model)
+
+            ToolbarIconButton(icon: "magnifyingglass",
+                              label: "搜索",
+                              accessibilityIdentifier: "favorites.search") {
                 model.homeSearchActive = true
             }
-            
-            // 刷新公式分组（仅当选中 formula 分组）
-            if model.currentGroup.kind == .formula {
-                Button {
+
+            // 公式分组的高频操作：宽屏直接露出，窄屏收进「更多」
+            if model.currentGroup.kind == .formula && !isCompact {
+                ToolbarIconButton(icon: "arrow.clockwise",
+                                  label: "刷新选股",
+                                  style: .accent,
+                                  isBusy: model.refreshProgress?.groupID == model.currentGroup.id,
+                                  accessibilityIdentifier: "favorites.formula.refresh") {
                     model.refreshFormulaGroup(id: model.currentGroup.id)
-                } label: {
-                    if let p = model.refreshProgress, p.groupID == model.currentGroup.id {
-                        HStack(spacing: 4) {
-                            ProgressView().scaleEffect(0.8)
-                            Text("\(p.done)/\(p.total)")
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(AppColors.textSecondary)
+                }
+                ToolbarIconButton(icon: "function",
+                                  label: model.fav.formulaName(groupID: model.currentGroup.id) == nil
+                                        ? "选择公式" : "编辑公式",
+                                  style: .accent,
+                                  accessibilityIdentifier: "favorites.formula.edit") {
+                    model.formulaEditorTarget = model.currentGroup
+                }
+            }
+
+            // 编辑态开关：选中用强调色，纯图标
+            FavoritesEditToggleButton(model: model)
+
+            if isCompact {
+                // 窄屏：表头设置 / 分组管理 / 公式操作收进「更多」，标题与常用按钮不被挤压
+                ToolbarOverflowMenu(label: "更多操作") {
+                    Button {
+                        model.showColumnPanel = true
+                    } label: {
+                        Label("表头设置", systemImage: "slider.horizontal.3")
+                    }
+                    Button {
+                        model.showManageSheet = true
+                    } label: {
+                        Label("分组管理", systemImage: "folder")
+                    }
+                    if model.currentGroup.kind == .formula {
+                        Button {
+                            model.refreshFormulaGroup(id: model.currentGroup.id)
+                        } label: {
+                            Label("刷新选股", systemImage: "arrow.clockwise")
                         }
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(AppColors.sidebarBackground)
-                        .cornerRadius(8)
-                    } else {
-                        Label("刷新选股", systemImage: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(AppColors.accent.opacity(0.08))
-                            .foregroundColor(AppColors.accent)
-                            .cornerRadius(8)
+                        Button {
+                            model.formulaEditorTarget = model.currentGroup
+                        } label: {
+                            Label(model.fav.formulaName(groupID: model.currentGroup.id) == nil
+                                  ? "选择公式" : "编辑公式",
+                                  systemImage: "function")
+                        }
                     }
                 }
-                .buttonStyle(.plain)
-                // 胶囊外观不变，只把命中区撑到 44 高
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            if model.currentGroup.kind == .formula {
-                Button {
-                    model.formulaEditorTarget = model.currentGroup
-                } label: {
-                    // 已引用公式显示「编辑公式」，未选择显示「选择公式」
-                    Label(model.fav.formulaName(groupID: model.currentGroup.id) == nil ? "选择公式" : "编辑公式",
-                          systemImage: "function")
-                        .font(.system(size: 13))
+            } else {
+                ToolbarIconButton(icon: "slider.horizontal.3",
+                                  label: "表头设置",
+                                  accessibilityIdentifier: "favorites.columns") {
+                    model.showColumnPanel = true
                 }
-                .buttonStyle(.plain)
-                .frame(minHeight: 44)
-                .padding(.horizontal, 6)
-                .contentShape(Rectangle())
+                ToolbarIconButton(icon: "folder",
+                                  label: "分组管理",
+                                  accessibilityIdentifier: "favorites.groups") {
+                    model.showManageSheet = true
+                }
             }
-            // 编辑态开关（A/B/C/D 四档同一按钮：文案「编辑」→「完成」）
-            FavoritesEditToggleButton(model: model)
-            topIconButton("slider.horizontal.3") {
-                model.showColumnPanel = true
-            }
-            topIconButton("folder") {
-                model.showManageSheet = true
-            }
-            topIconButton("plus", size: 18, color: AppColors.accent) {
+
+            // 新增分组：唯一允许使用强调色的高频入口，仍是同一种 IconButton
+            ToolbarIconButton(icon: "plus",
+                              label: "新建分组",
+                              style: .accent,
+                              accessibilityIdentifier: "favorites.add") {
                 model.showAddSheet = true
             }
             .padding(.trailing, 4)
         }
         .frame(height: 48)
         .background(AppColors.pageBackground)
-    }
-
-    /// 顶部工具条图标按钮：统一 44x44 命中区。
-    /// 纯图标按钮若不加 frame，可点范围只有字形大小（约 16x19），真机上很难点中。
-    private func topIconButton(_ systemName: String, size: CGFloat = 16,
-                               color: Color = AppColors.textSecondary,
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: size))
-                .foregroundColor(color)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 

@@ -649,55 +649,41 @@ struct MarketHeaderBar: View {
                 // 左侧：行情设置按钮（贴左，居中 Tab 两侧留白）
                 HStack {
                     // 行情设置按钮：默认打开「行情表设置」面板；
-                    // 从设置面板点「单元格宽度调整」后，切换为「带方框的❌」
-                    // 图标，保持宽度调整模式（左右拖动列分隔线调整列宽），
+                    // 从设置面板点「单元格宽度调整」后，切换为「关闭」图标，
+                    // 保持宽度调整模式（左右拖动列分隔线调整列宽），
                     // 再点一次退出该模式并恢复为设置按钮
-                    Button {
+                    ToolbarIconButton(icon: model.edgeAdjust ? "xmark" : "slider.horizontal.3",
+                                      label: model.edgeAdjust ? "退出单元格宽度调整" : "行情表设置",
+                                      isActive: model.edgeAdjust,
+                                      accessibilityIdentifier: "market.settings") {
                         if model.edgeAdjust {
                             withAnimation(.easeInOut(duration: 0.15)) { model.edgeAdjust = false }
                         } else {
                             model.showColumnPanel = true
                         }
-                    } label: {
-                        Image(systemName: model.edgeAdjust ? "xmark.square" : "slider.horizontal.3")
-                            .foregroundColor(model.edgeAdjust ? AppColors.accent : AppColors.textSecondary)
-                            .font(.system(size: 16))
                     }
-                    .buttonStyle(.plain)
-                    .frame(width: 28, height: 28)
-                    .help(model.edgeAdjust ? "退出单元格宽度调整" : "行情表设置（表头/冻结/宽度调整）")
                     Spacer()
                 }
-                .padding(.leading, 12)
+                .padding(.leading, 4)
 
                 // 右侧：公式入口（仅「选股」Tab 显示）+ 搜索按钮（保持最右不动）
                 HStack(spacing: 0) {
                     Spacer()
-                    // 公式入口：只在「选股」Tab 显示（市场 / 自选页工具区不出现），
-                    // 点击打开公式管理中心并定位到「选股指标」段；
-                    // 44×44 命中区放在 label 内层（不裁剪），外层仍收成 28×28，
-                    // 保证工具栏行高与相邻的搜索 / 设置按钮完全一致、不被撑高
                     if model.topMenu == .picker {
-                        Button { model.showFormulaCenter = true } label: {
-                            Image(systemName: "function")
-                                .foregroundColor(AppColors.textSecondary)
-                                .font(.system(size: 16))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
+                        ToolbarIconButton(icon: "function",
+                                          label: "公式管理（选股公式）",
+                                          style: .accent,
+                                          accessibilityIdentifier: "market.formula") {
+                            model.showFormulaCenter = true
                         }
-                        .buttonStyle(.plain)
-                        .frame(width: 28, height: 28)
-                        .help("公式管理（选股公式）")
                     }
-                    Button { model.homeSearchActive = true } label: {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(AppColors.textSecondary).font(.system(size: 16))
+                    ToolbarIconButton(icon: "magnifyingglass",
+                                      label: "搜索标的",
+                                      accessibilityIdentifier: "market.search") {
+                        model.homeSearchActive = true
                     }
-                    .buttonStyle(.plain)
-                    .frame(width: 28, height: 28)
-                    .help("搜索标的")
                 }
-                .padding(.trailing, 12)
+                .padding(.trailing, 4)
             }
             .frame(maxWidth: .infinity)
             .background(AppColors.pageBackground)
@@ -784,18 +770,20 @@ struct MarketToolBar: View {
     @ObservedObject var model: MarketPageModel
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             MarketToolButton(icon: "slider.horizontal.3", title: "表头设置") {
                 model.showColumnPanel = true
             }
-            MarketToolButton(icon: "arrow.left.and.right.square", title: "边线调整") {
+            MarketToolButton(icon: "arrow.left.and.right.square", title: "边线调整",
+                             isActive: model.edgeAdjust,
+                             style: .accent) {
                 model.edgeAdjust.toggle()
             }
             MarketToolButton(icon: "magnifyingglass", title: "搜索") {
                 model.homeSearchActive = true
             }
             if model.topMenu == .picker {
-                MarketToolButton(icon: "function", title: "公式") {
+                MarketToolButton(icon: "function", title: "公式", style: .accent) {
                     model.showFormulaCenter = true
                 }
             }
@@ -803,28 +791,20 @@ struct MarketToolBar: View {
     }
 }
 
-/// 工具条单个按钮：图标 + 文案（蓝色小胶囊），外层 44pt 命中区
+/// 工具条单个按钮：统一 IconButton（纯图标 + 无障碍标签），不再显示文字胶囊。
 struct MarketToolButton: View {
     let icon: String
     let title: String
+    var isActive: Bool = false
+    var style: ToolbarIconButton.Style = .normal
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 12, weight: .medium))
-                Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-            }
-            .foregroundColor(AppColors.accent)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(AppColors.sidebarBackground)
-            .cornerRadius(7)
-            .frame(height: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
+        ToolbarIconButton(icon: icon,
+                          label: title,
+                          style: style,
+                          isActive: isActive,
+                          action: action)
     }
 }
 

@@ -119,18 +119,12 @@ struct FormulaCenterView: View {
 
     private var header: some View {
         HStack {
-            Button {
+            ToolbarIconButton(icon: "chevron.left",
+                              label: "返回",
+                              accessibilityIdentifier: "formulaCenter.back") {
                 onClose()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
-                    Text("返回").font(.system(size: 15, weight: .medium))
-                }
-                .foregroundColor(AppColors.textPrimary)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
-            .padding(.leading, 16)
+            .padding(.leading, 8)
 
             Spacer()
 
@@ -140,21 +134,15 @@ struct FormulaCenterView: View {
 
             Spacer()
 
-            Button {
+            ToolbarIconButton(icon: "plus",
+                              label: "新建",
+                              style: .accent,
+                              accessibilityIdentifier: "formulaCenter.new") {
                 newAction()
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "plus").font(.system(size: 14, weight: .semibold))
-                    Text("新建").font(.system(size: 15, weight: .medium))
-                }
-                .foregroundColor(AppColors.textPrimary)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
             }
-            .accessibilityIdentifier("formulaCenter.new")
-            .padding(.trailing, 16)
+            .padding(.trailing, 8)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
         .background(AppColors.pageBackground)
     }
 

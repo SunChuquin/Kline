@@ -139,20 +139,24 @@ struct LANSyncView: View {
     // MARK: - 顶部返回栏（与个人中心同款）
 
     private var navBar: some View {
-        HStack {
-            Button(action: backTapped) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 24))
+        HStack(spacing: 4) {
+            ToolbarIconButton(icon: "chevron.left",
+                              label: "返回",
+                              accessibilityIdentifier: "lansync.back") {
+                backTapped()
             }
-            .padding(.leading, 16)
             .disabled(isSyncBusy)   // 配对中 / 传输中不允许返回，防同步任务与页面状态错乱
+            .accessibilityValue(isSyncBusy ? "同步中，暂不可返回" : "")
 
             Text("联机同步")
                 .font(.title)
                 .fontWeight(.bold)
+                .lineLimit(1)
+                .layoutPriority(1)
 
             Spacer()
         }
+        .padding(.leading, 8)
         .background(AppColors.pageBackground)
         .frame(height: 56)
     }

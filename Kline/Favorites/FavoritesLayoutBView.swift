@@ -127,28 +127,16 @@ struct FavoritesLayoutBView: View {
             Spacer(minLength: isCompact ? 4 : 8)
             // 刷新监控标的列表（全局刷新按钮）
             refreshButton
-            if isCompact {
-                // 紧凑态搜索收成纯图标（与 C 档顶栏同款），省下的宽度保住「全部按钮不出屏」
-                iconToolButton("magnifyingglass") {
-                    model.homeSearchActive = true
-                }
-            } else {
-                // 搜索按钮
-                toolButton("搜索", icon: "magnifyingglass") {
-                    model.homeSearchActive = true
-                }
+            // 搜索按钮（统一 IconButton）
+            iconToolButton("magnifyingglass", label: "搜索") {
+                model.homeSearchActive = true
             }
             if model.currentGroup.kind == .formula {
                 formulaRefreshButton(group: model.currentGroup)
             }
-            if isCompact {
-                iconToolButton("slider.horizontal.3") {
-                    model.showColumnPanel = true
-                }
-            } else {
-                toolButton("表头设置", icon: "slider.horizontal.3") {
-                    model.showColumnPanel = true
-                }
+            // 表头设置（统一 IconButton）
+            iconToolButton("slider.horizontal.3", label: "表头设置") {
+                model.showColumnPanel = true
             }
             // 编辑态开关：与 A/C/D 档同一按钮（文案「编辑」→「完成」，退出时清空多选）
             FavoritesEditToggleButton(model: model)
@@ -182,130 +170,28 @@ struct FavoritesLayoutBView: View {
         .onTapGesture { groupDrawerActive.toggle() }
     }
 
-    /// 刷新按钮
+    /// 刷新按钮（统一 IconButton）
     private var refreshButton: some View {
-        Button {
-            WatchlistSyncManager.shared.sync(reason: "手动")
-        } label: {
-            HStack(spacing: 5) {
-                if let p = model.refreshProgress {
-                    // 显示进度：图标 + 进度文字
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                    Text("\(p.done)/\(p.total)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                } else if watchlistSync.isRunning {
-                    // 显示加载中：图标 + 加载文字
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                    Text("刷新中...")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                } else {
-                    // 正常状态：图标 + 刷新文字
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                    Text("刷新")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(AppColors.accent)
-                }
-            }
-            .foregroundColor(AppColors.accent)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(AppColors.sidebarBackground)
-            .cornerRadius(7)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .disabled(!watchlistTappable)
-        .buttonStyle(.plain)
-        .fixedSize()
+        FavoritesRefreshButton(model: model)
     }
-
-    /// 清单标的自动更新状态（用于刷新按钮控制）
-    @ObservedObject private var watchlistSync = WatchlistSyncManager.shared
-
-    /// 刷新按钮可点条件：已启用且当前不在执行中
-    private var watchlistTappable: Bool {
-        syncConfig.enabled && !watchlistSync.isRunning
-    }
-
-    /// 同步配置（用于判断是否启用）
-    @ObservedObject private var syncConfig = TdxSyncConfig.shared
 
     /// 工具条胶囊按钮（文字 + 图标）：外观 28pt，命中区纵向补到 44pt
-    private func toolButton(_ title: String, icon: String, active: Bool = false,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 12, weight: .medium))
-                Text(title).font(.system(size: 12, weight: .medium))
-            }
-            .foregroundColor(active ? .white : AppColors.accent)
-            .padding(.horizontal, 11)
-            .frame(height: 28)
-            .background(active ? AppColors.accent : AppColors.sidebarBackground)
-            .cornerRadius(7)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// 通用图标工具按钮：统一 IconButton
+    private func iconToolButton(_ systemName: String, label: String,
+                                style: ToolbarIconButton.Style = .normal,
+                                action: @escaping () -> Void) -> some View {
+        ToolbarIconButton(icon: systemName, label: label, style: style, action: action)
     }
 
-    /// 紧凑态纯图标工具按钮（44×44 命中区，与 C 档顶栏图标按钮同款）：
-    /// 文字标签收起只留图标，宽度紧张时省给分组名
-    private func iconToolButton(_ systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 16))
-                .foregroundColor(AppColors.accent)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 公式分组的「刷新选股」：刷新中显示 done/total 进度
-    /// （fixedSize：紧凑态进度文案变宽时按钮整体外扩，不被容器压扁截断）
-    @ViewBuilder
+    /// 公式分组的「刷新选股」：统一 IconButton，刷新中显示进度圈
     private func formulaRefreshButton(group: FavoritesGroup) -> some View {
-        Button {
+        ToolbarIconButton(icon: "arrow.clockwise",
+                          label: "刷新选股",
+                          style: .accent,
+                          isBusy: model.refreshProgress?.groupID == group.id,
+                          accessibilityIdentifier: "favorites.formula.refresh") {
             model.refreshFormulaGroup(id: group.id)
-        } label: {
-            Group {
-                if let p = model.refreshProgress, p.groupID == group.id {
-                    HStack(spacing: 4) {
-                        ProgressView().scaleEffect(0.7)
-                        Text("\(p.done)/\(p.total)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(AppColors.textSecondary)
-                    }
-                    .padding(.horizontal, 11)
-                    .frame(height: 28)
-                    .background(AppColors.sidebarBackground)
-                    .cornerRadius(7)
-                } else {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .medium))
-                        Text("刷新选股").font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(AppColors.accent)
-                    .padding(.horizontal, 11)
-                    .frame(height: 28)
-                    .background(AppColors.sidebarBackground)
-                    .cornerRadius(7)
-                }
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .fixedSize()
     }
 }
 

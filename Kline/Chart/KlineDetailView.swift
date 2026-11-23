@@ -534,7 +534,6 @@ struct KlineDetailView: View {
         let vPad:    CGFloat = compact ? 0  : 3
         let hPad:    CGFloat = compact ? 6  : 8
         let gap:     CGFloat = compact ? 4  : 6
-        let textSize:CGFloat = compact ? 10 : 12
         let iconSize:CGFloat = compact ? 12 : 15
         let backSize:CGFloat = compact ? 24 : 30
         let smallW:  CGFloat = compact ? 24 : 28   // 多/空
@@ -644,8 +643,9 @@ struct KlineDetailView: View {
                         linkSync.sourceID = nil
                     }
                 }) {
-                    Text("边")
-                        .font(.system(size: textSize, weight: .bold))
+                    Image(systemName: edgeAdjust ? "arrow.left.and.right.square.fill"
+                                                 : "arrow.left.and.right.square")
+                        .font(.system(size: iconSize, weight: .bold))
                         .foregroundColor(edgeAdjust ? AppColors.accent : AppColors.textTertiary)
                         .frame(width: normW, height: btnH)
                         .contentShape(Rectangle())
@@ -696,8 +696,8 @@ struct KlineDetailView: View {
                     linkSync.sourceID = nil
                 }
             }) {
-                Text("联")
-                    .font(.system(size: textSize, weight: .bold))
+                Image(systemName: (effectiveDual && cursorLinkEnabled) ? "link.circle.fill" : "link.circle")
+                    .font(.system(size: iconSize, weight: .bold))
                     .foregroundColor(effectiveDual ? (cursorLinkEnabled ? AppColors.accent : AppColors.textTertiary) : AppColors.textTertiary)
                     .frame(width: normW, height: btnH)
                     .contentShape(Rectangle())
@@ -710,8 +710,8 @@ struct KlineDetailView: View {
             Button(action: {
                 config.mainMirrored.toggle()
             }) {
-                Text(config.mainMirrored ? "空" : "多")
-                    .font(.system(size: textSize, weight: .bold))
+                Image(systemName: config.mainMirrored ? "rectangle.lefthalf.filled" : "rectangle")
+                    .font(.system(size: iconSize, weight: .bold))
                     .foregroundColor(config.mainMirrored ? AppColors.accent : AppColors.textTertiary)
                     .frame(width: smallW, height: btnH)
                     .contentShape(Rectangle())

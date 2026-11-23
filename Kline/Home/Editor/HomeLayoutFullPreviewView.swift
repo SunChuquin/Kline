@@ -48,19 +48,10 @@ struct HomeLayoutFullPreviewView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Button {
-                onClose()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold))
-                    Text("返回").font(.system(size: 15, weight: .medium))
-                }
-                .foregroundColor(AppColors.textPrimary)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(AppColors.textTertiary.opacity(0.12)).cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 16)
+            ToolbarIconButton(icon: "chevron.left", label: "返回") {
+            onClose()
+        }
+        .padding(.leading, 8)
 
             Spacer(minLength: 8)
 
