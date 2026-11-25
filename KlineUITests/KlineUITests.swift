@@ -231,7 +231,9 @@ final class KlineUITests: XCTestCase {
 
     func test95_AccessoryButtonsAppearAfterLoad() throws {
         let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
         app.launch()
+        Thread.sleep(forTimeInterval: 1)
 
         let marketTab = app.buttons["tab.market"]
         XCTAssertTrue(marketTab.waitForExistence(timeout: 15), "底部菜单未出现")

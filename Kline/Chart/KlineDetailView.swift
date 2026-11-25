@@ -541,9 +541,16 @@ struct KlineDetailView: View {
         let gap:     CGFloat = compact ? 4  : 6
         let iconSize:CGFloat = compact ? 12 : 15
         let backSize:CGFloat = compact ? 24 : 30
-        let smallW:  CGFloat = compact ? 24 : 28   // 多/空
-        let normW:   CGFloat = compact ? 26 : 32   // 边、📌、联、⚙
+        let smallW:  CGFloat = compact ? 24 : 28   // 镜像
+        let normW:   CGFloat = compact ? 26 : 32   // 边线、📌、联动、⚙
         let corner:  CGFloat = compact ? 4  : 6
+        // 边线调节图标：hand.rays 为 iOS 18 新增，老系统回退到原方形箭头，避免空白
+        let edgeSymbol: String = {
+            if #available(iOS 18.0, *) {
+                return edgeAdjust ? "hand.rays.fill" : "hand.rays"
+            }
+            return edgeAdjust ? "arrow.left.and.right.square.fill" : "arrow.left.and.right.square"
+        }()
 
         let bar = HStack(spacing: gap) {
             // 返回按钮三级语义：
@@ -633,7 +640,7 @@ struct KlineDetailView: View {
             //   联动状态：永远显示「边」（不出图钉），限制每个视图最多一个十字光标；
             //   单图状态（包括钻取单图）：始终显示📌，无光标时灰、不可点；有任意光标后可点→钉住第一个光标。
             if effectiveDual {
-                // 联动：永远显示「边」
+                // 联动：永远显示边线调节图标（hand.rays）
                 Button(action: {
                     let turningOn = !edgeAdjust
                     edgeAdjust = turningOn
@@ -648,8 +655,7 @@ struct KlineDetailView: View {
                         linkSync.sourceID = nil
                     }
                 }) {
-                    Image(systemName: edgeAdjust ? "arrow.left.and.right.square.fill"
-                                                 : "arrow.left.and.right.square")
+                    Image(systemName: edgeSymbol)
                         .font(.system(size: iconSize, weight: .bold))
                         .foregroundColor(edgeAdjust ? AppColors.accent : AppColors.textTertiary)
                         .frame(width: normW, height: btnH)
@@ -674,7 +680,7 @@ struct KlineDetailView: View {
                 .disabled(!pinEnabled && !chartHasCursor)
             }
 
-            // 「联」字按钮：
+            // 联动按钮（bonjour）：
             //   普通单图（drillIn == nil）→ 进入联动模式
             //   钻取单图 → 禁用（此按钮不存在于钻取，因为 !effectiveDual 下仍为普通"进入联动"但意义上不应该操作，
             //     实际上钻取时 drillIn != nil，按当前需求：此按钮保持原样点击行为（进入联动会清理 drillIn 语义未定），
@@ -701,7 +707,8 @@ struct KlineDetailView: View {
                     linkSync.sourceID = nil
                 }
             }) {
-                Image(systemName: (effectiveDual && cursorLinkEnabled) ? "link.circle.fill" : "link.circle")
+                // bonjour 没有 .fill 变体：激活态由强调色区分
+                Image(systemName: "bonjour")
                     .font(.system(size: iconSize, weight: .bold))
                     .foregroundColor(effectiveDual ? (cursorLinkEnabled ? AppColors.accent : AppColors.textTertiary) : AppColors.textTertiary)
                     .frame(width: normW, height: btnH)
@@ -711,11 +718,11 @@ struct KlineDetailView: View {
                 !effectiveDual ? "进入联动模式"
                                : (cursorLinkEnabled ? "关闭光标联动（清除所有光标）" : "开启光标联动（所有视图按日期同步）"))
 
-            // 多/空 全局镜像
+            // 镜像按钮：airplane.departure（正常）/ airplane.arrival（空头镜像）
             Button(action: {
                 config.mainMirrored.toggle()
             }) {
-                Image(systemName: config.mainMirrored ? "rectangle.lefthalf.filled" : "rectangle")
+                Image(systemName: config.mainMirrored ? "airplane.arrival" : "airplane.departure")
                     .font(.system(size: iconSize, weight: .bold))
                     .foregroundColor(config.mainMirrored ? AppColors.accent : AppColors.textTertiary)
                     .frame(width: smallW, height: btnH)
