@@ -271,6 +271,17 @@ final class KlineUITests: XCTestCase {
         shots.lifetime = .keepAlways
         add(shots)
 
+        // 进入联动模式：检查边线调节图标（trapezoid.and.line.vertical）与工具栏布局
+        app.buttons["进入联动模式"].firstMatch.tap()
+        let edgeButton = app.buttons["开启边线调节"].firstMatch
+        XCTAssertTrue(edgeButton.waitForExistence(timeout: 8), "联动模式未出现边线调节按钮")
+        let linkedShot = XCTAttachment(screenshot: app.screenshot())
+        linkedShot.name = "kline.linked.edgeIcon"
+        linkedShot.lifetime = .keepAlways
+        add(linkedShot)
+        back.tap()   // 联动模式下返回键先退出联动
+        XCTAssertTrue(app.buttons["进入联动模式"].waitForExistence(timeout: 8), "未退出联动模式")
+
         // 快捷交易入口已迁到 K 线顶部工具栏（设置按钮右侧）：点按应弹出快捷面板
         let quickPanel = app.buttons["kline.quickPanelButton"].firstMatch
         XCTAssertTrue(quickPanel.waitForExistence(timeout: 8), "K 线工具栏未找到快捷交易入口")

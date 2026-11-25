@@ -544,13 +544,7 @@ struct KlineDetailView: View {
         let smallW:  CGFloat = compact ? 24 : 28   // 镜像
         let normW:   CGFloat = compact ? 26 : 32   // 边线、📌、联动、⚙
         let corner:  CGFloat = compact ? 4  : 6
-        // 边线调节图标：hand.rays 为 iOS 18 新增，老系统回退到原方形箭头，避免空白
-        let edgeSymbol: String = {
-            if #available(iOS 18.0, *) {
-                return edgeAdjust ? "hand.rays.fill" : "hand.rays"
-            }
-            return edgeAdjust ? "arrow.left.and.right.square.fill" : "arrow.left.and.right.square"
-        }()
+        // 边线调节图标：trapezoid.and.line.vertical 为 iOS 15+，激活态用强调色区分
 
         let bar = HStack(spacing: gap) {
             // 返回按钮三级语义：
@@ -640,7 +634,7 @@ struct KlineDetailView: View {
             //   联动状态：永远显示「边」（不出图钉），限制每个视图最多一个十字光标；
             //   单图状态（包括钻取单图）：始终显示📌，无光标时灰、不可点；有任意光标后可点→钉住第一个光标。
             if effectiveDual {
-                // 联动：永远显示边线调节图标（hand.rays）
+                // 联动：永远显示边线调节图标（trapezoid.and.line.vertical）
                 Button(action: {
                     let turningOn = !edgeAdjust
                     edgeAdjust = turningOn
@@ -655,7 +649,8 @@ struct KlineDetailView: View {
                         linkSync.sourceID = nil
                     }
                 }) {
-                    Image(systemName: edgeSymbol)
+                    // trapezoid.and.line.vertical 没有激活态语义，用强调色区分
+                    Image(systemName: "trapezoid.and.line.vertical")
                         .font(.system(size: iconSize, weight: .bold))
                         .foregroundColor(edgeAdjust ? AppColors.accent : AppColors.textTertiary)
                         .frame(width: normW, height: btnH)
