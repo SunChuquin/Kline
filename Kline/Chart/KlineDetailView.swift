@@ -151,6 +151,8 @@ struct KlineDetailView: View {
     /// 当前展示的标的（第二副图左右滑动时可在候选列表中切换）
     @State private var item: MetaItem
     var onClose: () -> Void
+    /// 「快捷交易」入口：由根呈现层注入，打开现有 FloatingAccessoryPanel（快捷交易面板）
+    var onOpenQuickPanel: () -> Void
     @State private var showSettings = false
     // 副图2 🔍 覆盖式搜索栏（单图模式：副图二指标栏右侧 🔍 打开；用于切换标的）
     @State private var showSearch = false
@@ -223,9 +225,12 @@ struct KlineDetailView: View {
     /// 透传给各 K 线图的右边界训练日（非训练态为 nil）
     private var trainingMaxDateValue: Int? { trainingActive ? trainer.trainingDate : nil }
 
-    init(item: MetaItem, isTraining: Bool = false, onClose: @escaping () -> Void) {
+    init(item: MetaItem, isTraining: Bool = false,
+         onOpenQuickPanel: @escaping () -> Void = {},
+         onClose: @escaping () -> Void) {
         self._item = State(initialValue: item)
         self.isTraining = isTraining
+        self.onOpenQuickPanel = onOpenQuickPanel
         self.onClose = onClose
     }
 
@@ -729,6 +734,17 @@ struct KlineDetailView: View {
                     .contentShape(Rectangle())
             }
             .accessibilityIdentifier("kline.settingsButton")
+
+            // 快捷交易入口：位于设置按钮右侧，打开原悬浮按钮承载的快捷面板
+            Button(action: onOpenQuickPanel) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: iconSize))
+                    .foregroundColor(AppColors.textTertiary)
+                    .frame(width: normW, height: btnH)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("快捷交易")
+            .accessibilityIdentifier("kline.quickPanelButton")
         }
         .padding(.leading, hPad)
         .padding(.trailing, hPad)

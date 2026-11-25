@@ -181,7 +181,7 @@ final class KlineUITests: XCTestCase {
 
         let marketTop = app.buttons["market.topMenu.市场"].firstMatch
         XCTAssertTrue(marketTop.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
-        let etf = app.staticTexts["ETF指数"].firstMatch
+        let etf = app.descendants(matching: .any)["ETF指数"].firstMatch
         if !etf.exists { marketTop.tap() }
         XCTAssertTrue(etf.waitForExistence(timeout: 8), "二级菜单未展开「ETF指数」")
         etf.tap()
@@ -238,12 +238,12 @@ final class KlineUITests: XCTestCase {
         marketTab.tap()
 
         // 列表页不该有悬浮按钮（既有行为）
-        XCTAssertFalse(app.descendants(matching: .any)["accessory.button"].firstMatch.exists,
+        XCTAssertFalse(app.descendants(matching: .any)["accessory2.button"].firstMatch.exists,
                        "行情列表页不应出现悬浮按钮")
 
         let marketTop = app.buttons["market.topMenu.市场"].firstMatch
         XCTAssertTrue(marketTop.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
-        let etf = app.staticTexts["ETF指数"].firstMatch
+        let etf = app.descendants(matching: .any)["ETF指数"].firstMatch
         if !etf.exists { marketTop.tap() }
         XCTAssertTrue(etf.waitForExistence(timeout: 8), "二级菜单未展开「ETF指数」")
         etf.tap()
@@ -255,25 +255,31 @@ final class KlineUITests: XCTestCase {
         XCTAssertTrue(back.waitForExistence(timeout: 15), "K线页未打开")
 
         // 自绘圆钮在无障碍树里是 other（非 button），必须用 descendants(matching: .any) 定位
-        let old = app.descendants(matching: .any)["accessory.button"].firstMatch
         let wheel = app.descendants(matching: .any)["accessory2.button"].firstMatch
 
-        // 两个按钮都应出现（新按钮 B' 同样受「图表出现后延迟 1 秒」的门控制）
+        // 大悬浮按钮受「图表出现后延迟 1 秒」的门控制
         // ⚠️ 这里只断言「出现」不断言耗时：实测该自绘圆钮的 isHittable 在隐藏态（opacity 0 +
         // allowsHitTesting(false)）也报 true，无法当可见性判据；1 秒延迟的权威证据是沙盒日志
         // 「图表出现 …」与「悬浮按钮：图表出现后延迟 1 秒，两个按钮恢复显示」两行的时间差
-        XCTAssertTrue(old.waitForExistence(timeout: 15), "旧悬浮按钮未出现")
-        XCTAssertTrue(wheel.exists, "新悬浮按钮未出现")
+        XCTAssertTrue(wheel.waitForExistence(timeout: 15), "悬浮按钮未出现")
 
-        // 顺带验证按钮真的可操作：点按中心应弹出快捷面板
-        old.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(app.buttons["accessory.close"].waitForExistence(timeout: 8), "点击悬浮按钮未弹出面板")
+        // 视觉留档：K 线顶部工具栏（设置按钮右侧的快捷交易入口）
+        let shots = XCTAttachment(screenshot: app.screenshot())
+        shots.name = "kline.quickPanel.entry"
+        shots.lifetime = .keepAlways
+        add(shots)
+
+        // 快捷交易入口已迁到 K 线顶部工具栏（设置按钮右侧）：点按应弹出快捷面板
+        let quickPanel = app.buttons["kline.quickPanelButton"].firstMatch
+        XCTAssertTrue(quickPanel.waitForExistence(timeout: 8), "K 线工具栏未找到快捷交易入口")
+        quickPanel.tap()
+        XCTAssertTrue(app.buttons["accessory.close"].waitForExistence(timeout: 8), "点击快捷交易未弹出面板")
         app.buttons["accessory.close"].tap()
 
         // 返回列表页：按钮应随之消失（页面关闭复位，既有行为）
         back.tap()
         XCTAssertTrue(waitHittable(marketTab, timeout: 10), "返回后未回到行情页")
-        XCTAssertFalse(app.descendants(matching: .any)["accessory.button"].firstMatch.exists,
+        XCTAssertFalse(app.descendants(matching: .any)["accessory2.button"].firstMatch.exists,
                        "返回列表页后悬浮按钮仍在")
     }
 
@@ -287,7 +293,7 @@ final class KlineUITests: XCTestCase {
         marketTab.tap()
         let marketTop = app.buttons["market.topMenu.市场"].firstMatch
         XCTAssertTrue(marketTop.waitForExistence(timeout: 10), "一级菜单「市场」未出现")
-        let etf = app.staticTexts["ETF指数"].firstMatch
+        let etf = app.descendants(matching: .any)["ETF指数"].firstMatch
         if !etf.exists { marketTop.tap() }
         XCTAssertTrue(etf.waitForExistence(timeout: 8), "二级菜单未展开「ETF指数」")
         etf.tap()

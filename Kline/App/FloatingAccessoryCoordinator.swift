@@ -2,15 +2,16 @@
 //  FloatingAccessoryCoordinator.swift
 //  Kline
 //
-//  两个悬浮按钮共享的协调对象（单例）：记录当前正在手势中的按钮、是否处于转圈驱动期，
-//  承载「新按钮转圈 → 图表光标」的命令通道，以及两按钮的耦合（同侧互斥 / 手势期间强制闲置）。
-//  注：两个按钮都不 @ObservedObject 观察本对象（避免高频发布引发整树重算），
+//  悬浮按钮协调对象（单例）：记录当前正在手势中的按钮、是否处于转圈驱动期，
+//  承载「新按钮转圈 → 图表光标」的命令通道，以及历史两按钮模型下的同侧互斥 / 手势强制闲置。
+//  原小悬浮按钮已移除，primary 分支作为兼容路径保留，避免改动大按钮已验收的手势逻辑。
+//  注：按钮不 @ObservedObject 观察本对象（避免高频发布引发整树重算），
 //  只订阅各自关心的 @Published 事件，并把「已知侧」当普通状态在 onChanged 里主动读取。
 //
 
 import Combine
 
-/// 悬浮按钮归属：primary = 旧按钮，secondary = 新按钮
+/// 悬浮按钮归属：primary = 已移除的小按钮（兼容分支），secondary = 大按钮
 enum FloatingAccessoryOwner: Hashable {
     case primary
     case secondary

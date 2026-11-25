@@ -47,7 +47,7 @@ struct ContentView: View {
 
     private var detailItem: MetaItem? { detailRouter.item }
 
-    /// 两个悬浮按钮当前是否应显示：详情页打开 + 自己的面板没开 + K 线详情页无弹窗
+    /// 悬浮按钮当前是否应显示：详情页打开 + 快捷交易面板没开 + K 线详情页无弹窗
     /// + K 线详情页首屏已加载完成（加载中不显示，避免页面还在转圈时按钮先露面）。
     /// 联动多图光标自动移动另有 hidesDuringCursorAutoMove() modifier 处理，不在此聚合
     private var isButtonVisible: Bool {
@@ -99,7 +99,10 @@ struct ContentView: View {
 
             // 全屏 K 线详情（覆盖整个屏幕，含底部栏）
             if let item = detailItem {
-                KlineDetailView(item: item) {
+                KlineDetailView(item: item,
+                                onOpenQuickPanel: {
+                                    withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
+                                }) {
                     DetailRouter.shared.item = nil
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -130,7 +133,11 @@ struct ContentView: View {
             // 全屏训练 K 线页（覆盖整个屏幕，含底部栏）：压在同层最后，保证在最上层；
             // trainer.close() 会置 meta = nil，页面随之消失
             if let meta = trainer.meta {
-                KlineDetailView(item: meta, isTraining: true, onClose: { trainer.close() })
+                KlineDetailView(item: meta, isTraining: true,
+                                onOpenQuickPanel: {
+                                    withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
+                                },
+                                onClose: { trainer.close() })
                     .transition(.opacity)
             }
         }
@@ -178,20 +185,12 @@ struct ContentView: View {
         .overlay(
             Group {
                 if detailItem != nil || trainer.meta != nil {
-                    FloatingAccessoryButton(action: {
-                        withAnimation(.easeOut(duration: 0.2)) { isAccessoryPanelPresented = true }
-                    }, bottomClearance: bottomBarHeight)
+                    // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
+                    // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
+                    FloatingAccessoryWheel(bottomClearance: bottomBarHeight)
                         .opacity(isButtonVisible ? 1 : 0)
                         .allowsHitTesting(isButtonVisible)
-                        // 联动多图模式下光标自动移动（贴边自动滚动、抬手后仍继续）期间整体隐藏，
-                        // 让出正在滚动的图表；停止后自动恢复
                         .hidesDuringCursorAutoMove()
-                        // 新按钮（转圈驱动光标）：点击 B' 让被驱动那一格的窗口朝更新方向平移一根（内部走协调对象命令，
-                        // 不需要外层注入 action）；面板呈现期间同样隐藏，否则它会压在面板的全屏遮罩之上
-                        FloatingAccessoryWheel(bottomClearance: bottomBarHeight)
-                            .opacity(isButtonVisible ? 1 : 0)
-                            .allowsHitTesting(isButtonVisible)
-                            .hidesDuringCursorAutoMove()
                 }
                 if isAccessoryPanelPresented {
                     FloatingAccessoryPanel {

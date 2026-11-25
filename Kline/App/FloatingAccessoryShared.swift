@@ -2,9 +2,9 @@
 //  FloatingAccessoryShared.swift
 //  Kline
 //
-//  两个悬浮按钮（旧按钮 FloatingAccessoryButton / 新按钮 FloatingAccessoryWheel）
-//  共用的原语：几何与描边常量、落位计算、落位持久化。
-//  抽出前后旧按钮的可见行为完全一致（纯行为中性重构）。
+//  悬浮按钮共用原语：几何与描边常量、落位计算、落位持久化。
+//  原小悬浮按钮已移除；大悬浮按钮（FloatingAccessoryWheel）继续复用本文件的
+//  几何推导、FloatingAccessoryRings 图形与落位持久化，故这些原语全部保留。
 //
 
 import SwiftUI
@@ -35,9 +35,7 @@ enum FloatingAccessoryMetrics {
     static let tapSlop: CGFloat = 6
     /// 摁住 / 拖动时直径的放大比例（+15%），抬手即恢复
     static let pressScaleFactor: CGFloat = 1.15
-    /// 未被触碰多久后整体降到 25% 透明度（**旧按钮**；新按钮见 wheelIdleFadeDelay）
-    static let idleFadeDelay: TimeInterval = 3
-    /// 新按钮的闲置淡出延时：比旧按钮短得多（0.5 秒）。
+    /// 新按钮的闲置淡出延时：0.5 秒。
     /// 它同时也是「临时旧外观」的还原时刻 —— 两者共用同一条计时，见 scheduleIdleFade
     static let wheelIdleFadeDelay: TimeInterval = 0.5
 
@@ -210,9 +208,9 @@ enum FloatingAccessoryPlacement {
 
 /// 悬浮按钮的持久化槽位：每个槽位一组独立 key（沿用项目 kline.* key 惯例，与 ChartConfigStore / KlineThemeStore 一致）
 enum FloatingAccessorySlot {
-    /// 旧按钮
+    /// 已移除的小按钮（保留 key 推导，供大按钮默认落位兼容读取）
     case primary
-    /// 新按钮
+    /// 大按钮
     case secondary
 
     /// key 前缀。primary 的 key 不能变，否则用户已有落位丢失
