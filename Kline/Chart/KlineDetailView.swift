@@ -675,7 +675,7 @@ struct KlineDetailView: View {
                 .disabled(!pinEnabled && !chartHasCursor)
             }
 
-            // 联动按钮（bonjour）：
+            // 联动按钮（personalhotspot）：
             //   普通单图（drillIn == nil）→ 进入联动模式
             //   钻取单图 → 禁用（此按钮不存在于钻取，因为 !effectiveDual 下仍为普通"进入联动"但意义上不应该操作，
             //     实际上钻取时 drillIn != nil，按当前需求：此按钮保持原样点击行为（进入联动会清理 drillIn 语义未定），
@@ -702,8 +702,8 @@ struct KlineDetailView: View {
                     linkSync.sourceID = nil
                 }
             }) {
-                // bonjour 没有 .fill 变体：激活态由强调色区分
-                Image(systemName: "bonjour")
+                // personalhotspot 没有 .fill 变体：激活态由强调色区分
+                Image(systemName: "personalhotspot")
                     .font(.system(size: iconSize, weight: .bold))
                     .foregroundColor(effectiveDual ? (cursorLinkEnabled ? AppColors.accent : AppColors.textTertiary) : AppColors.textTertiary)
                     .frame(width: normW, height: btnH)
